@@ -11,6 +11,7 @@ pub enum TokenKind {
     FormattedString(String),
     At,
     Ampersand,
+    Caret,
     Colon,
     ColonEqual,
     QuestionEqual,

@@ -941,6 +941,19 @@ struct EnumInstance {
     variants: Vec<severian_ast::EnumVariant>,
 }
 
+fn enum_payload_index(
+    variants: &[severian_ast::EnumVariant],
+    variant: usize,
+    payload: usize,
+) -> usize {
+    1 + variants
+        .iter()
+        .take(variant)
+        .map(|variant| variant.fields.len())
+        .sum::<usize>()
+        + payload
+}
+
 #[derive(Debug, Clone, Copy)]
 struct FallibleType {
     success: TypeId,
@@ -1143,23 +1156,10 @@ impl Analyzer<'_> {
                 );
                 for field in &variant.fields {
                     let field_type = self.resolve_source_type(&field.annotation)?;
-                    if let Some(existing) = fields.iter().find(|known| known.name == field.name) {
-                        if existing.ty != field_type {
-                            return Err(Diagnostic::new(
-                                "E000204",
-                                format!(
-                                    "enum payload field `{}` has conflicting types",
-                                    field.name
-                                ),
-                                Some(field.span),
-                            ));
-                        }
-                    } else {
-                        fields.push(HirClassFieldDeclaration {
-                            name: field.name.clone(),
-                            ty: field_type,
-                        });
-                    }
+                    fields.push(HirClassFieldDeclaration {
+                        name: format!("__variant_{ordinal}_{}", field.name),
+                        ty: field_type,
+                    });
                 }
             }
             let instance = self.enums.get_mut(&declaration.name).unwrap();
@@ -1286,6 +1286,7 @@ impl Analyzer<'_> {
         }
         // Install every visible class name before resolving fields so package
         // annotations may refer forward and through an imported namespace.
+        let mut resolved_visible_instances = self.class_instances.clone();
         for package_class in classes {
             if source_module
                 .is_some_and(|module| !package_class.lookups.contains_key(&module))
@@ -1346,6 +1347,25 @@ impl Analyzer<'_> {
             if !package_class.declaration.type_parameters.is_empty() {
                 continue;
             }
+            self.class_instances = resolved_visible_instances.clone();
+            for definition_class in classes {
+                let Some(instance) = self
+                    .class_instances_by_type
+                    .get(&definition_class.ty)
+                    .cloned()
+                else {
+                    continue;
+                };
+                for lookup in definition_class
+                    .lookups
+                    .get(&package_class.module)
+                    .into_iter()
+                    .flatten()
+                {
+                    self.class_instances
+                        .insert((lookup.clone(), Vec::new()), instance.clone());
+                }
+            }
             let is_error = package_class
                 .declaration
                 .traits
@@ -1380,6 +1400,7 @@ impl Analyzer<'_> {
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
             };
+            self.class_instances = resolved_visible_instances;
             self.class_instances_by_type
                 .insert(package_class.ty, instance.clone());
             if let Some(source_module) = source_module {
@@ -1393,6 +1414,7 @@ impl Analyzer<'_> {
                         .insert((lookup.clone(), Vec::new()), instance.clone());
                 }
             }
+            resolved_visible_instances = self.class_instances.clone();
             if source_module == Some(package_class.module) {
                 self.lowered_classes.push(HirClassDeclaration {
                     id: package_class.ty,
@@ -2559,17 +2581,18 @@ impl Analyzer<'_> {
                 }
                 if let Some(element) = self.list_elements.get(&collection.type_id).copied() {
                     let index = self.expression(index, None)?;
-                    let index_name = self
-                        .types
-                        .definition(index.type_id)
-                        .map(|definition| definition.name.as_str());
-                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                    if !self.integer_primitive(index.type_id) {
                         return Err(Diagnostic::new(
                             "E000211",
                             "list indices must be integers",
                             Some(index.span),
                         ));
                     }
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let index = self.coerce(index, integer, true)?;
                     let value = self.expression(value, Some(element))?;
                     let storage = self.list_storage_expression(collection, *span);
                     let storage_type = storage.type_id;
@@ -3337,12 +3360,8 @@ impl Analyzer<'_> {
                         Some(case.span),
                     ));
                 }
-                for payload in &variant.fields {
-                    let index = instance
-                        .fields
-                        .iter()
-                        .position(|field| field.name == payload.name)
-                        .expect("enum payload has a lowered field");
+                for (payload_ordinal, payload) in variant.fields.iter().enumerate() {
+                    let index = enum_payload_index(&instance.variants, ordinal, payload_ordinal);
                     let field = &instance.fields[index];
                     let id = self.next_id();
                     self.value_substitutions.insert(
@@ -3419,28 +3438,29 @@ impl Analyzer<'_> {
             ));
         }
         if let Some(mut values) = returned {
-            let Some((_, mut selected)) = values.pop() else {
-                return Err(Diagnostic::new(
-                    "E000216",
-                    "an enum match requires at least one arm",
-                    Some(span),
-                ));
-            };
-            let suffix = self.select_runtime_suffix(result_type, span)?;
-            while let Some((condition, value)) = values.pop() {
-                let Some(condition) = condition else {
-                    selected = value;
-                    continue;
+            if let Ok(suffix) = self.select_runtime_suffix(result_type, span) {
+                let Some((_, mut selected)) = values.pop() else {
+                    return Err(Diagnostic::new(
+                        "E000216",
+                        "an enum match requires at least one arm",
+                        Some(span),
+                    ));
                 };
-                selected = self.runtime_call(
-                    &format!("__sev_select_{suffix}"),
-                    &[boolean, result_type, result_type],
-                    result_type,
-                    vec![condition, value, selected],
-                    span,
-                );
+                while let Some((condition, value)) = values.pop() {
+                    let Some(condition) = condition else {
+                        selected = value;
+                        continue;
+                    };
+                    selected = self.runtime_call(
+                        &format!("__sev_select_{suffix}"),
+                        &[boolean, result_type, result_type],
+                        result_type,
+                        vec![condition, value, selected],
+                        span,
+                    );
+                }
+                return Ok(Statement::Return(Some(selected)));
             }
-            return Ok(Statement::Return(Some(selected)));
         }
         let mut lowered = lowered.into_iter().rev();
         let Some((_last_condition, last_body)) = lowered.next() else {
@@ -5344,17 +5364,18 @@ impl Analyzer<'_> {
                     ));
                 }
                 let index = self.expression(index, None)?;
-                let index_name = self
-                    .types
-                    .definition(index.type_id)
-                    .map(|definition| definition.name.as_str());
-                if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                if !self.integer_primitive(index.type_id) {
                     return Err(Diagnostic::new(
                         "E000211",
                         "list indices must be integers",
                         Some(index.span),
                     ));
                 }
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let index = self.coerce(index, integer, true)?;
                 let storage = self.list_storage_expression(object, ast.span);
                 let storage_type = storage.type_id;
                 let suffix = self.list_runtime_suffix(element, ast.span)?;
@@ -6434,6 +6455,21 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
+                    if self.map_elements.contains_key(&value.type_id) {
+                        let storage = self.collection_storage_expression(value, 0, ast.span);
+                        let storage_type = storage.type_id;
+                        let result = self
+                            .types
+                            .resolve_name("usize")
+                            .expect("bootstrap defines usize");
+                        return Ok(self.runtime_call(
+                            "__sev_list_len",
+                            &[storage_type],
+                            result,
+                            vec![storage],
+                            ast.span,
+                        ));
+                    }
                     let string = self
                         .types
                         .resolve_name("string")
@@ -6904,10 +6940,9 @@ impl Analyzer<'_> {
                     }
                 }
                 let operator_spelling = ast_binary_spelling(*operator);
-                if *operator == AstBinaryOperator::Pipe
-                    || self
-                        .active_operator_namespaces
-                        .contains_key(operator_spelling)
+                if self
+                    .active_operator_namespaces
+                    .contains_key(operator_spelling)
                 {
                     return self.trait_namespace_operator(
                         operator_spelling,
@@ -7241,6 +7276,31 @@ impl Analyzer<'_> {
                                 return Ok(Expression {
                                     id: self.next_id(),
                                     type_id: boolean,
+                                    kind: ExpressionKind::Unary {
+                                        operator: UnaryOperator::Not,
+                                        operand: Box::new(comparison),
+                                    },
+                                    span: ast.span,
+                                });
+                            }
+                            return Ok(comparison);
+                        }
+                        if self
+                            .class_instances_by_type
+                            .contains_key(&resolved_left.type_id)
+                        {
+                            let resolved_right =
+                                self.expression(right, Some(resolved_left.type_id))?;
+                            let comparison = self.structural_class_equality(
+                                resolved_left,
+                                resolved_right,
+                                ast.span,
+                                &mut BTreeSet::new(),
+                            )?;
+                            if *operator == AstBinaryOperator::NotEqual {
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: comparison.type_id,
                                     kind: ExpressionKind::Unary {
                                         operator: UnaryOperator::Not,
                                         operand: Box::new(comparison),
@@ -8516,15 +8576,20 @@ impl Analyzer<'_> {
             .expect("bootstrap defines int");
         let mut values = Vec::with_capacity(instance.fields.len());
         values.push(self.integer_expression(&ordinal.to_string(), integer, span));
-        for field in instance.fields.iter().skip(1) {
-            if let Some((argument, _)) = arguments
-                .iter()
-                .zip(&variant.fields)
-                .find(|(_, payload)| payload.name == field.name)
-            {
-                values.push(self.expression(&argument.value, Some(field.ty))?);
-            } else {
-                values.push(self.default_expression(field.ty, span)?);
+        for (known_ordinal, known_variant) in instance.variants.iter().enumerate() {
+            for (payload_ordinal, payload) in known_variant.fields.iter().enumerate() {
+                let index = enum_payload_index(&instance.variants, known_ordinal, payload_ordinal);
+                let field = &instance.fields[index];
+                if known_ordinal == ordinal {
+                    let argument = arguments
+                        .iter()
+                        .find(|argument| argument.name.as_deref() == Some(payload.name.as_str()))
+                        .or_else(|| arguments.get(payload_ordinal))
+                        .expect("enum arity was checked before payload lowering");
+                    values.push(self.expression(&argument.value, Some(field.ty))?);
+                } else {
+                    values.push(self.default_expression(field.ty, span)?);
+                }
             }
         }
         Ok(Expression {
@@ -9380,6 +9445,84 @@ impl Analyzer<'_> {
                 Some(span),
             )),
         }
+    }
+
+    fn structural_class_equality(
+        &mut self,
+        left: Expression,
+        right: Expression,
+        span: severian_source::Span,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> Result<Expression, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        if !visiting.insert(left.type_id) {
+            return Err(Diagnostic::new(
+                "E000211",
+                "recursive class equality requires an explicit operator",
+                Some(span),
+            ));
+        }
+        let fields = self
+            .class_instances_by_type
+            .get(&left.type_id)
+            .expect("caller checked the source class")
+            .fields
+            .clone();
+        let mut comparison = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+            span,
+        };
+        for (index, field) in fields.into_iter().enumerate() {
+            let left_field = Expression {
+                id: self.next_id(),
+                type_id: field.ty,
+                kind: ExpressionKind::Field {
+                    object: Box::new(left.clone()),
+                    index: index as u32,
+                },
+                span,
+            };
+            let right_field = Expression {
+                id: self.next_id(),
+                type_id: field.ty,
+                kind: ExpressionKind::Field {
+                    object: Box::new(right.clone()),
+                    index: index as u32,
+                },
+                span,
+            };
+            let equal = if self.class_instances_by_type.contains_key(&field.ty) {
+                self.structural_class_equality(left_field, right_field, span, visiting)?
+            } else {
+                Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Equal,
+                        left: Box::new(left_field),
+                        right: Box::new(right_field),
+                    },
+                    span,
+                }
+            };
+            comparison = Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::And,
+                    left: Box::new(comparison),
+                    right: Box::new(equal),
+                },
+                span,
+            };
+        }
+        visiting.remove(&left.type_id);
+        Ok(comparison)
     }
 
     fn runtime_call(
@@ -10870,6 +11013,26 @@ impl Analyzer<'_> {
                         span,
                     }));
                 }
+                "bytes" if arguments.is_empty() => {
+                    let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
+                    let storage = self.runtime_call(
+                        "__sev_string_bytes",
+                        &[string],
+                        string,
+                        vec![object],
+                        span,
+                    );
+                    let list_type = self.instantiate_list_type(byte);
+                    return Ok(Some(Expression {
+                        id: self.next_id(),
+                        type_id: list_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: list_type,
+                            fields: vec![storage],
+                        },
+                        span,
+                    }));
+                }
                 "frequencies" if arguments.is_empty() => {
                     let integer = self
                         .types
@@ -10909,7 +11072,7 @@ impl Analyzer<'_> {
                 }
                 "length" | "upper" | "contains" | "split" | "strip" | "lower"
                 | "replace" | "starts_with" | "ends_with" | "find" | "count"
-                | "characters" | "frequencies" => {
+                | "characters" | "bytes" | "frequencies" => {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("string method `{name}` received incompatible arguments"),
@@ -12585,6 +12748,9 @@ fn constant_integer_expression(expression: &AstExpression) -> Option<i64> {
             let left = constant_integer_expression(left)?;
             let right = constant_integer_expression(right)?;
             match operator {
+                AstBinaryOperator::Pipe => Some(left | right),
+                AstBinaryOperator::BitwiseAnd => Some(left & right),
+                AstBinaryOperator::BitwiseXor => Some(left ^ right),
                 AstBinaryOperator::Add => left.checked_add(right),
                 AstBinaryOperator::Subtract => left.checked_sub(right),
                 AstBinaryOperator::Multiply => left.checked_mul(right),
@@ -12879,7 +13045,9 @@ fn operator_namespaces(decorators: &[severian_ast::Decorator]) -> BTreeMap<Strin
 fn is_binary_operator_spelling(operator: &str) -> bool {
     matches!(
         operator,
-        "|" | "+"
+        "|" | "&"
+            | "^"
+            | "+"
             | "-"
             | "*"
             | "/"
@@ -12900,6 +13068,8 @@ fn is_binary_operator_spelling(operator: &str) -> bool {
 fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
     match operator {
         AstBinaryOperator::Pipe => "|",
+        AstBinaryOperator::BitwiseAnd => "&",
+        AstBinaryOperator::BitwiseXor => "^",
         AstBinaryOperator::Add => "+",
         AstBinaryOperator::Subtract => "-",
         AstBinaryOperator::Multiply => "*",
@@ -12922,6 +13092,8 @@ fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str
     use severian_ast::OperatorSyntax as Operator;
     match operator {
         Operator::Pipe => "|",
+        Operator::BitwiseAnd => "&",
+        Operator::BitwiseXor => "^",
         Operator::Plus => "+",
         Operator::Minus => "-",
         Operator::Multiply => "*",
@@ -12981,6 +13153,9 @@ fn static_integer_in(
             let left = static_integer_in(left, environment)?;
             let right = static_integer_in(right, environment)?;
             match operator {
+                AstBinaryOperator::Pipe => Some(left | right),
+                AstBinaryOperator::BitwiseAnd => Some(left & right),
+                AstBinaryOperator::BitwiseXor => Some(left ^ right),
                 AstBinaryOperator::Add => left.checked_add(right),
                 AstBinaryOperator::Subtract => left.checked_sub(right),
                 AstBinaryOperator::Multiply => left.checked_mul(right),
@@ -13938,9 +14113,9 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
 
 fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
     match operator {
-        AstBinaryOperator::Pipe => {
-            unreachable!("namespace operators are resolved before universal lookup")
-        }
+        AstBinaryOperator::Pipe => BinaryOperator::BitwiseOr,
+        AstBinaryOperator::BitwiseAnd => BinaryOperator::BitwiseAnd,
+        AstBinaryOperator::BitwiseXor => BinaryOperator::BitwiseXor,
         AstBinaryOperator::Add => BinaryOperator::Add,
         AstBinaryOperator::Subtract => BinaryOperator::Subtract,
         AstBinaryOperator::Multiply => BinaryOperator::Multiply,

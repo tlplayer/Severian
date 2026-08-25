@@ -3676,6 +3676,8 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
 fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     Some(match kind {
         TokenKind::Pipe => OperatorSyntax::Pipe,
+        TokenKind::Ampersand => OperatorSyntax::BitwiseAnd,
+        TokenKind::Caret => OperatorSyntax::BitwiseXor,
         TokenKind::Identifier(value) if value == "and" => OperatorSyntax::And,
         TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
         TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
@@ -3699,6 +3701,8 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
 fn operator_spelling(operator: OperatorSyntax) -> &'static str {
     match operator {
         OperatorSyntax::Pipe => "|",
+        OperatorSyntax::BitwiseAnd => "&",
+        OperatorSyntax::BitwiseXor => "^",
         OperatorSyntax::Plus => "+",
         OperatorSyntax::Minus => "-",
         OperatorSyntax::Multiply => "*",
@@ -3724,6 +3728,8 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
     }
     Some(match operator_syntax(kind)? {
         OperatorSyntax::Pipe => BinaryOperator::Pipe,
+        OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
+        OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,
         OperatorSyntax::Plus => BinaryOperator::Add,
         OperatorSyntax::Minus => BinaryOperator::Subtract,
         OperatorSyntax::Multiply => BinaryOperator::Multiply,
@@ -3857,7 +3863,6 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
 
 fn precedence(operator: BinaryOperator) -> u8 {
     match operator {
-        BinaryOperator::Pipe => 1,
         BinaryOperator::Or => 1,
         BinaryOperator::And => 2,
         BinaryOperator::Equal
@@ -3868,8 +3873,11 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::Greater
         | BinaryOperator::GreaterEqual => 3,
         BinaryOperator::Contains => 3,
-        BinaryOperator::Add | BinaryOperator::Subtract => 4,
-        BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 5,
-        BinaryOperator::Power => 6,
+        BinaryOperator::Pipe => 4,
+        BinaryOperator::BitwiseXor => 5,
+        BinaryOperator::BitwiseAnd => 6,
+        BinaryOperator::Add | BinaryOperator::Subtract => 7,
+        BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 8,
+        BinaryOperator::Power => 9,
     }
 }

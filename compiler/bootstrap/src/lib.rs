@@ -417,7 +417,9 @@ fn universal_unary(operator: OperatorSyntax) -> Option<UnaryOperator> {
 
 fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
     Some(match operator {
-        OperatorSyntax::Pipe => return None,
+        OperatorSyntax::Pipe => BinaryOperator::BitwiseOr,
+        OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
+        OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,
         OperatorSyntax::Plus => BinaryOperator::Add,
         OperatorSyntax::Minus => BinaryOperator::Subtract,
         OperatorSyntax::Multiply => BinaryOperator::Multiply,
@@ -600,6 +602,21 @@ mod tests {
                     .result,
                 i32
             );
+        }
+    }
+
+    #[test]
+    fn integer_primitives_declare_bitwise_algebra() {
+        let context = load().unwrap();
+        let integer = context.types.resolve_name("u128").unwrap();
+        let floating = context.types.resolve_name("f64").unwrap();
+        for operator in [
+            BinaryOperator::BitwiseOr,
+            BinaryOperator::BitwiseAnd,
+            BinaryOperator::BitwiseXor,
+        ] {
+            assert!(context.types.supports_binary(operator, integer));
+            assert!(!context.types.supports_binary(operator, floating));
         }
     }
 

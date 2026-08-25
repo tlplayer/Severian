@@ -490,7 +490,9 @@ fn ast_binary(operator: severian_ast::BinaryOperator) -> severian_universal::Bin
     use severian_ast::BinaryOperator as Ast;
     use severian_universal::BinaryOperator as Universal;
     match operator {
-        Ast::Pipe => unreachable!("namespace operators are resolved before universal lookup"),
+        Ast::Pipe => Universal::BitwiseOr,
+        Ast::BitwiseAnd => Universal::BitwiseAnd,
+        Ast::BitwiseXor => Universal::BitwiseXor,
         Ast::Add => Universal::Add,
         Ast::Subtract => Universal::Subtract,
         Ast::Multiply => Universal::Multiply,
@@ -514,7 +516,9 @@ fn ast_binary_syntax(
 ) -> Option<severian_universal::BinaryOperator> {
     use severian_ast::OperatorSyntax as Ast;
     Some(ast_binary(match operator {
-        Ast::Pipe => return None,
+        Ast::Pipe => severian_ast::BinaryOperator::Pipe,
+        Ast::BitwiseAnd => severian_ast::BinaryOperator::BitwiseAnd,
+        Ast::BitwiseXor => severian_ast::BinaryOperator::BitwiseXor,
         Ast::Plus => severian_ast::BinaryOperator::Add,
         Ast::Minus => severian_ast::BinaryOperator::Subtract,
         Ast::Multiply => severian_ast::BinaryOperator::Multiply,
@@ -809,7 +813,9 @@ fn trait_is_structurally_satisfied(
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
             (syntax, _) => {
                 let operator = match syntax {
-                    Syntax::Pipe => return false,
+                    Syntax::Pipe => Binary::BitwiseOr,
+                    Syntax::BitwiseAnd => Binary::BitwiseAnd,
+                    Syntax::BitwiseXor => Binary::BitwiseXor,
                     Syntax::Plus => Binary::Add,
                     Syntax::Minus => Binary::Subtract,
                     Syntax::Multiply => Binary::Multiply,

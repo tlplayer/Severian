@@ -982,6 +982,13 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     &declaration.name,
                     DefKind::Type,
                 ),
+                Item::Enum(declaration) => item_identity(
+                    module.package,
+                    module.id,
+                    "enum",
+                    &declaration.name,
+                    DefKind::Type,
+                ),
                 Item::Binding(binding)
                     if !binding.update && module_bindings.insert(binding.name.clone()) =>
                 {
@@ -1046,6 +1053,32 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
             let Some(edge) = module.imports.iter().find(|edge| edge.span == import.span) else {
                 continue;
             };
+            if matches!(import.subject, ImportSubject::Locator(_)) && import.alias.is_none() {
+                let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
+                for (name, resolution) in members {
+                    insert_binding(
+                        &mut index
+                            .modules
+                            .get_mut(&module.id)
+                            .expect("every graph module has a scope")
+                            .scope
+                            .bindings,
+                        name.clone(),
+                        resolution.clone(),
+                        &index.definitions,
+                    );
+                    insert_binding(
+                        index
+                            .exports
+                            .get_mut(&module.id)
+                            .expect("every graph module has exports"),
+                        name,
+                        resolution,
+                        &index.definitions,
+                    );
+                }
+                continue;
+            }
             let (name, resolution) = if import.source.is_some() {
                 let imported_name = match &import.subject {
                     ImportSubject::Name(name) | ImportSubject::Locator(name) => name,
@@ -1106,6 +1139,10 @@ fn insert_binding(
     ids.extend(resolution_definitions(&new));
     ids.sort();
     ids.dedup();
+    if let [id] = ids.as_slice() {
+        bindings.insert(name, Resolution::Def(*id));
+        return;
+    }
     let only_functions = !ids.is_empty()
         && ids.iter().all(|id| {
             definitions

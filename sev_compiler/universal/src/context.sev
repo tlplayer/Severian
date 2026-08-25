@@ -1,7 +1,9 @@
 import "types/mod.sev"
+import "operation_registry.sev"
 
 class UniversalContext:
     types: TypeContext
+    operations: OperationRegistry
 
 
 class UniversalError:
@@ -12,5 +14,10 @@ class UniversalError:
 
 
 def universal_context(types: TypeContext) -> UniversalContext:
-    return UniversalContext(types)
+    return UniversalContext(types, OperationRegistry())
 
+
+test "a universal context owns types and operation interfaces":
+    context = universal_context(TypeContext())
+    assert(len(context.types.definitions) == 0)
+    assert(len(context.operations.interfaces) == 0)

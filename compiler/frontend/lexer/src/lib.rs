@@ -40,6 +40,17 @@ mod tests {
     }
 
     #[test]
+    fn scans_primitive_bitwise_operators() {
+        let source = SourceFile::virtual_source("bits.sev", "combined = left | right & mask ^ salt\n");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Pipe));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Ampersand));
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Caret));
+    }
+
+    #[test]
     fn scans_indented_trait_members_and_typed_operators() {
         let source = SourceFile::virtual_source(
             "primitive.sev",

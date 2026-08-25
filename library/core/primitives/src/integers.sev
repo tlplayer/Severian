@@ -1,4 +1,8 @@
 trait Integer[T]:
+    operator |(right: T) -> T
+    operator &(right: T) -> T
+    operator ^(right: T) -> T
+
     operator +() -> T
     operator -() -> T
     operator +(right: T) -> T

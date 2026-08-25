@@ -8,3 +8,5 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
+io = { path = "../../library/system/io" }
+file = { path = "../../library/system/file" }

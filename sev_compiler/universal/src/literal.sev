@@ -22,20 +22,43 @@ enum LiteralValue:
 
 def literal_kind(value: LiteralValue) -> LiteralKind:
     match value:
-        case IntegerValue: return Integer
-        case FloatValue: return Float
-        case BooleanValue: return Boolean
-        case CharacterValue: return Character
-        case StringValue: return String
-        case BytesValue: return Bytes
-        case NoneValue: return LiteralKind.NoneValue
-        case UnitValue: return Unit
+        case IntegerValue:
+            return Integer
+        case FloatValue:
+            return Float
+        case BooleanValue:
+            return Boolean
+        case CharacterValue:
+            return Character
+        case StringValue:
+            return String
+        case BytesValue:
+            return Bytes
+        case NoneValue:
+            return LiteralKind.NoneValue
+        case UnitValue:
+            return Unit
 
 
 def literal_spelling(value: LiteralValue) -> string | None:
     match value:
-        case IntegerValue: return spelling
-        case FloatValue: return spelling
-        case StringValue: return value
-        else: return None
+        case IntegerValue:
+            return spelling
+        case FloatValue:
+            return spelling
+        case StringValue:
+            return value
+        case _:
+            return None
 
+
+test "literal spellings survive until type selection":
+    integer = IntegerValue("18446744073709551616")
+    floating = FloatValue("1.25e-4")
+    text = StringValue("severian")
+    assert(literal_kind(integer) == Integer)
+    assert(literal_kind(floating) == Float)
+    assert(literal_spelling(integer) == "18446744073709551616")
+    assert(literal_spelling(floating) == "1.25e-4")
+    assert(literal_spelling(text) == "severian")
+    assert(literal_spelling(BooleanValue(true)) == None)

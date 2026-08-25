@@ -10,3 +10,5 @@ trait string: Primitive:
     operator <=(right: string) -> bool
     operator >(right: string) -> bool
     operator >=(right: string) -> bool
+
+    def bytes() -> list[u8]

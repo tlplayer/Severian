@@ -1,3 +1,6 @@
+import io
+import file
+
 class SourceId:
     index: u32
 
@@ -31,8 +34,8 @@ class SourceMap:
         files.append(SourceFile(id, name, text))
         return id
 
-    def load(path: string) -> SourceId | IOError:
-        text = file.read_string(path)
+    def load(path: string) -> SourceId | io.IOError:
+        text = file.read(path)
         return add_virtual(path, text)
 
     def get(id: SourceId) -> SourceFile:
@@ -52,6 +55,6 @@ def virtual_source(name: string, text: string) -> SourceFile:
     return SourceFile(SourceId(0), name, text)
 
 
-def load(path: string) -> SourceFile | IOError:
-    text = file.read_string(path)
+def load(path: string) -> SourceFile | io.IOError:
+    text = file.read(path)
     return SourceFile(SourceId(0), path, text)

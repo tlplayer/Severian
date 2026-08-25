@@ -178,6 +178,38 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_bitwise_operators_with_integer_precedence() {
+        let source = SourceFile::virtual_source("bits.sev", "value = 1 | 2 ^ 3 & 4\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(binding) = &module.items[0] else {
+            panic!("expected binding")
+        };
+        let severian_ast::ExpressionKind::Binary {
+            operator: severian_ast::BinaryOperator::Pipe,
+            right,
+            ..
+        } = &binding.value.kind
+        else {
+            panic!("expected bitwise or at the expression root")
+        };
+        let severian_ast::ExpressionKind::Binary {
+            operator: severian_ast::BinaryOperator::BitwiseXor,
+            right,
+            ..
+        } = &right.kind
+        else {
+            panic!("expected bitwise xor inside bitwise or")
+        };
+        assert!(matches!(
+            right.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::BitwiseAnd,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn parses_task_ownership_locking_and_await() {
         let source = SourceFile::virtual_source(
             "tasks.sev",

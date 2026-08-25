@@ -628,6 +628,9 @@ fn c_unary(operator: UnaryOperation) -> &'static str {
 
 fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
     Ok(match operator {
+        BinaryOperation::BitwiseOr => "|",
+        BinaryOperation::BitwiseAnd => "&",
+        BinaryOperation::BitwiseXor => "^",
         BinaryOperation::Add => "+",
         BinaryOperation::Subtract => "-",
         BinaryOperation::Multiply => "*",

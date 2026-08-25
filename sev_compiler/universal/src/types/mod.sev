@@ -88,36 +88,58 @@ enum TypeError:
 
 
 def primitive_category(value: string) -> PrimitiveCategory | TypeError:
-    if value == "boolean": return Boolean
-    if value == "character": return Character
-    if value == "integer": return Integer
-    if value == "float": return Float
-    if value == "text": return Text
-    if value == "bytes": return Bytes
-    if value == "absence": return Absence
-    if value == "unit": return Unit
-    if value == "arguments": return Arguments
+    if value == "boolean":
+        return Boolean
+    if value == "character":
+        return Character
+    if value == "integer":
+        return Integer
+    if value == "float":
+        return Float
+    if value == "text":
+        return Text
+    if value == "bytes":
+        return Bytes
+    if value == "absence":
+        return Absence
+    if value == "unit":
+        return Unit
+    if value == "arguments":
+        return Arguments
     return error(UnknownCategory(value))
 
 
 def primitive_representation(value: string, bits: u16 | None, signed: bool) -> PrimitiveRepresentation | TypeError:
     if value == "fixed-integer":
-        if bits == None: return error(MissingBitWidth)
+        if bits == None:
+            return error(MissingBitWidth)
         return Integer(Fixed(bits), signed)
-    if value == "machine-signed": return Integer(Machine, true)
-    if value == "pointer-integer": return PointerInteger(signed)
-    if value == "machine-float": return Float(FloatFormat.Machine)
+    if value == "machine-signed":
+        return Integer(Machine, true)
+    if value == "pointer-integer":
+        return PointerInteger(signed)
+    if value == "machine-float":
+        return Float(FloatFormat.Machine)
     if value == "ieee-float":
-        if bits == None: return error(MissingBitWidth)
+        if bits == None:
+            return error(MissingBitWidth)
         return Float(Ieee(bits))
-    if value == "brain-float" and bits == 16: return Float(BrainFloat16)
-    if value == "i1": return PrimitiveRepresentation.Boolean
-    if value == "unicode-scalar": return PrimitiveRepresentation.Character
-    if value == "string": return PrimitiveRepresentation.String
-    if value == "byte-string": return PrimitiveRepresentation.Bytes
-    if value == "none": return NoneValue
-    if value == "unit": return PrimitiveRepresentation.Unit
-    if value == "arguments": return PrimitiveRepresentation.Arguments
+    if value == "brain-float" and bits == 16:
+        return Float(BrainFloat16)
+    if value == "i1":
+        return PrimitiveRepresentation.Boolean
+    if value == "unicode-scalar":
+        return PrimitiveRepresentation.Character
+    if value == "string":
+        return PrimitiveRepresentation.String
+    if value == "byte-string":
+        return PrimitiveRepresentation.Bytes
+    if value == "none":
+        return NoneValue
+    if value == "unit":
+        return PrimitiveRepresentation.Unit
+    if value == "arguments":
+        return PrimitiveRepresentation.Arguments
     return error(UnknownRepresentation(value))
 
 
@@ -160,7 +182,14 @@ class TypeContext:
             return error(UnknownTypeId(type_id))
         primitive_id = PrimitiveId(definition.declaration)
         primitive = PrimitiveDefinition(primitive_id, type_id, category, representation, default_literal)
-        definitions[type_id.index].kind = Primitive(primitive)
+        definitions[type_id.index] = TypeDefinition(
+            definition.id,
+            definition.declaration,
+            definition.path,
+            definition.name,
+            definition.parameter_count,
+            Primitive(primitive),
+        )
         grant_capability(type_id, Send)
         grant_capability(type_id, Sync)
         if category == Boolean or category == Character or category == Integer or category == Float or category == Absence or category == Unit:
@@ -170,14 +199,22 @@ class TypeContext:
             grant_capability(type_id, DeviceSafe)
         if default_literal:
             kind: LiteralKind | None = None
-            if category == Boolean: kind = LiteralKind.Boolean
-            elif category == Character: kind = LiteralKind.Character
-            elif category == Integer: kind = LiteralKind.Integer
-            elif category == Float: kind = LiteralKind.Float
-            elif category == Text: kind = LiteralKind.String
-            elif category == Bytes: kind = LiteralKind.Bytes
-            elif category == Absence: kind = LiteralKind.NoneValue
-            elif category == Unit: kind = LiteralKind.Unit
+            if category == Boolean:
+                kind = LiteralKind.Boolean
+            if category == Character:
+                kind = LiteralKind.Character
+            if category == Integer:
+                kind = LiteralKind.Integer
+            if category == Float:
+                kind = LiteralKind.Float
+            if category == Text:
+                kind = LiteralKind.String
+            if category == Bytes:
+                kind = LiteralKind.Bytes
+            if category == Absence:
+                kind = LiteralKind.NoneValue
+            if category == Unit:
+                kind = LiteralKind.Unit
             if kind != None:
                 defaults[kind] = type_id
         return primitive_id
@@ -218,10 +255,10 @@ class TypeContext:
         known = applications.get(key)
         if known != None:
             return known
-        parameters: map[GenericParamId, TypeId] = {}
+        parameters: map[int, int] = {}
         index: u32 = 0
         for argument in arguments:
-            parameters[GenericParamId(index)] = argument
+            parameters[int(index)] = int(argument.index)
             index += 1
         id = interner.intern(Nominal(DefId(0, 0, definition.declaration), Substitution(parameters)))
         applications[key] = id
@@ -256,13 +293,13 @@ class TypeContext:
 
     def resolve_binary(operator: BinaryOperator, left: TypeId, right: TypeId) -> ResolvedBinary | TypeError:
         for signature in binary:
-            if signature.operator != operator:
+            if signature.kind != operator:
                 continue
             match signature.left:
                 case Exact:
                     if type_id != left:
                         continue
-                else:
+                case _:
                     continue
             expected_right = pattern_type(signature.right, left, right)
             if expected_right != right:
@@ -272,13 +309,13 @@ class TypeContext:
 
     def supports_binary(operator: BinaryOperator, operand: TypeId) -> bool:
         for signature in binary:
-            if signature.operator != operator:
+            if signature.kind != operator:
                 continue
             match signature.left:
                 case Exact:
                     if type_id != operand:
                         continue
-                else:
+                case _:
                     continue
             if pattern_type(signature.right, operand, operand) == operand:
                 return true
@@ -339,9 +376,12 @@ class TypeContext:
 
 def pattern_type(pattern: TypePattern, left: TypeId, right: TypeId) -> TypeId:
     match pattern:
-        case Exact: return type_id
-        case SameAsLeft: return left
-        case SameAsRight: return right
+        case Exact:
+            return type_id
+        case SameAsLeft:
+            return left
+        case SameAsRight:
+            return right
 
 
 class TypeContextBuilder:

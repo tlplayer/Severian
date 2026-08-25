@@ -10,3 +10,17 @@ enum CompileRoute:
     Standard
     Compiler(compiler: CompilerId)
 
+
+def raw_pointer_type_id(element: TypeId) -> TypeId:
+    hash = (2166136261 ^ element.index) * 16777619
+    return TypeId(134217728 | (hash & 67108863))
+
+
+def is_raw_pointer_type(type_id: TypeId) -> bool:
+    return type_id.index & 4227858432 == 134217728
+
+
+test "raw pointer identities occupy their reserved structural range":
+    pointer = raw_pointer_type_id(TypeId(42))
+    assert(is_raw_pointer_type(pointer))
+    assert(not is_raw_pointer_type(TypeId(42)))

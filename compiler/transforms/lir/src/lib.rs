@@ -156,6 +156,9 @@ pub enum UnaryOperation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperation {
+    BitwiseOr,
+    BitwiseAnd,
+    BitwiseXor,
     Add,
     Subtract,
     Multiply,

@@ -21,6 +21,9 @@ impl UnaryOperator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BinaryOperator {
+    BitwiseOr,
+    BitwiseAnd,
+    BitwiseXor,
     Add,
     Subtract,
     Multiply,
@@ -41,6 +44,9 @@ pub enum BinaryOperator {
 impl BinaryOperator {
     pub fn from_spelling(value: &str) -> Option<Self> {
         match value {
+            "|" => Some(Self::BitwiseOr),
+            "&" => Some(Self::BitwiseAnd),
+            "^" => Some(Self::BitwiseXor),
             "+" => Some(Self::Add),
             "-" => Some(Self::Subtract),
             "*" => Some(Self::Multiply),
@@ -64,6 +70,9 @@ impl BinaryOperator {
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::BitwiseOr => "|",
+            Self::BitwiseAnd => "&",
+            Self::BitwiseXor => "^",
             Self::Add => "+",
             Self::Subtract => "-",
             Self::Multiply => "*",
@@ -102,4 +111,21 @@ pub struct OperatorSignature {
     pub left: TypePattern,
     pub right: TypePattern,
     pub result: TypePattern,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitwise_spellings_are_first_class_universal_operators() {
+        for (spelling, operator) in [
+            ("|", BinaryOperator::BitwiseOr),
+            ("&", BinaryOperator::BitwiseAnd),
+            ("^", BinaryOperator::BitwiseXor),
+        ] {
+            assert_eq!(BinaryOperator::from_spelling(spelling), Some(operator));
+            assert_eq!(operator.to_string(), spelling);
+        }
+    }
 }

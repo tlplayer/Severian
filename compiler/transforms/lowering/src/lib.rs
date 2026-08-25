@@ -1029,6 +1029,9 @@ fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
 
 fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
     match operator {
+        BinaryOperator::BitwiseOr => BinaryOperation::BitwiseOr,
+        BinaryOperator::BitwiseAnd => BinaryOperation::BitwiseAnd,
+        BinaryOperator::BitwiseXor => BinaryOperation::BitwiseXor,
         BinaryOperator::Add => BinaryOperation::Add,
         BinaryOperator::Subtract => BinaryOperation::Subtract,
         BinaryOperator::Multiply => BinaryOperation::Multiply,
@@ -1681,6 +1684,9 @@ fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
 
 fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
     match operator {
+        BinaryOperator::BitwiseOr => BinaryOperation::BitwiseOr,
+        BinaryOperator::BitwiseAnd => BinaryOperation::BitwiseAnd,
+        BinaryOperator::BitwiseXor => BinaryOperation::BitwiseXor,
         BinaryOperator::Add => BinaryOperation::Add,
         BinaryOperator::Subtract => BinaryOperation::Subtract,
         BinaryOperator::Multiply => BinaryOperation::Multiply,

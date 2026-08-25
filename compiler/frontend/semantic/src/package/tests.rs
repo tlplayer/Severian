@@ -504,3 +504,61 @@ fn declaration_only_module_cycles_can_resolve_mutually_recursive_bodies() {
     assert_eq!(typed.hir.modules.len(), 2);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn enum_names_are_package_types_in_signatures() {
+    let root = temporary();
+    let source = root.join("enum.sev");
+    std::fs::write(
+        &source,
+        "enum Result:\n    Value(value: int)\n    Message(value: string)\n    Empty\ndef unwrap(result: Result) -> int:\n    match result:\n        Value:\n            return value\n        Message:\n            return 0\n        Empty:\n            return 0\ndef selected() -> int:\n    return unwrap(Value(7))\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_class_fields_resolve_sibling_class_types() {
+    let root = temporary();
+    let source = root.join("ids.sev");
+    std::fs::write(
+        &source,
+        "class DeclarationId:\n    value: u128\nclass PrimitiveId:\n    declaration: DeclarationId\ndef wrap(value: DeclarationId) -> PrimitiveId:\n    return PrimitiveId(value)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_class_fields_survive_diamond_relative_imports() {
+    let root = temporary();
+    std::fs::write(
+        root.join("ids.sev"),
+        "class DeclarationId:\n    value: u128\nclass PrimitiveId:\n    declaration: DeclarationId\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("operator.sev"),
+        "import \"ids.sev\"\nclass Signature:\n    declaration: DeclarationId\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.sev"),
+        "import \"ids.sev\"\nimport \"operator.sev\"\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(
+        &severian_modules::resolve(&root.join("lib.sev")).unwrap(),
+        &universal,
+    )
+    .unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -1,5 +1,6 @@
 import "ids.sev"
 import "type_system.sev"
+import "types/mod.sev"
 
 class DialectId:
     value: u128
@@ -10,6 +11,18 @@ class OperationId:
 
 
 class AttributeId:
+    value: u128
+
+
+class BackendId:
+    value: u128
+
+
+class RuntimeId:
+    value: u128
+
+
+class ProviderId:
     value: u128
 
 
@@ -39,8 +52,9 @@ class EffectSet:
 enum LoweringCapability:
     Standard
     Compiler(compiler: CompilerId)
-    Backend(name: string)
-    Runtime(name: string)
+    Backend(backend: BackendId)
+    Runtime(runtime: RuntimeId)
+    Provider(provider: ProviderId)
 
 
 class RegisteredOperation:
@@ -48,6 +62,11 @@ class RegisteredOperation:
     operands: list[TypeId]
     results: list[TypeId]
     attributes: map[AttributeId, AttrValue]
+
+
+class IrContext:
+    types: TypeContext
+    operations: OperationRegistry
 
 
 class OperationDiagnostic:
@@ -61,11 +80,11 @@ class CanonicalRewrite:
 
 
 trait OperationInterface:
-    infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
-    verify(operation: RegisteredOperation) -> unit | OperationDiagnostic
-    effects(operation: RegisteredOperation) -> EffectSet
-    canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
-    lowering_capabilities() -> list[LoweringCapability]
+    def infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
+    def verify(operation: RegisteredOperation, context: IrContext) -> unit | OperationDiagnostic
+    def effects(operation: RegisteredOperation) -> EffectSet
+    def canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
+    def lowering_capabilities() -> list[LoweringCapability]
 
 
 class OperationRegistry:
@@ -84,11 +103,75 @@ class OperationRegistry:
         return interfaces.get(id)
 
 
-def no_effects() -> EffectSet: return EffectSet(0)
-def read_effect() -> EffectSet: return EffectSet(1)
-def write_effect() -> EffectSet: return EffectSet(2)
-def allocate_effect() -> EffectSet: return EffectSet(4)
-def free_effect() -> EffectSet: return EffectSet(8)
-def throw_effect() -> EffectSet: return EffectSet(16)
-def io_effect() -> EffectSet: return EffectSet(32)
+def dialect_id(name: string) -> DialectId:
+    return DialectId(stable_hash(name))
 
+
+def operation_id(name: string) -> OperationId:
+    return OperationId(stable_hash(name))
+
+
+def attribute_id(name: string) -> AttributeId:
+    return AttributeId(stable_hash(name))
+
+
+def backend_id(name: string) -> BackendId:
+    return BackendId(stable_hash(name))
+
+
+def runtime_id(name: string) -> RuntimeId:
+    return RuntimeId(stable_hash(name))
+
+
+def provider_id(name: string) -> ProviderId:
+    return ProviderId(stable_hash(name))
+
+
+def named_operation(dialect: string, operation: string) -> OpId:
+    return OpId(dialect_id(dialect), operation_id(operation))
+
+
+def no_effects() -> EffectSet:
+    return EffectSet(0)
+
+
+def read_effect() -> EffectSet:
+    return EffectSet(1)
+
+
+def write_effect() -> EffectSet:
+    return EffectSet(2)
+
+
+def allocate_effect() -> EffectSet:
+    return EffectSet(4)
+
+
+def free_effect() -> EffectSet:
+    return EffectSet(8)
+
+
+def throw_effect() -> EffectSet:
+    return EffectSet(16)
+
+
+def io_effect() -> EffectSet:
+    return EffectSet(32)
+
+
+test "operation names have stable independent identities":
+    first = named_operation("arith", "add")
+    repeated = named_operation("arith", "add")
+    different_operation = named_operation("arith", "sub")
+    different_dialect = named_operation("tensor", "add")
+    assert(first == repeated)
+    assert(first != different_operation)
+    assert(first != different_dialect)
+
+
+test "effect sets compose without losing bits":
+    effects = read_effect().union(write_effect()).union(io_effect())
+    assert(effects.contains(read_effect()))
+    assert(effects.contains(write_effect()))
+    assert(effects.contains(io_effect()))
+    assert(not effects.contains(throw_effect()))

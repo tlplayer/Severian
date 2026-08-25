@@ -1302,6 +1302,9 @@ fn binary_mnemonic(operator: BinaryOperation, ty: LoweredType) -> Result<String,
     let floating = matches!(ty, LoweredType::Float { .. });
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     Ok(match operator {
+        BinaryOperation::BitwiseOr => "arith.ori".into(),
+        BinaryOperation::BitwiseAnd => "arith.andi".into(),
+        BinaryOperation::BitwiseXor => "arith.xori".into(),
         BinaryOperation::Add => if floating { "arith.addf" } else { "arith.addi" }.into(),
         BinaryOperation::Subtract => if floating { "arith.subf" } else { "arith.subi" }.into(),
         BinaryOperation::Multiply => if floating { "arith.mulf" } else { "arith.muli" }.into(),
@@ -2159,6 +2162,9 @@ fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static st
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     let integer = matches!(ty, LoweredType::Integer { .. } | LoweredType::Boolean);
     Ok(match (operator, float, integer) {
+        (BinaryOperation::BitwiseOr, false, true) => "arith.ori",
+        (BinaryOperation::BitwiseAnd, false, true) => "arith.andi",
+        (BinaryOperation::BitwiseXor, false, true) => "arith.xori",
         (BinaryOperation::Add, false, true) => "arith.addi",
         (BinaryOperation::Subtract, false, true) => "arith.subi",
         (BinaryOperation::Multiply, false, true) => "arith.muli",
