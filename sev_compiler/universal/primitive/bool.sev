@@ -1,9 +1,12 @@
 import "primitive.sev"
-import "logical.sev"
-import "equitable.sev"
+import "../operator/trait/logical.sev"
+import "../operator/trait/equitable.sev"
+import "../operator/trait/bitwise.sev"
+
+trait Boolean: Primitive + Logical + Equatable
 
 
 # The compiler-side model selected when a source value has type `bool`.
 # Target lowering is responsible for representing Bool as MLIR `i1`.
-class Bool: Primitive + Logical + Equatable
+class Bool: Boolean
     name: string = "bool"

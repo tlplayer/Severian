@@ -1,0 +1,13 @@
+trait BitAnd:
+    operator &(right: Self) -> Self
+
+trait BitOr:
+    operator |(right: Self) -> Self
+
+trait BitXor:
+    operator ^(right: Self) -> Self
+
+trait Bitwise:
+    trait BitAnd
+    trait BitOr
+    trait BitXor
