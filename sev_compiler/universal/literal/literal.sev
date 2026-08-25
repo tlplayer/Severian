@@ -1,0 +1,6 @@
+enum Literal:
+    Bool(value: BoolLiteral)
+    Integer(value: IntegerLiteral)
+    Float(value: FloatLiteral)
+    String(value: StringLiteral)
+    Character(value: CharacterLiteral)

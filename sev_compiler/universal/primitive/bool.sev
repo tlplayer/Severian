@@ -3,7 +3,7 @@ import "../operator/trait/logical.sev"
 import "../operator/trait/equitable.sev"
 import "../operator/trait/bitwise.sev"
 
-trait Boolean: Primitive + Logical + Equatable
+trait Boolean: Primitive + Logical + Equatable + Bitwise
 
 
 # The compiler-side model selected when a source value has type `bool`.
