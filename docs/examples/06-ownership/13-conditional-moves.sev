@@ -1,11 +1,11 @@
 test with compiler:
-    value := "hello"
-    condition := true
-
-    if condition:
-        consumed := move value
-
     reject:
+        value := "hello"
+        condition := true
+
+        if condition:
+            consumed := move value
+
         print(value)
 
 test:

@@ -1,12 +1,21 @@
-values.append(move value)
-value := move values[0]
-borrowed := borrow values[0]
-copied := clone values[0]
+test:
+    values := ["a", "b", "c"]
+    value := "d"
+
+    values.append(move value)
+    moved := move values[0]
+    borrowed := borrow values[1]
+    copied := clone values[2]
+
+    assert(moved == "a")
+    assert(borrowed == "b")
+    assert(copied == "c")
 
 test with compiler:
     values := ["a", "b", "c"]
 
-    first := borrow values[0]
+    first := borrow values
 
     reject:
-        values.append("d")
+        mutation := borrow mut values
+        assert(first.length() == 3)

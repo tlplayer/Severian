@@ -12,6 +12,7 @@ pub enum LoanKind {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Loan {
     pub place: Place,
+    pub holder: LocalId,
     pub kind: LoanKind,
     pub block: BlockId,
 }
@@ -70,6 +71,13 @@ type OwnershipSolution = (
     BTreeSet<OwnershipError>,
     BTreeSet<LocalId>,
 );
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct BlockLiveness {
+    live_in: BTreeSet<LocalId>,
+    live_out: BTreeSet<LocalId>,
+    after_statements: Vec<BTreeSet<LocalId>>,
+}
 
 pub fn analyze_ownership(
     body: &CfgBody,
@@ -159,6 +167,13 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
 fn solve(body: &CfgBody) -> OwnershipSolution {
     let predecessors = predecessors(body);
     let reachable = reachable_blocks(body);
+    let liveness = calculate_liveness(body, &reachable);
+    let arguments = body
+        .locals
+        .iter()
+        .filter(|local| local.argument)
+        .map(|local| local.id)
+        .collect::<BTreeSet<_>>();
     let entry = OwnershipState {
         initialized: body
             .locals
@@ -211,6 +226,8 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
             &mut output,
             &mut BTreeSet::new(),
             &mut BTreeSet::new(),
+            &arguments,
+            liveness.get(&block_id).expect("reachable block is live"),
         );
         if outputs.get(&block_id) == Some(&output) {
             continue;
@@ -232,7 +249,14 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
             continue;
         };
         let mut state = inputs.get(block_id).cloned().unwrap_or_default();
-        transfer_block(block, &mut state, &mut errors, &mut escaped);
+        transfer_block(
+            block,
+            &mut state,
+            &mut errors,
+            &mut escaped,
+            &arguments,
+            liveness.get(block_id).expect("reachable block is live"),
+        );
     }
     (inputs, outputs, errors, escaped)
 }
@@ -266,11 +290,16 @@ fn transfer_block(
     state: &mut OwnershipState,
     errors: &mut BTreeSet<OwnershipError>,
     escaped: &mut BTreeSet<LocalId>,
+    arguments: &BTreeSet<LocalId>,
+    liveness: &BlockLiveness,
 ) {
-    for statement in &block.statements {
+    state
+        .loans
+        .retain(|loan| liveness.live_in.contains(&loan.holder));
+    for (index, statement) in block.statements.iter().enumerate() {
         match statement {
             CfgStatement::Assign(place, value) => {
-                inspect_rvalue(value, block.id, state, errors);
+                inspect_rvalue(value, place, block.id, state, errors);
                 if let Some(local) = place.local_id() {
                     state.initialized.insert(local);
                     state.moved.remove(&local);
@@ -286,7 +315,7 @@ fn transfer_block(
                 }
                 state
                     .loans
-                    .retain(|loan| loan.place.local_id() != Some(local));
+                    .retain(|loan| loan.place.local_id() != Some(local) && loan.holder != local);
             }
             CfgStatement::StorageLive(local) => {
                 state.initialized.remove(local);
@@ -297,7 +326,7 @@ fn transfer_block(
                 state.initialized.remove(local);
                 state
                     .loans
-                    .retain(|loan| loan.place.local_id() != Some(*local));
+                    .retain(|loan| loan.place.local_id() != Some(*local) && loan.holder != *local);
             }
             CfgStatement::Assert {
                 condition, message, ..
@@ -322,6 +351,9 @@ fn transfer_block(
             }
             CfgStatement::Coverage(_) => {}
         }
+        if let Some(live) = liveness.after_statements.get(index) {
+            state.loans.retain(|loan| live.contains(&loan.holder));
+        }
     }
     for operand in terminator_operands(&block.terminator) {
         inspect_operand(operand, state, errors);
@@ -342,29 +374,88 @@ fn transfer_block(
             state.consumed_resources.remove(&local);
         }
     }
-    if let Terminator::Return(Some(Operand::Copy(place))) = &block.terminator {
-        if let Some(local) = place.local_id() {
-            if state
+    // A structured task owns any borrow captured by its arguments until the
+    // task result's last use. Ordinary call temporaries simply fall out of the
+    // successor's live-in set.
+    if let Terminator::Spawn {
+        arguments,
+        destination,
+        ..
+    } = &block.terminator
+    {
+        if let Some(task) = destination.local_id() {
+            let argument_holders = arguments
+                .iter()
+                .filter_map(operand_local)
+                .collect::<BTreeSet<_>>();
+            let captured = state
                 .loans
                 .iter()
-                .any(|loan| loan.place.local_id() == Some(local))
+                .filter(|loan| argument_holders.contains(&loan.holder))
+                .cloned()
+                .map(|mut loan| {
+                    loan.holder = task;
+                    loan
+                })
+                .collect::<Vec<_>>();
+            state.loans.extend(captured);
+        }
+    }
+    if let Terminator::Return(Some(Operand::Copy(place))) = &block.terminator {
+        if let Some(local) = place.local_id() {
+            if let Some(owner) = state
+                .loans
+                .iter()
+                .find(|loan| loan.holder == local)
+                .and_then(|loan| loan.place.local_id())
+                .filter(|owner| !arguments.contains(owner))
             {
-                errors.insert(OwnershipError::EscapingBorrow(local));
-                escaped.insert(local);
+                errors.insert(OwnershipError::EscapingBorrow(owner));
+                escaped.insert(owner);
             }
         }
+    }
+    state
+        .loans
+        .retain(|loan| liveness.live_out.contains(&loan.holder));
+}
+
+fn operand_local(operand: &Operand) -> Option<LocalId> {
+    match operand {
+        Operand::Copy(place) | Operand::Move(place) => place.local_id(),
+        Operand::Constant { .. } | Operand::Function(_) => None,
     }
 }
 
 fn inspect_rvalue(
     value: &Rvalue,
+    destination: &Place,
     block: BlockId,
     state: &mut OwnershipState,
     errors: &mut BTreeSet<OwnershipError>,
 ) {
     match value {
-        Rvalue::Use(operand)
-        | Rvalue::Unary { operand, .. }
+        Rvalue::Use(operand) => {
+            let propagated = if let (Some(source), Some(holder)) =
+                (operand_local(operand), destination.local_id())
+            {
+                state
+                    .loans
+                    .iter()
+                    .filter(|loan| loan.holder == source)
+                    .cloned()
+                    .map(|mut loan| {
+                        loan.holder = holder;
+                        loan
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            inspect_operand(operand, state, errors);
+            state.loans.extend(propagated);
+        }
+        Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }
         | Rvalue::Await { task: operand } => inspect_operand(operand, state, errors),
         Rvalue::Binary { left, right, .. } => {
@@ -372,10 +463,17 @@ fn inspect_rvalue(
             inspect_operand(right, state, errors);
         }
         Rvalue::BorrowShared(place) => {
-            add_loan(place, LoanKind::Shared, block, state, errors);
+            add_loan(place, destination, LoanKind::Shared, block, state, errors);
         }
         Rvalue::BorrowExclusive(place) => {
-            add_loan(place, LoanKind::Exclusive, block, state, errors);
+            add_loan(
+                place,
+                destination,
+                LoanKind::Exclusive,
+                block,
+                state,
+                errors,
+            );
         }
         Rvalue::Aggregate { fields, .. } => {
             for field in fields {
@@ -387,12 +485,13 @@ fn inspect_rvalue(
 
 fn add_loan(
     place: &Place,
+    holder: &Place,
     kind: LoanKind,
     block: BlockId,
     state: &mut OwnershipState,
     errors: &mut BTreeSet<OwnershipError>,
 ) {
-    let Some(local) = place.local_id() else {
+    let (Some(local), Some(holder)) = (place.local_id(), holder.local_id()) else {
         return;
     };
     if state.loans.iter().any(|loan| {
@@ -403,6 +502,7 @@ fn add_loan(
     } else {
         state.loans.insert(Loan {
             place: place.clone(),
+            holder,
             kind,
             block,
         });
@@ -427,6 +527,13 @@ fn inspect_operand(
         return;
     }
     if moving {
+        if state
+            .loans
+            .iter()
+            .any(|loan| loan.place.local_id() == Some(local))
+        {
+            errors.insert(OwnershipError::ConflictingLoan(local));
+        }
         if !state.moved.insert(local) {
             errors.insert(OwnershipError::DoubleMove(local));
         }
@@ -467,6 +574,341 @@ fn reachable_blocks(body: &CfgBody) -> BTreeSet<BlockId> {
         }
     }
     reachable
+}
+
+fn calculate_liveness(
+    body: &CfgBody,
+    reachable: &BTreeSet<BlockId>,
+) -> BTreeMap<BlockId, BlockLiveness> {
+    let mut result = reachable
+        .iter()
+        .copied()
+        .map(|block| (block, BlockLiveness::default()))
+        .collect::<BTreeMap<_, _>>();
+    loop {
+        let previous = result.clone();
+        for block in body
+            .blocks
+            .iter()
+            .rev()
+            .filter(|block| reachable.contains(&block.id))
+        {
+            let mut live_out = BTreeSet::new();
+            for successor in successors(&block.terminator) {
+                if let Some(successor) = previous.get(&successor) {
+                    live_out.extend(&successor.live_in);
+                }
+            }
+            let mut live = live_out.clone();
+            apply_terminator_liveness(&block.terminator, &mut live);
+            let mut after_statements = vec![BTreeSet::new(); block.statements.len()];
+            for (index, statement) in block.statements.iter().enumerate().rev() {
+                after_statements[index] = live.clone();
+                apply_statement_liveness(statement, &mut live);
+            }
+            result.insert(
+                block.id,
+                BlockLiveness {
+                    live_in: live,
+                    live_out,
+                    after_statements,
+                },
+            );
+        }
+        if result == previous {
+            return result;
+        }
+    }
+}
+
+fn apply_statement_liveness(statement: &CfgStatement, live: &mut BTreeSet<LocalId>) {
+    match statement {
+        CfgStatement::Assign(destination, value) => {
+            define_place(destination, live);
+            use_rvalue(value, live);
+            if !destination.projection.is_empty() {
+                use_place(destination, live);
+            }
+        }
+        CfgStatement::Drop(place) => {
+            define_place(place, live);
+            use_place(place, live);
+        }
+        CfgStatement::StorageLive(local) | CfgStatement::StorageDead(local) => {
+            live.remove(local);
+        }
+        CfgStatement::Assert {
+            condition, message, ..
+        } => {
+            use_operand(condition, live);
+            if let Some(message) = message {
+                use_operand(message, live);
+            }
+        }
+        CfgStatement::Operation {
+            operands, results, ..
+        } => {
+            for result in results {
+                define_place(result, live);
+            }
+            for operand in operands {
+                use_operand(operand, live);
+            }
+        }
+        CfgStatement::Coverage(_) => {}
+    }
+}
+
+fn apply_terminator_liveness(terminator: &Terminator, live: &mut BTreeSet<LocalId>) {
+    match terminator {
+        Terminator::Call { destination, .. } => {
+            if let Some(destination) = destination {
+                define_place(destination, live);
+            }
+        }
+        Terminator::Spawn { destination, .. }
+        | Terminator::SpawnFieldUpdate { destination, .. } => define_place(destination, live),
+        _ => {}
+    }
+    for operand in terminator_operands(terminator) {
+        use_operand(operand, live);
+    }
+}
+
+fn use_rvalue(value: &Rvalue, live: &mut BTreeSet<LocalId>) {
+    match value {
+        Rvalue::Use(operand)
+        | Rvalue::Unary { operand, .. }
+        | Rvalue::Convert { operand, .. }
+        | Rvalue::Await { task: operand } => use_operand(operand, live),
+        Rvalue::Binary { left, right, .. } => {
+            use_operand(left, live);
+            use_operand(right, live);
+        }
+        Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) => use_place(place, live),
+        Rvalue::Aggregate { fields, .. } => {
+            for field in fields {
+                use_operand(field, live);
+            }
+        }
+    }
+}
+
+fn use_operand(operand: &Operand, live: &mut BTreeSet<LocalId>) {
+    if let Operand::Copy(place) | Operand::Move(place) = operand {
+        use_place(place, live);
+    }
+}
+
+fn use_place(place: &Place, live: &mut BTreeSet<LocalId>) {
+    if let Some(local) = place.local_id() {
+        live.insert(local);
+    }
+    for projection in &place.projection {
+        if let crate::Projection::Index(local) = projection {
+            live.insert(*local);
+        }
+    }
+}
+
+fn define_place(place: &Place, live: &mut BTreeSet<LocalId>) {
+    if place.projection.is_empty() {
+        if let Some(local) = place.local_id() {
+            live.remove(&local);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BasicBlock, Callee, LocalDecl};
+    use severian_universal::{DeclarationId, DefId, LiteralValue, TypeId};
+
+    fn local(id: u32, argument: bool) -> LocalDecl {
+        LocalDecl {
+            id: LocalId(id),
+            ty: TypeId(0),
+            mutable: true,
+            argument,
+            span: None,
+        }
+    }
+
+    fn initialize(local: u32) -> CfgStatement {
+        CfgStatement::Assign(
+            Place::local(LocalId(local)),
+            Rvalue::Use(Operand::Constant {
+                value: LiteralValue::Integer("1".into()),
+                ty: TypeId(0),
+            }),
+        )
+    }
+
+    #[test]
+    fn direct_call_borrows_end_at_the_call_boundary() {
+        let source = LocalId(0);
+        let shared = LocalId(1);
+        let exclusive = LocalId(2);
+        let body = CfgBody {
+            entry: BlockId(0),
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    parameters: Vec::new(),
+                    statements: vec![CfgStatement::Assign(
+                        Place::local(shared),
+                        Rvalue::BorrowShared(Place::local(source)),
+                    )],
+                    statement_spans: vec![None],
+                    terminator: Terminator::Call {
+                        callee: Callee::Direct {
+                            function: DefId {
+                                package: 0,
+                                module: 0,
+                                declaration: DeclarationId(0),
+                            },
+                            substitution: Default::default(),
+                        },
+                        arguments: vec![Operand::Copy(Place::local(shared))],
+                        destination: None,
+                        target: BlockId(1),
+                        unwind: None,
+                    },
+                    terminator_span: None,
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    parameters: Vec::new(),
+                    statements: vec![CfgStatement::Assign(
+                        Place::local(exclusive),
+                        Rvalue::BorrowExclusive(Place::local(source)),
+                    )],
+                    statement_spans: vec![None],
+                    terminator: Terminator::Return(None),
+                    terminator_span: None,
+                },
+            ],
+            locals: vec![local(0, true), local(1, false), local(2, false)],
+            return_type: TypeId(0),
+        };
+
+        let (_, _, errors, _) = solve(&body);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn copied_borrow_holder_keeps_the_loan_active() {
+        let body = CfgBody {
+            entry: BlockId(0),
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                parameters: Vec::new(),
+                statements: vec![
+                    CfgStatement::Assign(
+                        Place::local(LocalId(1)),
+                        Rvalue::BorrowShared(Place::local(LocalId(0))),
+                    ),
+                    CfgStatement::Assign(
+                        Place::local(LocalId(2)),
+                        Rvalue::Use(Operand::Copy(Place::local(LocalId(1)))),
+                    ),
+                    CfgStatement::Assign(
+                        Place::local(LocalId(3)),
+                        Rvalue::BorrowExclusive(Place::local(LocalId(0))),
+                    ),
+                ],
+                statement_spans: vec![None; 3],
+                terminator: Terminator::Return(Some(Operand::Copy(Place::local(LocalId(2))))),
+                terminator_span: None,
+            }],
+            locals: vec![
+                local(0, true),
+                local(1, false),
+                local(2, false),
+                local(3, false),
+            ],
+            return_type: TypeId(0),
+        };
+
+        let (_, _, errors, _) = solve(&body);
+        assert!(errors.contains(&OwnershipError::ConflictingLoan(LocalId(0))));
+    }
+
+    #[test]
+    fn retained_borrow_ends_after_its_last_use() {
+        let body = CfgBody {
+            entry: BlockId(0),
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                parameters: Vec::new(),
+                statements: vec![
+                    CfgStatement::Assign(
+                        Place::local(LocalId(1)),
+                        Rvalue::BorrowShared(Place::local(LocalId(0))),
+                    ),
+                    CfgStatement::Assert {
+                        condition: Operand::Copy(Place::local(LocalId(1))),
+                        message: None,
+                        origin: crate::AssertionOrigin {
+                            statement_start: 0,
+                            condition_start: 0,
+                            condition_end: 0,
+                            location: None,
+                        },
+                    },
+                    CfgStatement::Assign(
+                        Place::local(LocalId(2)),
+                        Rvalue::BorrowExclusive(Place::local(LocalId(0))),
+                    ),
+                ],
+                statement_spans: vec![None; 3],
+                terminator: Terminator::Return(Some(Operand::Copy(Place::local(LocalId(2))))),
+                terminator_span: None,
+            }],
+            locals: vec![local(0, true), local(1, false), local(2, false)],
+            return_type: TypeId(0),
+        };
+
+        let (_, _, errors, _) = solve(&body);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn borrowed_local_cannot_escape_but_borrowed_argument_can() {
+        let body = |argument| CfgBody {
+            entry: BlockId(0),
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                parameters: Vec::new(),
+                statements: if argument {
+                    vec![CfgStatement::Assign(
+                        Place::local(LocalId(1)),
+                        Rvalue::BorrowShared(Place::local(LocalId(0))),
+                    )]
+                } else {
+                    vec![
+                        initialize(0),
+                        CfgStatement::Assign(
+                            Place::local(LocalId(1)),
+                            Rvalue::BorrowShared(Place::local(LocalId(0))),
+                        ),
+                    ]
+                },
+                statement_spans: vec![None; if argument { 1 } else { 2 }],
+                terminator: Terminator::Return(Some(Operand::Copy(Place::local(LocalId(1))))),
+                terminator_span: None,
+            }],
+            locals: vec![local(0, argument), local(1, false)],
+            return_type: TypeId(0),
+        };
+
+        let (_, _, local_errors, _) = solve(&body(false));
+        assert!(local_errors.contains(&OwnershipError::EscapingBorrow(LocalId(0))));
+
+        let (_, _, argument_errors, _) = solve(&body(true));
+        assert!(argument_errors.is_empty(), "{argument_errors:?}");
+    }
 }
 
 fn successors(terminator: &Terminator) -> Vec<BlockId> {

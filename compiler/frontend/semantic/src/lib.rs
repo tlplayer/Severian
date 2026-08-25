@@ -5695,6 +5695,24 @@ impl Analyzer<'_> {
                     return self.empty_set_expression(element, ast.span);
                 }
                 if let AstExpressionKind::Member { object, name } = &callee.kind {
+                    if name == "clear" && arguments.is_empty() {
+                        let collection = self.expression(object, None)?;
+                        if self.list_elements.contains_key(&collection.type_id) {
+                            let storage = self.list_storage_expression(collection, ast.span);
+                            let storage_type = storage.type_id;
+                            let unit = self
+                                .types
+                                .resolve_name("unit")
+                                .expect("bootstrap defines unit");
+                            return Ok(self.runtime_call(
+                                "__sev_list_clear",
+                                &[storage_type],
+                                unit,
+                                vec![storage],
+                                ast.span,
+                            ));
+                        }
+                    }
                     if matches!(name.as_str(), "add" | "append")
                         && arguments.len() == 1
                         && arguments[0].name.is_none()
@@ -8674,6 +8692,243 @@ impl Analyzer<'_> {
                 Some(span),
             )),
         }
+    }
+
+    fn system_surface_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        if let AstExpressionKind::TypeApplication {
+            callee: application,
+            arguments: type_arguments,
+        } = &callee.kind
+        {
+            if callable_path(application).as_deref() == Some("platform.layout") {
+                let ([queried], [target]) = (type_arguments.as_slice(), arguments) else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "`platform.layout[T]` expects one type and one target",
+                        Some(span),
+                    ));
+                };
+                if target.name.is_some() {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "the platform target must be positional",
+                        Some(target.value.span),
+                    ));
+                }
+                let target_type = self
+                    .class_instances
+                    .get(&("platform.Target".into(), Vec::new()))
+                    .map(|instance| instance.ty)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            "platform.Target is unavailable",
+                            Some(target.value.span),
+                        )
+                    })?;
+                let _target = self.expression(&target.value, Some(target_type))?;
+                let queried_type = self.resolve_source_type(queried)?;
+                let instance = self.instantiate_class(
+                    "platform.Layout",
+                    std::slice::from_ref(queried),
+                    span,
+                )?;
+                let (size, alignment) = self.type_layout(queried_type, span)?;
+                let data_size = self
+                    .types
+                    .resolve_name("data_size")
+                    .expect("bootstrap defines data_size");
+                let measured = |value: u64, id: HirId| Expression {
+                    id,
+                    type_id: data_size,
+                    kind: ExpressionKind::Literal(LiteralValue::Float(format!("{value}.0"))),
+                    span,
+                };
+                let size = measured(size, self.next_id());
+                let alignment = measured(alignment, self.next_id());
+                self.platform_layout_types.insert(instance.ty, queried_type);
+                return Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: instance.ty,
+                    kind: ExpressionKind::Aggregate {
+                        class: instance.ty,
+                        fields: vec![size, alignment],
+                    },
+                    span,
+                }));
+            }
+        }
+        if callable_path(callee).as_deref() == Some("process.arguments")
+            && arguments.is_empty()
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let list = self.instantiate_list_type(string);
+            let storage = self.runtime_call(
+                "__sev_process_arguments",
+                &[],
+                string,
+                Vec::new(),
+                span,
+            );
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: list,
+                kind: ExpressionKind::Aggregate {
+                    class: list,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        if callable_path(callee).as_deref() == Some("io.write_all")
+            && arguments.len() == 2
+            && arguments.iter().all(|argument| argument.name.is_none())
+        {
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let byte = self
+                .types
+                .resolve_name("u8")
+                .expect("bootstrap defines u8");
+            let bytes_type = self.instantiate_list_type(byte);
+            let writer = self.expression(&arguments[0].value, Some(integer))?;
+            let bytes = self.expression(&arguments[1].value, Some(bytes_type))?;
+            let storage = self.list_storage_expression(bytes, span);
+            let storage_type = storage.type_id;
+            let data_size = self
+                .types
+                .resolve_name("data_size")
+                .expect("bootstrap defines data_size");
+            return Ok(Some(self.runtime_call(
+                "__sev_io_write_all",
+                &[integer, storage_type],
+                data_size,
+                vec![writer, storage],
+                span,
+            )));
+        }
+        let AstExpressionKind::Member { object, name } = &callee.kind else {
+            return Ok(None);
+        };
+        if name == "contains" && arguments.len() == 1 && arguments[0].name.is_none() {
+            if let Ok(collection) = self.expression(object, None) {
+                if let Some(element) = self.list_elements.get(&collection.type_id).copied() {
+                    let needle = self.expression(&arguments[0].value, Some(element))?;
+                    let suffix = self.list_runtime_suffix(element, span)?;
+                    let storage = self.list_storage_expression(collection, span);
+                    let storage_type = storage.type_id;
+                    let boolean = self
+                        .types
+                        .resolve_name("bool")
+                        .expect("bootstrap defines bool");
+                    return Ok(Some(self.runtime_call(
+                        &format!("__sev_list_contains_{suffix}"),
+                        &[storage_type, element],
+                        boolean,
+                        vec![storage, needle],
+                        span,
+                    )));
+                }
+            }
+        }
+        if name == "field" && arguments.len() == 1 && arguments[0].name.is_none() {
+            if let AstExpressionKind::Literal(AstLiteral::String(field_name)) =
+                &arguments[0].value.kind
+            {
+                if let Ok(layout) = self.expression(object, None) {
+                    if let Some(queried) = self.platform_layout_types.get(&layout.type_id).copied()
+                    {
+                        let offset = self.type_field_offset(queried, field_name, span)?;
+                        let class = self.class_instances_by_type[&queried].clone();
+                        let field = class
+                            .fields
+                            .iter()
+                            .find(|field| field.name == *field_name)
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    "E000204",
+                                    format!("class `{}` has no field `{field_name}`", class.name),
+                                    Some(arguments[0].value.span),
+                                )
+                            })?;
+                        let (_, alignment) = self.type_layout(field.ty, span)?;
+                        let field_layout = self
+                            .class_instances
+                            .get(&("platform.FieldLayout".into(), Vec::new()))
+                            .cloned()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    "E000204",
+                                    "platform.FieldLayout is unavailable",
+                                    Some(span),
+                                )
+                            })?;
+                        let data_size = self
+                            .types
+                            .resolve_name("data_size")
+                            .expect("bootstrap defines data_size");
+                        let value = |magnitude: u64, id: HirId| Expression {
+                            id,
+                            type_id: data_size,
+                            kind: ExpressionKind::Literal(LiteralValue::Float(format!(
+                                "{magnitude}.0"
+                            ))),
+                            span,
+                        };
+                        let offset = value(offset, self.next_id());
+                        let alignment = value(alignment, self.next_id());
+                        return Ok(Some(Expression {
+                            id: self.next_id(),
+                            type_id: field_layout.ty,
+                            kind: ExpressionKind::Aggregate {
+                                class: field_layout.ty,
+                                fields: vec![offset, alignment],
+                            },
+                            span,
+                        }));
+                    }
+                }
+            }
+        }
+        if name == "bytes" && arguments.is_empty() {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let value = self.expression(object, Some(string))?;
+            let storage = self.runtime_call(
+                "__sev_string_bytes",
+                &[string],
+                string,
+                vec![value],
+                span,
+            );
+            let byte = self
+                .types
+                .resolve_name("u8")
+                .expect("bootstrap defines u8");
+            let bytes = self.instantiate_list_type(byte);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: bytes,
+                kind: ExpressionKind::Aggregate {
+                    class: bytes,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        Ok(None)
     }
 
     fn list_storage_expression(

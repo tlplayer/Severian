@@ -1,21 +1,39 @@
 test with compiler:
     reject:
-        # use after move
+        value := "owned"
+        consumed := move value
+        print(value)
 
     reject:
-        # mutable + shared alias
+        value := "shared"
+        shared := borrow value
+        exclusive := borrow mut value
+        print(shared)
 
     reject:
-        # two mutable aliases
+        value := "exclusive"
+        first := borrow mut value
+        second := borrow mut value
+        print(first)
 
     reject:
-        # returning borrow to local
+        def escaping_borrow() -> borrow string:
+            local := "temporary"
+            return borrow local
 
     reject:
-        # mutation invalidating collection borrow
+        values := [1, 2, 3]
+        view := borrow values
+        mutation := borrow mut values
+        assert(view.length() == 3)
 
     reject:
-        # borrowing object after drop
+        value := "finished"
+        drop(value)
+        print(borrow value)
 
     reject:
-        # unsafe async escape
+        value := "task data"
+        task := async print(borrow value) with self
+        mutation := borrow mut value
+        await task

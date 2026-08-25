@@ -1,4 +1,4 @@
-def length(values: list[int]) -> int:
+def length(values: list[int]) -> usize:
     return values.length()
 
 
@@ -8,3 +8,18 @@ def clear(values: list[int]):
 
 def store(values: list[int]) -> list[int]:
     return values
+
+
+test:
+    values := [1, 2, 3]
+
+    # Read-only use infers a shared view.
+    assert(length(values) == 3)
+
+    # Mutation infers exclusive access without requiring boundary syntax.
+    clear(values)
+    assert(values.length() == 0)
+
+    # Returning the value infers an ownership-carrying result.
+    stored := store(values)
+    assert(stored.length() == 0)

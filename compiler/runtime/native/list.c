@@ -140,6 +140,11 @@ void __sev_list_push_bool(void *storage, _Bool value) {
     list->values[list->length++] = (uintptr_t)value;
 }
 
+void __sev_list_clear(void *storage) {
+    sev_list *list = storage;
+    list->length = 0;
+}
+
 void *__sev_list_append_i64(void *storage, int64_t value) {
     __sev_list_push_i64(storage, value);
     return storage;
