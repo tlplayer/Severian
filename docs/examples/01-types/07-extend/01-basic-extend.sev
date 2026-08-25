@@ -1,0 +1,52 @@
+'''
+E2E: extend is additive only.
+
+An extension may add new behavior to an existing type.
+It may not replace behavior already defined directly on that type.
+'''
+
+class Counter:
+    value: int
+
+    def get() -> int:
+        return value
+
+
+# Valid: reset() does not already exist on Counter.
+extend Counter:
+
+    def reset() -> Counter:
+        return Counter(0)
+
+
+def main():
+    counter := Counter(10)
+
+    assert(counter.get() == 10)
+
+    counter = counter.reset()
+
+    assert(counter.get() == 0)
+
+
+test with integ "extension adds new behavior":
+    counter := Counter(42)
+
+    assert(counter.get() == 42)
+    assert(counter.reset().get() == 0)
+
+
+test with compiler "extension cannot overwrite existing behavior":
+
+    reject:
+        class InvalidCounter:
+            value: int
+
+            def get() -> int:
+                return value
+
+        extend InvalidCounter:
+
+            # Reject: get() already belongs to InvalidCounter.
+            def get() -> int:
+                return 0

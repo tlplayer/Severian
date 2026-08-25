@@ -21,6 +21,56 @@ mod tests {
     }
 
     #[test]
+    fn parses_plain_and_namespaced_extensions() {
+        let source = SourceFile::virtual_source(
+            "extensions.sev",
+            "extend Counter:\n    def reset() -> Counter:\n        return Counter(0)\n\n@combinatorics\nextend set[T]:\n    operator +(other: set[T]) -> set[T]:\n        return self\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Extension(plain) = &module.items[0] else {
+            panic!("expected a plain extension")
+        };
+        assert_eq!(plain.target.simple_name(), Some("Counter"));
+        assert_eq!(plain.methods[0].name, "reset");
+        let severian_ast::Item::Extension(namespaced) = &module.items[1] else {
+            panic!("expected a namespaced extension")
+        };
+        assert_eq!(namespaced.decorators[0].name, "combinatorics");
+        assert_eq!(namespaced.operators.len(), 1);
+    }
+
+    #[test]
+    fn compiler_cases_accept_classes_and_extensions() {
+        let source = SourceFile::virtual_source(
+            "extension-case.sev",
+            "test with compiler \"additive\":\n    reject:\n        class Counter:\n            value: int\n        extend Counter:\n            def value() -> int:\n                return 0\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected a compiler test")
+        };
+        assert!(matches!(test.compiler_cases[0].items[0], severian_ast::Item::Class(_)));
+        assert!(matches!(test.compiler_cases[0].items[1], severian_ast::Item::Extension(_)));
+    }
+
+    #[test]
+    fn canonical_extension_examples_parse() {
+        for (name, text) in [
+            (
+                "basic-extend.sev",
+                include_str!("../../../../docs/examples/01-types/07-extend/01-basic-extend.sev"),
+            ),
+            (
+                "namespace-extensions.sev",
+                include_str!("../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"),
+            ),
+        ] {
+            let source = SourceFile::virtual_source(name, text);
+            parse(&scan(&source).unwrap()).unwrap();
+        }
+    }
+
+    #[test]
     fn multiline_delimiters_ignore_layout_tokens_and_allow_trailing_commas() {
         let source = SourceFile::virtual_source(
             "multiline.sev",

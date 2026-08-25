@@ -273,6 +273,18 @@ pub struct ClassDeclaration {
     pub span: Span,
 }
 
+/// Behavior added to an existing type without changing that type's identity.
+/// Extensions may contain executable members only; semantic analysis rejects
+/// every member that is already defined directly by the target type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionDeclaration {
+    pub decorators: Vec<Decorator>,
+    pub target: TypeAnnotation,
+    pub methods: Vec<FunctionDeclaration>,
+    pub operators: Vec<OperatorImplementation>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumVariant {
     pub name: String,

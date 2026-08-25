@@ -44,6 +44,21 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
 }
 
 #[test]
+fn extensions_survive_package_indexing_and_lowering() {
+    let root = temporary();
+    std::fs::write(
+        root.join("extensions.sev"),
+        "class Counter:\n    value: int\n    def get() -> int:\n        return value\n\nextend Counter:\n    def reset() -> Counter:\n        return Counter(0)\n\n@combinatorics\nextend set[T]:\n    operator +(other: set[T]) -> set[T]:\n        result := self\n        for value in other:\n            result.add(value)\n        return result\n\n@combinatorics(+)\ndef union(left: set[int], right: set[int]) -> set[int]:\n    return left + right\n\ndef selected() -> int:\n    counter := Counter(1).reset()\n    values := union({1, 2}, {2, 3})\n    return counter.get()\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("extensions.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn qualified_imported_types_resolve_in_annotations_and_constructors() {
     let root = temporary();
     std::fs::write(

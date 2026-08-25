@@ -11,11 +11,11 @@ pub use expression::{
 pub use statement::{Binding, LoopGuard, LoopGuardAction, MatchCase, SelectCase, Statement};
 pub use types::{
     ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
-    DecoratorValue, EnumDeclaration, EnumVariant, FunctionContract, FunctionDeclaration,
-    FunctionParameter, GenericConstraint, HookSpecification, ImportDeclaration, ImportSubject,
-    OperatorDeclaration, OperatorImplementation, OperatorParameter, OperatorSyntax,
-    PropertyConstraint, PropertyDeclaration, TestDeclaration, TraitDeclaration, TypeAnnotation,
-    TypeAnnotationKind, TypeDeclaration,
+    DecoratorValue, EnumDeclaration, EnumVariant, ExtensionDeclaration, FunctionContract,
+    FunctionDeclaration, FunctionParameter, GenericConstraint, HookSpecification,
+    ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorImplementation,
+    OperatorParameter, OperatorSyntax, PropertyConstraint, PropertyDeclaration, TestDeclaration,
+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -28,6 +28,7 @@ pub enum Item {
     Import(ImportDeclaration),
     Trait(TraitDeclaration),
     Class(ClassDeclaration),
+    Extension(ExtensionDeclaration),
     Enum(EnumDeclaration),
     Binding(Binding),
     Expression(Expression),

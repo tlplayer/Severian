@@ -138,7 +138,8 @@ pub fn analyze_package_with_context(
     universal: &UniversalContext,
     context: PackageAnalysisContext,
 ) -> Result<TypedProgram, Diagnostic> {
-    let lowered_module_graph = lower_trait_typed_parameters(module_graph);
+    let lowered_module_graph = lower_extensions(module_graph)?;
+    let lowered_module_graph = lower_trait_typed_parameters(&lowered_module_graph);
     let module_graph = &lowered_module_graph;
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
@@ -336,6 +337,14 @@ pub fn analyze_package_with_context(
     }
 
     Ok(TypedProgram { index, hir })
+}
+
+fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnostic> {
+    let mut lowered = module_graph.clone();
+    for module in &mut lowered.modules {
+        module.ast = crate::normalize_extensions(&module.ast)?;
+    }
+    Ok(lowered)
 }
 
 fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
@@ -573,6 +582,12 @@ fn resolve_package_type(
             return Ok(list.ty);
         }
         return Ok(crate::list_type_id(element));
+    }
+    if let Some(("set", [element])) = annotation.named_parts() {
+        // Resolve the argument here so unknown element types still fail at the
+        // package boundary. Sets currently share one representation identity.
+        resolve_package_type(types, element, module, classes, lists)?;
+        return Ok(crate::set_type_id());
     }
     if let Some(("map", [key, value])) = annotation.named_parts() {
         let key = resolve_package_type(types, key, module, classes, lists)?;

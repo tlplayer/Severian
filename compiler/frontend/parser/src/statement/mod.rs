@@ -1,12 +1,12 @@
 use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
-    ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
-    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, LoopGuard, LoopGuardAction,
-    MatchCase, Module, OperatorDeclaration, OperatorImplementation, OperatorParameter,
-    OperatorSyntax, PropertyConstraint, PropertyDeclaration, SelectCase, Statement, TaskOwner,
-    TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
-    UnaryOperator,
+    ExpressionKind, ExtensionDeclaration, FunctionContract, FunctionDeclaration, FunctionParameter,
+    GenericConstraint, HookSpecification, ImportDeclaration, ImportSubject, Item, Literal,
+    LoopGuard, LoopGuardAction, MatchCase, Module, OperatorDeclaration, OperatorImplementation,
+    OperatorParameter, OperatorSyntax, PropertyConstraint, PropertyDeclaration, SelectCase,
+    Statement, TaskOwner, TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+    TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -127,6 +127,12 @@ impl Parser<'_> {
                 module
                     .items
                     .push(Item::Class(self.class_declaration(decorators)?));
+                self.separators();
+                continue;
+            } else if self.at_identifier("extend") {
+                module
+                    .items
+                    .push(Item::Extension(self.extension_declaration(decorators)?));
                 self.separators();
                 continue;
             } else if self.at_identifier("enum") {
@@ -737,6 +743,10 @@ impl Parser<'_> {
             };
             if self.at_identifier("def") {
                 items.push(Item::Function(self.function_declaration(decorators)?));
+            } else if self.at_identifier("class") {
+                items.push(Item::Class(self.class_declaration(decorators)?));
+            } else if self.at_identifier("extend") {
+                items.push(Item::Extension(self.extension_declaration(decorators)?));
             } else if self.at_identifier("enum") && decorators.is_empty() {
                 items.push(Item::Enum(self.enum_declaration()?));
             } else if !decorators.is_empty() {
@@ -1627,6 +1637,64 @@ impl Parser<'_> {
             traits,
             fields,
             constructors,
+            methods,
+            operators,
+            span: Span::new(start.source, start.start, end.end),
+        })
+    }
+
+    fn extension_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<ExtensionDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let target = self.type_annotation()?;
+        self.expect(&TokenKind::Colon, "expected `:` after extension target")?;
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after extension header",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected an indented extension body")?;
+
+        let mut methods = Vec::new();
+        let mut operators = Vec::new();
+        self.separators();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let member_decorators = if self.at(&TokenKind::At) {
+                self.decorators()?
+            } else {
+                Vec::new()
+            };
+            if self.at_identifier("def") {
+                let method = self.function_declaration(member_decorators)?;
+                if method.body.is_none() {
+                    return Err(Diagnostic::new(
+                        "E000122",
+                        "extension methods require a body",
+                        Some(method.span),
+                    ));
+                }
+                methods.push(method);
+            } else if self.at_identifier("operator") {
+                operators.push(self.operator_implementation(member_decorators)?);
+            } else if !member_decorators.is_empty() {
+                return Err(
+                    self.error("expected `def` or `operator` after extension member decorator")
+                );
+            } else if self.at_identifier("pass") {
+                self.next();
+            } else {
+                return Err(self.error("expected a method, operator, or `pass` in extension body"));
+            }
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of extension body")?
+            .span;
+        Ok(ExtensionDeclaration {
+            decorators,
+            target,
             methods,
             operators,
             span: Span::new(start.source, start.start, end.end),

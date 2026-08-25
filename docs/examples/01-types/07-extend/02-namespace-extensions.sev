@@ -1,0 +1,99 @@
+'''
+E2E: namespaced additive extensions.
+
+The combinatorics namespace extends set with + and - without creating
+AddableSet, SubtractableSet, etc.
+
++ performs set union.
+- performs set difference.
+
+extend is additive only and cannot replace an operation
+already defined by the target type.
+
+The operations do not become part of set globally.
+'''
+
+@combinatorics
+extend set[T]:
+
+    operator +(other: set[T]) -> set[T]:
+        result := self
+
+        for value in other:
+            result.add(value)
+
+        return result
+
+
+    operator -(other: set[T]) -> set[T]:
+        result := set[T]()
+
+        for value in self:
+            if value not in other:
+                result.add(value)
+
+        return result
+
+
+@combinatorics(+)
+def set_union(left: set[int], right: set[int]) -> set[int]:
+    return left + right
+
+
+@combinatorics(-)
+def set_difference(left: set[int], right: set[int]) -> set[int]:
+    return left - right
+
+
+@combinatorics(+, -)
+def combine(left: set[int], right: set[int]) -> set[int]:
+    return (left + right) - {2}
+
+
+test with integ "set addition":
+    left := {1, 2, 3}
+    right := {3, 4, 5}
+
+    result := set_union(left, right)
+
+    assert(result == {1, 2, 3, 4, 5})
+
+
+test with integ "set subtraction":
+    left := {1, 2, 3, 4}
+    right := {2, 4}
+
+    result := set_difference(left, right)
+
+    assert(result == {1, 3})
+
+
+test with integ "extensions preserve set type":
+    values := set_union({1, 2}, {2, 3})
+    values = set_difference(values, {1})
+
+    assert(values == {2, 3})
+
+
+test with integ "combinatorics operation selection":
+    result := combine({1, 2, 3}, {3, 4})
+
+    assert(result == {1, 3, 4})
+
+
+test with compiler "extend cannot overwrite existing operation":
+    reject:
+        extend set[T]:
+
+            # Reject if set already defines contains().
+            def contains(value: T) -> bool:
+                return false
+
+
+test with compiler "set operators require namespace":
+    reject:
+        left := {1, 2}
+        right := {2, 3}
+
+        # Reject: + only exists while @combinatorics(+) is active.
+        result := left + right

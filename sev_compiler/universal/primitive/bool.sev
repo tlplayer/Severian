@@ -1,6 +1,6 @@
 import "../trait/conversion.sev"
-import "../trait/primitive.sev"
-import "../trait/type.sev"
+import "primitive.sev"
+import "../type/type.sev"
 
 
 trait bool: Primitive:

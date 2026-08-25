@@ -110,10 +110,13 @@ pub(crate) fn analyze_with_package_functions(
     package_constants: &[PackageConstant],
     source_module: Option<severian_modules::ModuleId>,
 ) -> Result<Program, Diagnostic> {
+    let normalized_ast = normalize_extensions(ast)?;
+    let ast = &normalized_ast;
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
     let namespace_methods = collect_trait_namespace_methods(ast)?;
     let namespace_operators = collect_trait_namespace_operators(ast)?;
+    let namespace_extension_operators = collect_extension_namespace_operators(ast)?;
     let namespace_hooks = collect_trait_namespace_hooks(ast)?;
     let mut analyzer = Analyzer {
         types,
@@ -145,6 +148,7 @@ pub(crate) fn analyze_with_package_functions(
         parameter_effects: BTreeMap::new(),
         namespace_methods,
         namespace_operators,
+        namespace_extension_operators,
         namespace_hooks,
         active_operator_namespaces: BTreeMap::new(),
         active_function_name: None,
@@ -188,6 +192,7 @@ pub(crate) fn analyze_with_package_functions(
         preserve_error_depth: 0,
         lowered_classes: Vec::new(),
         runtime_functions: Vec::new(),
+        helper_bindings: Vec::new(),
         runtime_definitions: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
@@ -819,11 +824,125 @@ pub(crate) fn analyze_with_package_functions(
             module.functions[source_function_count + offset].body = Some(body);
         }
     }
+    module.bindings.append(&mut analyzer.helper_bindings);
     module.functions.extend(analyzer.runtime_functions.clone());
     module.classes = analyzer.lowered_classes.clone();
     Ok(Program {
         modules: vec![module],
     })
+}
+
+pub(crate) fn normalize_extensions(
+    ast: &severian_ast::Module,
+) -> Result<severian_ast::Module, Diagnostic> {
+    let mut normalized = ast.clone();
+    let extensions = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Extension(extension) => Some(extension.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for extension in &extensions {
+        let Some((target, _)) = extension.target.named_parts() else {
+            return Err(Diagnostic::new(
+                "E000204",
+                "an extension target must be a named type",
+                Some(extension.target.span),
+            ));
+        };
+        let source_class = normalized.items.iter().find_map(|item| match item {
+            severian_ast::Item::Class(class) if class.name == target => Some(class),
+            _ => None,
+        });
+        if source_class.is_none() && target != "set" {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("cannot extend unknown type `{target}`"),
+                Some(extension.target.span),
+            ));
+        }
+        for method in &extension.methods {
+            let directly_defined = source_class.is_some_and(|class| {
+                class.fields.iter().any(|known| known.name == method.name)
+                    || class.methods.iter().any(|known| known.name == method.name)
+                    || class
+                        .constructors
+                        .iter()
+                        .any(|known| known.name == method.name)
+            }) || (target == "set"
+                && matches!(
+                    method.name.as_str(),
+                    "add"
+                        | "clear"
+                        | "contains"
+                        | "intersection"
+                        | "symmetric_difference"
+                        | "union"
+                ));
+            if directly_defined {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!(
+                        "extension cannot replace behavior `{target}.{}` defined directly on `{target}`",
+                        method.name
+                    ),
+                    Some(method.span),
+                )
+                .with_help("rename the extension member; `extend` never participates in overriding"));
+            }
+        }
+        for operator in &extension.operators {
+            let directly_defined = source_class.is_some_and(|class| {
+                class
+                    .operators
+                    .iter()
+                    .any(|known| known.operator == operator.operator)
+            }) || (target == "set"
+                && matches!(
+                    operator.operator,
+                    severian_ast::OperatorSyntax::Equal
+                        | severian_ast::OperatorSyntax::NotEqual
+                        | severian_ast::OperatorSyntax::Contains
+                ));
+            if directly_defined {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!(
+                        "extension cannot replace operator `{}.{}` defined directly on `{target}`",
+                        target,
+                        ast_operator_spelling(operator.operator)
+                    ),
+                    Some(operator.span),
+                )
+                .with_help("remove the extension operator; `extend` never participates in overriding"));
+            }
+        }
+
+        // An undecorated extension is globally visible and can use the normal
+        // class-member path. Decorated extensions remain separate so their
+        // behavior is only visible while that namespace is active.
+        if extension.decorators.is_empty() {
+            let Some(class) = normalized.items.iter_mut().find_map(|item| match item {
+                severian_ast::Item::Class(class) if class.name == target => Some(class),
+                _ => None,
+            }) else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("global extensions of built-in type `{target}` are not yet supported"),
+                    Some(extension.span),
+                ));
+            };
+            class.methods.extend(extension.methods.clone());
+            class.operators.extend(extension.operators.clone());
+        }
+    }
+    normalized.items.retain(|item| {
+        !matches!(item, severian_ast::Item::Extension(extension) if extension.decorators.is_empty())
+    });
+    Ok(normalized)
 }
 
 struct Analyzer<'a> {
@@ -850,6 +969,7 @@ struct Analyzer<'a> {
     parameter_effects: BTreeMap<FunctionId, Vec<ParameterEffect>>,
     namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
     namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
+    namespace_extension_operators: BTreeMap<String, NamespaceExtensionOperator>,
     namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
     active_operator_namespaces: BTreeMap<String, Vec<String>>,
     active_function_name: Option<String>,
@@ -884,6 +1004,7 @@ struct Analyzer<'a> {
     preserve_error_depth: usize,
     lowered_classes: Vec<HirClassDeclaration>,
     runtime_functions: Vec<FunctionDeclaration>,
+    helper_bindings: Vec<Binding>,
     runtime_definitions: BTreeMap<String, DefId>,
     next_class_type: u32,
 }
@@ -900,6 +1021,13 @@ struct NamespaceTraitOperator {
     trait_name: String,
     declaration: severian_ast::OperatorDeclaration,
     implementations: Vec<(String, severian_ast::OperatorImplementation)>,
+}
+
+#[derive(Debug, Clone)]
+struct NamespaceExtensionOperator {
+    namespace: String,
+    target: TypeAnnotation,
+    implementation: severian_ast::OperatorImplementation,
 }
 
 #[derive(Debug, Clone)]
@@ -1528,6 +1656,10 @@ impl Analyzer<'_> {
             }
             return Ok(self.instantiate_list_type(element));
         }
+        if let Some(("set", [element])) = annotation.named_parts() {
+            let element = self.resolve_source_type(element)?;
+            return self.ensure_set_type(element, annotation.span);
+        }
         if let Some(("pointer", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
             return Ok(self.instantiate_pointer_type(element));
@@ -1545,6 +1677,9 @@ impl Analyzer<'_> {
             return Ok(self.instantiate_map_type(key, value));
         }
         if let Some(name) = annotation.simple_name() {
+            if let Some(ty) = self.active_type_aliases.get(name) {
+                return Ok(*ty);
+            }
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
                 return Ok(instance.ty);
             }
@@ -2248,6 +2383,18 @@ impl Analyzer<'_> {
                         ));
                     }
                     vec![(binding.clone(), element_type, 0)]
+                } else if self.set_type == Some(iterable_value.type_id) {
+                    if second_binding.is_some() {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "set iteration provides one loop value",
+                            Some(*span),
+                        ));
+                    }
+                    let element = self.set_element.ok_or_else(|| {
+                        Diagnostic::new("E000211", "set element type is unknown", Some(*span))
+                    })?;
+                    vec![(binding.clone(), element, 0)]
                 } else if let Some((key, value)) =
                     self.map_elements.get(&iterable_value.type_id).copied()
                 {
@@ -5583,6 +5730,10 @@ impl Analyzer<'_> {
                 } = &callee.kind
                 {
                     if let AstExpressionKind::Name(name) = &application.kind {
+                        if name == "set" && type_arguments.len() == 1 && arguments.is_empty() {
+                            let element = self.resolve_source_type(&type_arguments[0])?;
+                            return self.empty_set_expression(Some(element), ast.span);
+                        }
                         if name == "allocate" {
                             if self.unsafe_depth == 0 {
                                 return Err(Diagnostic::new(
@@ -8535,7 +8686,37 @@ impl Analyzer<'_> {
         element: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let set_type = TypeId(0x07ff_fffe);
+        let set_type = self.ensure_set_type_optional(element, span)?;
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let storage = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: set_type,
+            kind: ExpressionKind::Aggregate {
+                class: set_type,
+                fields: vec![storage],
+            },
+            span,
+        })
+    }
+
+    fn ensure_set_type(
+        &mut self,
+        element: TypeId,
+        span: severian_source::Span,
+    ) -> Result<TypeId, Diagnostic> {
+        self.ensure_set_type_optional(Some(element), span)
+    }
+
+    fn ensure_set_type_optional(
+        &mut self,
+        element: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<TypeId, Diagnostic> {
+        let set_type = set_type_id();
         let storage_type = self
             .types
             .resolve_name("string")
@@ -8561,16 +8742,7 @@ impl Analyzer<'_> {
             }
             self.set_element = Some(element);
         }
-        let storage = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
-        Ok(Expression {
-            id: self.next_id(),
-            type_id: set_type,
-            kind: ExpressionKind::Aggregate {
-                class: set_type,
-                fields: vec![storage],
-            },
-            span,
-        })
+        Ok(set_type)
     }
 
     fn enum_constructor(
@@ -10746,6 +10918,191 @@ impl Analyzer<'_> {
         Ok(Some(selected))
     }
 
+    fn extension_namespace_operator(
+        &mut self,
+        path: &str,
+        extension: NamespaceExtensionOperator,
+        left: &AstExpression,
+        right: &AstExpression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let [right_parameter] = extension.implementation.parameters.as_slice() else {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("extension operator `{path}` must declare one right-hand parameter"),
+                Some(extension.implementation.span),
+            ));
+        };
+
+        let left = self.expression(left, None)?;
+        let aliases = self.extension_target_aliases(&extension.target, left.type_id)?;
+        let previous_aliases = std::mem::replace(&mut self.active_type_aliases, aliases);
+        let resolved = (|| {
+            let target = self.resolve_source_type(&extension.target)?;
+            if target != left.type_id {
+                return Err(Diagnostic::new(
+                    "E000202",
+                    format!("operator `{path}` does not apply to the left operand type"),
+                    Some(span),
+                ));
+            }
+            let right_type = self.resolve_source_type(&right_parameter.annotation)?;
+            let right = self.expression(right, Some(right_type))?;
+            let result = self.resolve_source_type(&extension.implementation.result)?;
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+                return Err(semantic_error(
+                    "extension operator result does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            self.lower_extension_operator(path, &extension, left, right, result, span)
+        })();
+        self.active_type_aliases = previous_aliases;
+        resolved
+    }
+
+    fn extension_target_aliases(
+        &self,
+        target: &TypeAnnotation,
+        actual: TypeId,
+    ) -> Result<BTreeMap<String, TypeId>, Diagnostic> {
+        let Some((name, arguments)) = target.named_parts() else {
+            return Err(Diagnostic::new(
+                "E000204",
+                "an extension target must be a named type",
+                Some(target.span),
+            ));
+        };
+        if name == "set" {
+            if self.set_type != Some(actual) {
+                return Ok(BTreeMap::new());
+            }
+            let element = self.set_element.ok_or_else(|| {
+                Diagnostic::new("E000211", "set element type is unknown", Some(target.span))
+            })?;
+            return Ok(arguments
+                .first()
+                .and_then(TypeAnnotation::simple_name)
+                .map(|parameter| BTreeMap::from([(parameter.to_owned(), element)]))
+                .unwrap_or_default());
+        }
+        for ((class_name, concrete), instance) in &self.class_instances {
+            if class_name == name && instance.ty == actual && concrete.len() == arguments.len() {
+                return Ok(arguments
+                    .iter()
+                    .zip(concrete)
+                    .filter_map(|(argument, concrete)| {
+                        argument
+                            .simple_name()
+                            .map(|parameter| (parameter.to_owned(), *concrete))
+                    })
+                    .collect());
+            }
+        }
+        Ok(BTreeMap::new())
+    }
+
+    fn lower_extension_operator(
+        &mut self,
+        path: &str,
+        extension: &NamespaceExtensionOperator,
+        left: Expression,
+        right: Expression,
+        result: TypeId,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let definition = synthetic_extension_definition(
+            path,
+            extension.implementation.span,
+            &[left.type_id, right.type_id, result],
+        );
+        let function_id = FunctionId(definition.declaration.0);
+        if !self
+            .runtime_functions
+            .iter()
+            .any(|function| function.id == function_id)
+        {
+            let self_binding = self.new_binding_id();
+            let right_binding = self.new_binding_id();
+            let parameters = vec![
+                FunctionParameter {
+                    binding: self_binding,
+                    name: "self".into(),
+                    contract: universal_boundary(left.type_id),
+                },
+                FunctionParameter {
+                    binding: right_binding,
+                    name: extension.implementation.parameters[0].name.clone(),
+                    contract: universal_boundary(right.type_id),
+                },
+            ];
+
+            let previous_names = self.names.clone();
+            let previous_declarations = self.declarations.clone();
+            let previous_mutable = self.mutable_variables.clone();
+            let previous_values = self.value_substitutions.clone();
+            let previous_function = self.active_function_name.clone();
+            self.names.clear();
+            self.declarations.clear();
+            self.value_substitutions.clear();
+            self.active_function_name = Some(format!("extension {path}"));
+            for parameter in &parameters {
+                let variable = severian_hir::VariableId(parameter.binding.0);
+                self.mutable_variables.insert(variable);
+                self.names.insert(
+                    parameter.name.clone(),
+                    (parameter.binding, variable, parameter.contract.ty),
+                );
+                self.declarations.insert(parameter.name.clone());
+            }
+            let mut bindings = std::mem::take(&mut self.helper_bindings);
+            let body = self.block(&extension.implementation.body, &mut bindings, result);
+            self.helper_bindings = bindings;
+            self.names = previous_names;
+            self.declarations = previous_declarations;
+            self.mutable_variables = previous_mutable;
+            self.value_substitutions = previous_values;
+            self.active_function_name = previous_function;
+            let body = body?;
+            if block_flow(&extension.implementation.body) == ControlFlow::FallsThrough {
+                return Err(Diagnostic::new(
+                    "E000209",
+                    format!("not every path in extension operator `{path}` returns a result"),
+                    Some(extension.implementation.span),
+                ));
+            }
+            self.runtime_functions.push(FunctionDeclaration {
+                id: function_id,
+                definition,
+                substitution: severian_universal::Substitution::default(),
+                name: format!(
+                    "__sev_extension_{}_{}",
+                    extension.namespace,
+                    internal_name_part(path)
+                ),
+                type_parameters: Vec::new(),
+                parameters,
+                result: universal_boundary(result),
+                compile_route: severian_universal::CompileRoute::Standard,
+                call_type: CallType::Severian,
+                body: Some(body),
+            });
+        }
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: result,
+            kind: ExpressionKind::Call {
+                callee: severian_hir::Callee::Direct {
+                    function: definition,
+                    substitution: severian_universal::Substitution::default(),
+                },
+                arguments: vec![left, right],
+            },
+            span,
+        })
+    }
+
     fn trait_namespace_operator(
         &mut self,
         operator: &str,
@@ -10786,6 +11143,16 @@ impl Analyzer<'_> {
             }
         };
         let path = format!("{namespace}.{operator}");
+        if let Some(extension) = self.namespace_extension_operators.get(&path).cloned() {
+            return self.extension_namespace_operator(
+                &path,
+                extension,
+                left,
+                right,
+                expected,
+                span,
+            );
+        }
         let namespace_operator = self
             .namespace_operators
             .get(&path)
@@ -11473,7 +11840,7 @@ impl Analyzer<'_> {
             )
             .with_help("call a public class method instead"));
         }
-        if name == "get" {
+        if name == "get" && !instance.methods.iter().any(|method| method.name == *name) {
             let [argument] = arguments else {
                 return Err(Diagnostic::new(
                     "E000206",
@@ -11791,7 +12158,7 @@ impl Analyzer<'_> {
                 .object_set(binding, &instance, arguments, expression.span)
                 .map(Some);
         }
-        if name == "get" {
+        if name == "get" && !instance.methods.iter().any(|method| method.name == *name) {
             return Ok(None);
         }
         let Some(mut method) = instance
@@ -12121,6 +12488,10 @@ pub(crate) fn list_type_id(element: TypeId) -> TypeId {
     TypeId(0x0c00_0000 | (hash & 0x03ff_ffff))
 }
 
+pub(crate) const fn set_type_id() -> TypeId {
+    TypeId(0x07ff_fffe)
+}
+
 pub(crate) fn pointer_type_id(element: TypeId) -> TypeId {
     severian_universal::raw_pointer_type_id(element)
 }
@@ -12328,6 +12699,27 @@ fn synthetic_runtime_definition(symbol: &str) -> DefId {
         declaration: severian_universal::DeclarationId::from_path(&format!(
             "severian.runtime.{symbol}"
         )),
+    }
+}
+
+fn synthetic_extension_definition(
+    path: &str,
+    span: severian_source::Span,
+    types: &[TypeId],
+) -> DefId {
+    let concrete = types
+        .iter()
+        .map(|ty| ty.0.to_string())
+        .collect::<Vec<_>>()
+        .join(".");
+    let identity = format!(
+        "severian.extension.{path}.{}.{}.{}",
+        span.source.0, span.start, concrete
+    );
+    DefId {
+        package: 0,
+        module: severian_universal::DeclarationId::from_path("severian.extensions").0,
+        declaration: severian_universal::DeclarationId::from_path(&identity),
     }
 }
 
@@ -12548,6 +12940,39 @@ fn collect_trait_namespace_operators(
                     implementations,
                 };
                 if operators.insert(path.clone(), namespace_operator).is_some() {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("namespace operator `{path}` is declared more than once"),
+                        Some(decorator.span),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(operators)
+}
+
+fn collect_extension_namespace_operators(
+    ast: &severian_ast::Module,
+) -> Result<BTreeMap<String, NamespaceExtensionOperator>, Diagnostic> {
+    let mut operators = BTreeMap::new();
+    for extension in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Extension(extension) => Some(extension),
+        _ => None,
+    }) {
+        for operator in &extension.operators {
+            for decorator in extension.decorators.iter().chain(&operator.decorators) {
+                if !decorator.arguments.is_empty() {
+                    continue;
+                }
+                let spelling = ast_operator_spelling(operator.operator);
+                let path = format!("{}.{spelling}", decorator.name);
+                let entry = NamespaceExtensionOperator {
+                    namespace: decorator.name.clone(),
+                    target: extension.target.clone(),
+                    implementation: operator.clone(),
+                };
+                if operators.insert(path.clone(), entry).is_some() {
                     return Err(Diagnostic::new(
                         "E000203",
                         format!("namespace operator `{path}` is declared more than once"),
@@ -14319,6 +14744,79 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn plain_extensions_add_methods_but_cannot_replace_them() {
+        analyze_source(
+            "class Counter:\n    value: int\n    def get() -> int:\n        return value\n\nextend Counter:\n    def reset() -> Counter:\n        return Counter(0)\n\ndef main():\n    counter := Counter(10)\n    counter = counter.reset()\n    assert(counter.get() == 0)\n",
+        );
+
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "invalid-extension.sev",
+            "class Counter:\n    value: int\n    def get() -> int:\n        return value\n\nextend Counter:\n    def get() -> int:\n        return 0\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert!(error.message.contains("cannot replace behavior `Counter.get`"));
+    }
+
+    #[test]
+    fn namespaced_set_extensions_lower_full_operator_bodies() {
+        let (program, _) = analyze_source(
+            "@combinatorics\nextend set[T]:\n    operator +(other: set[T]) -> set[T]:\n        result := self\n        for value in other:\n            result.add(value)\n        return result\n    operator -(other: set[T]) -> set[T]:\n        result := set[T]()\n        for value in self:\n            if value not in other:\n                result.add(value)\n        return result\n\n@combinatorics(+, -)\ndef combine(left: set[int], right: set[int]) -> set[int]:\n    return (left + right) - {2}\n\ndef main():\n    result := combine({1, 2, 3}, {3, 4})\n    assert(result == {1, 3, 4})\n",
+        );
+        let module = &program.modules[0];
+        assert!(module
+            .functions
+            .iter()
+            .any(|function| function.name.starts_with("__sev_extension_combinatorics")));
+        severian_mir::build(&program).unwrap();
+
+        let context = severian_bootstrap::load().unwrap();
+        let outside = SourceFile::virtual_source(
+            "inactive-extension.sev",
+            "@combinatorics\nextend set[T]:\n    operator +(other: set[T]) -> set[T]:\n        return self\n\ndef main():\n    result := {1, 2} + {2, 3}\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&outside).unwrap()).unwrap();
+        assert!(analyze(&ast, &context.types).is_err());
+
+        let overwrite = SourceFile::virtual_source(
+            "native-extension-overwrite.sev",
+            "@combinatorics\nextend set[T]:\n    def contains(value: T) -> bool:\n        return false\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&overwrite).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert!(error.message.contains("cannot replace behavior `set.contains`"));
+    }
+
+    #[test]
+    fn canonical_extension_examples_reach_mir() {
+        for (name, text) in [
+            (
+                "basic-extend.sev",
+                include_str!("../../../../docs/examples/01-types/07-extend/01-basic-extend.sev"),
+            ),
+            (
+                "namespace-extensions.sev",
+                include_str!("../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"),
+            ),
+        ] {
+            let context = severian_bootstrap::load().unwrap();
+            let source = SourceFile::virtual_source(name, text);
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let program = analyze_with_context(
+                &ast,
+                &context.types,
+                AnalysisContext {
+                    mode: AnalysisMode::Test,
+                    module_name: name,
+                },
+            )
+            .unwrap();
+            severian_mir::build(&program).unwrap();
+        }
     }
 
     #[test]
