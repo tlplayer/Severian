@@ -1,0 +1,18 @@
+
+
+
+class IntPrimitive:
+    signed: bool
+    width: IntWidth
+
+    def bits(target: Target) -> u16:
+        match width:
+            case Fixed:
+                return bits
+
+            case Machine:
+                return target.int_bits
+
+            case Pointer:
+                return target.pointer_bits
+    

@@ -1,6 +1,0 @@
-enum ConversionType:
-    Identity
-    Widen
-    Checked
-    Lossy
-    Unsupported

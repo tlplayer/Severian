@@ -1,0 +1,11 @@
+from "../trait/type.sev" import Type
+
+# The compiler discovers primitive declarations by this composed trait. The
+# properties form the bootstrap protocol; they are data, not ordinary runtime
+# fields and are read before user semantic analysis starts.
+trait Primitive: Type + Conversion
+    property category: string
+    property representation: string
+    property bits: int = 0
+    property signed: bool = false
+    property default_literal: bool = false

@@ -1,0 +1,19 @@
+
+enum ConversionKind:
+    Identity
+    Promote
+    Checked
+    Lossy
+
+
+class Constructor:
+    source: Type
+    kind: ConversionKind
+
+
+trait Conversion:
+    property constructors: set[Constructor]
+
+
+
+
