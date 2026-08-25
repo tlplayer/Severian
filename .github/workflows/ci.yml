@@ -56,7 +56,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint
-        run: cargo clippy --locked --workspace --all-targets
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Workspace tests
         run: cargo test --locked --workspace

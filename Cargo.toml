@@ -49,6 +49,18 @@ license-file = "LICENSE.md"
 repository = "https://github.com/tlplayer/Severian"
 version = "0.1.0"
 
+[workspace.lints.rust]
+dead_code = "deny"
+unreachable_code = "deny"
+unused_imports = "deny"
+unused_variables = "deny"
+
+[workspace.lints.clippy]
+match_same_arms = "deny"
+if_same_then_else = "deny"
+needless_match = "deny"
+branches_sharing_code = "warn"
+
 # Package classifications are descriptive. Exact package allowlists below are
 # authoritative and fail closed for every new production dependency.
 [workspace.metadata.architecture.packages]

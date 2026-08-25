@@ -5,6 +5,9 @@ edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 severian-lir = { path = "../../transforms/lir" }
 severian-runtime = { path = "../../runtime" }

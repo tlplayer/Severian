@@ -5,6 +5,9 @@ edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 severian-abi = { path = "../abi" }
 severian-ast = { path = "../../frontend/ast" }
