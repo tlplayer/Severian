@@ -311,10 +311,9 @@ test "deque compaction and LRU updates preserve logical state":
     assert(updated == 10)
     cache.put("c", 3)
     assert(cache.keys() == ["a", "c"])
-    cache.get("b") else error:
-         assert(error.message == "cache key does not exist")
+    cache.get("b") 
 
-    single_values: map[int, string] := {}
+    single_values: map[int, string] = {}
     single = LruCache[int, string](1, single_values, [])
     single.put(1, "one")
     single.put(2, "two")

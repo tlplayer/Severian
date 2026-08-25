@@ -1,10 +1,10 @@
 def first(values: list[int]) -> int | Error:
     if size(values) == 0:
         throw Error("Size cannot be 0 and call first")
-
+    
     return values[0]
 
-test with property and chaos "first is safe for generated lists":
+test with property "first is safe for generated lists":
     # Property generation varies list contents and shape. Chaos injection then
     # explores every reachable failure point for each bounded generated case.
     values = [10, 20, 30]

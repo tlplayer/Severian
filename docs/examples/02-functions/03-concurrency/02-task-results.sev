@@ -1,6 +1,6 @@
 from os import wait
 
-def fetch(url: string) -> bool | IOError:
+def fetch(url: string) -> bool | Error:
     wait(0.1s)
     return true
 
