@@ -22,10 +22,6 @@ class RuntimeId: StableId
     value: u128
 
 
-class ProviderId: StableId
-    value: u128
-
-
 class OpId:
     dialect: DialectId
     operation: OperationId

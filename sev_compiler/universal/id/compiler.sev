@@ -58,6 +58,10 @@ class ModuleId: StableId
     value: u128
 
 
+class ProviderId: StableId
+    value: u128
+
+
 class InterfaceId: NamedId
     value: string
 
@@ -72,4 +76,3 @@ class AbiId: NamedId
 
 class SymbolId: NamedId
     value: string
-
