@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const CATALOG_SOURCE: &str = include_str!("../../../../tools/sev/config/options.toml");
+const CATALOG_SOURCE: &str = include_str!("../config/options.toml");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptionSpec {

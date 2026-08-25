@@ -1,7 +1,7 @@
 import "iterator.sev"
 
 
-trait Collection[T]: Iterable[T]:
+trait Collection[T]: Iterable[T]
     def len() -> usize
 
     def empty() -> bool:

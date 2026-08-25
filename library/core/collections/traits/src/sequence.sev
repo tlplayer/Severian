@@ -1,7 +1,7 @@
 import "collection.sev"
 
 
-trait Sequence[T]: Collection[T]:
+trait Sequence[T]: Collection[T]
     def get(index: usize) -> borrow T
     def append(item: T)
     def remove(index: usize) -> T

@@ -1,4 +1,4 @@
-trait bytes: Primitive:
+trait bytes: Primitive
     property category: string = "bytes"
     property representation: string = "byte-string"
 

@@ -1,4 +1,4 @@
-trait char: Primitive:
+trait char: Primitive
     property category: string = "character"
     property representation: string = "unicode-scalar"
     property default_literal: bool = true

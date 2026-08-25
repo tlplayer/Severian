@@ -1,4 +1,4 @@
-trait bool: Primitive:
+trait bool: Primitive
     property category: string = "boolean"
     property representation: string = "i1"
     property bits: int = 1

@@ -1,4 +1,4 @@
-trait unit: Primitive:
+trait unit: Primitive
     property category: string = "unit"
     property representation: string = "unit"
     property default_literal: bool = true
