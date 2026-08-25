@@ -1,0 +1,3 @@
+enum FunctionLinkage:
+    Internal
+    External(symbol: string)

@@ -9,18 +9,11 @@ import "passes.sev"
 import "verify.sev"
 import "build/mod.sev"
 
-class AssertionLocation:
-    file: string
-    line: u32
-    column: u32
-    expression: string
-
-
 class AssertionOrigin:
     statement_start: u32
     condition_start: u32
     condition_end: u32
-    location: AssertionLocation | None
+    location: universal.AssertionLocation | None
 
 
 enum CoverageKind:
@@ -47,10 +40,10 @@ class Block:
 
 
 class Function:
-    id: hir.FunctionId
+    id: universal.FunctionId
     definition: universal.DefId
     name: string
-    parameters: list[ValueId]
+    parameters: list[universal.ValueId]
     result: universal.TypeId
     body: Block | None
     cfg: CfgBody | None
@@ -60,18 +53,18 @@ class Function:
 class TestDeclaration:
     name: string
     modes: list[hir.TestMode]
-    function: hir.FunctionId
+    function: universal.FunctionId
     expectations: list[hir.TestExpectation]
 
 
 class Module:
     values: list[Value]
-    bindings: list[tuple[hir.BindingId, ValueId]]
-    globals: list[ValueId]
+    bindings: list[tuple[hir.BindingId, universal.ValueId]]
+    globals: list[universal.ValueId]
     initializer: Block
     initializer_cfg: CfgBody
     functions: list[Function]
-    entry: hir.FunctionId | None
+    entry: universal.FunctionId | None
     tests: list[TestDeclaration]
 
 
@@ -81,4 +74,3 @@ def empty_block() -> Block:
 
 def empty_module() -> Module:
     return Module([], [], [], empty_block(), empty_cfg(universal.TypeId(0)), [], None, [])
-

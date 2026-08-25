@@ -1,0 +1,11 @@
+class ExpressionConversion:
+    from_type: TypeId
+    to_type: TypeId
+    kind: ExpressionConversionKind
+
+
+enum ExpressionConversionKind:
+    NumericWidening
+    UnionInjection
+    Borrow
+    User(function: DefId)

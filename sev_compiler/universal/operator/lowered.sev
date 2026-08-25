@@ -1,0 +1,22 @@
+enum UnaryOperation:
+    Positive
+    Negative
+    Not
+
+
+enum BinaryOperation:
+    Add
+    Subtract
+    Multiply
+    Divide
+    Remainder
+    Power
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Contains
+    And
+    Or

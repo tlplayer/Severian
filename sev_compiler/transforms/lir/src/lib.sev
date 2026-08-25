@@ -1,114 +1,40 @@
 import artifact
-
-enum LoweredFloatFormat:
-    Ieee(bits: u16)
-    BrainFloat16
-
-
-enum LoweredType:
-    Integer(bits: u16, signed: bool)
-    Float(format: LoweredFloatFormat)
-    Boolean
-    String
-    Bytes
-    NoneValue
-    Unit
-    Arguments
-
-
-class ValueId:
-    index: u32
-
-
-class FunctionId:
-    value: u128
-
-
-class Value:
-    id: ValueId
-    type_id: LoweredType
-
-
-class AssertionLocation:
-    file: string
-    line: u32
-    column: u32
-    expression: string
-
-
-enum Constant:
-    Integer(value: string)
-    Float(value: string)
-    Boolean(value: bool)
-    String(value: string)
-    Bytes(value: list[u8])
-    NoneValue
-    Unit
-
-
-enum UnaryOperation:
-    Positive
-    Negative
-    Not
-
-
-enum BinaryOperation:
-    Add
-    Subtract
-    Multiply
-    Divide
-    Remainder
-    Power
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
-    Contains
-    And
-    Or
+import universal
 
 
 enum Operation:
     Coverage(key: string)
-    ConstantValue(value: Constant, result: ValueId)
-    Unary(operator: UnaryOperation, operand: ValueId, result: ValueId)
-    Binary(operator: BinaryOperation, left: ValueId, right: ValueId, result: ValueId)
-    Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
-    RuntimeCall(symbol: string, arguments: list[ValueId], result: ValueId | None)
-    Return(value: ValueId | None)
-    Assert(condition: ValueId, message: ValueId | None, location: AssertionLocation | None)
-    If(condition: ValueId, then_block: Block, else_block: Block)
-    ArtifactCall(artifact_id: artifact.ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+    ConstantValue(value: universal.Constant, result: universal.ValueId)
+    Unary(operator: universal.UnaryOperation, operand: universal.ValueId, result: universal.ValueId)
+    Binary(operator: universal.BinaryOperation, left: universal.ValueId, right: universal.ValueId, result: universal.ValueId)
+    Call(function: universal.FunctionId, arguments: list[universal.ValueId], result: universal.ValueId)
+    RuntimeCall(symbol: string, arguments: list[universal.ValueId], result: universal.ValueId | None)
+    Return(value: universal.ValueId | None)
+    Assert(condition: universal.ValueId, message: universal.ValueId | None, location: universal.AssertionLocation | None)
+    If(condition: universal.ValueId, then_block: Block, else_block: Block)
+    ArtifactCall(artifact_id: artifact.ArtifactId, inputs: list[universal.ValueId], outputs: list[universal.ValueId])
 
 
 class Block:
     operations: list[Operation]
 
 
-enum FunctionLinkage:
-    Internal
-    External(symbol: string)
-
-
 class Function:
-    id: FunctionId
+    id: universal.FunctionId
     name: string
-    parameters: list[ValueId]
-    result: LoweredType
+    parameters: list[universal.ValueId]
+    result: universal.LoweredType
     body: Block | None
-    linkage: FunctionLinkage
+    linkage: universal.FunctionLinkage
 
 
 class Module:
-    values: list[Value]
-    globals: list[ValueId]
+    values: list[universal.Value]
+    globals: list[universal.ValueId]
     initializer: Block
     functions: list[Function]
-    entry: FunctionId | None
+    entry: universal.FunctionId | None
 
 
 def empty_module() -> Module:
     return Module([], [], Block([]), [], None)
-

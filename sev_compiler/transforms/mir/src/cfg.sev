@@ -53,7 +53,7 @@ enum Rvalue:
     Binary(operator: universal.BinaryOperator, left: Operand, right: Operand)
     BorrowShared(place: Place)
     BorrowExclusive(place: Place)
-    Convert(operand: Operand, conversion: hir.Conversion)
+    Convert(operand: Operand, conversion: universal.ExpressionConversion)
     Aggregate(type_id: universal.TypeId, fields: list[Operand])
 
 

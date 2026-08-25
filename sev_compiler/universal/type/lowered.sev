@@ -1,0 +1,14 @@
+enum LoweredFloatFormat:
+    Ieee(bits: u16)
+    BrainFloat16
+
+
+enum LoweredType:
+    Integer(bits: u16, signed: bool)
+    Float(format: LoweredFloatFormat)
+    Boolean
+    String
+    Bytes
+    NoneValue
+    Unit
+    Arguments

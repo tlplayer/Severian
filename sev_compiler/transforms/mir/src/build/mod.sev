@@ -6,15 +6,15 @@ import "../model/value/mod.sev"
 
 class Builder:
     module: Module
-    bindings: map[hir.BindingId, ValueId]
-    function_ids: map[universal.DefId, hir.FunctionId]
+    bindings: map[hir.BindingId, universal.ValueId]
+    function_ids: map[universal.DefId, universal.FunctionId]
 
-    def value(type_id: universal.TypeId) -> ValueId:
-        id = ValueId(u32(len(module.values)))
+    def value(type_id: universal.TypeId) -> universal.ValueId:
+        id = universal.ValueId(u32(len(module.values)))
         module.values.append(Value(id, type_id))
         return id
 
-    def expression(expression: hir.Expression, block: Block) -> ValueId:
+    def expression(expression: hir.Expression, block: Block) -> universal.ValueId:
         match expression.kind:
             case Literal:
                 result = value(expression.type_id)
@@ -36,7 +36,7 @@ class Builder:
                 block.operations.append(Binary(operator, left_value, right_value, result))
                 return result
             case Call:
-                arguments_values: list[ValueId] = []
+                arguments_values: list[universal.ValueId] = []
                 for argument in arguments:
                     arguments_values.append(self.expression(argument, block))
                 result = value(expression.type_id)
@@ -61,12 +61,12 @@ class Builder:
             case ExpressionStatement:
                 self.expression(expression, block)
             case Return:
-                result: ValueId | None = None
+                result: universal.ValueId | None = None
                 if value != None: result = self.expression(value, block)
                 block.operations.append(Return(result))
             case Assert:
                 condition_value = self.expression(condition, block)
-                message_value: ValueId | None = None
+                message_value: universal.ValueId | None = None
                 if message != None: message_value = self.expression(message, block)
                 origin = AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
                 block.operations.append(Assert(condition_value, message_value, origin))
@@ -119,7 +119,7 @@ def cfg_from_hir(body: hir.Block, hir_module: hir.Module, result_type: universal
 
 def build(program: hir.Program) -> Module:
     result = empty_module()
-    function_ids: map[universal.DefId, hir.FunctionId] = {}
+    function_ids: map[universal.DefId, universal.FunctionId] = {}
     for hir_module in program.modules:
         for function in hir_module.functions:
             function_ids[function.definition] = function.id
@@ -130,7 +130,7 @@ def build(program: hir.Program) -> Module:
         for test in hir_module.tests:
             result.tests.append(TestDeclaration(test.name, test.modes, test.function, test.expectations))
         for function in hir_module.functions:
-            parameters: list[ValueId] = []
+            parameters: list[universal.ValueId] = []
             for parameter in function.parameters:
                 parameters.append(builder.value(parameter.contract.type_id))
             cfg: CfgBody | None = None

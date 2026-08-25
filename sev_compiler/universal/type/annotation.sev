@@ -1,0 +1,22 @@
+import source
+
+class TypeAnnotation:
+    kind: TypeAnnotationKind
+    span: source.Span
+
+
+enum TypeAnnotationKind:
+    Named(name: string, arguments: list[TypeAnnotation])
+    Union(members: list[TypeAnnotation])
+
+
+def named_type(name: string, arguments: list[TypeAnnotation], span: source.Span) -> TypeAnnotation:
+    return TypeAnnotation(Named(name, arguments), span)
+
+
+def simple_type_name(annotation: TypeAnnotation) -> string | None:
+    match annotation.kind:
+        case Named:
+            if len(arguments) == 0:
+                return name
+    return None

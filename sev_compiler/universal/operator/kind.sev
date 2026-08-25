@@ -1,0 +1,29 @@
+enum UnaryOperator:
+    Positive { "+" }
+    Negative { "-" }
+    Not { "!", "not" }
+    Move
+    BitwiseNot { "~" }
+
+
+enum BinaryOperator:
+    BitwiseOr { "|", "|=" }
+    BitwiseAnd { "&", "&=" }
+    BitwiseXor { "^", "^=" }
+    ShiftLeft { "<<", "<<=" }
+    ShiftRight { ">>", ">>=" }
+    Add { "+", "+=" }
+    Subtract { "-", "-=" }
+    Multiply { "*", "*=" }
+    Divide { "/", "/=" }
+    Remainder { "%", "%=" }
+    Power { "**", "**=" }
+    Equal { "==" }
+    NotEqual { "!=" }
+    Less { "<" }
+    LessEqual { "<=" }
+    Greater { ">" }
+    GreaterEqual { ">=" }
+    Contains { "in" }
+    And { "and" }
+    Or { "or" }

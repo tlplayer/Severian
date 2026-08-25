@@ -16,25 +16,11 @@ enum Callee:
     Intrinsic(operation: universal.OpId)
 
 
-enum ConversionKind:
-    NumericWidening
-    UnionInjection
-    Borrow
-    User(function: universal.DefId)
-
-
-class Conversion:
-    from_type: universal.TypeId
-    to_type: universal.TypeId
-    kind: ConversionKind
-
-
 enum ExpressionKind:
     Literal(value: universal.LiteralValue)
     Binding(binding: BindingId)
     Function(definition: universal.DefId)
     Call(callee: Callee, arguments: list[Expression])
-    Convert(operand: Expression, conversion: Conversion)
+    Convert(operand: Expression, conversion: universal.ExpressionConversion)
     Unary(operator: universal.UnaryOperator, operand: Expression)
     Binary(operator: universal.BinaryOperator, left: Expression, right: Expression)
-

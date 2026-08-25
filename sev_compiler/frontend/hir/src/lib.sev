@@ -11,10 +11,6 @@ class BindingId:
     index: u32
 
 
-class FunctionId:
-    value: u128
-
-
 class VariantId:
     index: u32
 
@@ -68,7 +64,7 @@ class FunctionParameter:
 
 
 class FunctionDeclaration:
-    id: FunctionId
+    id: universal.FunctionId
     definition: universal.DefId
     name: string
     type_parameters: list[universal.GenericParamId]
@@ -111,7 +107,7 @@ enum TestExpectation:
 class TestDeclaration:
     name: string
     modes: list[TestMode]
-    function: FunctionId
+    function: universal.FunctionId
     expectations: list[TestExpectation]
 
 
@@ -125,7 +121,7 @@ class Module:
     bindings: list[Binding]
     initializer: Block
     functions: list[FunctionDeclaration]
-    entry: FunctionId | None
+    entry: universal.FunctionId | None
     tests: list[TestDeclaration]
     types: list[TypeDeclaration]
 
@@ -140,4 +136,3 @@ def empty_module() -> Module:
 
 def empty_program() -> Program:
     return Program([])
-

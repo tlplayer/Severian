@@ -79,8 +79,8 @@ def resume_block(block: PlannedBlock) -> mir.Block:
             case Standard:
                 for operation in region.operations: operations.append(operation)
             case Compiler:
-                inputs: list[mir.ValueId] = []
-                outputs: list[mir.ValueId] = []
+                inputs: list[universal.ValueId] = []
+                outputs: list[universal.ValueId] = []
                 for value in region.inputs: inputs.append(value.id)
                 for value in region.outputs: outputs.append(value.id)
                 operations.append(mir.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))

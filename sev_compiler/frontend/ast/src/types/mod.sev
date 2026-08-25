@@ -1,4 +1,5 @@
 import source
+import universal
 import "../expression/mod.sev"
 import "../statement/mod.sev"
 
@@ -33,25 +34,15 @@ class Decorator:
     span: source.Span
 
 
-class TypeAnnotation:
-    kind: TypeAnnotationKind
-    span: source.Span
-
-
-enum TypeAnnotationKind:
-    Named(name: string, arguments: list[TypeAnnotation])
-    Union(members: list[TypeAnnotation])
-
-
 class FunctionParameter:
     name: string
-    annotation: TypeAnnotation
+    annotation: universal.TypeAnnotation
     default: Expression | absent
     span: source.Span
 
 
 enum GenericConstraint:
-    Parameter(parameter: string, bound: TypeAnnotation, span: source.Span)
+    Parameter(parameter: string, bound: universal.TypeAnnotation, span: source.Span)
     Predicate(expression: Expression)
 
 
@@ -61,7 +52,7 @@ class FunctionDeclaration:
     type_parameters: list[string]
     constraints: list[GenericConstraint]
     parameters: list[FunctionParameter]
-    result: TypeAnnotation
+    result: universal.TypeAnnotation
     body: list[Statement] | None
     span: source.Span
 
@@ -71,7 +62,7 @@ class TypeDeclaration:
     name: string
     type_parameters: list[string]
     constraints: list[GenericConstraint]
-    definition: TypeAnnotation | None
+    definition: universal.TypeAnnotation | None
     span: source.Span
 
 
@@ -95,42 +86,23 @@ class TestDeclaration:
     span: source.Span
 
 
-enum OperatorSyntax:
-    Plus
-    Minus
-    Multiply
-    Divide
-    Remainder
-    Power
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
-    Contains
-    And
-    Or
-    Not
-
-
 class PropertyDeclaration:
     name: string
-    annotation: TypeAnnotation
+    annotation: universal.TypeAnnotation
     default: Expression | None
     span: source.Span
 
 
 class OperatorParameter:
     name: string
-    annotation: TypeAnnotation
+    annotation: universal.TypeAnnotation
     span: source.Span
 
 
 class OperatorDeclaration:
-    operator: OperatorSyntax
+    operator: universal.OperatorSyntax
     parameters: list[OperatorParameter]
-    result: TypeAnnotation
+    result: universal.TypeAnnotation
     span: source.Span
 
 
@@ -139,19 +111,7 @@ class TraitDeclaration:
     name: string
     type_parameters: list[string]
     constraints: list[GenericConstraint]
-    bases: list[TypeAnnotation]
+    bases: list[universal.TypeAnnotation]
     properties: list[PropertyDeclaration]
     operators: list[OperatorDeclaration]
     span: source.Span
-
-
-def named_type(name: string, arguments: list[TypeAnnotation], span: source.Span) -> TypeAnnotation:
-    return TypeAnnotation(Named(name, arguments), span)
-
-
-def simple_type_name(annotation: TypeAnnotation) -> string | None:
-    match annotation.kind:
-        case Named:
-            if len(arguments) == 0:
-                return name
-    return None

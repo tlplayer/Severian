@@ -1,0 +1,7 @@
+import "../type/lowered.sev"
+import "../id/value.sev"
+
+
+class Value:
+    id: ValueId
+    type_id: LoweredType

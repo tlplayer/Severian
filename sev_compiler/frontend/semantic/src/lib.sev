@@ -19,7 +19,7 @@ class AnalysisContext:
 
 class PackageFunction:
     lookup: string
-    id: hir.FunctionId
+    id: universal.FunctionId
     definition: universal.DefId
     type_parameters: list[universal.GenericParamId]
     constrained: bool
@@ -42,9 +42,9 @@ class Analyzer:
     types: universal.TypeContext
     names: map[string, hir.BindingId]
     declarations: set[string]
-    functions: map[string, list[hir.FunctionId]]
-    definitions: map[hir.FunctionId, universal.DefId]
-    signatures: map[hir.FunctionId, FunctionSignature]
+    functions: map[string, list[universal.FunctionId]]
+    definitions: map[universal.FunctionId, universal.DefId]
+    signatures: map[universal.FunctionId, FunctionSignature]
     binding_types: map[hir.BindingId, universal.TypeId]
     generic_types: map[string, universal.TypeId]
     generic_binary: map[universal.GenericParamId, set[universal.BinaryOperator]]
@@ -94,7 +94,7 @@ class Analyzer:
                 candidates = functions.get(name)
                 if candidates == None:
                     return error(diagnostics.Diagnostic("E000202", "unknown callable " + name, value.span))
-                selected: hir.FunctionId | None = None
+                selected: universal.FunctionId | None = None
                 selected_substitution = universal.Substitution({})
                 selected_rank = 2147483647
                 ambiguous = false
@@ -217,57 +217,33 @@ class Analyzer:
 def lower_literal(expression: ast.Expression) -> universal.LiteralValue:
     match expression.kind:
         case LiteralValue:
-            match value:
-                case Integer: return universal.IntegerValue(spelling)
-                case Float: return universal.FloatValue(spelling)
-                case Boolean: return universal.BooleanValue(value)
-                case Character: return universal.CharacterValue(value)
-                case String: return universal.StringValue(value)
-                case Bytes: return universal.BytesValue(value)
-                case NoneValue: return universal.NoneValue
-                case Unit: return universal.UnitValue
+            return value
 
 
-def lower_unary(operator: ast.UnaryOperator) -> universal.UnaryOperator:
-    if operator == ast.Positive: return universal.Positive
-    if operator == ast.Negative: return universal.Negative
-    return universal.Not
+def lower_unary(operator: universal.UnaryOperator) -> universal.UnaryOperator:
+    return operator
 
 
-def lower_binary(operator: ast.BinaryOperator) -> universal.BinaryOperator:
-    if operator == ast.Add: return universal.Add
-    if operator == ast.Subtract: return universal.Subtract
-    if operator == ast.Multiply: return universal.Multiply
-    if operator == ast.Divide: return universal.Divide
-    if operator == ast.Remainder: return universal.Remainder
-    if operator == ast.Power: return universal.Power
-    if operator == ast.Equal: return universal.Equal
-    if operator == ast.NotEqual: return universal.NotEqual
-    if operator == ast.Less: return universal.Less
-    if operator == ast.LessEqual: return universal.LessEqual
-    if operator == ast.Greater: return universal.Greater
-    if operator == ast.GreaterEqual: return universal.GreaterEqual
-    if operator == ast.Contains: return universal.Contains
-    if operator == ast.And: return universal.And
-    return universal.Or
+def lower_binary(operator: universal.BinaryOperator) -> universal.BinaryOperator:
+    return operator
 
 
-def trait_binary_operator(operator: ast.OperatorSyntax) -> universal.BinaryOperator | None:
-    if operator == ast.Plus: return universal.Add
-    if operator == ast.Minus: return universal.Subtract
-    if operator == ast.Multiply: return universal.Multiply
-    if operator == ast.Divide: return universal.Divide
-    if operator == ast.Remainder: return universal.Remainder
-    if operator == ast.Power: return universal.Power
-    if operator == ast.Equal: return universal.Equal
-    if operator == ast.NotEqual: return universal.NotEqual
-    if operator == ast.Less: return universal.Less
-    if operator == ast.LessEqual: return universal.LessEqual
-    if operator == ast.Greater: return universal.Greater
-    if operator == ast.GreaterEqual: return universal.GreaterEqual
-    if operator == ast.Contains: return universal.Contains
-    if operator == ast.And: return universal.And
-    if operator == ast.Or: return universal.Or
+def trait_binary_operator(operator: universal.OperatorSyntax) -> universal.BinaryOperator | None:
+    if operator == universal.Plus: return universal.Add
+    if operator == universal.Minus: return universal.Subtract
+    if operator == universal.Multiply: return universal.Multiply
+    if operator == universal.Divide: return universal.Divide
+    if operator == universal.Remainder: return universal.Remainder
+    if operator == universal.Power: return universal.Power
+    if operator == universal.Equal: return universal.Equal
+    if operator == universal.NotEqual: return universal.NotEqual
+    if operator == universal.Less: return universal.Less
+    if operator == universal.LessEqual: return universal.LessEqual
+    if operator == universal.Greater: return universal.Greater
+    if operator == universal.GreaterEqual: return universal.GreaterEqual
+    if operator == universal.Contains: return universal.Contains
+    if operator == universal.And: return universal.And
+    if operator == universal.Or: return universal.Or
     return None
 
 
@@ -315,7 +291,7 @@ def declaration_binary_requirements(
         match constraint:
             case Parameter:
                 parameter_id = generic_parameter_id(declaration.type_parameters, parameter)
-                bound_name = ast.simple_type_name(bound)
+                bound_name = universal.simple_type_name(bound)
                 if parameter_id != None and bound_name != None:
                     capabilities = trait_capabilities.get(bound_name)
                     if capabilities != None:
@@ -344,19 +320,19 @@ def declaration_capability_requirements(
     return requirements
 
 
-def type_annotation_head(annotation: ast.TypeAnnotation) -> string | None:
+def type_annotation_head(annotation: universal.TypeAnnotation) -> string | None:
     match annotation.kind:
         case Named: return name
     return None
 
 
-def compiler_capability_bound(annotation: ast.TypeAnnotation) -> universal.CompilerCapability | None:
+def compiler_capability_bound(annotation: universal.TypeAnnotation) -> universal.CompilerCapability | None:
     match annotation.kind:
         case Named:
             if name == "FfiSafe":
                 if len(arguments) != 1:
                     return None
-                abi = ast.simple_type_name(arguments[0])
+                abi = universal.simple_type_name(arguments[0])
                 if abi == None:
                     return None
                 return universal.ffi_safe_capability(abi)
@@ -412,13 +388,13 @@ def ast_callable_name(expression: ast.Expression) -> string | None:
     return None
 
 
-def resolve_type_annotation(types: universal.TypeContext, annotation: ast.TypeAnnotation) -> universal.TypeId | diagnostics.Diagnostic:
+def resolve_type_annotation(types: universal.TypeContext, annotation: universal.TypeAnnotation) -> universal.TypeId | diagnostics.Diagnostic:
     return resolve_type_annotation_with_parameters(types, annotation, {})
 
 
 def resolve_type_annotation_with_parameters(
     types: universal.TypeContext,
-    annotation: ast.TypeAnnotation,
+    annotation: universal.TypeAnnotation,
     parameters: map[string, universal.TypeId],
 ) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
@@ -587,8 +563,8 @@ def analyze_with_package_functions(
     types: universal.TypeContext,
     context: AnalysisContext,
     visible: list[PackageFunction],
-    own_ids: list[hir.FunctionId],
-    test_ids: list[hir.FunctionId],
+    own_ids: list[universal.FunctionId],
+    test_ids: list[universal.FunctionId],
 ) -> hir.Program | diagnostics.Diagnostic:
     analyzer = Analyzer(types, {}, set(), {}, {}, {}, {}, {}, {}, 0, 0)
     trait_binary = collect_trait_binary_capabilities(module_ast)
@@ -605,7 +581,7 @@ def analyze_with_package_functions(
     for item in module_ast.items:
         match item:
             case Function:
-                id = own_ids[ordinal] if ordinal < len(own_ids) else hir.FunctionId(u128(ordinal))
+                id = own_ids[ordinal] if ordinal < len(own_ids) else universal.FunctionId(u128(ordinal))
                 definition = synthetic_definition(context.module_name, declaration.name, ordinal)
                 parameters: list[hir.FunctionParameter] = []
                 parameter_types: list[universal.TypeId] = []

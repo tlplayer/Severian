@@ -1,5 +1,6 @@
 import lir
 import runtime
+import universal
 
 enum ArtifactKind:
     Executable
@@ -11,13 +12,13 @@ class Artifact:
 
 
 enum BackendError:
-    UnsupportedType(type_id: lir.LoweredType)
+    UnsupportedType(type_id: universal.LoweredType)
     UnsupportedOperation(message: string)
-    InvalidValue(value: lir.ValueId)
+    InvalidValue(value: universal.ValueId)
     CompilerFailed(message: string)
 
 
-def c_type(type_id: lir.LoweredType) -> string | BackendError:
+def c_type(type_id: universal.LoweredType) -> string | BackendError:
     match type_id:
         case Integer:
             if bits == 8: return "int8_t" if signed else "uint8_t"
@@ -38,12 +39,12 @@ def c_type(type_id: lir.LoweredType) -> string | BackendError:
     return error(UnsupportedType(type_id))
 
 
-def value_type(module: lir.Module, value: lir.ValueId) -> lir.LoweredType | BackendError:
+def value_type(module: lir.Module, value: universal.ValueId) -> universal.LoweredType | BackendError:
     if value.index >= len(module.values): return error(InvalidValue(value))
     return module.values[value.index].type_id
 
 
-def c_literal(value: lir.Constant) -> string:
+def c_literal(value: universal.Constant) -> string:
     match value:
         case IntegerValue: return spelling
         case FloatValue: return spelling
@@ -54,20 +55,20 @@ def c_literal(value: lir.Constant) -> string:
         case BytesValue: return "0"
 
 
-def binary_operator(operator: lir.BinaryOperation) -> string:
-    if operator == lir.Add: return "+"
-    if operator == lir.Subtract: return "-"
-    if operator == lir.Multiply: return "*"
-    if operator == lir.Divide: return "/"
-    if operator == lir.Remainder: return "%"
-    if operator == lir.Equal: return "=="
-    if operator == lir.NotEqual: return "!="
-    if operator == lir.Less: return "<"
-    if operator == lir.LessEqual: return "<="
-    if operator == lir.Greater: return ">"
-    if operator == lir.GreaterEqual: return ">="
-    if operator == lir.And: return "&&"
-    if operator == lir.Or: return "||"
+def binary_operator(operator: universal.BinaryOperation) -> string:
+    if operator == universal.Add: return "+"
+    if operator == universal.Subtract: return "-"
+    if operator == universal.Multiply: return "*"
+    if operator == universal.Divide: return "/"
+    if operator == universal.Remainder: return "%"
+    if operator == universal.Equal: return "=="
+    if operator == universal.NotEqual: return "!="
+    if operator == universal.Less: return "<"
+    if operator == universal.LessEqual: return "<="
+    if operator == universal.Greater: return ">"
+    if operator == universal.GreaterEqual: return ">="
+    if operator == universal.And: return "&&"
+    if operator == universal.Or: return "||"
     return "+"
 
 
@@ -81,8 +82,8 @@ def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + c_literal(value) + ";\n"
             case Unary:
                 symbol = "+"
-                if operator == lir.Negative: symbol = "-"
-                elif operator == lir.Not: symbol = "!"
+                if operator == universal.Negative: symbol = "-"
+                elif operator == universal.Not: symbol = "!"
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + symbol + "v" + string(operand.index) + ";\n"
             case Binary:
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = v" + string(left.index) + " " + binary_operator(operator) + " v" + string(right.index) + ";\n"
@@ -131,7 +132,7 @@ def render_c(module: lir.Module) -> string | BackendError:
             parameters.append(c_type(value_type(module, parameter)) + " v" + string(parameter.index))
         output += "static " + c_type(function.result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
         output += render_block(module, function.body)
-        if function.result == lir.Unit: output += "    return;\n"
+        if function.result == universal.Unit: output += "    return;\n"
         output += "}\n"
     output += "int main(int argc, char **argv) { (void)argc; (void)argv; if (__sev_init()) return 1;"
     if module.entry != None: output += " __sev_fn_" + string(module.entry.value) + "();"
@@ -145,4 +146,3 @@ def emit_executable(module: lir.Module, output_path: string) -> Artifact | Backe
     if result.status != 0:
         return error(CompilerFailed(result.stderr))
     return Artifact(output_path, Executable)
-

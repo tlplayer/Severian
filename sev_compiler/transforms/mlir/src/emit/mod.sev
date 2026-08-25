@@ -1,10 +1,11 @@
 import artifact
 import lir
+import universal
 
 class MlirArtifact:
     module: string
-    inputs: list[lir.LoweredType]
-    outputs: list[lir.LoweredType]
+    inputs: list[universal.LoweredType]
+    outputs: list[universal.LoweredType]
 
 
 enum MlirError:
@@ -13,17 +14,17 @@ enum MlirError:
     ArtifactSignatureConflict(artifact_id: artifact.ArtifactId)
     EntryFunctionCount(count: int)
     EntryFunctionIsDeclaration
-    InvalidValue(value: lir.ValueId)
+    InvalidValue(value: universal.ValueId)
     MlirApi(message: string)
     ParseFailed(description: string)
     SignatureMismatch
     TargetMismatch(artifact_target: string, composition_target: string)
-    UnsupportedType(type_id: lir.LoweredType)
+    UnsupportedType(type_id: universal.LoweredType)
     UnsupportedOperation(message: string)
     VerificationFailed(description: string)
 
 
-def mlir_type(type_id: lir.LoweredType) -> string | MlirError:
+def mlir_type(type_id: universal.LoweredType) -> string | MlirError:
     match type_id:
         case Integer: return "i" + string(bits)
         case Float:
@@ -38,7 +39,7 @@ def mlir_type(type_id: lir.LoweredType) -> string | MlirError:
         case Arguments: return "!llvm.ptr"
 
 
-def value_type(module: lir.Module, value: lir.ValueId) -> lir.LoweredType | MlirError:
+def value_type(module: lir.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
     if value.index >= len(module.values):
         return error(InvalidValue(value))
     return module.values[value.index].type_id
@@ -50,7 +51,7 @@ def function_symbol(function: lir.Function) -> string:
     return "__sev_fn_" + string(function.id.value)
 
 
-def render_constant(value: lir.Constant, type_id: lir.LoweredType) -> string | MlirError:
+def render_constant(value: universal.Constant, type_id: universal.LoweredType) -> string | MlirError:
     match value:
         case IntegerValue: return spelling
         case FloatValue: return spelling
@@ -71,9 +72,9 @@ def render_block(module: lir.Module, block: lir.Block, indentation: string) -> s
                 output += indentation + "%v" + string(result.index) + " = arith.constant " + render_constant(value, type_id) + " : " + mlir_type(type_id) + "\n"
             case Unary:
                 type_id = value_type(module, result)
-                if operator == lir.Positive:
+                if operator == universal.Positive:
                     output += indentation + "%v" + string(result.index) + " = arith.addi %v" + string(operand.index) + ", %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
-                elif operator == lir.Negative:
+                elif operator == universal.Negative:
                     output += indentation + "%v" + string(result.index) + " = arith.negi %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
                 else:
                     output += indentation + "%v" + string(result.index) + " = arith.xori %v" + string(operand.index) + ", true : i1\n"
@@ -119,17 +120,17 @@ def render_block(module: lir.Module, block: lir.Block, indentation: string) -> s
     return output
 
 
-def binary_mnemonic(operator: lir.BinaryOperation, type_id: lir.LoweredType) -> string:
+def binary_mnemonic(operator: universal.BinaryOperation, type_id: universal.LoweredType) -> string:
     floating = false
     match type_id:
         case Float: floating = true
-    if operator == lir.Add: return "arith.addf" if floating else "arith.addi"
-    if operator == lir.Subtract: return "arith.subf" if floating else "arith.subi"
-    if operator == lir.Multiply: return "arith.mulf" if floating else "arith.muli"
-    if operator == lir.Divide: return "arith.divf" if floating else "arith.divsi"
-    if operator == lir.Remainder: return "arith.remsi"
-    if operator == lir.And: return "arith.andi"
-    if operator == lir.Or: return "arith.ori"
+    if operator == universal.Add: return "arith.addf" if floating else "arith.addi"
+    if operator == universal.Subtract: return "arith.subf" if floating else "arith.subi"
+    if operator == universal.Multiply: return "arith.mulf" if floating else "arith.muli"
+    if operator == universal.Divide: return "arith.divf" if floating else "arith.divsi"
+    if operator == universal.Remainder: return "arith.remsi"
+    if operator == universal.And: return "arith.andi"
+    if operator == universal.Or: return "arith.ori"
     return "arith.cmpi"
 
 
@@ -138,7 +139,7 @@ def render_function(module: lir.Module, function: lir.Function) -> string | Mlir
     for parameter in function.parameters:
         parameters.append("%v" + string(parameter.index) + ": " + mlir_type(value_type(module, parameter)))
     result = ""
-    if function.result != lir.Unit:
+    if function.result != universal.Unit:
         result = " -> " + mlir_type(function.result)
     symbol = function_symbol(function)
     if function.body == None:

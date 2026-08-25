@@ -54,7 +54,7 @@ def external_import(locator: string, alias: string) -> ExternalImport | None | X
     return ExternalImport(language_from_name(parts[0]), parts[1], alias)
 
 
-def resolve_contract(annotation: ast.TypeAnnotation, foreign: ffi.ForeignModule, types: universal.TypeContext, result: bool) -> tuple[ffi.ValueContract, ffi.ParameterMode] | XxiError:
+def resolve_contract(annotation: universal.TypeAnnotation, foreign: ffi.ForeignModule, types: universal.TypeContext, result: bool) -> tuple[ffi.ValueContract, ffi.ParameterMode] | XxiError:
     ownership: ffi.Ownership = ffi.Copy
     mode = ffi.In
     nullable = false
@@ -118,4 +118,3 @@ def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTar
     for function in foreign.functions:
         plans.append(ffi.lower_function(function, foreign, types, target))
     return ResolvedExternalModule(imports, foreign, plans)
-

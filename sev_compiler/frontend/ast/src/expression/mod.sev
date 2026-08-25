@@ -1,39 +1,5 @@
 import source
-
-enum Literal:
-    Integer(spelling: string)
-    Float(spelling: string)
-    Boolean(value: bool)
-    Character(value: char)
-    String(value: string)
-    Bytes(value: list[u8])
-    NoneValue
-    Unit
-
-
-enum UnaryOperator:
-    Positive
-    Negative
-    Not
-    Move
-
-
-enum BinaryOperator:
-    Add
-    Subtract
-    Multiply
-    Divide
-    Remainder
-    Power
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
-    Contains
-    And
-    Or
+import universal
 
 
 class Expression:
@@ -48,9 +14,9 @@ class CallArgument:
 
 
 enum ExpressionKind:
-    LiteralValue(value: Literal)
+    LiteralValue(value: universal.LiteralValue)
     Name(name: string)
     Member(object: Expression, name: string)
     Call(callee: Expression, arguments: list[CallArgument])
-    Unary(operator: UnaryOperator, operand: Expression)
-    Binary(operator: BinaryOperator, left: Expression, right: Expression)
+    Unary(operator: universal.UnaryOperator, operand: Expression)
+    Binary(operator: universal.BinaryOperator, left: Expression, right: Expression)

@@ -12,3 +12,4 @@ ast = { path = "../ast" }
 diagnostics = { path = "../../diagnostics" }
 lexer = { path = "../lexer" }
 source = { path = "../../source" }
+universal = { path = "../../universal" }

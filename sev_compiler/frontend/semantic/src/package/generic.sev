@@ -21,25 +21,25 @@ class MonomorphizationCollector:
             instances[definition].append(candidate)
 
 
-def substitute_annotation(annotation: ast.TypeAnnotation, substitution: map[string, string]) -> ast.TypeAnnotation:
+def substitute_annotation(annotation: universal.TypeAnnotation, substitution: map[string, string]) -> universal.TypeAnnotation:
     match annotation.kind:
         case Named:
             replacement = substitution.get(name)
             if replacement != None and len(arguments) == 0:
-                return ast.named_type(replacement, [], annotation.span)
-            replaced: list[ast.TypeAnnotation] = []
+                return universal.named_type(replacement, [], annotation.span)
+            replaced: list[universal.TypeAnnotation] = []
             for argument in arguments:
                 replaced.append(substitute_annotation(argument, substitution))
-            return ast.named_type(name, replaced, annotation.span)
+            return universal.named_type(name, replaced, annotation.span)
         case Union:
-            replaced: list[ast.TypeAnnotation] = []
+            replaced: list[universal.TypeAnnotation] = []
             for member in members:
                 replaced.append(substitute_annotation(member, substitution))
-            return ast.TypeAnnotation(ast.Union(replaced), annotation.span)
+            return universal.TypeAnnotation(universal.Union(replaced), annotation.span)
 
 
 def specialize_signature(signature: FunctionDecl, substitution: map[string, string]) -> FunctionDecl:
-    parameters: list[ast.TypeAnnotation] = []
+    parameters: list[universal.TypeAnnotation] = []
     for parameter in signature.parameters:
         parameters.append(substitute_annotation(parameter, substitution))
     return FunctionDecl([], parameters, substitute_annotation(signature.result, substitution), signature.constraints)

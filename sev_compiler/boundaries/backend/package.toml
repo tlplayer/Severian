@@ -10,3 +10,4 @@ path = "src/lib.sev"
 [dependencies]
 lir = { path = "../../transforms/lir" }
 runtime = { path = "../../runtime" }
+universal = { path = "../../universal" }

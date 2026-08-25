@@ -2,6 +2,7 @@ import ast
 import lexer
 import diagnostics
 import source
+import universal
 
 def formatted_string_expression(value: string, span: source.Span) -> ast.Expression | diagnostics.Diagnostic:
     characters = value.characters()
@@ -24,7 +25,7 @@ def formatted_string_expression(value: string, span: source.Span) -> ast.Express
             cursor += 1
             continue
         if len(literal) > 0:
-            parts.append(ast.Expression(ast.LiteralValue(ast.String(literal)), span))
+            parts.append(ast.Expression(ast.LiteralValue(universal.StringValue(literal)), span))
             literal = ""
         expression_start = cursor + 1
         cursor = expression_start
@@ -44,12 +45,12 @@ def formatted_string_expression(value: string, span: source.Span) -> ast.Express
         parts.append(expression_parser.expression(0))
         cursor += 1
     if len(literal) > 0:
-        parts.append(ast.Expression(ast.LiteralValue(ast.String(literal)), span))
+        parts.append(ast.Expression(ast.LiteralValue(universal.StringValue(literal)), span))
     if len(parts) == 0:
-        return ast.Expression(ast.LiteralValue(ast.String("")), span)
+        return ast.Expression(ast.LiteralValue(universal.StringValue("")), span)
     result = parts[0]
     for part in parts[1:]:
-        result = ast.Expression(ast.Binary(ast.Add, result, part), span)
+        result = ast.Expression(ast.Binary(universal.Add, result, part), span)
     return result
 
 class Parser:
@@ -209,7 +210,7 @@ class Parser:
             if take(Comma) == None:
                 break
         close = expect(RightParen, "expected closing parenthesis").span
-        result = ast.named_type("unit", [], close)
+        result = universal.named_type("unit", [], close)
         if take(Arrow) != None:
             result = type_annotation()
         constraints += declaration_constraints()
@@ -227,7 +228,7 @@ class Parser:
         generic_parts = type_parameters()
         parameters = generic_parts[0]
         constraints = generic_parts[1]
-        definition: ast.TypeAnnotation | None = None
+        definition: universal.TypeAnnotation | None = None
         if take(Equal) != None:
             definition = type_annotation()
         constraints += declaration_constraints()
@@ -240,7 +241,7 @@ class Parser:
         parameters = generic_parts[0]
         constraints = generic_parts[1]
         constraints += declaration_constraints()
-        bases: list[ast.TypeAnnotation] = []
+        bases: list[universal.TypeAnnotation] = []
         if take(Colon) != None and not at_simple(Newline):
             while true:
                 bases.append(type_annotation())
@@ -336,7 +337,7 @@ class Parser:
     def binding() -> ast.Binding | diagnostics.Diagnostic:
         start = peek().span
         name = identifier("expected binding name")[0]
-        annotation: ast.TypeAnnotation | None = None
+        annotation: universal.TypeAnnotation | None = None
         if take(Colon) != None:
             annotation = type_annotation()
         inferred = take(ColonEqual) != None
@@ -353,18 +354,18 @@ class Parser:
             if operator == None or precedence(operator) < minimum:
                 break
             token = next()
-            next_minimum = precedence(operator) if operator == ast.Power else precedence(operator) + 1
+            next_minimum = precedence(operator) if operator == universal.Power else precedence(operator) + 1
             right = expression(next_minimum)
             left = ast.Expression(ast.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
         return left
 
     def unary() -> ast.Expression | diagnostics.Diagnostic:
         token = peek()
-        operator: ast.UnaryOperator | None = None
-        if token.kind == Plus: operator = ast.Positive
-        elif token.kind == Minus: operator = ast.Negative
-        elif at_identifier("not"): operator = ast.Not
-        elif at_identifier("move"): operator = ast.Move
+        operator: universal.UnaryOperator | None = None
+        if token.kind == Plus: operator = universal.Positive
+        elif token.kind == Minus: operator = universal.Negative
+        elif at_identifier("not"): operator = universal.Not
+        elif at_identifier("move"): operator = universal.Move
         if operator != None:
             next()
             operand = unary()
@@ -399,14 +400,14 @@ class Parser:
         token = next()
         match token.kind:
             case Identifier:
-                if value == "true": return ast.Expression(ast.LiteralValue(ast.Boolean(true)), token.span)
-                if value == "false": return ast.Expression(ast.LiteralValue(ast.Boolean(false)), token.span)
-                if value == "None": return ast.Expression(ast.LiteralValue(ast.NoneValue), token.span)
+                if value == "true": return ast.Expression(ast.LiteralValue(universal.BooleanValue(true)), token.span)
+                if value == "false": return ast.Expression(ast.LiteralValue(universal.BooleanValue(false)), token.span)
+                if value == "None": return ast.Expression(ast.LiteralValue(universal.NoneValue), token.span)
                 return ast.Expression(ast.Name(value), token.span)
-            case Integer: return ast.Expression(ast.LiteralValue(ast.Integer(value)), token.span)
-            case Float: return ast.Expression(ast.LiteralValue(ast.Float(value)), token.span)
-            case Character: return ast.Expression(ast.LiteralValue(ast.Character(value)), token.span)
-            case String: return ast.Expression(ast.LiteralValue(ast.String(value)), token.span)
+            case Integer: return ast.Expression(ast.LiteralValue(universal.IntegerValue(value)), token.span)
+            case Float: return ast.Expression(ast.LiteralValue(universal.FloatValue(value)), token.span)
+            case Character: return ast.Expression(ast.LiteralValue(universal.CharacterValue(value)), token.span)
+            case String: return ast.Expression(ast.LiteralValue(universal.StringValue(value)), token.span)
             case FormattedString: return formatted_string_expression(value, token.span)
             case LeftParen:
                 value = expression(0)
@@ -414,20 +415,20 @@ class Parser:
                 return value
         return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
 
-    def type_annotation() -> ast.TypeAnnotation | diagnostics.Diagnostic:
+    def type_annotation() -> universal.TypeAnnotation | diagnostics.Diagnostic:
         first = type_primary()
         if take(Pipe) == None:
             return first
-        members: list[ast.TypeAnnotation] = [first]
+        members: list[universal.TypeAnnotation] = [first]
         while true:
             members.append(type_primary())
             if take(Pipe) == None:
                 break
-        return ast.TypeAnnotation(ast.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
+        return universal.TypeAnnotation(universal.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
 
-    def type_primary() -> ast.TypeAnnotation | diagnostics.Diagnostic:
+    def type_primary() -> universal.TypeAnnotation | diagnostics.Diagnostic:
         name = identifier("expected a type name")
-        arguments: list[ast.TypeAnnotation] = []
+        arguments: list[universal.TypeAnnotation] = []
         end = name[1].end
         if take(LeftBracket) != None:
             while not at_simple(RightBracket):
@@ -435,32 +436,32 @@ class Parser:
                 if take(Comma) == None:
                     break
             end = expect(RightBracket, "expected closing type bracket").span.end
-        return ast.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
+        return universal.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
 
 
-def binary_operator(kind: lexer.TokenKind) -> ast.BinaryOperator | None:
-    if kind == Plus: return ast.Add
-    if kind == Minus: return ast.Subtract
-    if kind == Star: return ast.Multiply
-    if kind == Slash: return ast.Divide
-    if kind == Percent: return ast.Remainder
-    if kind == Power: return ast.Power
-    if kind == EqualEqual: return ast.Equal
-    if kind == NotEqual: return ast.NotEqual
-    if kind == Less: return ast.Less
-    if kind == LessEqual: return ast.LessEqual
-    if kind == Greater: return ast.Greater
-    if kind == GreaterEqual: return ast.GreaterEqual
+def binary_operator(kind: lexer.TokenKind) -> universal.BinaryOperator | None:
+    if kind == Plus: return universal.Add
+    if kind == Minus: return universal.Subtract
+    if kind == Star: return universal.Multiply
+    if kind == Slash: return universal.Divide
+    if kind == Percent: return universal.Remainder
+    if kind == Power: return universal.Power
+    if kind == EqualEqual: return universal.Equal
+    if kind == NotEqual: return universal.NotEqual
+    if kind == Less: return universal.Less
+    if kind == LessEqual: return universal.LessEqual
+    if kind == Greater: return universal.Greater
+    if kind == GreaterEqual: return universal.GreaterEqual
     return None
 
 
-def precedence(operator: ast.BinaryOperator) -> int:
-    if operator == ast.Or: return 1
-    if operator == ast.And: return 2
-    if operator == ast.Equal or operator == ast.NotEqual: return 3
-    if operator == ast.Less or operator == ast.LessEqual or operator == ast.Greater or operator == ast.GreaterEqual or operator == ast.Contains: return 4
-    if operator == ast.Add or operator == ast.Subtract: return 5
-    if operator == ast.Multiply or operator == ast.Divide or operator == ast.Remainder: return 6
+def precedence(operator: universal.BinaryOperator) -> int:
+    if operator == universal.Or: return 1
+    if operator == universal.And: return 2
+    if operator == universal.Equal or operator == universal.NotEqual: return 3
+    if operator == universal.Less or operator == universal.LessEqual or operator == universal.Greater or operator == universal.GreaterEqual or operator == universal.Contains: return 4
+    if operator == universal.Add or operator == universal.Subtract: return 5
+    if operator == universal.Multiply or operator == universal.Divide or operator == universal.Remainder: return 6
     return 7
 
 

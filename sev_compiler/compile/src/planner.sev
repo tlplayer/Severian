@@ -4,7 +4,7 @@ import universal
 import "error.sev"
 import "model.sev"
 
-def operation_inputs(operation: mir.Operation) -> list[mir.ValueId]:
+def operation_inputs(operation: mir.Operation) -> list[universal.ValueId]:
     match operation:
         case Unary: return [operand]
         case Binary: return [left, right]
@@ -13,7 +13,7 @@ def operation_inputs(operation: mir.Operation) -> list[mir.ValueId]:
         case Assert:
             return [condition, message] if message != None else [condition]
         case If:
-            result: list[mir.ValueId] = [condition]
+            result: list[universal.ValueId] = [condition]
             for nested in then_block.operations:
                 for value in operation_inputs(nested): result.append(value)
             for nested in else_block.operations:
@@ -24,7 +24,7 @@ def operation_inputs(operation: mir.Operation) -> list[mir.ValueId]:
         else: return []
 
 
-def operation_outputs(operation: mir.Operation) -> list[mir.ValueId]:
+def operation_outputs(operation: mir.Operation) -> list[universal.ValueId]:
     match operation:
         case Constant: return [result]
         case Unary: return [result]
@@ -34,7 +34,7 @@ def operation_outputs(operation: mir.Operation) -> list[mir.ValueId]:
         else: return []
 
 
-def operation_route(operation: mir.Operation, values: map[mir.ValueId, mir.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
+def operation_route(operation: mir.Operation, values: map[universal.ValueId, mir.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
     match operation:
         case CompiledRegionCall: return error(PlannerGeneratedOperation(index))
         case Coverage: return universal.Standard
@@ -56,8 +56,8 @@ def operation_route(operation: mir.Operation, values: map[mir.ValueId, mir.Value
     return error(ConflictingCompilers(index, compilers.values()))
 
 
-def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, operations: list[mir.Operation], values: map[mir.ValueId, mir.Value]) -> CompileRegion | CompileError:
-    produced: set[mir.ValueId] = set()
+def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, operations: list[mir.Operation], values: map[universal.ValueId, mir.Value]) -> CompileRegion | CompileError:
+    produced: set[universal.ValueId] = set()
     for operation in operations:
         for output in operation_outputs(operation): produced.add(output)
     inputs: list[mir.Value] = []
@@ -77,7 +77,7 @@ def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, 
     return CompileRegion(id, compiler, operations, inputs, outputs, effects)
 
 
-def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
+def plan_block(block: mir.Block, values: map[universal.ValueId, mir.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
     segments: list[PlanSegment] = []
     current_standard: list[mir.Operation] = []
     current_custom: list[mir.Operation] = []
@@ -112,7 +112,7 @@ def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: uni
 
 
 def plan(module: mir.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
-    values: map[mir.ValueId, mir.Value] = {}
+    values: map[universal.ValueId, mir.Value] = {}
     for value in module.values: values[value.id] = value
     next_region: u32 = 0
     initializer_result = plan_block(module.initializer, values, types, next_region)

@@ -9,8 +9,8 @@ enum Visibility:
 
 class FunctionDecl:
     type_parameters: list[string]
-    parameters: list[ast.TypeAnnotation]
-    result: ast.TypeAnnotation
+    parameters: list[universal.TypeAnnotation]
+    result: universal.TypeAnnotation
     constraints: list[ast.GenericConstraint]
 
 
@@ -102,7 +102,7 @@ def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
             match item:
                 case Function:
                     name = declaration.name
-                    parameters: list[ast.TypeAnnotation] = []
+                    parameters: list[universal.TypeAnnotation] = []
                     for parameter in declaration.parameters:
                         parameters.append(parameter.annotation)
                     kind = DefKind.Function(FunctionDecl(declaration.type_parameters, parameters, declaration.result, declaration.constraints))

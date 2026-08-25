@@ -1,10 +1,11 @@
 import source
+import universal
 import "../expression/mod.sev"
 import "../types/mod.sev"
 
 class Binding:
     name: string
-    annotation: TypeAnnotation | None
+    annotation: universal.TypeAnnotation | None
     value: Expression
     update: bool
     preserve_error: bool
@@ -13,7 +14,7 @@ class Binding:
 
 class MatchCase:
     binding: string | None
-    annotation: TypeAnnotation | None
+    annotation: universal.TypeAnnotation | None
     body: list[Statement]
     span: source.Span
 

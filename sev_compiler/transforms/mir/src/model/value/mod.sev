@@ -1,10 +1,6 @@
 import universal
 
-class ValueId:
-    index: u32
-
 
 class Value:
-    id: ValueId
+    id: universal.ValueId
     type_id: universal.TypeId
-

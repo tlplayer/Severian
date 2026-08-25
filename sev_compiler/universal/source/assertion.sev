@@ -1,0 +1,5 @@
+class AssertionLocation:
+    file: string
+    line: u32
+    column: u32
+    expression: string
