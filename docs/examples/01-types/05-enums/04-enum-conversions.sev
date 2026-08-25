@@ -1,15 +1,21 @@
 enum TypeSymbols:
     Add {"+", "+="}
-    Sub {"-", "-"}
-    #Multiple types are allowed but they funnel to one enum, error if there is a conflict in symbol funneling 
-    Mult {"*", "*=",0}
+    Sub {"-", "-="}
+    # Multiple types can funnel to one canonical enum variant.
+    Mult {"*", "*=", 0}
 
 
-test "Conveting symbols to enums":
-    operations = ["+","-","*=","*",0]
+test "Converting symbols to enums":
+    operations = ["+", "-", "*=", "*"]
 
     for operation in operations:
-        TypeSymbol = TypeSymbols(operation)
+        symbol = TypeSymbols(operation)
+
+    assert(TypeSymbols("+") == TypeSymbols.Add)
+    assert(TypeSymbols("+=") == TypeSymbols.Add)
+    assert(TypeSymbols("-=") == TypeSymbols.Sub)
+    assert(TypeSymbols("*=") == TypeSymbols.Mult)
+    assert(TypeSymbols(0) == TypeSymbols.Mult)
 
     throws(TypeSymbols("/") -> Error)
 
@@ -18,4 +24,3 @@ test with compiler "Enums cannot share the same symbol":
         enum Fake:
             A {"+"}
             B {"+"}
-

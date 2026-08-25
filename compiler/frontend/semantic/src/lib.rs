@@ -1095,7 +1095,35 @@ impl Analyzer<'_> {
                 .iter()
                 .map(|variant| variant.name.as_str())
                 .collect::<BTreeSet<_>>();
+            let mut accepted_values: Vec<(&AstLiteral, &str)> = Vec::new();
             for variant in &declaration.variants {
+                if !variant.accepted_values.is_empty() && !variant.fields.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000213",
+                        format!(
+                            "enum variant `{}.{}` cannot combine accepted values with payload fields",
+                            declaration.name, variant.name
+                        ),
+                        Some(variant.span),
+                    ));
+                }
+                for value in &variant.accepted_values {
+                    if let Some((_, previous)) = accepted_values
+                        .iter()
+                        .find(|(accepted, _)| *accepted == value)
+                    {
+                        return Err(Diagnostic::new(
+                            "E000213",
+                            format!(
+                                "enum accepted value is shared by `{}.{previous}` and `{}.{}`",
+                                declaration.name, declaration.name, variant.name
+                            ),
+                            Some(variant.span),
+                        )
+                        .with_help("each accepted value must identify exactly one enum variant"));
+                    }
+                    accepted_values.push((value, variant.name.as_str()));
+                }
                 for transition in &variant.transitions {
                     if !variants.contains(transition.as_str()) {
                         return Err(Diagnostic::new(
@@ -6401,6 +6429,19 @@ impl Analyzer<'_> {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
                     }
+                    if self.enums.get(&path).is_some_and(|instance| {
+                        instance
+                            .variants
+                            .iter()
+                            .any(|variant| !variant.accepted_values.is_empty())
+                    }) {
+                        return self.enum_value_constructor(
+                            &path,
+                            arguments,
+                            expected,
+                            ast.span,
+                        );
+                    }
                     if self
                         .class_instances
                         .contains_key(&(path.clone(), Vec::new()))
@@ -8593,6 +8634,90 @@ impl Analyzer<'_> {
         })
     }
 
+    fn enum_value_constructor(
+        &mut self,
+        enum_name: &str,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let [argument] = arguments else {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!("enum conversion `{enum_name}` expects exactly one value"),
+                Some(span),
+            ));
+        };
+        if argument.name.is_some() {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!("enum conversion `{enum_name}` does not accept named arguments"),
+                Some(argument.span),
+            ));
+        }
+        let instance = self.enums[enum_name].clone();
+        if expected.is_some_and(|expected| expected != instance.ty) {
+            return Err(semantic_error(
+                "enum conversion does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+
+        let value = self.expression(&argument.value, None)?;
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let error = self.core_error_expression(
+            format!("value is not accepted by enum `{enum_name}`"),
+            span,
+        );
+        let mut converted = Expression {
+            id: self.next_id(),
+            type_id: instance.ty,
+            kind: ExpressionKind::Throw(Box::new(error)),
+            span,
+        };
+        for variant in instance.variants.iter().rev() {
+            for accepted in variant.accepted_values.iter().rev() {
+                let accepted = AstExpression {
+                    kind: AstExpressionKind::Literal(accepted.clone()),
+                    span,
+                };
+                let Ok(accepted) = self.expression(&accepted, Some(value.type_id)) else {
+                    continue;
+                };
+                let condition = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Equal,
+                        left: Box::new(value.clone()),
+                        right: Box::new(accepted),
+                    },
+                    span,
+                };
+                let canonical = self.enum_constructor(
+                    &format!("{enum_name}.{}", variant.name),
+                    &[],
+                    Some(instance.ty),
+                    span,
+                )?;
+                converted = Expression {
+                    id: self.next_id(),
+                    type_id: instance.ty,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(canonical),
+                        fallback: Box::new(converted),
+                    },
+                    span,
+                };
+            }
+        }
+        Ok(converted)
+    }
+
     fn default_expression(
         &mut self,
         type_id: TypeId,
@@ -9655,6 +9780,35 @@ impl Analyzer<'_> {
             kind: ExpressionKind::Throw(Box::new(error)),
             span,
         }
+    }
+
+    fn core_error_expression(
+        &mut self,
+        message: impl Into<String>,
+        span: severian_source::Span,
+    ) -> Expression {
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let error = self
+            .types
+            .resolve_name("Error")
+            .expect("bootstrap defines Error");
+        let message = self.string_expression(message, span);
+        let function = self.string_expression(
+            self.active_function_name
+                .clone()
+                .unwrap_or_else(|| "<module>".into()),
+            span,
+        );
+        self.runtime_call(
+            "__sev_error_create",
+            &[string, string],
+            error,
+            vec![message, function],
+            span,
+        )
     }
 
     fn field_condition(
@@ -14287,6 +14441,29 @@ mod tests {
         assert!(error
             .message
             .contains("Status.Received -> Status.Connecting"));
+    }
+
+    #[test]
+    fn enum_accepted_values_lower_to_canonical_variants() {
+        let (program, _) = analyze_source(
+            "enum Symbol:\n    Add {\"+\", \"+=\"}\n    Multiply {\"*\", \"*=\", 0}\ndef main():\n    add := Symbol(\"+=\")\n    multiply := Symbol(0)\n    assert(add == Symbol.Add)\n    assert(multiply == Symbol.Multiply)\n",
+        );
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn enum_accepted_values_must_identify_one_variant() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "ambiguous-enum.sev",
+            "enum Bad:\n    First {\"+\"}\n    Second {\"+\"}\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000213");
+        assert!(error.message.contains("Bad.First"));
+        assert!(error.message.contains("Bad.Second"));
     }
 
     #[test]

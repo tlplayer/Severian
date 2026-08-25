@@ -277,6 +277,7 @@ pub struct ClassDeclaration {
 pub struct EnumVariant {
     pub name: String,
     pub fields: Vec<PropertyDeclaration>,
+    pub accepted_values: Vec<crate::Literal>,
     pub transitions: Vec<String>,
     pub span: Span,
 }

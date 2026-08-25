@@ -737,6 +737,8 @@ impl Parser<'_> {
             };
             if self.at_identifier("def") {
                 items.push(Item::Function(self.function_declaration(decorators)?));
+            } else if self.at_identifier("enum") && decorators.is_empty() {
+                items.push(Item::Enum(self.enum_declaration()?));
             } else if !decorators.is_empty() {
                 return Err(self.error("expected `def` after compiler-case decorator"));
             } else {
@@ -1669,6 +1671,33 @@ impl Parser<'_> {
                     .span
                     .end;
             }
+            let mut accepted_values = Vec::new();
+            if self.take(&TokenKind::LeftBrace).is_some() {
+                if self.at(&TokenKind::RightBrace) {
+                    return Err(self.error("an enum accepted-value set cannot be empty"));
+                }
+                loop {
+                    let expression = self.expression(0)?;
+                    let ExpressionKind::Literal(value) = expression.kind else {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "an enum accepted value must be a literal",
+                            Some(expression.span),
+                        ));
+                    };
+                    accepted_values.push(value);
+                    if self.take(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                end = self
+                    .expect(
+                        &TokenKind::RightBrace,
+                        "expected `}` after enum accepted values",
+                    )?
+                    .span
+                    .end;
+            }
             let mut transitions = Vec::new();
             if self.take(&TokenKind::Arrow).is_some() {
                 loop {
@@ -1684,6 +1713,7 @@ impl Parser<'_> {
             variants.push(EnumVariant {
                 name: variant_name,
                 fields,
+                accepted_values,
                 transitions,
                 span: Span::new(variant_start.source, variant_start.start, end),
             });
