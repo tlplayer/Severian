@@ -1429,7 +1429,9 @@ fn remap_module_bindings(module: &mut severian_hir::Module, offset: u32) {
 fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
     for statement in &mut block.statements {
         match statement {
-            Statement::Sequence(block) => remap_block_bindings(block, offset),
+            Statement::Sequence(block) | Statement::Placement { body: block, .. } => {
+                remap_block_bindings(block, offset)
+            }
             Statement::Binding(binding) => binding.0 += offset,
             Statement::FieldUpdate { binding, value, .. }
             | Statement::FieldSet { binding, value, .. } => {

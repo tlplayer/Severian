@@ -203,6 +203,7 @@ pub(crate) fn analyze_with_package_functions(
         next_comprehension: 0,
         loop_depth: 0,
         unsafe_depth: 0,
+        execution_placement: None,
         next_class_type: u32::MAX,
     };
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
@@ -1007,6 +1008,7 @@ struct Analyzer<'a> {
     next_comprehension: u32,
     loop_depth: usize,
     unsafe_depth: usize,
+    execution_placement: Option<severian_universal::ExecutionPlacement>,
     functions: BTreeMap<String, Vec<FunctionId>>,
     source_functions: BTreeMap<String, Vec<severian_ast::FunctionDeclaration>>,
     mocks: BTreeMap<String, ActiveMock>,
@@ -2269,11 +2271,25 @@ impl Analyzer<'_> {
                 self.unsafe_depth -= 1;
                 Ok(Statement::Sequence(lowered?))
             }
-            AstStatement::Placement { body, .. } => Ok(Statement::Sequence(self.block(
-                body,
-                bindings,
-                result_type,
-            )?)),
+            AstStatement::Placement { policy, body, span } => {
+                let placement = severian_universal::ExecutionPlacement::parse(policy).ok_or_else(
+                    || {
+                        Diagnostic::new(
+                            "E000211",
+                            format!("unsupported execution placement `{policy}`"),
+                            Some(*span),
+                        )
+                    },
+                )?;
+                let previous = self.execution_placement.replace(placement);
+                let lowered = self.block(body, bindings, result_type);
+                self.execution_placement = previous;
+                Ok(Statement::Placement {
+                    placement,
+                    body: lowered?,
+                    span: *span,
+                })
+            }
             AstStatement::While {
                 condition,
                 initializer,
@@ -2411,10 +2427,31 @@ impl Analyzer<'_> {
                 Ok(Statement::Sequence(sequence))
             }
             AstStatement::For {
+                placement: Some(policy),
+                span,
+                ..
+            } => {
+                let mut nested = statement.clone();
+                let AstStatement::For { placement, .. } = &mut nested else {
+                    unreachable!()
+                };
+                *placement = None;
+                self.statement(
+                    &AstStatement::Placement {
+                        policy: policy.clone(),
+                        body: vec![nested],
+                        span: *span,
+                    },
+                    bindings,
+                    result_type,
+                )
+            }
+            AstStatement::For {
                 binding,
                 second_binding,
                 iterable,
                 initializer,
+                placement: None,
                 body,
                 span,
             } => {
@@ -4154,6 +4191,7 @@ impl Analyzer<'_> {
                 second_binding: clause.bindings.get(1).cloned(),
                 iterable: clause.iterable,
                 initializer: None,
+                placement: None,
                 body,
                 span: clause.span,
             }];
@@ -4564,7 +4602,9 @@ impl Analyzer<'_> {
         parameter: BindingId,
     ) -> ParameterEffect {
         match statement {
-            Statement::Sequence(block) => self.inferred_parameter_effect(block, parameter),
+            Statement::Sequence(block) | Statement::Placement { body: block, .. } => {
+                self.inferred_parameter_effect(block, parameter)
+            }
             Statement::Binding(binding) => self
                 .active_binding_effect(*binding, parameter)
                 .unwrap_or(ParameterEffect::Shared),
@@ -10960,6 +11000,12 @@ impl Analyzer<'_> {
             severian_universal::COMPILE_TYPE_ATTRIBUTE,
             severian_universal::AttrValue::Compiler(severian_universal::tensor::compiler_id()),
         );
+        if let Some(placement) = self.execution_placement {
+            attributes.insert(
+                severian_universal::EXECUTION_PLACEMENT_ATTRIBUTE,
+                severian_universal::AttrValue::String(placement.as_str().into()),
+            );
+        }
         if let Some(element) = self.tensor_element_type(result) {
             attributes.insert(
                 severian_universal::tensor::ELEMENT_TYPE,

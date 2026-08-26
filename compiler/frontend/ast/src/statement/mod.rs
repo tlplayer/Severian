@@ -122,6 +122,7 @@ pub enum Statement {
         second_binding: Option<String>,
         iterable: Expression,
         initializer: Option<Binding>,
+        placement: Option<String>,
         body: Vec<Statement>,
         span: Span,
     },

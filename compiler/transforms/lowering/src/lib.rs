@@ -147,6 +147,10 @@ mod cfg_lowering_entry {
             classes,
             storage_globals,
             initializer_cfg: Some(initializer_cfg),
+            gpu_architecture: context
+                .target
+                .rocm_device()
+                .map(|device| device.architecture.clone()),
         })
     }
 }
@@ -229,6 +233,13 @@ impl CfgLowering<'_> {
             }
             blocks.push(severian_lir::BasicBlock {
                 id: severian_lir::BlockId(block.id.0),
+                execution: block.execution.filter(|placement| match placement {
+                    severian_universal::ExecutionPlacement::Gpu => {
+                        self.target.rocm_device().is_some()
+                    }
+                    severian_universal::ExecutionPlacement::Host
+                    | severian_universal::ExecutionPlacement::Simd => true,
+                }),
                 operations,
                 operation_spans,
                 terminator,
@@ -1098,7 +1109,67 @@ fn lower_type(
 #[cfg(test)]
 mod cfg_tests {
     use super::*;
+    use severian_target::{Device, DeviceKind, FeatureSet};
     use severian_universal::{PrimitiveCategory, TypeContextBuilder};
+
+    #[test]
+    fn generic_gpu_cfg_blocks_are_selected_by_the_discovered_device() {
+        let mut types = TypeContextBuilder::new();
+        let unit = types.register_declaration("core.unit", "unit").unwrap();
+        types
+            .define_primitive(
+                unit,
+                PrimitiveCategory::Unit,
+                PrimitiveRepresentation::Unit,
+                true,
+            )
+            .unwrap();
+        let types = types.build();
+        let block = |id, execution, terminator| severian_mir::BasicBlock {
+            id: severian_mir::BlockId(id),
+            execution,
+            parameters: Vec::new(),
+            statements: Vec::new(),
+            statement_spans: Vec::new(),
+            terminator,
+            terminator_span: None,
+        };
+        let mir = severian_mir::Module {
+            initializer: severian_mir::CfgBody {
+                entry: severian_mir::BlockId(0),
+                blocks: vec![
+                    block(
+                        0,
+                        None,
+                        severian_mir::Terminator::Goto(severian_mir::BlockId(1), Vec::new()),
+                    ),
+                    block(
+                        1,
+                        Some(severian_universal::ExecutionPlacement::Gpu),
+                        severian_mir::Terminator::Goto(severian_mir::BlockId(2), Vec::new()),
+                    ),
+                    block(2, None, severian_mir::Terminator::Return(None)),
+                ],
+                locals: Vec::new(),
+                return_type: unit,
+            },
+            ..severian_mir::Module::default()
+        };
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "gfx1100".into(),
+            features: FeatureSet::from_names(["vendor.amd", "driver.rocm"]),
+        });
+
+        let lir = lower(&mir, &types, &target).unwrap();
+        assert_eq!(lir.gpu_architecture.as_deref(), Some("gfx1100"));
+        assert_eq!(
+            lir.initializer_cfg.as_ref().unwrap().blocks[1].execution,
+            Some(severian_universal::ExecutionPlacement::Gpu)
+        );
+    }
 
     #[test]
     fn uncaught_throws_terminate_through_the_runtime() {
@@ -1118,6 +1189,7 @@ mod cfg_tests {
                 entry: severian_mir::BlockId(0),
                 blocks: vec![severian_mir::BasicBlock {
                     id: severian_mir::BlockId(0),
+                    execution: None,
                     parameters: Vec::new(),
                     statements: Vec::new(),
                     statement_spans: Vec::new(),
@@ -1264,6 +1336,9 @@ mod legacy_structured_lowering {
                     })
                 })
                 .collect::<Result<Vec<_>, LoweringError>>()?,
+            gpu_architecture: target
+                .rocm_device()
+                .map(|device| device.architecture.clone()),
         })
     }
 

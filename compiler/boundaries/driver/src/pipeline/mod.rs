@@ -20,6 +20,7 @@ pub enum CompileError {
     Lowering(severian_lowering::LoweringError),
     Mlir(severian_mlir::MlirError),
     Backend(BackendError),
+    Component(String),
     NativeLink(String),
 }
 
@@ -45,6 +46,7 @@ impl fmt::Display for CompileError {
             Self::Lowering(error) => write!(formatter, "lowering failed: {error}"),
             Self::Mlir(error) => write!(formatter, "MLIR generation failed: {error}"),
             Self::Backend(error) => error.fmt(formatter),
+            Self::Component(error) => write!(formatter, "component provisioning failed: {error}"),
             Self::NativeLink(error) => formatter.write_str(error),
         }
     }
@@ -156,21 +158,23 @@ impl Compiler {
     }
 
     fn compile_plan_to_mlir(&self, plan: &CompilePlan) -> Result<String, CompileError> {
+        let target = crate::components::ensure_for_plan(plan, &self.target)
+            .map_err(CompileError::Component)?;
         let artifacts = self
             .compile_handlers
             .compile(
                 plan,
                 &CompileContext {
                     types: &self.context.types,
-                    target: &self.target,
+                    target: &target,
                 },
             )
             .map_err(CompileError::Compile)?;
         let resumed = plan.resumed_mir();
-        let lir = severian_lowering::lower(&resumed, &self.context.types, &self.target)
+        let lir = severian_lowering::lower(&resumed, &self.context.types, &target)
             .map_err(CompileError::Lowering)?;
         let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
-        severian_mlir::compose(&ordinary, &artifacts, &self.target).map_err(CompileError::Mlir)
+        severian_mlir::compose(&ordinary, &artifacts, &target).map_err(CompileError::Mlir)
     }
 
     pub fn compile_source(
@@ -844,6 +848,8 @@ impl Compiler {
             .expect("the driver crate is nested below the repository root");
         let standard = [
             ("cli", repository.join("library/system/cli")),
+            ("device", repository.join("library/system/device")),
+            ("driver", repository.join("library/system/driver")),
             ("environment", repository.join("library/system/environment")),
             ("file", repository.join("library/system/file")),
             ("io", repository.join("library/system/io")),

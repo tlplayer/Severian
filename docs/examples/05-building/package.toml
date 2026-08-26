@@ -26,7 +26,6 @@ type-safe = true
 
 [build]
 profile = "dev"
-backend = "auto"
 target = "host"
 incremental = true
 

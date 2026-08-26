@@ -2,7 +2,8 @@ use crate::{AssertionOrigin, CoverageKind, CoveragePoint, FunctionId, TaskOwner}
 use severian_hir::{Callee as HirCallee, Conversion};
 use severian_source::Span;
 use severian_universal::{
-    Attrs, BinaryOperator, DefId, LiteralValue, OpId, Substitution, TypeId, UnaryOperator,
+    Attrs, BinaryOperator, DefId, ExecutionPlacement, LiteralValue, OpId, Substitution, TypeId,
+    UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -203,6 +204,10 @@ pub enum Terminator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BasicBlock {
     pub id: BlockId,
+    /// Requested execution domain for this block. `None` is ordinary host
+    /// execution. This is structural CFG metadata rather than an operation
+    /// attribute so placement survives control-flow lowering.
+    pub execution: Option<ExecutionPlacement>,
     pub parameters: Vec<LocalId>,
     pub statements: Vec<Statement>,
     pub statement_spans: Vec<Option<Span>>,
@@ -224,6 +229,7 @@ impl Default for Body {
             entry: BlockId(0),
             blocks: vec![BasicBlock {
                 id: BlockId(0),
+                execution: None,
                 parameters: Vec::new(),
                 statements: Vec::new(),
                 statement_spans: Vec::new(),
@@ -315,7 +321,8 @@ fn collect_global_bindings(
     variables: &mut BTreeMap<severian_hir::VariableId, Place>,
 ) {
     match statement {
-        severian_hir::Statement::Sequence(block) => {
+        severian_hir::Statement::Sequence(block)
+        | severian_hir::Statement::Placement { body: block, .. } => {
             for statement in &block.statements {
                 collect_global_bindings(statement, module, globals, bindings, variables);
             }
@@ -357,6 +364,7 @@ struct BodyBuilder {
     catch_targets: Vec<CatchTarget>,
     terminated: BTreeSet<BlockId>,
     current_span: Option<Span>,
+    execution: Option<ExecutionPlacement>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -382,6 +390,7 @@ impl BodyBuilder {
                 entry: BlockId(0),
                 blocks: vec![BasicBlock {
                     id: BlockId(0),
+                    execution: None,
                     parameters: Vec::new(),
                     statements: Vec::new(),
                     statement_spans: Vec::new(),
@@ -400,6 +409,7 @@ impl BodyBuilder {
             catch_targets: Vec::new(),
             terminated: BTreeSet::new(),
             current_span: None,
+            execution: None,
         }
     }
 
@@ -416,6 +426,7 @@ impl BodyBuilder {
         let id = BlockId(self.body.blocks.len() as u32);
         self.body.blocks.push(BasicBlock {
             id,
+            execution: self.execution,
             parameters: Vec::new(),
             statements: Vec::new(),
             statement_spans: Vec::new(),
@@ -474,6 +485,7 @@ impl BodyBuilder {
     ) {
         let span = match statement {
             severian_hir::Statement::Sequence(_) | severian_hir::Statement::Return(None) => None,
+            severian_hir::Statement::Placement { span, .. } => Some(*span),
             severian_hir::Statement::FieldUpdate { value, .. }
             | severian_hir::Statement::FieldSet { value, .. }
             | severian_hir::Statement::Expression(value)
@@ -508,6 +520,30 @@ impl BodyBuilder {
         match statement {
             severian_hir::Statement::Sequence(block) => {
                 self.lower_statements(&block.statements, module);
+            }
+            severian_hir::Statement::Placement {
+                placement, body, ..
+            } => {
+                let previous = self.execution;
+                self.execution = Some(*placement);
+                let entry = self.block();
+                self.execution = previous;
+                let continuation = self.block();
+                self.terminate(Terminator::Goto(entry, Vec::new()));
+
+                self.execution = Some(*placement);
+                self.current = entry;
+                self.lower_statements(&body.statements, module);
+                let reaches_continuation = self.open(self.current);
+                if reaches_continuation {
+                    self.terminate(Terminator::Goto(continuation, Vec::new()));
+                }
+
+                self.execution = previous;
+                self.current = continuation;
+                if !reaches_continuation {
+                    self.terminate(Terminator::Unreachable);
+                }
             }
             severian_hir::Statement::FieldSet {
                 binding,

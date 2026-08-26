@@ -56,7 +56,7 @@ fn validate_statement(
     declared: &mut BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match statement {
-        Statement::Sequence(block) => {
+        Statement::Sequence(block) | Statement::Placement { body: block, .. } => {
             for statement in &block.statements {
                 validate_statement(statement, bindings, declared)?;
             }

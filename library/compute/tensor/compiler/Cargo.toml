@@ -11,7 +11,11 @@ workspace = true
 [dependencies]
 severian-compile = { path = "../../../../compiler/compile" }
 severian-mlir = { path = "../../../../compiler/transforms/mlir" }
+severian-target = { path = "../../../../compiler/target" }
 severian-universal = { path = "../../../../compiler/universal" }
 
 [lib]
 path = "src/lib.rs"
+
+[dev-dependencies]
+severian-artifact = { path = "../../../../compiler/artifact" }

@@ -1,0 +1,73 @@
+# CompileType handlers request a capability; the compiler chooses the matching
+# component for the discovered device and operating system. There is no
+# source-level or command-line backend switch.
+
+[[component]]
+id = "driver.rocm"
+kind = "driver"
+device = "gpu"
+vendor = "amd"
+provides = ["driver.rocm"]
+detect-all = ["/dev/kfd"]
+detect-any = ["/usr/bin/rocminfo", "/opt/rocm/bin/rocminfo"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "rocminfo", "rocm-hip-runtime"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "rocminfo", "rocm-hip"]
+
+[[component.install]]
+os = ["arch", "manjaro"]
+program = "pacman"
+arguments = ["-S", "--needed", "--noconfirm", "rocminfo", "hip-runtime-amd"]
+
+[[component]]
+id = "compiler.mlir-vector"
+kind = "compiler"
+device = "cpu"
+vendor = "any"
+provides = ["mlir.vector"]
+detect-all = []
+detect-any = []
+
+[[component]]
+id = "compiler.rocdl"
+kind = "compiler"
+device = "gpu"
+vendor = "amd"
+provides = ["mlir.rocdl"]
+detect-all = []
+detect-any = []
+
+[[component]]
+id = "runtime.mlir-rocm"
+kind = "runtime"
+device = "gpu"
+vendor = "amd"
+provides = ["runtime.mlir-rocm"]
+detect-all = []
+detect-any = ["/opt/rocm/lib/libmlir_rocm_runtime.so", "/opt/rocm/lib64/libmlir_rocm_runtime.so"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "rocmlir"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "rocmlir"]
+
+[[component.install]]
+os = ["arch", "manjaro"]
+program = "pacman"
+arguments = ["-S", "--needed", "--noconfirm", "rocmlir"]
+
+# XLA and Triton remain optional consumers. Installing a future component
+# manifest makes it a candidate for eligible tensor graph regions without
+# adding a user-facing flag.

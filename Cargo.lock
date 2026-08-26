@@ -305,13 +305,18 @@ version = "0.1.0"
 [[package]]
 name = "severian-target"
 version = "0.1.0"
+dependencies = [
+ "severian-universal",
+]
 
 [[package]]
 name = "severian-tensor-compiler"
 version = "0.1.0"
 dependencies = [
+ "severian-artifact",
  "severian-compile",
  "severian-mlir",
+ "severian-target",
  "severian-universal",
 ]
 

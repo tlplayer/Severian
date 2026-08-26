@@ -1,0 +1,25 @@
+import os
+import platform
+
+Cpu = "cpu"
+Gpu = "gpu"
+Rocm = "rocm"
+
+class Device:
+    name: string
+    kind: string
+    architecture: string
+    driver: string
+
+def rocm_available() -> bool:
+    # ROCm exposes the HSA compute device and a DRM render node. Requiring
+    # both avoids treating an ordinary display-only AMD device as executable.
+    runtime = os.exists("/usr/bin/rocminfo") or os.exists("/opt/rocm/bin/rocminfo")
+    return os.exists("/dev/kfd") and os.exists("/dev/dri/renderD128") and runtime
+
+def discover() -> list[Device]:
+    target = platform.current()
+    devices := [Device("host-cpu", Cpu, target.architecture, "native")]
+    if rocm_available():
+        devices.append(Device("renderD128", Gpu, "amdgpu", Rocm))
+    return devices

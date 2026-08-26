@@ -705,23 +705,39 @@ pub fn emit_mlir_executable_with_linker_arguments(
     output: &Path,
     linker_arguments: &[String],
 ) -> Result<Artifact, BackendError> {
+    let gpu_architecture = module
+        .split_once("severian.gpu.architecture = \"")
+        .and_then(|(_, suffix)| suffix.split_once('"').map(|(value, _)| value));
+    let mut lowering_arguments = vec!["--verify-each".to_owned(), "--canonicalize".to_owned()];
+    if let Some(architecture) = gpu_architecture {
+        lowering_arguments.extend([
+            "--gpu-kernel-outlining".to_owned(),
+            format!("--rocdl-attach-target=chip={architecture}"),
+            "--convert-gpu-to-rocdl".to_owned(),
+            "--gpu-module-to-binary".to_owned(),
+            "--gpu-to-llvm".to_owned(),
+        ]);
+    }
+    lowering_arguments.extend([
+        "--async-to-async-runtime".to_owned(),
+        "--async-runtime-ref-counting".to_owned(),
+        "--async-runtime-ref-counting-opt".to_owned(),
+        "--convert-async-to-llvm".to_owned(),
+        "--convert-scf-to-cf".to_owned(),
+        "--convert-math-to-llvm".to_owned(),
+        "--convert-arith-to-llvm".to_owned(),
+        "--convert-cf-to-llvm".to_owned(),
+        "--convert-func-to-llvm".to_owned(),
+        "--reconcile-unrealized-casts".to_owned(),
+    ]);
+    let lowering_arguments = lowering_arguments
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     let lowered = run_tool(
         "mlir-opt",
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
-        &[
-            "--verify-each",
-            "--canonicalize",
-            "--async-to-async-runtime",
-            "--async-runtime-ref-counting",
-            "--async-runtime-ref-counting-opt",
-            "--convert-async-to-llvm",
-            "--convert-scf-to-cf",
-            "--convert-math-to-llvm",
-            "--convert-arith-to-llvm",
-            "--convert-cf-to-llvm",
-            "--convert-func-to-llvm",
-            "--reconcile-unrealized-casts",
-        ],
+        &lowering_arguments,
         module.as_bytes(),
     )?;
     let llvm_ir = run_tool(
@@ -770,6 +786,16 @@ pub fn emit_mlir_executable_with_linker_arguments(
             format!("-L{libdir}"),
             format!("-Wl,-rpath,{libdir}"),
             "-lmlir_async_runtime".into(),
+        ]);
+    }
+    if gpu_architecture.is_some() {
+        clang_arguments.extend([
+            "-L/opt/rocm/lib".into(),
+            "-L/opt/rocm/lib64".into(),
+            "-Wl,-rpath,/opt/rocm/lib".into(),
+            "-Wl,-rpath,/opt/rocm/lib64".into(),
+            "-lamdhip64".into(),
+            "-lmlir_rocm_runtime".into(),
         ]);
     }
     clang_arguments.extend(linker_arguments.iter().cloned());
@@ -853,6 +879,7 @@ mod tests {
             classes: vec![],
             storage_globals: vec![],
             initializer_cfg: None,
+            gpu_architecture: None,
         };
         assert!(render_c(&module).unwrap().contains("int32_t v0 = 10;"));
     }

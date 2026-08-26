@@ -116,9 +116,12 @@ impl Context {
                 ffi::mlirGetDialectHandle__async__(),
                 ffi::mlirGetDialectHandle__cf__(),
                 ffi::mlirGetDialectHandle__func__(),
+                ffi::mlirGetDialectHandle__gpu__(),
                 ffi::mlirGetDialectHandle__llvm__(),
                 ffi::mlirGetDialectHandle__math__(),
+                ffi::mlirGetDialectHandle__rocdl__(),
                 ffi::mlirGetDialectHandle__scf__(),
+                ffi::mlirGetDialectHandle__vector__(),
             ] {
                 ffi::mlirDialectHandleInsertDialect(dialect, registry);
             }

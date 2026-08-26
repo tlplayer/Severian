@@ -1,0 +1,28 @@
+import device
+
+Native = "native"
+MlirVector = "mlir-vector"
+Rocdl = "rocdl"
+StableHloXla = "stablehlo-xla"
+Triton = "triton"
+
+class Driver:
+    backend: string
+    device_name: string
+
+def host() -> Driver:
+    return Driver(Native, "host-cpu")
+
+def simd() -> Driver:
+    # SIMD remains on the host, but is lowered through MLIR's vector route.
+    return Driver(MlirVector, "host-cpu")
+
+def rocm() -> Driver | None:
+    if device.rocm_available():
+        return Driver(Rocdl, "renderD128")
+    return None
+
+def gpu_backend() -> string:
+    if device.rocm_available():
+        return Rocdl
+    return ""

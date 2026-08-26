@@ -628,7 +628,7 @@ fn config_sync_preserves_existing_values() {
     fs::create_dir(root.join("src")).unwrap();
     fs::write(
         root.join("package.toml"),
-        "[package]\nname = \"sync\"\n\n[[bin]]\nname = \"sync\"\npath = \"src/main.sev\"\n\n[build]\nbackend = \"native\"\n",
+        "[package]\nname = \"sync\"\n\n[[bin]]\nname = \"sync\"\npath = \"src/main.sev\"\n",
     )
     .unwrap();
     fs::write(root.join("src/main.sev"), "print(\"sync\")\n").unwrap();
@@ -639,7 +639,6 @@ fn config_sync_preserves_existing_values() {
         String::from_utf8_lossy(&output.stderr)
     );
     let manifest = fs::read_to_string(root.join("package.toml")).unwrap();
-    assert!(manifest.contains("backend = \"native\""));
     assert!(manifest.contains("profile = \"dev\""));
     assert!(manifest.contains("target = \"host\""));
     fs::remove_dir_all(root).unwrap();

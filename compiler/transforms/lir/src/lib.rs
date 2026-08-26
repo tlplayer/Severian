@@ -330,6 +330,8 @@ pub enum Case {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BasicBlock {
     pub id: BlockId,
+    /// Execution domain retained from universal/HIR placement syntax.
+    pub execution: Option<severian_universal::ExecutionPlacement>,
     pub operations: Vec<Operation>,
     pub operation_spans: Vec<Option<Span>>,
     pub terminator: Terminator,
@@ -357,6 +359,9 @@ pub struct Module {
     pub classes: Vec<ClassDeclaration>,
     pub storage_globals: Vec<GlobalDecl>,
     pub initializer_cfg: Option<CfgBody>,
+    /// Concrete accelerator architecture selected by the compiler component
+    /// resolver (for example `gfx1100`).
+    pub gpu_architecture: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 use crate::{BindingId, Expression, TypeId, VariableId};
 use severian_source::Span;
-use severian_universal::BinaryOperator;
+use severian_universal::{BinaryOperator, ExecutionPlacement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
@@ -20,6 +20,11 @@ pub struct Binding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Sequence(Block),
+    Placement {
+        placement: ExecutionPlacement,
+        body: Block,
+        span: Span,
+    },
     Binding(BindingId),
     FieldUpdate {
         binding: BindingId,

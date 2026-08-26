@@ -1,0 +1,12 @@
+[package]
+name = "device"
+version = "0.1.0"
+edition = "2026"
+description = "Host and accelerator device discovery"
+
+[dependencies]
+os = { path = "../os" }
+platform = { path = "../platform" }
+
+[lib]
+path = "src/lib.sev"

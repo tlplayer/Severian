@@ -17,14 +17,6 @@ values = ["dev", "release"]
 description = "Build profile selection."
 
 [[option]]
-path = "build.backend"
-group = "Build"
-type = "enum"
-default = "auto"
-values = ["auto", "native", "xla"]
-description = "Backend selection policy."
-
-[[option]]
 path = "build.target"
 group = "Build"
 type = "string"

@@ -2,6 +2,7 @@
 
 mod context;
 mod conversion;
+mod execution;
 mod ids;
 mod literal;
 mod operation_registry;
@@ -13,6 +14,10 @@ pub mod types;
 
 pub use context::{UniversalContext, UniversalError};
 pub use conversion::{Constructor, Conversion, ConversionKind};
+pub use execution::{
+    ExecutionPlacement, EXECUTION_BACKEND_ATTRIBUTE, EXECUTION_DEVICE_ATTRIBUTE,
+    EXECUTION_PLACEMENT_ATTRIBUTE,
+};
 pub use ids::{
     CompilerId, DeclarationId, DefId, GenericParamId, InferVarId, InstanceId, PrimitiveId,
     RegionId, TyId, TypeId,

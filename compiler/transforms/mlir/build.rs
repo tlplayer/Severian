@@ -31,8 +31,11 @@ fn main() {
         println!("cargo:rustc-link-lib=static=MLIRCAPIArith");
         println!("cargo:rustc-link-lib=static=MLIRCAPIControlFlow");
         println!("cargo:rustc-link-lib=static=MLIRCAPIFunc");
+        println!("cargo:rustc-link-lib=static=MLIRCAPIGPU");
         println!("cargo:rustc-link-lib=static=MLIRCAPIMath");
+        println!("cargo:rustc-link-lib=static=MLIRCAPIROCDL");
         println!("cargo:rustc-link-lib=static=MLIRCAPISCF");
+        println!("cargo:rustc-link-lib=static=MLIRCAPIVector");
         println!("cargo:rustc-link-lib=dylib=MLIR");
         println!("cargo:rustc-link-lib=dylib={llvm_library}");
         println!("cargo:rustc-link-lib=dylib=c++");
@@ -59,9 +62,12 @@ fn build_linux_bridge(libdir: &str, llvm_library: &str) {
         "libMLIRCAPIAsync.a",
         "libMLIRCAPIControlFlow.a",
         "libMLIRCAPIFunc.a",
+        "libMLIRCAPIGPU.a",
         "libMLIRCAPILLVM.a",
         "libMLIRCAPIMath.a",
+        "libMLIRCAPIROCDL.a",
         "libMLIRCAPISCF.a",
+        "libMLIRCAPIVector.a",
     ];
     let mut mlir_archives = fs::read_dir(libdir)
         .expect("could not inspect the MLIR library directory")

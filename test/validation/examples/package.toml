@@ -13,6 +13,3 @@ testing = { path = "../../../library/testing" }
 compute = { path = "../../../library/compute" }
 system = { path = "../../../library/system" }
 tensor = { path = "../../../library/tensor" }
-
-[build]
-backend = "auto"

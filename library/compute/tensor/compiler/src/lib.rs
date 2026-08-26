@@ -2,7 +2,8 @@
 
 use severian_compile::{CompileContext, CompileError, CompileHandler, CompileRegion};
 use severian_mlir::{LoweredType, MlirArtifact};
-use severian_universal::{tensor, AttrValue, OpId};
+use severian_target::ExecutionBackend;
+use severian_universal::{tensor, AttrValue, ExecutionPlacement, OpId};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TensorCompiler;
@@ -24,6 +25,33 @@ impl CompileHandler for TensorCompiler {
                 operation.id
             ))
         })?;
+        let placement = operation
+            .attributes
+            .get(&severian_universal::EXECUTION_PLACEMENT_ATTRIBUTE)
+            .and_then(|value| match value {
+                AttrValue::String(value) => ExecutionPlacement::parse(value),
+                _ => None,
+            })
+            .unwrap_or(ExecutionPlacement::Host);
+        let backend = context
+            .target
+            .select_execution_backend(placement)
+            .map_err(|error| CompileError::InvalidArtifact(error.to_string()))?;
+        if !matches!(
+            backend,
+            ExecutionBackend::Native | ExecutionBackend::MlirVector
+        ) {
+            return Err(CompileError::InvalidArtifact(format!(
+                "tensor operation {:?} selected `{}` for device `{}`, but that optional lowering plugin is not installed",
+                operation.id,
+                backend.as_str(),
+                context
+                    .target
+                    .rocm_device()
+                    .map(|device| device.name.as_str())
+                    .unwrap_or("unspecified")
+            )));
+        }
         let parameters = (0..operation.operands.len())
             .map(|index| format!("%arg{index}: !llvm.ptr"))
             .collect::<Vec<_>>()
@@ -74,7 +102,9 @@ impl CompileHandler for TensorCompiler {
             })
             .unwrap_or("dynamic");
         let module = format!(
-            "module {{\n  func.func private @{symbol}({runtime_parameters}) -> !llvm.ptr\n  func.func @entry({parameters}) -> !llvm.ptr attributes {{severian.tensor.element_type = \"{element}\"}} {{\n{setup}    %result = func.call @{symbol}({call_arguments}) : ({call_types}) -> !llvm.ptr\n    return %result : !llvm.ptr\n  }}\n}}"
+            "module {{\n  func.func private @{symbol}({runtime_parameters}) -> !llvm.ptr\n  func.func @entry({parameters}) -> !llvm.ptr attributes {{severian.execution.backend = \"{}\", severian.execution.placement = \"{}\", severian.tensor.element_type = \"{element}\"}} {{\n{setup}    %result = func.call @{symbol}({call_arguments}) : ({call_types}) -> !llvm.ptr\n    return %result : !llvm.ptr\n  }}\n}}",
+            backend.as_str(),
+            placement.as_str(),
         );
         Ok(MlirArtifact {
             module,
@@ -108,7 +138,16 @@ fn runtime_symbol(operation: OpId) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_universal::{install_primitives, TypeContextBuilder};
+    use severian_artifact::CompiledRegionId;
+    use severian_compile::{CompileOperation, EffectSet};
+    use severian_target::TargetSpec;
+    use severian_universal::{install_primitives, Attrs, TypeContextBuilder};
+
+    fn types() -> severian_universal::TypeContext {
+        let mut builder = TypeContextBuilder::new();
+        install_primitives(&mut builder).unwrap();
+        builder.build()
+    }
 
     #[test]
     fn every_numeric_storage_width_has_one_stable_runtime_tag() {
@@ -127,5 +166,61 @@ mod tests {
                 Some(expected as u8)
             );
         }
+    }
+
+    fn region(placement: ExecutionPlacement) -> CompileRegion {
+        let mut attributes = Attrs::new();
+        attributes.insert(
+            severian_universal::EXECUTION_PLACEMENT_ATTRIBUTE,
+            AttrValue::String(placement.as_str().into()),
+        );
+        CompileRegion {
+            id: CompiledRegionId::new(0),
+            compiler: tensor::compiler_id(),
+            operations: Vec::new(),
+            compile_operations: vec![CompileOperation {
+                id: tensor::ADD,
+                operands: vec![severian_universal::TypeId(1); 2],
+                results: vec![severian_universal::TypeId(1)],
+                attributes,
+            }],
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            effects: EffectSet::default(),
+        }
+    }
+
+    #[test]
+    fn simd_is_an_explicit_mlir_vector_route() {
+        let types = types();
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let artifact = TensorCompiler
+            .compile(
+                &region(ExecutionPlacement::Simd),
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap();
+        assert!(artifact
+            .module
+            .contains("severian.execution.backend = \"mlir-vector\""));
+    }
+
+    #[test]
+    fn gpu_never_silently_uses_the_native_tensor_runtime() {
+        let types = types();
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let error = TensorCompiler
+            .compile(
+                &region(ExecutionPlacement::Gpu),
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("no supported AMD GPU"));
     }
 }

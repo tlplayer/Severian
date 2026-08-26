@@ -825,6 +825,7 @@ mod tests {
             blocks: vec![
                 BasicBlock {
                     id: BlockId(0),
+                    execution: None,
                     parameters: Vec::new(),
                     statements: vec![CfgStatement::Assign(
                         Place::local(shared),
@@ -849,6 +850,7 @@ mod tests {
                 },
                 BasicBlock {
                     id: BlockId(1),
+                    execution: None,
                     parameters: Vec::new(),
                     statements: vec![CfgStatement::Assign(
                         Place::local(exclusive),
@@ -873,6 +875,7 @@ mod tests {
             entry: BlockId(0),
             blocks: vec![BasicBlock {
                 id: BlockId(0),
+                execution: None,
                 parameters: Vec::new(),
                 statements: vec![
                     CfgStatement::Assign(
@@ -911,6 +914,7 @@ mod tests {
             entry: BlockId(0),
             blocks: vec![BasicBlock {
                 id: BlockId(0),
+                execution: None,
                 parameters: Vec::new(),
                 statements: vec![
                     CfgStatement::Assign(
@@ -950,6 +954,7 @@ mod tests {
             entry: BlockId(0),
             blocks: vec![BasicBlock {
                 id: BlockId(0),
+                execution: None,
                 parameters: Vec::new(),
                 statements: if argument {
                     vec![CfgStatement::Assign(

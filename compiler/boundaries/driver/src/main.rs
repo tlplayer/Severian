@@ -92,7 +92,6 @@ fn is_command(argument: &str) -> bool {
 struct CommonOptions {
     path: Option<PathBuf>,
     profile: Option<String>,
-    backend: Option<String>,
     target: Option<String>,
     bin: Option<String>,
     output: Option<PathBuf>,
@@ -129,7 +128,6 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
         }
         let destination = match argument.as_str() {
             "--profile" => Some(&mut options.profile),
-            "--backend" => Some(&mut options.backend),
             "--target" => Some(&mut options.target),
             "--bin" => Some(&mut options.bin),
             _ => None,
@@ -223,7 +221,6 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
 #[derive(Debug, Clone)]
 struct ResolvedConfig {
     profile: String,
-    backend: String,
     target: String,
     values: BTreeMap<String, ResolvedValue>,
     active_profile: BTreeMap<String, ResolvedValue>,
@@ -264,7 +261,6 @@ fn resolve_config(
     }
     for (path, override_value) in [
         ("build.profile", options.profile.as_ref()),
-        ("build.backend", options.backend.as_ref()),
         ("build.target", options.target.as_ref()),
     ] {
         if let Some(value) = override_value {
@@ -277,7 +273,6 @@ fn resolve_config(
         }
     }
     let profile = values["build.profile"].value.clone();
-    let backend = values["build.backend"].value.clone();
     let target = values["build.target"].value.clone();
     let prefix = format!("profile.{profile}.");
     let active_profile = values
@@ -292,7 +287,6 @@ fn resolve_config(
         .collect();
     Ok(ResolvedConfig {
         profile,
-        backend,
         target,
         values,
         active_profile,
@@ -562,9 +556,6 @@ fn compiler(
     manifest: Option<&Manifest>,
     include_root_dev: bool,
 ) -> Result<Compiler, String> {
-    if config.backend == "xla" {
-        return Err("whole-program `xla` is not available yet; use `auto` for native programs containing CompileType-selected kernels".into());
-    }
     let target = if config.target == "host" {
         TargetSpec::host()
     } else {
@@ -868,7 +859,7 @@ default:\n  sev [path] [-- args...]       Check, build, and run the default bina
 commands:\n  check   build   compile   run   test   new   init   config <show|sync|defaults>\n\n\
 build options:\n",
     );
-    for path in ["build.profile", "build.backend", "build.target"] {
+    for path in ["build.profile", "build.target"] {
         let option = catalog.get(path).expect("help option is cataloged");
         output.push_str(&format!(
             "  --{:<10} {} (default: {})\n",
@@ -888,20 +879,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn target_and_backend_are_distinct_options() {
+    fn target_selection_is_separate_from_application_arguments() {
         let options = parse_common(vec![
             "hello.sev".into(),
-            "--backend".into(),
-            "native".into(),
             "--target".into(),
             "wasm32-unknown-wasi".into(),
             "--".into(),
             "input.txt".into(),
         ])
         .unwrap();
-        assert_eq!(options.backend.as_deref(), Some("native"));
         assert_eq!(options.target.as_deref(), Some("wasm32-unknown-wasi"));
         assert_eq!(options.application_args, ["input.txt"]);
+    }
+
+    #[test]
+    fn backend_is_resolved_as_a_component_not_a_command_line_option() {
+        let error = parse_common(vec!["--backend".into(), "xla".into()]).unwrap_err();
+        assert!(error.contains("unknown option `--backend`"));
     }
 
     #[test]

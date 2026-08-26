@@ -767,12 +767,10 @@ mod tests {
     #[test]
     fn catalog_drives_defaults_validation_and_template() {
         let catalog = Catalog::load().unwrap();
-        assert_eq!(catalog.default("build.backend").unwrap(), "auto");
-        assert!(catalog.validate("build.backend", "xla").is_ok());
-        assert!(catalog.validate("build.backend", "gpu").is_err());
         let template = catalog.template("hello");
         assert!(template.contains("profile = \"dev\""));
-        assert!(template.contains("backend = \"auto\""));
+        assert!(template.contains("target = \"host\""));
+        assert!(!template.contains("backend ="));
     }
 
     #[test]

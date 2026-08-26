@@ -1,19 +1,15 @@
-import parallel
+import tensor
 
 
-def scale(values: list[float], factor: float) -> list[float]:
-    output: list[float] := []
-
-    for value in values:
-        output.append(value * factor)
-
-    return output
-
-
-test "simd placement preserves result":
+def simd_multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     with self and simd:
-        result = async scale([1.0, 2.0, 3.0, 4.0], 2.0)
+        result = left * right
+    return result
 
-    values = await result
 
-    assert(values == [2.0, 4.0, 6.0, 8.0])
+test "simd tensor placement uses the host vector component":
+    left = tensor([1.0, 2.0, 3.0, 4.0], [4])
+    right = tensor([2.0, 2.0, 2.0, 2.0], [4])
+    result = simd_multiply(left, right)
+
+    assert(result.values == [2.0, 4.0, 6.0, 8.0])

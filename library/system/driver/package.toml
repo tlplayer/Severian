@@ -1,0 +1,11 @@
+[package]
+name = "driver"
+version = "0.1.0"
+edition = "2026"
+description = "Execution backend selection over discovered devices"
+
+[dependencies]
+device = { path = "../device" }
+
+[lib]
+path = "src/lib.sev"

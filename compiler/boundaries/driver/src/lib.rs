@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+mod components;
 mod pipeline;
 
 pub use pipeline::{

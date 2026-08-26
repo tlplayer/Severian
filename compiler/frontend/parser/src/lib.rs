@@ -1291,8 +1291,9 @@ output = f"""module {{
             &test.body[1],
             severian_ast::Statement::For {
                 initializer: None,
+                placement: Some(policy),
                 ..
-            }
+            } if policy == "gpu"
         ));
     }
 }

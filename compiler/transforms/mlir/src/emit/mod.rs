@@ -126,7 +126,14 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             declaration.id
         ));
     }
-    output.push_str("module {\n");
+    if let Some(architecture) = &module.gpu_architecture {
+        output.push_str(&format!(
+            "module attributes {{severian.gpu.architecture = \"{}\"}} {{\n",
+            mlir_string(architecture)
+        ));
+    } else {
+        output.push_str("module {\n");
+    }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
@@ -393,7 +400,14 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             declaration.id
         ));
     }
-    output.push_str("module {\n");
+    if let Some(architecture) = &module.gpu_architecture {
+        output.push_str(&format!(
+            "module attributes {{severian.gpu.architecture = \"{}\"}} {{\n",
+            mlir_string(architecture)
+        ));
+    } else {
+        output.push_str("module {\n");
+    }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
@@ -598,7 +612,15 @@ fn render_cfg_body_function(
     };
     output.push_str(&format!("  func.func @{symbol}({parameters}){result} {{\n"));
     let mut task_locals = BTreeMap::new();
+    let gpu_regions = gpu_regions(body)?;
+    let gpu_blocks = gpu_regions
+        .values()
+        .flat_map(|region| region.blocks.iter().copied())
+        .collect::<BTreeSet<_>>();
     for block in &body.blocks {
+        if gpu_blocks.contains(&block.id) {
+            continue;
+        }
         if block.id != body.entry {
             output.push_str(&format!("  ^bb{}:\n", block.id.0));
         }
@@ -645,9 +667,261 @@ fn render_cfg_body_function(
                 &mut task_locals,
             )?;
         }
+        if let severian_lir::Terminator::Goto(target) = block.terminator {
+            if let Some(region) = gpu_regions.get(&target) {
+                render_gpu_region(output, module, body, region, &mut task_locals)?;
+                output.push_str(&format!("    cf.br ^bb{}\n", region.exit.0));
+                continue;
+            }
+        }
         render_cfg_terminator(output, module, &block.terminator, 4)?;
     }
     output.push_str("  }\n");
+    Ok(())
+}
+
+#[derive(Debug)]
+struct GpuCfgRegion {
+    entry: severian_lir::BlockId,
+    exit: severian_lir::BlockId,
+    blocks: BTreeSet<severian_lir::BlockId>,
+}
+
+fn cfg_successors(terminator: &severian_lir::Terminator) -> Vec<severian_lir::BlockId> {
+    match terminator {
+        severian_lir::Terminator::Goto(target) => vec![*target],
+        severian_lir::Terminator::Branch {
+            then_block,
+            else_block,
+            ..
+        } => vec![*then_block, *else_block],
+        severian_lir::Terminator::Switch {
+            targets, fallback, ..
+        } => targets
+            .iter()
+            .map(|(_, target)| *target)
+            .chain(std::iter::once(*fallback))
+            .collect(),
+        severian_lir::Terminator::Call { target, .. } => vec![*target],
+        severian_lir::Terminator::Return(_)
+        | severian_lir::Terminator::Throw(_)
+        | severian_lir::Terminator::Unreachable => Vec::new(),
+    }
+}
+
+/// Finds maximal CFG components selected for GPU execution. Placement is
+/// deliberately analyzed after ordinary lowering, so this is independent of
+/// the source operator or the value type being processed.
+fn gpu_regions(
+    body: &severian_lir::CfgBody,
+) -> Result<BTreeMap<severian_lir::BlockId, GpuCfgRegion>, MlirError> {
+    use severian_universal::ExecutionPlacement;
+
+    let gpu = body
+        .blocks
+        .iter()
+        .filter(|block| block.execution == Some(ExecutionPlacement::Gpu))
+        .map(|block| block.id)
+        .collect::<BTreeSet<_>>();
+    let entries = gpu
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            body.blocks.iter().any(|block| {
+                !gpu.contains(&block.id) && cfg_successors(&block.terminator).contains(candidate)
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut regions = BTreeMap::new();
+    let mut assigned = BTreeSet::new();
+    for entry in entries {
+        let mut pending = vec![entry];
+        let mut blocks = BTreeSet::new();
+        let mut exits = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !blocks.insert(id) {
+                continue;
+            }
+            let block = body.blocks.get(id.0 as usize).ok_or_else(|| {
+                MlirError::UnsupportedOperation(format!("unknown GPU block {}", id.0))
+            })?;
+            for successor in cfg_successors(&block.terminator) {
+                if gpu.contains(&successor) {
+                    pending.push(successor);
+                } else {
+                    exits.insert(successor);
+                }
+            }
+        }
+        if exits.len() != 1 {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "GPU CFG region at block {} requires one host continuation, found {}",
+                entry.0,
+                exits.len()
+            )));
+        }
+        if blocks.iter().any(|block| !assigned.insert(*block)) {
+            return Err(MlirError::UnsupportedOperation(
+                "overlapping GPU CFG regions are not supported".into(),
+            ));
+        }
+        regions.insert(
+            entry,
+            GpuCfgRegion {
+                entry,
+                exit: *exits.iter().next().expect("checked one exit"),
+                blocks,
+            },
+        );
+    }
+    if assigned != gpu {
+        return Err(MlirError::UnsupportedOperation(
+            "GPU CFG region has no ordinary host entry".into(),
+        ));
+    }
+    Ok(regions)
+}
+
+fn render_gpu_region(
+    output: &mut String,
+    module: &Module,
+    body: &severian_lir::CfgBody,
+    region: &GpuCfgRegion,
+    task_locals: &mut BTreeMap<severian_lir::LocalId, ValueId>,
+) -> Result<(), MlirError> {
+    output.push_str(&format!(
+        "    %gpu_one_{} = arith.constant 1 : index\n",
+        region.entry.0
+    ));
+    output.push_str(&format!(
+        "    gpu.launch blocks(%gpu_bx_{0}, %gpu_by_{0}, %gpu_bz_{0}) in (%gpu_gx_{0} = %gpu_one_{0}, %gpu_gy_{0} = %gpu_one_{0}, %gpu_gz_{0} = %gpu_one_{0}) threads(%gpu_tx_{0}, %gpu_ty_{0}, %gpu_tz_{0}) in (%gpu_sx_{0} = %gpu_one_{0}, %gpu_sy_{0} = %gpu_one_{0}, %gpu_sz_{0} = %gpu_one_{0}) {{\n",
+        region.entry.0
+    ));
+    for id in &region.blocks {
+        let block = body.blocks.get(id.0 as usize).ok_or_else(|| {
+            MlirError::UnsupportedOperation(format!("unknown GPU block {}", id.0))
+        })?;
+        if *id != region.entry {
+            output.push_str(&format!("    ^gpu{}_bb{}:\n", region.entry.0, id.0));
+        }
+        for (operation_index, operation) in block.operations.iter().enumerate() {
+            render_cfg_operation(
+                output,
+                module,
+                body,
+                block.id,
+                operation_index,
+                operation,
+                6,
+                task_locals,
+            )?;
+        }
+        render_gpu_terminator(output, module, &block.terminator, region, 6)?;
+    }
+    output.push_str(&format!("    ^gpu{}_exit:\n", region.entry.0));
+    output.push_str("      gpu.terminator\n");
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn gpu_label(target: severian_lir::BlockId, region: &GpuCfgRegion) -> Result<String, MlirError> {
+    if target == region.exit {
+        Ok(format!("^gpu{}_exit", region.entry.0))
+    } else if region.blocks.contains(&target) {
+        Ok(format!("^gpu{}_bb{}", region.entry.0, target.0))
+    } else {
+        Err(MlirError::UnsupportedOperation(format!(
+            "GPU CFG branch escapes to block {} instead of continuation {}",
+            target.0, region.exit.0
+        )))
+    }
+}
+
+fn render_gpu_terminator(
+    output: &mut String,
+    module: &Module,
+    terminator: &severian_lir::Terminator,
+    region: &GpuCfgRegion,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    match terminator {
+        severian_lir::Terminator::Goto(target) => {
+            output.push_str(&format!(
+                "{indentation}cf.br {}\n",
+                gpu_label(*target, region)?
+            ));
+        }
+        severian_lir::Terminator::Branch {
+            condition,
+            then_block,
+            else_block,
+        } => output.push_str(&format!(
+            "{indentation}cf.cond_br %v{}, {}, {}\n",
+            condition.0,
+            gpu_label(*then_block, region)?,
+            gpu_label(*else_block, region)?
+        )),
+        severian_lir::Terminator::Switch { .. } => {
+            return Err(MlirError::UnsupportedOperation(
+                "switch terminators in GPU CFG regions are not implemented".into(),
+            ));
+        }
+        severian_lir::Terminator::Call {
+            function: callee,
+            arguments,
+            destination,
+            target,
+        } => {
+            let callee = function(module, *callee)?;
+            let argument_values = arguments
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let argument_types = arguments
+                .iter()
+                .map(|value| value_type(module, *value).and_then(mlir_type))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            let result_type = mlir_type(callee.result)?;
+            if callee.result == LoweredType::Unit {
+                output.push_str(&format!(
+                    "{indentation}func.call @{}({argument_values}) : ({argument_types}) -> ()\n",
+                    function_symbol(callee)
+                ));
+            } else if let Some(destination) = destination {
+                output.push_str(&format!(
+                    "{indentation}%gpu_call_result_{}_{} = func.call @{}({argument_values}) : ({argument_types}) -> {result_type}\n",
+                    region.entry.0,
+                    target.0,
+                    function_symbol(callee)
+                ));
+                output.push_str(&format!(
+                    "{indentation}llvm.store %gpu_call_result_{}_{}, {} : {result_type}, !llvm.ptr\n",
+                    region.entry.0,
+                    target.0,
+                    cfg_place_address(destination)?
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}func.call @{}({argument_values}) : ({argument_types}) -> {result_type}\n",
+                    function_symbol(callee)
+                ));
+            }
+            output.push_str(&format!(
+                "{indentation}cf.br {}\n",
+                gpu_label(*target, region)?
+            ));
+        }
+        severian_lir::Terminator::Return(_)
+        | severian_lir::Terminator::Throw(_)
+        | severian_lir::Terminator::Unreachable => {
+            return Err(MlirError::UnsupportedOperation(
+                "GPU CFG regions must return control to their host continuation".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -2484,6 +2758,79 @@ mod tests {
     }
 
     #[test]
+    fn gpu_cfg_placement_becomes_a_gpu_launch_region() {
+        let integer = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let module = Module {
+            values: (0..3)
+                .map(|id| severian_lir::Value {
+                    id: ValueId(id),
+                    ty: integer,
+                })
+                .collect(),
+            initializer_cfg: Some(severian_lir::CfgBody {
+                entry: severian_lir::BlockId(0),
+                blocks: vec![
+                    severian_lir::BasicBlock {
+                        id: severian_lir::BlockId(0),
+                        execution: None,
+                        operations: Vec::new(),
+                        operation_spans: Vec::new(),
+                        terminator: severian_lir::Terminator::Goto(severian_lir::BlockId(1)),
+                        terminator_span: None,
+                    },
+                    severian_lir::BasicBlock {
+                        id: severian_lir::BlockId(1),
+                        execution: Some(severian_universal::ExecutionPlacement::Gpu),
+                        operations: vec![
+                            Operation::Constant {
+                                value: Constant::Integer("20".into()),
+                                result: ValueId(0),
+                            },
+                            Operation::Constant {
+                                value: Constant::Integer("22".into()),
+                                result: ValueId(1),
+                            },
+                            Operation::Binary {
+                                operator: BinaryOperation::Add,
+                                left: ValueId(0),
+                                right: ValueId(1),
+                                result: ValueId(2),
+                            },
+                        ],
+                        operation_spans: vec![None; 3],
+                        terminator: severian_lir::Terminator::Goto(severian_lir::BlockId(2)),
+                        terminator_span: None,
+                    },
+                    severian_lir::BasicBlock {
+                        id: severian_lir::BlockId(2),
+                        execution: None,
+                        operations: Vec::new(),
+                        operation_spans: Vec::new(),
+                        terminator: severian_lir::Terminator::Return(None),
+                        terminator_span: None,
+                    },
+                ],
+                locals: Vec::new(),
+                return_type: LoweredType::Unit,
+            }),
+            ..Module::default()
+        };
+
+        let rendered = render(&module).unwrap();
+        assert!(rendered.contains("gpu.launch blocks"));
+        assert!(rendered.contains("arith.addi %v0, %v1"));
+        assert!(rendered.contains("^gpu1_exit:"));
+        assert!(!rendered.contains("\n  ^bb1:"));
+        assert!(rendered.contains("cf.br ^bb2"));
+        let mut target = TargetSpec::host();
+        target.capabilities.insert("mlir.dialect.gpu");
+        compose(&rendered, &[], &target).unwrap();
+    }
+
+    #[test]
     fn strings_use_llvm_globals_without_changing_their_bytes() {
         assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
     }
@@ -2771,6 +3118,7 @@ mod tests {
             classes: vec![],
             storage_globals: vec![],
             initializer_cfg: None,
+            gpu_architecture: None,
         })
         .unwrap();
         let artifact = verify_artifact(
@@ -2821,6 +3169,7 @@ mod tests {
             classes: vec![],
             storage_globals: vec![],
             initializer_cfg: None,
+            gpu_architecture: None,
         })
         .unwrap();
 

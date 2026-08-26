@@ -1229,6 +1229,7 @@ impl Parser<'_> {
             }
             self.next();
             let iterable = self.expression(0)?;
+            let mut placement = None;
             let initializer = if self.at_identifier("with") {
                 self.next();
                 if matches!(
@@ -1239,10 +1240,9 @@ impl Parser<'_> {
                             "gpu" | "simd" | "simt" | "parallel" | "tasks" | "distributed"
                         )
                 ) {
-                    // Execution placement is a loop policy, not a loop
-                    // initializer binding. The native backend currently
-                    // executes the loop as a portable fallback.
-                    self.next();
+                    // Execution placement is retained separately from the
+                    // optional loop initializer and survives into semantic IR.
+                    placement = Some(self.identifier("expected an execution placement")?.0);
                     None
                 } else {
                     Some(self.binding()?)
@@ -1257,6 +1257,7 @@ impl Parser<'_> {
                 second_binding,
                 iterable,
                 initializer,
+                placement,
                 body,
                 span: Span::new(start.source, start.start, end),
             });
@@ -1305,6 +1306,7 @@ impl Parser<'_> {
                 second_binding: None,
                 iterable,
                 initializer: None,
+                placement: None,
                 body,
                 span: Span::new(start.source, start.start, end),
             });

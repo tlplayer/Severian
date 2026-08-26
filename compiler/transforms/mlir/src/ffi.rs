@@ -67,9 +67,12 @@ unsafe extern "C" {
     pub fn mlirGetDialectHandle__async__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__cf__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__func__() -> MlirDialectHandle;
+    pub fn mlirGetDialectHandle__gpu__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__llvm__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__math__() -> MlirDialectHandle;
+    pub fn mlirGetDialectHandle__rocdl__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__scf__() -> MlirDialectHandle;
+    pub fn mlirGetDialectHandle__vector__() -> MlirDialectHandle;
     pub fn mlirDialectHandleInsertDialect(handle: MlirDialectHandle, registry: MlirDialectRegistry);
 
     pub fn mlirModuleCreateParse(context: MlirContext, source: MlirStringRef) -> MlirModule;
