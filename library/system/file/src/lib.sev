@@ -1,8 +1,16 @@
 @c(symbol = "__sev_file_write_text")
 def write(path: string, contents: string) -> i32
 
+def write(path: string, contents: list[u8]) -> i32
+
 @c(symbol = "__sev_file_read_text")
 def read(path: string) -> string
+
+def open(path: string) -> int
+
+def read(handle: int, count: data_size) -> list[u8]
+
+def map(path: string) -> list[u8]
 
 @c(symbol = "__sev_file_lock")
 def native_lock(path: string) -> int

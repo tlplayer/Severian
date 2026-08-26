@@ -93,6 +93,11 @@ uintptr_t __sev_list_len(void *storage) {
     return list->length;
 }
 
+double __sev_list_bytes(void *storage) {
+    sev_list *list = storage;
+    return (double)list->length;
+}
+
 void *__sev_list_indices(void *storage) {
     sev_list *source = storage;
     sev_list *result = __sev_list_create();
@@ -478,6 +483,10 @@ _Bool __sev_list_equal_ptr(void *left_storage, void *right_storage) {
 }
 
 _Bool __sev_list_equal_bool(void *left_storage, void *right_storage) {
+    return __sev_list_equal_i64(left_storage, right_storage);
+}
+
+_Bool __sev_list_equal_u8(void *left_storage, void *right_storage) {
     return __sev_list_equal_i64(left_storage, right_storage);
 }
 
@@ -1045,6 +1054,10 @@ int64_t __sev_map_get_ptr_i64(void *keys_storage, void *values_storage, const ch
         }
     }
     return 0;
+}
+
+_Bool __sev_map_get_ptr_bool(void *keys_storage, void *values_storage, const char *key) {
+    return (_Bool)__sev_map_get_ptr_i64(keys_storage, values_storage, key);
 }
 
 const char *__sev_map_get_ptr_ptr(void *keys_storage, void *values_storage, const char *key) {

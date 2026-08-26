@@ -1226,4 +1226,29 @@ output = f"""module {{
                 if names == &["i", "j"]
         ));
     }
+
+    #[test]
+    fn parses_scoped_context_bindings_as_one_shot_blocks() {
+        let source = SourceFile::virtual_source(
+            "context.sev",
+            "test:\n    path = \"value.bin\"\n    with file.open(path) as handle:\n        print(handle)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        assert!(matches!(
+            &test.body[1],
+            severian_ast::Statement::For {
+                binding,
+                second_binding: None,
+                iterable: severian_ast::Expression {
+                    kind: severian_ast::ExpressionKind::List(resources),
+                    ..
+                },
+                body,
+                ..
+            } if binding == "handle" && resources.len() == 1 && body.len() == 1
+        ));
+    }
 }

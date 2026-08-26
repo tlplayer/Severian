@@ -9725,6 +9725,200 @@ impl Analyzer<'_> {
         arguments: &[severian_ast::CallArgument],
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
+        let callable = callable_path(callee);
+        let positional = arguments
+            .iter()
+            .all(|argument| argument.name.is_none() && !argument.spread);
+        if callable.as_deref() == Some("file.write") && arguments.len() == 2 && positional {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let result = self
+                .types
+                .resolve_name("i32")
+                .expect("bootstrap defines i32");
+            let path = self.expression(&arguments[0].value, Some(string))?;
+            let byte = self
+                .types
+                .resolve_name("u8")
+                .expect("bootstrap defines u8");
+            let byte_list = self.instantiate_list_type(byte);
+            let contents = if matches!(arguments[1].value.kind, AstExpressionKind::List(_)) {
+                self.expression(&arguments[1].value, Some(byte_list))?
+            } else {
+                self.expression(&arguments[1].value, None)?
+            };
+            if contents.type_id == string {
+                return Ok(Some(self.runtime_call(
+                    "__sev_file_write_text",
+                    &[string, string],
+                    result,
+                    vec![path, contents],
+                    span,
+                )));
+            }
+            if self.list_elements.get(&contents.type_id) == Some(&byte) {
+                let storage = self.list_storage_expression(contents, span);
+                return Ok(Some(self.runtime_call(
+                    "__sev_file_write_bytes",
+                    &[string, storage.type_id],
+                    result,
+                    vec![path, storage],
+                    span,
+                )));
+            }
+            return Err(Diagnostic::new(
+                "E000206",
+                "`file.write` expects string or list[u8] contents",
+                Some(arguments[1].value.span),
+            ));
+        }
+        if callable.as_deref() == Some("file.open") && arguments.len() == 1 && positional {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let path = self.expression(&arguments[0].value, Some(string))?;
+            return Ok(Some(self.runtime_call(
+                "__sev_file_open",
+                &[string],
+                integer,
+                vec![path],
+                span,
+            )));
+        }
+        if callable.as_deref() == Some("file.read") && positional {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            if let [path] = arguments {
+                let json = self
+                    .constant_string_value(&path.value)
+                    .is_some_and(|path| path.ends_with(".json"));
+                let path = self.expression(&path.value, Some(string))?;
+                if json {
+                    let boolean = self
+                        .types
+                        .resolve_name("bool")
+                        .expect("bootstrap defines bool");
+                    let result = self.instantiate_map_type(string, boolean);
+                    let keys = self.runtime_call(
+                        "__sev_file_read_json_bool_keys",
+                        &[string],
+                        string,
+                        vec![path.clone()],
+                        span,
+                    );
+                    let values = self.runtime_call(
+                        "__sev_file_read_json_bool_values",
+                        &[string],
+                        string,
+                        vec![path],
+                        span,
+                    );
+                    return Ok(Some(Expression {
+                        id: self.next_id(),
+                        type_id: result,
+                        kind: ExpressionKind::Aggregate {
+                            class: result,
+                            fields: vec![keys, values],
+                        },
+                        span,
+                    }));
+                }
+                return Ok(Some(self.runtime_call(
+                    "__sev_file_read_text",
+                    &[string],
+                    string,
+                    vec![path],
+                    span,
+                )));
+            }
+            if let [handle, count] = arguments {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let data_size = self
+                    .types
+                    .resolve_name("data_size")
+                    .expect("bootstrap defines data_size");
+                let handle = self.expression(&handle.value, Some(integer))?;
+                let count = self.expression(&count.value, Some(data_size))?;
+                let storage = self.runtime_call(
+                    "__sev_file_read_bytes",
+                    &[integer, data_size],
+                    string,
+                    vec![handle, count],
+                    span,
+                );
+                let byte = self
+                    .types
+                    .resolve_name("u8")
+                    .expect("bootstrap defines u8");
+                let result = self.instantiate_list_type(byte);
+                return Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: result,
+                    kind: ExpressionKind::Aggregate {
+                        class: result,
+                        fields: vec![storage],
+                    },
+                    span,
+                }));
+            }
+        }
+        if callable.as_deref() == Some("file.map") && arguments.len() == 1 && positional {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let path = self.expression(&arguments[0].value, Some(string))?;
+            let storage = self.runtime_call(
+                "__sev_file_map",
+                &[string],
+                string,
+                vec![path],
+                span,
+            );
+            let byte = self
+                .types
+                .resolve_name("u8")
+                .expect("bootstrap defines u8");
+            let result = self.instantiate_list_type(byte);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        if callable.as_deref() == Some("bytes") && arguments.len() == 1 && positional {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self.list_elements.contains_key(&value.type_id) {
+                let storage = self.list_storage_expression(value, span);
+                let data_size = self
+                    .types
+                    .resolve_name("data_size")
+                    .expect("bootstrap defines data_size");
+                return Ok(Some(self.runtime_call(
+                    "__sev_list_bytes",
+                    &[storage.type_id],
+                    data_size,
+                    vec![storage],
+                    span,
+                )));
+            }
+        }
         if let AstExpressionKind::TypeApplication {
             callee: application,
             arguments: type_arguments,
@@ -9954,6 +10148,20 @@ impl Analyzer<'_> {
             }));
         }
         Ok(None)
+    }
+
+    fn constant_string_value(&self, expression: &AstExpression) -> Option<String> {
+        match &expression.kind {
+            AstExpressionKind::Literal(AstLiteral::String(value)) => Some(value.clone()),
+            AstExpressionKind::Name(name) => {
+                let (binding, _, _) = self.names.get(name)?;
+                match &self.binding_values.get(binding)?.kind {
+                    ExpressionKind::Literal(LiteralValue::String(value)) => Some(value.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     fn list_storage_expression(

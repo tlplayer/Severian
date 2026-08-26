@@ -862,6 +862,7 @@ impl Parser<'_> {
                 || self.at_identifier("select")
                 || self.at_identifier("while")
                 || self.at_identifier("for")
+                || self.at_identifier("with")
                 || self.at_identifier("unsafe")
                 || self.at_identifier("try");
             if self.at_identifier("pass") {
@@ -1237,6 +1238,29 @@ impl Parser<'_> {
                 second_binding,
                 iterable,
                 initializer,
+                body,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("with") {
+            let start = self.next().span;
+            let resource = self.expression(0)?;
+            if !self.at_identifier("as") {
+                return Err(self.error("expected `as` after context expression"));
+            }
+            self.next();
+            let (binding, _) = self.identifier("expected a context binding after `as`")?;
+            self.expect(&TokenKind::Colon, "expected `:` after context binding")?;
+            let (body, end) = self.indented_block("with")?;
+            let iterable = Expression {
+                span: resource.span,
+                kind: ExpressionKind::List(vec![resource]),
+            };
+            return Ok(Statement::For {
+                binding,
+                second_binding: None,
+                iterable,
+                initializer: None,
                 body,
                 span: Span::new(start.source, start.start, end),
             });
