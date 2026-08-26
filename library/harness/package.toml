@@ -1,0 +1,18 @@
+[package]
+name = "harness"
+version = "0.1.0"
+edition = "2026"
+description = "Model execution harnesses, prompt context, and inference planning"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+data = { path = "../data", version = "0.1.0" }
+model = { path = "../model", version = "0.1.0" }
+storage = { path = "../data/storage", version = "0.1.0" }
+
+[package.metadata.library]
+category = "ai"
+implementation = "source-and-compiler-contracts"
+status = "experimental"

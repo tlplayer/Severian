@@ -1,0 +1,183 @@
+import os
+import path
+import process
+
+class ModelError: Error
+    message: string
+
+# A reference describes artifact location, not a bespoke implementation. The
+# same loader handles local directories, local SafeTensor files, ordinary URLs,
+# and Hugging Face repositories.
+class Reference:
+    locator: string
+    revision: string
+    config_name: string
+    tokenizer_name: string
+    weights_name: string
+
+class Artifact:
+    identifier: string
+    revision: string
+    root: string
+    config: string
+    tokenizer: string
+    weights: string
+    format: string
+
+class LoadedModel:
+    artifact: Artifact
+    architecture: string
+    parameters: int
+    dtype: string
+
+    def weights_path() -> string:
+        return artifact.weights
+
+def ready(selected: Artifact) -> bool:
+    return os.is_file(selected.weights) and os.file_size(selected.weights) > 0B
+
+def ready(loaded: LoadedModel) -> bool:
+    return ready(loaded.artifact)
+
+SmolLm2 = "HuggingFaceTB/SmolLM2-135M-Instruct"
+SmolLm2Revision = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+
+def reference(
+    locator: string,
+    revision: string = "main",
+    config: string = "config.json",
+    tokenizer: string = "tokenizer.json",
+    weights: string = "model.safetensors",
+) -> Reference:
+    return Reference(locator, revision, config, tokenizer, weights)
+
+def shell_quote(value: string) -> string:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def cache_key(locator: string) -> string:
+    return locator.replace("https://", "").replace("http://", "").replace("hf://", "").replace("/", "--").replace(":", "-")
+
+def default_root(selected: Reference) -> string:
+    return "target/models/" + cache_key(selected.locator) + "/" + selected.revision
+
+def hugging_face_repository(locator: string) -> string:
+    if locator.starts_with("hf://"):
+        return locator[5:]
+    marker = "huggingface.co/"
+    if marker in locator:
+        suffix = locator.split(marker)[1]
+        parts = suffix.split("/")
+        assert(size(parts) >= 2, "Hugging Face URLs require an owner and repository")
+        return parts[0] + "/" + parts[1]
+    return locator
+
+def is_url(locator: string) -> bool:
+    return locator.starts_with("https://") or locator.starts_with("http://")
+
+def is_hugging_face(locator: string) -> bool:
+    return locator.starts_with("hf://") or "huggingface.co/" in locator or (not is_url(locator) and "/" in locator)
+
+def artifact(identifier: string, revision: string, root: string) -> Artifact:
+    return Artifact(
+        identifier,
+        revision,
+        root,
+        root + "/config.json",
+        root + "/tokenizer.json",
+        root + "/model.safetensors",
+        "safetensors",
+    )
+
+def valid_artifact(root: string) -> bool:
+    selected = artifact("", "", root)
+    return ready(selected) and os.is_file(selected.config) and os.file_size(selected.config) > 0B and os.is_file(selected.tokenizer) and os.file_size(selected.tokenizer) > 0B
+
+def artifact_for(selected: Reference, root: string) -> Artifact:
+    return Artifact(
+        selected.locator,
+        selected.revision,
+        root,
+        root + "/" + selected.config_name,
+        root + "/" + selected.tokenizer_name,
+        root + "/" + selected.weights_name,
+        "safetensors",
+    )
+
+def download(url: string, destination: string) -> bool:
+    temporary = destination + ".partial"
+    command = "curl --fail --location --retry 3 --continue-at - --output " + shell_quote(temporary) + " " + shell_quote(url)
+    if process.run(command) != 0:
+        return false
+    return os.rename(temporary, destination) == 0
+
+def acquire_hugging_face(selected: Reference, root: string) -> Artifact:
+    result = artifact_for(selected, root)
+    if ready(result) and os.is_file(result.config):
+        return result
+    if not os.make_directories(root):
+        assert(false, "could not create model cache " + root)
+    repository = hugging_face_repository(selected.locator)
+    base = "https://huggingface.co/" + repository + "/resolve/" + selected.revision + "/"
+    if not os.is_file(result.config) and not download(base + selected.config_name, result.config):
+        assert(false, "could not acquire model config from " + selected.locator)
+    if not os.is_file(result.weights) and not download(base + selected.weights_name, result.weights):
+        assert(false, "could not acquire model weights from " + selected.locator)
+    # Tokenizers are optional because the same model container also represents
+    # vision, audio, embedding, and custom tensor models.
+    if selected.tokenizer_name != "" and not os.is_file(result.tokenizer):
+        _tokenizer_downloaded = download(base + selected.tokenizer_name, result.tokenizer)
+    assert(ready(result), "downloaded model artifact is incomplete")
+    return result
+
+def acquire_url(selected: Reference, root: string) -> Artifact:
+    if not os.make_directories(root):
+        assert(false, "could not create model cache " + root)
+    result = artifact_for(selected, root)
+    if not ready(result) and not download(selected.locator, result.weights):
+        assert(false, "could not acquire model weights from " + selected.locator)
+    return result
+
+def acquire_local(selected: Reference) -> Artifact:
+    if os.is_dir(selected.locator):
+        return artifact_for(selected, selected.locator)
+    assert(os.is_file(selected.locator), "model path does not exist: " + selected.locator)
+    root = path.dirname(selected.locator)
+    return Artifact(
+        selected.locator,
+        "local",
+        root,
+        root + "/" + selected.config_name,
+        root + "/" + selected.tokenizer_name,
+        selected.locator,
+        "safetensors",
+    )
+
+def load(selected: Reference, root: string = "") -> LoadedModel:
+    destination = default_root(selected) if root == "" else root
+    resolved := artifact_for(selected, destination)
+    if os.is_dir(selected.locator) or os.is_file(selected.locator):
+        resolved = acquire_local(selected)
+    else:
+        if is_hugging_face(selected.locator):
+            resolved = acquire_hugging_face(selected, destination)
+        else:
+            if is_url(selected.locator):
+                resolved = acquire_url(selected, destination)
+            else:
+                assert(false, "model locator is not a path, URL, or Hugging Face repository: " + selected.locator)
+    # Configuration interpretation and architecture lowering happen after
+    # loading. They are intentionally not selected by checkpoint identity.
+    return LoadedModel(resolved, "auto", 0, "auto")
+
+def load(locator: string, root: string = "") -> LoadedModel:
+    return load(reference(locator), root)
+
+test "model references are generic and cache paths are deterministic":
+    selected = reference("hf://owner/model", "immutable-revision")
+    assert(hugging_face_repository(selected.locator) == "owner/model")
+    assert(default_root(selected) == "target/models/owner--model/immutable-revision")
+
+test "local artifacts do not require a model-specific provider":
+    selected = artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
+    assert(selected.identifier == "custom/model")
+    assert(not ready(selected))

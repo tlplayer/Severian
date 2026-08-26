@@ -1,0 +1,101 @@
+import data
+import model
+import storage
+
+class Options:
+    max_tokens: int
+    temperature: float
+    top_p: float
+    seed: int | None
+
+class Request:
+    prompt: string
+    context: data.Data
+    options: Options
+
+class Generation:
+    text: string
+    tokens: int
+    finish_reason: string
+
+class InferencePlan:
+    loaded: model.LoadedModel
+    request: Request
+    placement: string
+    backend: string
+
+# Runtimes implement formats or architecture families, never checkpoint IDs.
+# The compiler can select one from installed components when placement/backend
+# remain `auto`.
+trait Runtime:
+    @harness
+    def generate(plan: InferencePlan) -> Generation with { (plan) -> bool }
+
+class Harness:
+    loaded: model.LoadedModel
+    context: data.Data
+    system: string
+    template: string
+
+    def ready() -> bool:
+        return model.ready(loaded)
+
+    def with_data(value: data.Data) -> Harness:
+        return Harness(loaded, value, system, template)
+
+    def request(prompt: string, options: Options) -> Request:
+        return Request(prompt, context, options)
+
+    def plan(prompt: string, options: Options) -> InferencePlan:
+        return InferencePlan(loaded, Request(prompt, context, options), "auto", "auto")
+
+def options() -> Options:
+    return Options(128, 0.8, 0.9, None)
+
+def plan(value: Harness, prompt: string) -> InferencePlan:
+    return value.plan(prompt, options())
+
+def plan(value: Harness, prompt: string, selected: Options) -> InferencePlan:
+    return value.plan(prompt, selected)
+
+def wrap(loaded: model.LoadedModel, system: string = "", template: string = "{{ prompt }}") -> Harness:
+    return Harness(loaded, data.Data([], []), system, template)
+
+def wrap(locator: string, system: string = "", template: string = "{{ prompt }}") -> Harness:
+    return wrap(model.load(locator), system, template)
+
+def with_data(value: Harness, context: data.Data) -> Harness:
+    return Harness(value.loaded, context, value.system, value.template)
+
+def with_storage(
+    loaded: model.LoadedModel,
+    connection: storage.Connection,
+    resource: string,
+    system: string = "",
+    template: string = "{{ prompt }}",
+) -> Harness:
+    context = connection.data(resource) if connection.provider == "memory" else storage.read(connection.locator, resource)
+    return Harness(loaded, context, system, template)
+
+def on(plan: InferencePlan, placement: string) -> InferencePlan:
+    return InferencePlan(plan.loaded, plan.request, placement, plan.backend)
+
+def using(plan: InferencePlan, backend: string) -> InferencePlan:
+    return InferencePlan(plan.loaded, plan.request, plan.placement, backend)
+
+test "harness plans preserve Data context without choosing a backend flag":
+    artifact = model.artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
+    loaded = model.LoadedModel(artifact, "auto", 0, "auto")
+    context = data.Data(["name", "role"], [["Ada", "compiler"]])
+    configured = with_data(wrap(loaded), context)
+    plan = plan(configured, "Who works on the compiler?")
+    assert(size(plan.request.context.columns_data) == 2)
+    assert(plan.request.context.columns_data[0] == "name")
+    assert(plan.placement == "auto")
+    assert(plan.backend == "auto")
+
+test "placement is a component hint on the plan":
+    artifact = model.artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
+    loaded = model.LoadedModel(artifact, "auto", 0, "auto")
+    plan = on(plan(wrap(loaded), "hello"), "gpu")
+    assert(plan.placement == "gpu")

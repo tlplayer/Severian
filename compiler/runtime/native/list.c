@@ -26,6 +26,8 @@ typedef struct {
     size_t size;
 } sev_aggregate_box;
 
+extern const char *__sev_any_string(sev_pair_i64 value);
+
 static uintptr_t sev_f64_bits(double value) {
     uint64_t bits = 0;
     memcpy(&bits, &value, sizeof(bits));
@@ -377,6 +379,33 @@ const char *__sev_list_string_ptr(void *storage) {
         if (value == NULL) value = "None";
         size_t length = strlen(value);
         memcpy(result + offset, value, length);
+        offset += length;
+    }
+    result[offset++] = ']';
+    result[offset] = '\0';
+    return result;
+}
+
+const char *__sev_list_string_pair_i64(void *storage) {
+    sev_list *list = storage;
+    size_t capacity = 3;
+    for (size_t index = 0; index < list->length; ++index) {
+        sev_pair_i64 *value = (sev_pair_i64 *)list->values[index];
+        const char *rendered = value == NULL ? "None" : __sev_any_string(*value);
+        capacity += strlen(rendered) + 2;
+    }
+    char *result = sev_list_string_allocation(capacity);
+    size_t offset = 0;
+    result[offset++] = '[';
+    for (size_t index = 0; index < list->length; ++index) {
+        if (index != 0) {
+            result[offset++] = ',';
+            result[offset++] = ' ';
+        }
+        sev_pair_i64 *value = (sev_pair_i64 *)list->values[index];
+        const char *rendered = value == NULL ? "None" : __sev_any_string(*value);
+        size_t length = strlen(rendered);
+        memcpy(result + offset, rendered, length);
         offset += length;
     }
     result[offset++] = ']';
@@ -1253,6 +1282,93 @@ int64_t __sev_map_set_default_ptr_i64(
     __sev_list_push_ptr(keys, key);
     __sev_list_push_i64(values, fallback);
     return fallback;
+}
+
+_Bool __sev_map_get_default_ptr_bool(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    _Bool fallback
+) {
+    return (_Bool)__sev_map_get_default_ptr_i64(
+        keys_storage,
+        values_storage,
+        key,
+        (int64_t)fallback
+    );
+}
+
+void __sev_map_set_ptr_bool(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    _Bool value
+) {
+    __sev_map_set_ptr_i64(keys_storage, values_storage, key, (int64_t)value);
+}
+
+sev_pair_i64 __sev_map_get_default_ptr_pair_i64(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_pair_i64 fallback
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            sev_pair_i64 *value = (sev_pair_i64 *)values->values[index];
+            return value == NULL ? fallback : *value;
+        }
+    }
+    return fallback;
+}
+
+sev_list_value __sev_map_get_default_ptr_list(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_list_value fallback
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            sev_list_value result = {(void *)values->values[index]};
+            return result;
+        }
+    }
+    return fallback;
+}
+
+void __sev_map_set_ptr_list(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_list_value value
+) {
+    __sev_map_set_ptr_ptr(keys_storage, values_storage, key, (const char *)value.storage);
+}
+
+const void *__sev_map_get_default_ptr_aggregate(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    const void *fallback
+) {
+    const char *value = __sev_map_get_ptr_ptr(keys_storage, values_storage, key);
+    return value == NULL ? fallback : value;
+}
+
+void __sev_map_set_ptr_aggregate(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    const void *value
+) {
+    __sev_map_set_ptr_ptr(keys_storage, values_storage, key, (const char *)value);
 }
 
 void __sev_set_add_pair_i64(void *storage, sev_pair_i64 value) {

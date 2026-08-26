@@ -1,8 +1,8 @@
 # Machine-learning API corpus
 
 Severian uses snake_case spellings and keeps external frameworks at the import
-boundary. The corpus should prioritize these familiar names when adding typed,
-tested implementations.
+boundary. Names enter the public API only with typed behavior, compiler
+lowering, and tests; empty compatibility stubs do not count as coverage.
 
 ## Model lifecycle
 
@@ -10,8 +10,10 @@ tested implementations.
 `evaluate`, `compile`, `forward`, `parameters`, `weights`, `state`,
 `load_state`, and `summary`.
 
-`model.load` constructs a network. An existing network's `load`/`load_state`
-loads parameters into its declared architecture. `file.read` is not a synonym.
+`model.load` acquires a frozen artifact independently of checkpoint identity.
+Architecture/configuration lowering happens after acquisition. An existing
+network's `load` or `load_state` loads parameters into its declared
+architecture; `file.read` is not a synonym.
 
 ## Tensor operations
 
@@ -39,6 +41,3 @@ loads parameters into its declared architecture. `file.read` is not a synonym.
 `triplet_loss`, `sgd`, `adam`, `adamw`, `adagrad`, `adadelta`, `rmsprop`,
 `zero_grad`, `step`, `learning_rate`, `weight_decay`, `momentum`, `linear_lr`,
 `cosine_lr`, `exponential_lr`, and `reduce_lr_on_plateau`.
-
-Names enter the public API only with typed behavior, compiler lowering, and
-tests. Empty compatibility stubs do not count as corpus coverage.

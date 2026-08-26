@@ -861,7 +861,6 @@ impl Compiler {
             .expect("the driver crate is nested below the repository root");
         let standard = [
             ("abi", repository.join("library/interop/abi")),
-            ("ai", repository.join("library/ai")),
             ("cli", repository.join("library/system/cli")),
             ("csv", repository.join("library/data/csv")),
             ("data_format", repository.join("library/data/format")),
@@ -873,6 +872,7 @@ impl Compiler {
             ("io", repository.join("library/system/io")),
             ("json", repository.join("library/data/json")),
             ("math", repository.join("library/core/math")),
+            ("model", repository.join("library/model")),
             ("os", repository.join("library/system/os")),
             ("parallel", repository.join("library/compute/parallel")),
             ("path", repository.join("library/system/path")),
@@ -890,6 +890,14 @@ impl Compiler {
             .saturating_add(1);
         let mut standard_ids = BTreeMap::new();
         for (name, root) in standard {
+            let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+            if let Some(existing) = packages.packages.values().find(|package| {
+                std::fs::canonicalize(&package.root).unwrap_or_else(|_| package.root.clone())
+                    == canonical_root
+            }) {
+                standard_ids.insert(name.to_owned(), existing.id);
+                continue;
+            }
             let library = if name == "tensor" {
                 root.join("src/compiler.sev")
             } else {
@@ -1770,6 +1778,7 @@ mod tests {
             "io",
             "json",
             "math",
+            "model",
             "os",
             "parallel",
             "path",

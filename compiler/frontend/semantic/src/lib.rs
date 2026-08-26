@@ -1536,12 +1536,18 @@ impl Analyzer<'_> {
         // annotations may refer forward and through an imported namespace.
         let mut resolved_visible_instances = self.class_instances.clone();
         for package_class in classes {
-            if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
-                && package_class.declaration.name != "Tensor"
-            {
-                continue;
-            }
             if !package_class.declaration.type_parameters.is_empty() {
+                for lookup in package_class
+                    .lookups
+                    .get(&package_class.module)
+                    .into_iter()
+                    .flatten()
+                {
+                    self.classes
+                        .insert(lookup.clone(), package_class.declaration.clone());
+                    self.generic_class_constructors
+                        .insert(lookup.clone(), package_class.ty);
+                }
                 if let Some(source_module) = source_module {
                     for lookup in package_class
                         .lookups
@@ -1827,6 +1833,17 @@ impl Analyzer<'_> {
             }
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
                 return Ok(instance.ty);
+            }
+            let mut matching = self
+                .class_instances
+                .iter()
+                .filter(|((candidate, arguments), _)| {
+                    arguments.is_empty() && candidate.rsplit('.').next() == Some(name)
+                })
+                .map(|(_, instance)| instance.ty)
+                .collect::<BTreeSet<_>>();
+            if matching.len() == 1 {
+                return Ok(matching.pop_first().expect("one matching class type"));
             }
         }
         resolve_type_annotation(self.types, annotation)
@@ -4893,6 +4910,10 @@ impl Analyzer<'_> {
         ast: &AstExpression,
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
+        if expected == Some(any_type_id()) {
+            let expression = self.expression_inner(ast, None)?;
+            return self.box_any_value(expression, ast.span);
+        }
         let expression = self.expression_inner(ast, expected)?;
         match expected {
             Some(expected) => self.coerce(expression, expected, false),
@@ -7730,6 +7751,33 @@ impl Analyzer<'_> {
                         operator,
                         AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
                     ) {
+                        if resolved_left.type_id == any_type_id() {
+                            let any = self.ensure_any_type();
+                            let resolved_right = self.expression(right, Some(any))?;
+                            let boolean = self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool");
+                            let comparison = self.runtime_call(
+                                "__sev_any_equal",
+                                &[any, any],
+                                boolean,
+                                vec![resolved_left, resolved_right],
+                                ast.span,
+                            );
+                            if *operator == AstBinaryOperator::NotEqual {
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Unary {
+                                        operator: UnaryOperator::Not,
+                                        operand: Box::new(comparison),
+                                    },
+                                    span: ast.span,
+                                });
+                            }
+                            return Ok(comparison);
+                        }
                         if let Some(fallible) =
                             self.fallible_types.get(&resolved_left.type_id).copied()
                         {
@@ -8013,6 +8061,28 @@ impl Analyzer<'_> {
                         | AstBinaryOperator::GreaterEqual
                 ) {
                     let left_value = self.expression(left, None)?;
+                    if left_value.type_id == any_type_id() {
+                        let any = self.ensure_any_type();
+                        let right_value = self.expression(right, Some(any))?;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        let symbol = match operator {
+                            AstBinaryOperator::Less => "__sev_any_less",
+                            AstBinaryOperator::LessEqual => "__sev_any_less_equal",
+                            AstBinaryOperator::Greater => "__sev_any_greater",
+                            AstBinaryOperator::GreaterEqual => "__sev_any_greater_equal",
+                            _ => unreachable!(),
+                        };
+                        return Ok(self.runtime_call(
+                            symbol,
+                            &[any, any],
+                            boolean,
+                            vec![left_value, right_value],
+                            ast.span,
+                        ));
+                    }
                     let right_value = self.expression(right, None)?;
                     if left_value.type_id != right_value.type_id
                         && self.integer_primitive(left_value.type_id)
@@ -8225,6 +8295,25 @@ impl Analyzer<'_> {
                 let span = expression.span;
                 return Ok(self.runtime_call(
                     "__sev_float_from_string",
+                    &[string],
+                    expected,
+                    vec![expression],
+                    span,
+                ));
+            }
+            if requested.is_none()
+                && self.types.resolve_name("string") == Some(expression.type_id)
+                && matches!(
+                    self.types
+                        .definition(expected)
+                        .map(|definition| definition.name.as_str()),
+                    Some("int" | "i64")
+                )
+            {
+                let string = expression.type_id;
+                let span = expression.span;
+                return Ok(self.runtime_call(
+                    "__sev_int_from_string",
                     &[string],
                     expected,
                     vec![expression],
@@ -9170,7 +9259,7 @@ impl Analyzer<'_> {
             .iter()
             .zip(&constructor.parameters)
             .map(|(argument, parameter)| {
-                let parameter_type = resolve_type_annotation(self.types, &parameter.annotation)?;
+                let parameter_type = self.resolve_source_type(&parameter.annotation)?;
                 self.expression(&argument.value, Some(parameter_type))
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -10076,6 +10165,36 @@ impl Analyzer<'_> {
         let positional = arguments
             .iter()
             .all(|argument| argument.name.is_none() && !argument.spread);
+        if callable.as_deref() == Some("json.kind") && arguments.len() == 1 && positional {
+            let any = self.ensure_any_type();
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let value = self.expression(&arguments[0].value, Some(any))?;
+            return Ok(Some(self.runtime_call(
+                "__sev_any_kind",
+                &[any],
+                string,
+                vec![value],
+                span,
+            )));
+        }
+        if callable.as_deref() == Some("json.is_null") && arguments.len() == 1 && positional {
+            let any = self.ensure_any_type();
+            let boolean = self
+                .types
+                .resolve_name("bool")
+                .expect("bootstrap defines bool");
+            let value = self.expression(&arguments[0].value, Some(any))?;
+            return Ok(Some(self.runtime_call(
+                "__sev_any_is_null",
+                &[any],
+                boolean,
+                vec![value],
+                span,
+            )));
+        }
         if callable.as_deref() == Some("file.write") && arguments.len() == 2 && positional {
             let string = self
                 .types
@@ -13859,11 +13978,16 @@ impl Analyzer<'_> {
                 Some(callee.span),
             ));
         };
-        if method.parameters.len() != arguments.len() {
+        let required_parameters = method
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default.is_none())
+            .count();
+        if arguments.len() < required_parameters || arguments.len() > method.parameters.len() {
             return Err(Diagnostic::new(
                 "E000206",
                 format!(
-                    "method `{name}` expects {} argument(s), received {}",
+                    "method `{name}` expects {required_parameters} to {} argument(s), received {}",
                     method.parameters.len(),
                     arguments.len()
                 ),
@@ -13975,9 +14099,14 @@ impl Analyzer<'_> {
                 );
             }
             let resolved = (|| {
-                for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                for (index, parameter) in method.parameters.iter().enumerate() {
+                    let argument = arguments
+                        .get(index)
+                        .map(|argument| &argument.value)
+                        .or(parameter.default.as_ref())
+                        .expect("method arity validation requires a value or default");
                     let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                    let value = self.expression(&argument.value, Some(parameter_type))?;
+                    let value = self.expression(argument, Some(parameter_type))?;
                     self.value_substitutions
                         .insert(parameter.name.clone(), value);
                 }
@@ -18057,6 +18186,25 @@ mod tests {
         assert!(symbols.contains(&"__sev_any_from_bool"));
         assert!(symbols.contains(&"__sev_any_string"));
         assert!(symbols.contains(&"__sev_list_append_pair_i64"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn any_bindings_box_primitive_values() {
+        let (program, _) = analyze_source(
+            "def values():\n    boolean: Any = true\n    integer: Any = 42\n    text: Any = \"text\"\n",
+        );
+        let symbols = program.modules[0]
+            .functions
+            .iter()
+            .filter_map(|function| match &function.call_type {
+                severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
+                severian_hir::CallType::Severian => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_any_from_bool"));
+        assert!(symbols.contains(&"__sev_any_from_int"));
+        assert!(symbols.contains(&"__sev_any_from_string"));
         severian_mir::build(&program).unwrap();
     }
 }

@@ -1,7 +1,7 @@
 import json
 
 def inferred_types(rows: list[list[Any]], width: int) -> list[string]:
-    result := []
+    result: list[string] := []
     for position in range(width):
         kind := "null"
         for values in rows:
@@ -16,7 +16,7 @@ def inferred_types(rows: list[list[Any]], width: int) -> list[string]:
     return result
 
 def inferred_nullability(rows: list[list[Any]], width: int) -> list[bool]:
-    result := []
+    result: list[bool] := []
     for position in range(width):
         nullable := false
         for values in rows:

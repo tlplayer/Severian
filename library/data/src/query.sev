@@ -1,4 +1,4 @@
-import "src/expression.sev" as expression
+import "expression.sev" as expression
 
 class Step:
     operation: string
@@ -32,7 +32,7 @@ def limit(count: int) -> Step:
     return Step("limit", [], expression.literal(true), count, false)
 
 def copied(steps: list[Step]) -> list[Step]:
-    result := []
+    result: list[Step] := []
     for step in steps:
         result.append(step)
     return result

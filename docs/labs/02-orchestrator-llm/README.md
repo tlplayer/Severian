@@ -74,9 +74,11 @@ done
 [`model/model.toml`](model/model.toml) declares
 `HuggingFaceTB/SmolLM2-135M-Instruct`, BF16, greedy decoding, batch size one,
 and at most 32 generated tokens. The lab no longer contains a smoke classifier or checked-in substitute
-weights. `ai.model.load` dispatches to the SmolLM2 provider, pins revision
-`12fd25f77366fa6b3b4b768ec3050bf629380bac`, and acquires `config.json`, the
-official tokenizer, and `model.safetensors` into `target/models`.
+weights. `model.load` accepts a local path, direct URL, or Hugging Face
+reference. The lab pins revision
+`12fd25f77366fa6b3b4b768ec3050bf629380bac` and acquires `config.json`, the
+official tokenizer, and `model.safetensors` into `target/models` without a
+checkpoint-specific provider.
 
 Readiness requires the complete 269,060,552-byte safetensor artifact. A worker
 must not advertise readiness or fabricated generation while decoder lowering

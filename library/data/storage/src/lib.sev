@@ -1,0 +1,89 @@
+import data
+
+class StorageError: Error
+    message: string
+
+# Connection is backend-neutral. Provider packages own native handles and may
+# add their own connection classes while implementing the Storage contract.
+class Connection:
+    provider: string
+    locator: string
+    options: map[string, string]
+    tables: map[string, data.Data]
+
+    def data(resource: string) -> data.Data:
+        return tables.get(resource, data.Data([], []))
+
+trait Storage:
+    @storage
+    def read(locator: string, resource: string) -> data.Data with { (locator, resource) -> bool }
+
+class MemoryStorage: Storage
+    def read(locator: string, resource: string) -> data.Data with { locator == "memory" or locator.starts_with("memory://") }:
+        return data.Data([], [])
+
+def connect(locator: string, options: map[string, string] = {}) -> Connection:
+    provider = locator.split("://")[0] if "://" in locator else locator
+    return Connection(provider, locator, options, {})
+
+def memory() -> Connection:
+    return Connection("memory", "memory://", {}, {})
+
+def memory(tables: map[string, data.Data]) -> Connection:
+    return Connection("memory", "memory://", {}, tables)
+
+def put(connection: Connection, resource: string, value: data.Data) -> Connection:
+    connection.tables[resource] = value
+    return connection
+
+class StoragePlan:
+    model: string
+    resource: string
+    operations: list[string]
+
+def copied(values: list[string]) -> list[string]:
+    output: list[string] := []
+    for value in values:
+        output.append(value)
+    return output
+
+def relational_scan(table: string) -> StoragePlan:
+    return StoragePlan("relational", table, ["scan"])
+
+def document_get(collection: string, key: string) -> StoragePlan:
+    return StoragePlan("document", collection, ["get " + key])
+
+def key_value_get(table: string, key: string) -> StoragePlan:
+    return StoragePlan("key-value", table, ["get " + key])
+
+def append(plan: StoragePlan, operation: string) -> StoragePlan:
+    operations = copied(plan.operations)
+    operations.append(operation)
+    return StoragePlan(plan.model, plan.resource, operations)
+
+def inspect(plan: StoragePlan) -> list[string]:
+    output := ["model=" + plan.model, "resource=" + plan.resource]
+    for operation in plan.operations:
+        output.append("operation=" + operation)
+    return output
+
+def transaction(plans: list[StoragePlan]) -> list[string]:
+    operations := ["begin"]
+    for plan in plans:
+        operations.append(plan.model + ":" + plan.resource)
+        for operation in plan.operations:
+            operations.append("  " + operation)
+    operations.append("commit")
+    return operations
+
+test "memory storage returns the universal Data type":
+    people = data.Data(["name", "role"], [["Ada", "compiler"], ["Grace", "runtime"]])
+    connection = memory({"people": people})
+    selected = connection.data("people")
+    assert(selected.columns_data == ["name", "role"])
+    assert(size(selected.rows_data) == 2)
+
+test "storage plans remain backend neutral and inspectable":
+    plan = append(relational_scan("people"), "project name")
+    assert(inspect(plan) == ["model=relational", "resource=people", "operation=scan", "operation=project name"])
+    assert(transaction([plan]) == ["begin", "relational:people", "  scan", "  project name", "commit"])

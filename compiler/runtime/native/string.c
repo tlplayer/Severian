@@ -69,6 +69,10 @@ double __sev_float_from_string(const char *value) {
     return strtod(value, NULL);
 }
 
+int64_t __sev_int_from_string(const char *value) {
+    return strtoll(value, NULL, 10);
+}
+
 const char *__sev_string_from_bool(_Bool value) {
     return value ? "true" : "false";
 }

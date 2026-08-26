@@ -1,8 +1,8 @@
 [package]
-name = "ai"
+name = "model"
 version = "0.1.0"
 edition = "2026"
-description = "Model discovery, artifact acquisition, and inference contracts"
+description = "Backend-neutral model references, artifact acquisition, and loading"
 
 [lib]
 path = "src/lib.sev"

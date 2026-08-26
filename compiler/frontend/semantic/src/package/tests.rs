@@ -702,6 +702,25 @@ fn package_class_fields_survive_diamond_relative_imports() {
 }
 
 #[test]
+fn package_class_fields_resolve_qualified_classes_inside_lists() {
+    let root = temporary();
+    std::fs::write(root.join("query.sev"), "class Step:\n    name: string\n").unwrap();
+    std::fs::write(
+        root.join("lib.sev"),
+        "import \"query.sev\" as query\nclass Data:\n    steps: list[query.Step]\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(
+        &severian_modules::resolve(&root.join("lib.sev")).unwrap(),
+        &universal,
+    )
+    .unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn tensor_intrinsics_do_not_consume_other_package_namespaces_as_receivers() {
     let root = temporary();
     std::fs::write(

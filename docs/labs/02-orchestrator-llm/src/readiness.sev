@@ -1,4 +1,6 @@
-import ai
+import model
+import os
 
 def model_files(model_root: string) -> bool:
-    return ai.valid_artifact(model_root)
+    selected = model.artifact("", "", model_root)
+    return model.valid_artifact(model_root) and os.file_size(selected.weights) > 200MB

@@ -57,3 +57,71 @@ const char *__sev_any_string(sev_any value) {
             return "";
     }
 }
+
+const char *__sev_any_kind(sev_any value) {
+    switch (value.tag) {
+        case 0:
+            return "string";
+        case 1:
+            return "integer";
+        case 2:
+            return "float";
+        case 3:
+            return "boolean";
+        case 4:
+            return "character";
+        default:
+            return "null";
+    }
+}
+
+_Bool __sev_any_is_null(sev_any value) {
+    return value.tag < 0;
+}
+
+static int sev_any_compare(sev_any left, sev_any right) {
+    if ((left.tag == 1 || left.tag == 2) &&
+        (right.tag == 1 || right.tag == 2)) {
+        double left_number;
+        double right_number;
+        if (left.tag == 1) {
+            left_number = (double)left.payload;
+        } else {
+            memcpy(&left_number, &left.payload, sizeof(left_number));
+        }
+        if (right.tag == 1) {
+            right_number = (double)right.payload;
+        } else {
+            memcpy(&right_number, &right.payload, sizeof(right_number));
+        }
+        return left_number < right_number ? -1 : left_number > right_number ? 1 : 0;
+    }
+    if (left.tag != right.tag) {
+        return left.tag < right.tag ? -1 : 1;
+    }
+    if (left.tag == 0) {
+        return strcmp((const char *)(intptr_t)left.payload,
+                      (const char *)(intptr_t)right.payload);
+    }
+    return left.payload < right.payload ? -1 : left.payload > right.payload ? 1 : 0;
+}
+
+_Bool __sev_any_equal(sev_any left, sev_any right) {
+    return sev_any_compare(left, right) == 0;
+}
+
+_Bool __sev_any_less(sev_any left, sev_any right) {
+    return sev_any_compare(left, right) < 0;
+}
+
+_Bool __sev_any_less_equal(sev_any left, sev_any right) {
+    return sev_any_compare(left, right) <= 0;
+}
+
+_Bool __sev_any_greater(sev_any left, sev_any right) {
+    return sev_any_compare(left, right) > 0;
+}
+
+_Bool __sev_any_greater_equal(sev_any left, sev_any right) {
+    return sev_any_compare(left, right) >= 0;
+}

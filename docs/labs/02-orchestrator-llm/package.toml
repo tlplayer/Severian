@@ -23,7 +23,7 @@ name = "orchestrator_llm"
 path = "src/lib.sev"
 
 [dependencies]
-ai = { path = "../../../library/ai", version = "0.1.0" }
+model = { path = "../../../library/model", version = "0.1.0" }
 container = { path = "../../../library/system/container", version = "0.1.0" }
 device = { path = "../../../library/system/device", version = "0.1.0" }
 environment = { path = "../../../library/system/environment", version = "0.1.0" }

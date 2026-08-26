@@ -4,7 +4,9 @@ compute       execution/computation
 network       communication
 data          structured data/storage
 system        OS/machine interaction
-ai            model/agent infrastructure
+model         model artifacts and loading
+harness       model execution and serving contracts
+agent         higher-order model coordination
 media         visual/audio
 interop       external boundaries
 

@@ -1,4 +1,4 @@
-import ai
+import model
 import container
 import device
 import environment
@@ -126,7 +126,7 @@ def gateway(
 
 def main():
     root = environment.get("PWD", ".")
-    model_root = root + "/target/models/SmolLM2-135M-Instruct/" + ai.SmolLm2Revision
+    model_root = root + "/target/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
     executable = root + "/target/host/dev/bin/tiny-llm-worker"
     bundle_root = root + "/target/oci/tiny-llm"
     if process.run("sev build --bin tiny-llm-worker") != 0:

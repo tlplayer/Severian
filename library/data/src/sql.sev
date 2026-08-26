@@ -1,5 +1,3 @@
-import json
-
 class SqlQuery:
     relation: string
     columns: list[string]
@@ -20,18 +18,18 @@ def invalid(message: string) -> SqlQuery:
 def literal(text: string) -> Any:
     if size(text) >= 2 and text.starts_with("'") and text.ends_with("'"):
         return text[1:-1]
-    match json.decode[Any](text):
-        case value:
-            return value
-        failure _:
-            return text
+    if text == "true":
+        return true
+    if text == "false":
+        return false
+    return text
 
 def parse(statement: string) -> SqlQuery:
-    tokens = statement.replace(",", " , ").replace(";", " ").strip().words()
+    tokens = statement.replace(",", " , ").replace(";", " ").strip().split(" ")
     if size(tokens) < 4 or tokens[0].upper() != "SELECT":
         return invalid("SQL must start with SELECT")
 
-    columns := []
+    columns: list[string] := []
     cursor := 1
     while cursor < size(tokens) and tokens[cursor].upper() != "FROM":
         if tokens[cursor] != ",":

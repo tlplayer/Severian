@@ -1,10 +1,11 @@
 # storage
 
-`storage` is a backend-neutral logical-plan layer. Relational scans, document
-operations, key/value access, and Dynamo-style partition queries use the same
-inspectable `StoragePlan` representation. Transactions and migrations are
-validated before an adapter receives a plan.
+`storage` is a backend-neutral connection and logical-plan layer. Every read
+returns the canonical `data.Data` type from `library/data/src`; storage does
+not define a competing dataframe representation.
 
-The package does not pretend every data model is relational. Adapters preserve
-model-specific operations while sharing validation, inspection, transaction,
-and migration infrastructure.
+Provider packages implement the `storage.Storage` dispatch contract for their
+locator scheme. Relational scans, document operations, and key/value access
+remain distinct inspectable plans while sharing connection and transaction
+infrastructure. The in-memory provider is available for tests and harness
+context.

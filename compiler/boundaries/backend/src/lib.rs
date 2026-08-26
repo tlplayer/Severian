@@ -762,26 +762,11 @@ pub fn emit_mlir_executable_with_linker_arguments(
             .into_iter()
             .map(|source| source.to_string_lossy().into_owned()),
     );
+    // `-x c` is only for the native runtime sources. Any following positional
+    // inputs are linker inputs and must be detected from their file format.
+    clang_arguments.extend(["-x".into(), "none".into()]);
     if module.contains("async.") {
-        let llvm_config = tool("SEVERIAN_LLVM_CONFIG", "llvm-config-21");
-        let libdir_output = Command::new(&llvm_config)
-            .arg("--libdir")
-            .output()
-            .map_err(|source| BackendError::ToolSpawn {
-                tool: "llvm-config",
-                source,
-            })?;
-        if !libdir_output.status.success() {
-            return Err(BackendError::ToolFailed {
-                tool: "llvm-config",
-                diagnostic: String::from_utf8_lossy(&libdir_output.stderr)
-                    .trim()
-                    .to_owned(),
-            });
-        }
-        let libdir = String::from_utf8_lossy(&libdir_output.stdout)
-            .trim()
-            .to_owned();
+        let libdir = llvm_config(&["--libdir"])?;
         clang_arguments.extend([
             format!("-L{libdir}"),
             format!("-Wl,-rpath,{libdir}"),
@@ -801,13 +786,26 @@ pub fn emit_mlir_executable_with_linker_arguments(
             .ancestors()
             .nth(3)
             .expect("backend crate is nested below the repository root");
-        let component_runtime = repository
-            .join("target/components/rocm-runtime/libmlir_rocm_runtime.so");
+        let component_runtime =
+            repository.join("target/components/rocm-runtime/libmlir_rocm_runtime.so");
         if component_runtime.is_file() {
             clang_arguments.push(component_runtime.to_string_lossy().into_owned());
         } else {
             clang_arguments.push("-lmlir_rocm_runtime".into());
         }
+        // MLIR's ROCm runtime wrapper uses LLVM support types internally.
+        // Keep this after the wrapper input so linkers using --as-needed retain
+        // the support library.
+        let llvm_libdir = llvm_config(&["--libdir"])?;
+        clang_arguments.extend([
+            format!("-L{llvm_libdir}"),
+            format!("-Wl,-rpath,{llvm_libdir}"),
+        ]);
+        clang_arguments.extend(
+            llvm_config(&["--libs", "support"])?
+                .split_whitespace()
+                .map(str::to_owned),
+        );
     }
     clang_arguments.extend(linker_arguments.iter().cloned());
     clang_arguments.extend(["-lm".into(), "-o".into(), output_path]);
@@ -825,6 +823,23 @@ pub fn emit_mlir_executable_with_linker_arguments(
         path: output.to_owned(),
         kind: ArtifactKind::Executable,
     })
+}
+
+fn llvm_config(arguments: &[&str]) -> Result<String, BackendError> {
+    let result = Command::new(tool("SEVERIAN_LLVM_CONFIG", "llvm-config-21"))
+        .args(arguments)
+        .output()
+        .map_err(|source| BackendError::ToolSpawn {
+            tool: "llvm-config",
+            source,
+        })?;
+    if !result.status.success() {
+        return Err(BackendError::ToolFailed {
+            tool: "llvm-config",
+            diagnostic: String::from_utf8_lossy(&result.stderr).trim().to_owned(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&result.stdout).trim().to_owned())
 }
 
 fn tool(variable: &str, default: &'static str) -> String {

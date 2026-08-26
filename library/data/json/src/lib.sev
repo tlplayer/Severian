@@ -22,6 +22,13 @@ def decode(source: string) -> Document:
 def encode(document: Document) -> string:
     return document.source
 
+def kind(value: Any) -> string
+
+def is_null(value: Any) -> bool
+
+def encode(values: list[Any]) -> string:
+    return string(values)
+
 def read(path: string) -> string:
     return decode(file.raw(path)).text()
 

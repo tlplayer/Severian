@@ -1,12 +1,12 @@
 import platform
 import json
-import "src/expression.sev" as expression
-import "src/query.sev" as query
-import "src/schema.sev" as schema_logic
-import "src/sql.sev" as sql_parser
+import "expression.sev" as expression
+import "query.sev" as query
+import "schema.sev" as schema_logic
+import "sql.sev" as sql_parser
 
 trait Source:
-    data() -> Data
+    def data() -> Data
 
 class Schema:
     columns: list[string]
@@ -42,51 +42,51 @@ class Row:
     def values() -> list[Any]:
         return values_data
     def as_map() -> map[string, Any]:
-        result := {}
+        result: map[string, Any] := {}
         for index in range(size(columns_data)):
             column = columns_data[index]
             result[column] = cell_at(values_data, index)
         return result
 
     def select(columns: list[string]) -> Row:
-        selected := []
+        selected: list[Any] := []
         for column in columns:
             selected.append(cell_at(values_data, column_position(columns_data, column)))
         return Row(columns, selected)
 
 def values_for(columns: list[string], row: Row) -> list[Any]:
-    values := []
+    values: list[Any] := []
     for column in columns:
         values.append(row.get(column))
     return values
 
 def normalized_key(row: Row, columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> string:
-    values := []
+    values: list[Any] := []
     for column in columns:
         value := row.get(column)
         if trim_strings:
-            value = value.strip()
+            value = string(value).strip()
         if column in lowercase_columns:
-            value = value.lower()
+            value = string(value).lower()
         values.append(value)
     return json.encode(values)
 
-def callback_key(row: Row, columns: list[string], normalize: Function[string, Any, Any]) -> string:
-    values := []
+def callback_key(row: Row, columns: list[string], normalize: (string, Any) -> Any) -> string:
+    values: list[Any] := []
     for column in columns:
         values.append(normalize(column, row.get(column)))
     return json.encode(values)
 
 def project_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> Data:
-    selected := []
+    selected: list[list[Any]] := []
     for values in source_rows:
         row = Row(source_columns, values)
         selected.append(values_for(columns, row))
     return Data(columns, selected)
 
 def deduplicate_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Data:
-    seen := {}
-    retained := []
+    seen: map[string, bool] := {}
+    retained: list[list[Any]] := []
     for values in source_rows:
         row = Row(source_columns, values)
         key = normalized_key(row, columns, lowercase_columns, trim_strings)
@@ -95,9 +95,9 @@ def deduplicate_records(source_columns: list[string], source_rows: list[list[Any
             seen[key] = true
     return Data(source_columns, retained)
 
-def deduplicate_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: Function[string, Any, Any]) -> Data:
-    seen := {}
-    retained := []
+def deduplicate_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: (string, Any) -> Any) -> Data:
+    seen: map[string, bool] := {}
+    retained: list[list[Any]] := []
     for values in source_rows:
         row = Row(source_columns, values)
         key = callback_key(row, columns, normalize)
@@ -106,15 +106,15 @@ def deduplicate_records_by(source_columns: list[string], source_rows: list[list[
             seen[key] = true
     return Data(source_columns, retained)
 
-def index_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: Function[string, Any, Any]) -> map[string, bool]:
-    index := {}
+def index_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: (string, Any) -> Any) -> map[string, bool]:
+    index: map[string, bool] := {}
     for values in source_rows:
         index[callback_key(Row(source_columns, values), columns, normalize)] = true
     return index
 
 def group_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> list[Data]:
-    order := []
-    groups := {}
+    order: list[string] := []
+    groups: map[string, list[list[Any]]] := {}
     for values in source_rows:
         row = Row(source_columns, values)
         key = normalized_key(row, columns, [], false)
@@ -131,12 +131,12 @@ def group_records(source_columns: list[string], source_rows: list[list[Any]], co
 def group_merge_records(
     source_columns: list[string],
     source_rows: list[list[Any]],
-    predicate: Function[Row, bool],
+    predicate: (Row) -> bool,
     columns: list[string],
-    merge: Function[Data, Row],
+    merge: (Data) -> Row,
 ) -> Data:
-    groups := {}
-    selected_keys := []
+    groups: map[string, list[list[Any]]] := {}
+    selected_keys: list[string] := []
     for values in source_rows:
         row = Row(source_columns, values)
         if predicate(row):
@@ -147,8 +147,8 @@ def group_merge_records(
             selected_keys.append(key)
         else:
             selected_keys.append("")
-    emitted := {}
-    retained := []
+    emitted: map[string, bool] := {}
+    retained: list[list[Any]] := []
     for index, values in enumerate(source_rows):
         key = selected_keys[index]
         if size(key) == 0:
@@ -233,7 +233,7 @@ class Data:
         position = column_position(columns_data, column)
         if position < 0:
             return []
-        result := []
+        result: list[Row] := []
         for values in rows_data:
             result.append(cell_at(values, position))
         return result
@@ -243,7 +243,7 @@ class Data:
         position = column_position(columns_data, column)
         if position < 0:
             return []
-        result := []
+        result: list[Any] := []
         for values in rows_data:
             result.append(cell_at(values, position))
         return result
@@ -254,22 +254,22 @@ class Data:
             return Data(columns_data, rows_data, steps, source_name)
         return project_records(columns_data, rows_data, columns)
     def drop(columns: list[string]) -> Data:
-        retained := []
+        retained: list[string] := []
         for column in columns_data:
             if not (column in columns):
                 retained.append(column)
         return project_records(columns_data, rows_data, retained)
     def rename(source: string, destination: string) -> Data:
-        columns := []
+        columns: list[string] := []
         for column in columns_data:
             columns.append(destination if column == source else column)
-        copied := []
+        copied: list[list[Any]] := []
         for values in rows_data:
             copied.append(values)
         return Data(columns, copied)
 
     def require_columns(required: list[string]) -> Data:
-        columns := []
+        columns: list[string] := []
         for column in required:
             if not (column in columns):
                 columns.append(column)
@@ -279,7 +279,7 @@ class Data:
         return project_records(columns_data, rows_data, columns)
 
     def append(row: map[string, Any]):
-        values := []
+        values: list[Any] := []
         for column in columns_data:
             values.append(row.get(column, ""))
         rows_data.append(values)
@@ -293,20 +293,20 @@ class Data:
 
     def lower(column: string) -> Data:
         position = column_position(columns_data, column)
-        transformed := []
+        transformed: list[list[Any]] := []
         for original in rows_data:
-            values := []
+            values: list[Any] := []
             for index in range(size(original)):
                 value = original[index]
-                values.append(value.lower() if index == position else value)
+                values.append(string(value).lower() if index == position else value)
             transformed.append(values)
         return Data(columns_data, transformed)
 
-    def transform(column: string, operation: Function[Any, Any]) -> Data:
+    def transform(column: string, operation: (Any) -> Any) -> Data:
         position = column_position(columns_data, column)
-        transformed := []
+        transformed: list[list[Any]] := []
         for original in rows_data:
-            values := []
+            values: list[Any] := []
             for index in range(size(original)):
                 value = original[index]
                 values.append(operation(value) if index == position else value)
@@ -314,25 +314,25 @@ class Data:
         return Data(columns_data, transformed)
 
     def strip(columns: list[string]) -> Data:
-        transformed := []
+        transformed: list[list[Any]] := []
         for original in rows_data:
-            values := []
+            values: list[Any] := []
             for index in range(size(original)):
                 value = original[index]
-                values.append(value.strip() if columns_data[index] in columns else value)
+                values.append(string(value).strip() if columns_data[index] in columns else value)
             transformed.append(values)
         return Data(columns_data, transformed)
 
     def where_not_empty(column: string) -> Data:
-        filtered := []
+        filtered: list[list[Any]] := []
         position = column_position(columns_data, column)
         for values in rows_data:
-            if position >= 0 and size(cell_at(values, position).strip()) > 0:
+            if position >= 0 and size(string(cell_at(values, position)).strip()) > 0:
                 filtered.append(values)
         return Data(columns_data, filtered)
 
-    def filter(predicate: Function[Row, bool]) -> Data:
-        filtered := []
+    def filter(predicate: (Row) -> bool) -> Data:
+        filtered: list[list[Any]] := []
         for values in rows_data:
             row = Row(columns_data, values)
             if predicate(row):
@@ -375,22 +375,22 @@ class Data:
     def unique_normalized(columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Data:
         return deduplicate_records(columns_data, rows_data, columns, lowercase_columns, trim_strings)
 
-    def unique_by(columns: list[string], normalize: Function[string, Any, Any]) -> Data:
+    def unique_by(columns: list[string], normalize: (string, Any) -> Any) -> Data:
         return deduplicate_records_by(columns_data, rows_data, columns, normalize)
 
     def index(columns: list[string]) -> map[string, bool]:
         return index_records_by(columns_data, rows_data, columns, |column, value| value)
 
-    def index_by(columns: list[string], normalize: Function[string, Any, Any]) -> map[string, bool]:
+    def index_by(columns: list[string], normalize: (string, Any) -> Any) -> map[string, bool]:
         return index_records_by(columns_data, rows_data, columns, normalize)
 
     def group(columns: list[string]) -> list[Data]:
         return group_records(columns_data, rows_data, columns)
 
     def group_merge(
-        predicate: Function[Row, bool],
+        predicate: (Row) -> bool,
         columns: list[string],
-        merge: Function[Data, Row],
+        merge: (Data) -> Row,
     ) -> Data:
         return group_merge_records(columns_data, rows_data, predicate, columns, merge)
 
@@ -411,7 +411,7 @@ class Data:
             if step.operation == "scan":
                 continue
             if step.operation == "filter":
-                retained := []
+                retained: list[list[Any]] := []
                 for values in result.rows_data:
                     if expression.evaluate(step.predicate, Row(result.columns_data, values).as_map()):
                         retained.append(values)
@@ -428,7 +428,7 @@ class Data:
         return result
 
     def explain() -> string:
-        steps := []
+        steps: list[query.Step] := []
         for step in query_steps:
             if step.operation != "scan":
                 steps.append(step)
