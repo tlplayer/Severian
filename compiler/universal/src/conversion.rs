@@ -186,10 +186,14 @@ fn classify(
             Float {
                 format: target_format,
             },
-        ) => Some(if float_format_fits(source_format, target_format) {
-            Promote
-        } else {
-            Lossy
+        ) => Some(match (source_format, target_format) {
+            // The source-level machine float widens canonically into the
+            // stable-width f64 type. Converting explicit f64 back to a
+            // target-dependent machine type remains explicit.
+            (FloatFormat::Machine, FloatFormat::Ieee(64)) => Promote,
+            (FloatFormat::Ieee(64), FloatFormat::Machine) => Lossy,
+            _ if float_format_fits(source_format, target_format) => Promote,
+            _ => Lossy,
         }),
         _ => None,
     }
@@ -272,9 +276,9 @@ fn float_shape(format: FloatFormat) -> Option<(u16, u16)> {
         FloatFormat::Ieee(16) => Some((5, 11)),
         FloatFormat::BrainFloat16 => Some((8, 8)),
         FloatFormat::Ieee(32) => Some((8, 24)),
-        FloatFormat::Ieee(64) => Some((11, 53)),
+        FloatFormat::Ieee(64) | FloatFormat::Machine => Some((11, 53)),
         FloatFormat::Ieee(128) => Some((15, 113)),
-        FloatFormat::Ieee(_) | FloatFormat::Machine => None,
+        FloatFormat::Ieee(_) => None,
     }
 }
 
@@ -309,6 +313,8 @@ mod tests {
         assert_eq!(kind("f8e5m2", "f8e4m3fn"), ConversionKind::Lossy);
         assert_eq!(kind("bf16", "f16"), ConversionKind::Lossy);
         assert_eq!(kind("f64", "f32"), ConversionKind::Lossy);
+        assert_eq!(kind("float", "f64"), ConversionKind::Promote);
+        assert_eq!(kind("f64", "float"), ConversionKind::Lossy);
         assert_eq!(kind("f64", "f128"), ConversionKind::Promote);
         assert_eq!(kind("f128", "f64"), ConversionKind::Lossy);
         assert_eq!(kind("int", "data_size"), ConversionKind::Lossy);

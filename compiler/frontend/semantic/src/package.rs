@@ -494,6 +494,12 @@ fn visible_class_names(
                     .is_some_and(&matches_class)
                 {
                     names.push(format!("{binding}.{}", class.declaration.name));
+                    // Tensor is the language-facing generic value type. Keep
+                    // its annotation available beside the `tensor(...)`
+                    // constructor after an ordinary `import tensor`.
+                    if class.declaration.name == "Tensor" {
+                        names.push("Tensor".into());
+                    }
                 }
             }
             resolution if matches_class(resolution) => names.push(binding.clone()),

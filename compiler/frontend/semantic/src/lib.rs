@@ -1747,10 +1747,22 @@ impl Analyzer<'_> {
             return Ok(self.instantiate_map_type(key, value));
         }
         if let Some((name, arguments)) = annotation.named_parts() {
-            if !arguments.is_empty() && self.classes.contains_key(name) {
-                return self
-                    .instantiate_class(name, arguments, annotation.span)
-                    .map(|class| class.ty);
+            let visible_name = self
+                .classes
+                .contains_key(name)
+                .then(|| name.to_owned())
+                .or_else(|| {
+                    self.classes
+                        .keys()
+                        .find(|candidate| candidate.rsplit('.').next() == Some(name))
+                        .cloned()
+                });
+            if !arguments.is_empty() {
+                if let Some(visible_name) = visible_name {
+                    return self
+                        .instantiate_class(&visible_name, arguments, annotation.span)
+                        .map(|class| class.ty);
+                }
             }
         }
         if let Some(name) = annotation.simple_name() {
@@ -2257,6 +2269,11 @@ impl Analyzer<'_> {
                 self.unsafe_depth -= 1;
                 Ok(Statement::Sequence(lowered?))
             }
+            AstStatement::Placement { body, .. } => Ok(Statement::Sequence(self.block(
+                body,
+                bindings,
+                result_type,
+            )?)),
             AstStatement::While {
                 condition,
                 initializer,
@@ -5232,6 +5249,26 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Name(name) => {
+                if name == "e" {
+                    let f64_type = self
+                        .types
+                        .resolve_name("f64")
+                        .expect("bootstrap defines f64");
+                    if expected.is_some_and(|expected| !self.types.assignable(f64_type, expected)) {
+                        return Err(semantic_error(
+                            "Euler's number does not satisfy the expected type".into(),
+                            ast.span,
+                        ));
+                    }
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: f64_type,
+                        kind: ExpressionKind::Literal(LiteralValue::Float(
+                            "2.718281828459045".into(),
+                        )),
+                        span: ast.span,
+                    });
+                }
                 if name == "absent" {
                     let Some(expected) = expected else {
                         return Err(Diagnostic::new(
@@ -5759,6 +5796,71 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(symbol) = callable_path(callee)
+                    .and_then(|path| path.strip_prefix("__operator__.").map(str::to_owned))
+                {
+                    let namespaces = self
+                        .active_operator_namespaces
+                        .get(&symbol)
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    let namespace = match namespaces.iter().collect::<Vec<_>>().as_slice() {
+                        [namespace] => (*namespace).as_str(),
+                        [] => {
+                            return Err(Diagnostic::new(
+                                "E000202",
+                                format!("symbol-pack operator `{symbol}` is not active"),
+                                Some(ast.span),
+                            )
+                            .with_help(format!(
+                                "decorate the containing function with `@namespace({symbol})`"
+                            )))
+                        }
+                        _ => {
+                            return Err(Diagnostic::new(
+                                "E000210",
+                                format!(
+                                    "symbol-pack operator `{symbol}` is ambiguous between namespaces: {}",
+                                    namespaces.into_iter().collect::<Vec<_>>().join(", ")
+                                ),
+                                Some(ast.span),
+                            ))
+                        }
+                    };
+                    if namespace == "tensor" && symbol == "X" {
+                        let matmul = AstExpression {
+                            kind: AstExpressionKind::Member {
+                                object: Box::new(AstExpression {
+                                    kind: AstExpressionKind::Name("tensor".into()),
+                                    span: callee.span,
+                                }),
+                                name: "matmul".into(),
+                            },
+                            span: callee.span,
+                        };
+                        return self
+                            .tensor_call(&matmul, arguments, expected, ast.span)?
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    "E000202",
+                                    "`tensor(X)` requires two compatible tensor operands",
+                                    Some(ast.span),
+                                )
+                            });
+                    }
+                    return Err(Diagnostic::new(
+                        "E000202",
+                        format!(
+                            "namespace `{namespace}` does not define symbol-pack operator `{symbol}`"
+                        ),
+                        Some(ast.span),
+                    ));
+                }
+                if let Some(call) = self.math_call(callee, arguments, expected, ast.span)? {
+                    return Ok(call);
+                }
                 if let Some(call) = self.system_surface_call(callee, arguments, ast.span)? {
                     return Ok(call);
                 }
@@ -7835,6 +7937,35 @@ impl Analyzer<'_> {
                 let right = self.prepare(right)?;
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
+                let fixed_width_float = |constraint| match constraint {
+                    TypeConstraint::Known(ty) => self.types.primitive(ty).is_some_and(|primitive| {
+                        matches!(
+                            primitive.representation,
+                            severian_universal::PrimitiveRepresentation::Float {
+                                format: severian_universal::FloatFormat::Ieee(_)
+                                    | severian_universal::FloatFormat::BrainFloat16
+                                    | severian_universal::FloatFormat::Float8E4M3Fn
+                                    | severian_universal::FloatFormat::Float8E5M2
+                            }
+                        )
+                    }),
+                    TypeConstraint::Literal(_) => false,
+                };
+                let known_integer = |constraint| match constraint {
+                    TypeConstraint::Known(ty) => self.integer_primitive(ty),
+                    TypeConstraint::Literal(_) => false,
+                };
+                if (known_integer(left_constraint) && fixed_width_float(right_constraint))
+                    || (fixed_width_float(left_constraint) && known_integer(right_constraint))
+                {
+                    return Err(self.binary_operator_error(
+                        TypeError::NoMatchingOperator(operator),
+                        operator,
+                        left_constraint,
+                        right_constraint,
+                        ast.span,
+                    ));
+                }
                 let resolved = self
                     .types
                     .resolve_binary(operator, left_constraint, right_constraint, expected)
@@ -10696,6 +10827,101 @@ impl Analyzer<'_> {
             }
         }
         None
+    }
+
+    fn math_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let Some(path) = callable_path(callee) else {
+            return Ok(None);
+        };
+        let name = path.rsplit('.').next().unwrap_or(&path);
+        if !matches!(
+            name,
+            "pow"
+                | "log"
+                | "ln"
+                | "log2"
+                | "log10"
+                | "sin"
+                | "cos"
+                | "tan"
+                | "floor"
+                | "ceil"
+                | "round"
+                | "isfinite"
+                | "isnan"
+        ) {
+            return Ok(None);
+        }
+        if arguments.iter().any(|argument| {
+            argument.name.is_some() || argument.spread || argument.expected_error.is_some()
+        }) {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("`{name}` accepts positional arguments only"),
+                Some(span),
+            ));
+        }
+        let f64_type = self
+            .types
+            .resolve_name("f64")
+            .expect("bootstrap defines f64");
+        let integer = self
+            .types
+            .resolve_name("int")
+            .expect("bootstrap defines int");
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let (symbol, parameter_types, result_type) = match (name, arguments.len()) {
+            ("pow", 2) => ("__sev_math_pow_f64", vec![f64_type, f64_type], f64_type),
+            ("log" | "ln", 1) => ("__sev_math_log_f64", vec![f64_type], f64_type),
+            ("log2", 1) => ("__sev_math_log2_f64", vec![f64_type], f64_type),
+            ("log10", 1) => ("__sev_math_log10_f64", vec![f64_type], f64_type),
+            ("sin", 1) => ("__sev_math_sin_f64", vec![f64_type], f64_type),
+            ("cos", 1) => ("__sev_math_cos_f64", vec![f64_type], f64_type),
+            ("tan", 1) => ("__sev_math_tan_f64", vec![f64_type], f64_type),
+            ("floor", 1) => ("__sev_math_floor_i64", vec![f64_type], integer),
+            ("ceil", 1) => ("__sev_math_ceil_i64", vec![f64_type], integer),
+            ("round", 2) => (
+                "__sev_math_round_digits_f64",
+                vec![f64_type, integer],
+                f64_type,
+            ),
+            ("isfinite", 1) => ("__sev_math_isfinite_f64", vec![f64_type], boolean),
+            ("isnan", 1) => ("__sev_math_isnan_f64", vec![f64_type], boolean),
+            _ => {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    format!("`{name}` received the wrong number of arguments"),
+                    Some(span),
+                ))
+            }
+        };
+        if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+            return Err(semantic_error(
+                format!("`{name}` does not satisfy the expected type"),
+                span,
+            ));
+        }
+        let resolved = arguments
+            .iter()
+            .zip(&parameter_types)
+            .map(|(argument, parameter)| self.expression(&argument.value, Some(*parameter)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(self.runtime_call(
+            symbol,
+            &parameter_types,
+            result_type,
+            resolved,
+            span,
+        )))
     }
 
     fn tensor_type(
@@ -14886,6 +15112,7 @@ fn collect_thrown_error_names(statements: &[AstStatement], names: &mut BTreeSet<
             AstStatement::While { body, .. }
             | AstStatement::For { body, .. }
             | AstStatement::Unsafe { body, .. }
+            | AstStatement::Placement { body, .. }
             | AstStatement::FallibleElse { body, .. } => {
                 collect_thrown_error_names(body, names);
             }
@@ -15113,7 +15340,7 @@ fn operator_namespaces(decorators: &[severian_ast::Decorator]) -> BTreeMap<Strin
             let severian_ast::DecoratorValue::Name(operator) = &argument.value else {
                 continue;
             };
-            if argument.name.is_none() && is_binary_operator_spelling(operator) {
+            if argument.name.is_none() {
                 namespaces
                     .entry(operator.clone())
                     .or_default()
@@ -15122,29 +15349,6 @@ fn operator_namespaces(decorators: &[severian_ast::Decorator]) -> BTreeMap<Strin
         }
     }
     namespaces
-}
-
-fn is_binary_operator_spelling(operator: &str) -> bool {
-    matches!(
-        operator,
-        "|" | "&"
-            | "^"
-            | "+"
-            | "-"
-            | "*"
-            | "/"
-            | "%"
-            | "**"
-            | "=="
-            | "!="
-            | "<"
-            | "<="
-            | ">"
-            | ">="
-            | "in"
-            | "and"
-            | "or"
-    )
 }
 
 fn tensor_literal_shape(expression: &AstExpression) -> Option<severian_universal::TensorShape> {
@@ -15878,6 +16082,9 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             AstStatement::Unsafe { body, .. } if block_flow(body) == ControlFlow::Returns => {
                 ControlFlow::Returns
             }
+            AstStatement::Placement { body, .. } if block_flow(body) == ControlFlow::Returns => {
+                ControlFlow::Returns
+            }
             AstStatement::Try {
                 body, catch_body, ..
             } if block_flow(body) == ControlFlow::Returns
@@ -15893,6 +16100,7 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             | AstStatement::Defer { .. }
             | AstStatement::Assert { .. }
             | AstStatement::Unsafe { .. }
+            | AstStatement::Placement { .. }
             | AstStatement::Try { .. }
             | AstStatement::FallibleElse { .. }
             | AstStatement::If { .. }

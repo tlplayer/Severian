@@ -86,6 +86,11 @@ pub enum Statement {
         body: Vec<Statement>,
         span: Span,
     },
+    Placement {
+        policy: String,
+        body: Vec<Statement>,
+        span: Span,
+    },
     Try {
         body: Vec<Statement>,
         catch_binding: String,

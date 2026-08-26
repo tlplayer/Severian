@@ -163,6 +163,16 @@ void __sev_list_push_i64(void *storage, int64_t value) {
     list->values[list->length++] = (uintptr_t)value;
 }
 
+void __sev_list_push_f64(void *storage, double value) {
+    sev_list *list = storage;
+    sev_list_reserve(list);
+    list->values[list->length++] = sev_f64_bits(value);
+}
+
+void __sev_list_push_float(void *storage, double value) {
+    __sev_list_push_f64(storage, value);
+}
+
 void __sev_list_push_u8(void *storage, uint8_t value) {
     sev_list *list = storage;
     sev_list_reserve(list);

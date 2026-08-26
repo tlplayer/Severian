@@ -160,7 +160,9 @@ fn apply_statement(statement: &mut Statement, edit: MutationEdit) -> bool {
                     .as_mut()
                     .is_some_and(|message| apply_expression(message, edit))
         }
-        Statement::Unsafe { body, .. } => apply_statements(body, edit),
+        Statement::Unsafe { body, .. } | Statement::Placement { body, .. } => {
+            apply_statements(body, edit)
+        }
         Statement::Try {
             body, catch_body, ..
         } => apply_statements(body, edit) || apply_statements(catch_body, edit),

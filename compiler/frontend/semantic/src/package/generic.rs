@@ -112,7 +112,8 @@ fn validate_generic_statements(
                     validate_generic_expression(message, names, function, index, types)?;
                 }
             }
-            severian_ast::Statement::Unsafe { body, .. } => {
+            severian_ast::Statement::Unsafe { body, .. }
+            | severian_ast::Statement::Placement { body, .. } => {
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
             }
             severian_ast::Statement::Try {
@@ -1019,7 +1020,8 @@ fn visit_statements_for_specializations(
                     )?;
                 }
             }
-            severian_ast::Statement::Unsafe { body, .. } => {
+            severian_ast::Statement::Unsafe { body, .. }
+            | severian_ast::Statement::Placement { body, .. } => {
                 visit_statements_for_specializations(
                     module,
                     body,

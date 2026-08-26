@@ -152,9 +152,11 @@ fn semantic_operator_declaration(declaration: &ExternalFunctionDeclaration) -> b
     declaration.decorators.iter().any(|decorator| {
         decorator.arguments.iter().any(|argument| {
             argument.name.is_none()
-                && matches!(&argument.value, AttributeValue::Name(value) if matches!(value.as_str(),
-                    "|" | "+" | "-" | "*" | "/" | "%" | "**" | "==" | "!=" | "<"
-                        | "<=" | ">" | ">=" | "in" | "and" | "or"))
+                && matches!(&argument.value, AttributeValue::Name(value)
+                    if matches!(value.as_str(),
+                        "|" | "+" | "-" | "*" | "/" | "%" | "**" | "==" | "!=" | "<"
+                            | "<=" | ">" | ">=" | "in" | "and" | "or")
+                        || value.chars().next().is_some_and(|character| character.is_ascii_uppercase()))
         })
     })
 }
@@ -550,6 +552,19 @@ mod tests {
         let source = SourceFile::virtual_source(
             "operators.sev",
             "@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.foreign.functions.is_empty());
+        assert!(resolved.plans.is_empty());
+    }
+
+    #[test]
+    fn named_symbol_pack_operators_do_not_create_foreign_functions() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "operators.sev",
+            "@tensor(X)\ndef contract(left: string, right: string) -> string:\n    return left X right\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let resolved = resolve(&module, &context.types, &target()).unwrap();

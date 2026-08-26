@@ -2,7 +2,7 @@ import parallel
 
 
 def scale(values: list[float], factor: float) -> list[float]:
-    output := []
+    output: list[float] := []
 
     for value in values:
         output.append(value * factor)

@@ -264,3 +264,21 @@ int64_t __sev_pow_i64_i64(int64_t base, int64_t exponent) {
     }
     return (int64_t)result;
 }
+
+double __sev_math_pow_f64(double base, double exponent) { return pow(base, exponent); }
+double __sev_math_log_f64(double value) { return log(value); }
+double __sev_math_log2_f64(double value) { return log2(value); }
+double __sev_math_log10_f64(double value) { return log10(value); }
+double __sev_math_sin_f64(double value) { return sin(value); }
+double __sev_math_cos_f64(double value) { return cos(value); }
+double __sev_math_tan_f64(double value) { return tan(value); }
+int64_t __sev_math_floor_i64(double value) { return (int64_t)floor(value); }
+int64_t __sev_math_ceil_i64(double value) { return (int64_t)ceil(value); }
+
+double __sev_math_round_digits_f64(double value, int64_t digits) {
+    double scale = pow(10.0, (double)digits);
+    return round(value * scale) / scale;
+}
+
+_Bool __sev_math_isfinite_f64(double value) { return isfinite(value); }
+_Bool __sev_math_isnan_f64(double value) { return isnan(value); }

@@ -185,7 +185,9 @@ impl Collector<'_> {
                     self.expression(message);
                 }
             }
-            Statement::Unsafe { body, .. } => self.statements(body),
+            Statement::Unsafe { body, .. } | Statement::Placement { body, .. } => {
+                self.statements(body)
+            }
             Statement::Try {
                 body, catch_body, ..
             } => {

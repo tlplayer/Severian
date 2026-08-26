@@ -1237,8 +1237,13 @@ fn render_cfg_unary(
         )),
         UnaryOperation::Negative => {
             let zero = format!("v{}_zero", result.0);
+            let zero_literal = if matches!(ty, LoweredType::Float { .. }) {
+                "0.0"
+            } else {
+                "0"
+            };
             output.push_str(&format!(
-                "{indentation}%{zero} = arith.constant 0 : {}\n",
+                "{indentation}%{zero} = arith.constant {zero_literal} : {}\n",
                 mlir_type(ty)?
             ));
             output.push_str(&format!(

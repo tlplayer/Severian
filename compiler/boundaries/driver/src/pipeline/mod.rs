@@ -847,7 +847,9 @@ impl Compiler {
             ("environment", repository.join("library/system/environment")),
             ("file", repository.join("library/system/file")),
             ("io", repository.join("library/system/io")),
+            ("math", repository.join("library/core/math")),
             ("os", repository.join("library/system/os")),
+            ("parallel", repository.join("library/compute/parallel")),
             ("path", repository.join("library/system/path")),
             ("platform", repository.join("library/system/platform")),
             ("process", repository.join("library/system/process")),
@@ -1624,7 +1626,17 @@ mod tests {
         let compiler = Compiler::new(TargetSpec::host()).unwrap();
         let graph = compiler.standard_package_graph(&source).unwrap();
         let dependencies = &graph.packages[&graph.root].dependencies;
-        for package in ["environment", "file", "io", "os", "path", "process"] {
+        for package in [
+            "environment",
+            "file",
+            "io",
+            "math",
+            "os",
+            "parallel",
+            "path",
+            "process",
+            "tensor",
+        ] {
             assert!(
                 dependencies.contains_key(package),
                 "missing standard package {package}"

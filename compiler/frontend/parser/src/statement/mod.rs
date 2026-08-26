@@ -192,6 +192,7 @@ impl Parser<'_> {
                     | Statement::IndexAssignment { .. }
                     | Statement::Assert { .. }
                     | Statement::Unsafe { .. }
+                    | Statement::Placement { .. }
                     | Statement::Try { .. }
                     | Statement::FallibleElse { .. }
                     | Statement::If { .. }
@@ -1230,7 +1231,22 @@ impl Parser<'_> {
             let iterable = self.expression(0)?;
             let initializer = if self.at_identifier("with") {
                 self.next();
-                Some(self.binding()?)
+                if matches!(
+                    &self.peek().kind,
+                    TokenKind::Identifier(policy)
+                        if matches!(
+                            policy.as_str(),
+                            "gpu" | "simd" | "simt" | "parallel" | "tasks" | "distributed"
+                        )
+                ) {
+                    // Execution placement is a loop policy, not a loop
+                    // initializer binding. The native backend currently
+                    // executes the loop as a portable fallback.
+                    self.next();
+                    None
+                } else {
+                    Some(self.binding()?)
+                }
             } else {
                 None
             };
@@ -1247,6 +1263,31 @@ impl Parser<'_> {
         }
         if self.at_identifier("with") {
             let start = self.next().span;
+            if self.at_identifier("self")
+                && self.tokens.get(self.cursor + 1).is_some_and(
+                    |token| matches!(&token.kind, TokenKind::Identifier(value) if value == "and"),
+                )
+                && self.tokens.get(self.cursor + 2).is_some_and(|token| {
+                    matches!(
+                        &token.kind,
+                        TokenKind::Identifier(value)
+                            if matches!(value.as_str(), "gpu" | "simd" | "simt")
+                    )
+                })
+            {
+                self.next();
+                self.next();
+                let policy = self
+                    .identifier("expected an execution placement after `and`")?
+                    .0;
+                self.expect(&TokenKind::Colon, "expected `:` after execution placement")?;
+                let (body, end) = self.indented_block("execution placement")?;
+                return Ok(Statement::Placement {
+                    policy,
+                    body,
+                    span: Span::new(start.source, start.start, end),
+                });
+            }
             let resource = self.expression(0)?;
             if !self.at_identifier("as") {
                 return Err(self.error("expected `as` after context expression"));
@@ -2685,6 +2726,7 @@ impl Parser<'_> {
         let mut comparison_tail: Option<Expression> = None;
         loop {
             const RANGE_PRECEDENCE: u8 = 4;
+            const SYMBOL_PACK_PRECEDENCE: u8 = 8;
             if self.at(&TokenKind::Range) {
                 if RANGE_PRECEDENCE < minimum_precedence {
                     break;
@@ -2716,6 +2758,63 @@ impl Parser<'_> {
                                 value: right,
                                 expected_error: None,
                                 span,
+                            },
+                        ],
+                    },
+                    span,
+                };
+                comparison_tail = None;
+                continue;
+            }
+            let symbol_pack_operator = match &self.peek().kind {
+                TokenKind::Identifier(symbol)
+                    if symbol
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_uppercase()) =>
+                {
+                    Some(symbol.clone())
+                }
+                _ => None,
+            };
+            if let Some(symbol) = symbol_pack_operator {
+                if SYMBOL_PACK_PRECEDENCE < minimum_precedence {
+                    break;
+                }
+                let operator_span = self.next().span;
+                let right = self.expression(SYMBOL_PACK_PRECEDENCE + 1)?;
+                let span = Span::new(
+                    expression.span.source,
+                    expression.span.start,
+                    right.span.end,
+                );
+                let callee = Expression {
+                    kind: ExpressionKind::Member {
+                        object: Box::new(Expression {
+                            kind: ExpressionKind::Name("__operator__".into()),
+                            span: operator_span,
+                        }),
+                        name: symbol,
+                    },
+                    span: operator_span,
+                };
+                expression = Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(callee),
+                        arguments: vec![
+                            CallArgument {
+                                name: None,
+                                spread: false,
+                                span: expression.span,
+                                expected_error: None,
+                                value: expression,
+                            },
+                            CallArgument {
+                                name: None,
+                                spread: false,
+                                span: right.span,
+                                expected_error: None,
+                                value: right,
                             },
                         ],
                     },

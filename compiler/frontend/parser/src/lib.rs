@@ -1251,4 +1251,48 @@ output = f"""module {{
             } if binding == "handle" && resources.len() == 1 && body.len() == 1
         ));
     }
+
+    #[test]
+    fn parses_symbol_pack_and_execution_placement_syntax() {
+        let source = SourceFile::virtual_source(
+            "placement.sev",
+            "@tensor(X)\ndef contract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:\n    return left X right\n\ntest:\n    with self and simd:\n        result = async contract(left, right)\n    for value in values with gpu:\n        print(value)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::Return {
+            value:
+                Some(severian_ast::Expression {
+                    kind: severian_ast::ExpressionKind::Call { callee, arguments },
+                    ..
+                }),
+            ..
+        } = &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected symbol-pack operator call")
+        };
+        assert_eq!(arguments.len(), 2);
+        assert!(matches!(
+            &callee.kind,
+            severian_ast::ExpressionKind::Member { object, name }
+                if name == "X"
+                    && matches!(&object.kind, severian_ast::ExpressionKind::Name(root) if root == "__operator__")
+        ));
+        let severian_ast::Item::Test(test) = &module.items[1] else {
+            panic!("expected test")
+        };
+        assert!(matches!(
+            &test.body[0],
+            severian_ast::Statement::Placement { policy, .. } if policy == "simd"
+        ));
+        assert!(matches!(
+            &test.body[1],
+            severian_ast::Statement::For {
+                initializer: None,
+                ..
+            }
+        ));
+    }
 }

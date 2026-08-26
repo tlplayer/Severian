@@ -1,0 +1,19 @@
+e: f64 = 2.718281828459045
+
+
+def pow(base: f64, exponent: f64) -> f64
+def log(value: f64) -> f64
+def ln(value: f64) -> f64
+def log2(value: f64) -> f64
+def log10(value: f64) -> f64
+
+def sin(value: f64) -> f64
+def cos(value: f64) -> f64
+def tan(value: f64) -> f64
+
+def floor(value: f64) -> int
+def ceil(value: f64) -> int
+def round(value: f64, digits: int) -> f64
+
+def isfinite(value: f64) -> bool
+def isnan(value: f64) -> bool
