@@ -1,0 +1,21 @@
+'''
+Environment isolation is a scoped test-library resource. The original process
+environment is restored even when an assertion or throw ends the test early.
+'''
+
+
+test "environment overrides are local to one test":
+    environment = test.env({
+        "HOME": "/tmp/severian-test-home",
+        "DEBUG": "1",
+    })
+
+    assert(env.get("HOME") == "/tmp/severian-test-home")
+    assert(env.get("DEBUG") == "1")
+
+
+test "environment can explicitly remove inherited values":
+    environment = test.env(remove=["HTTP_PROXY", "HTTPS_PROXY"])
+
+    assert(env.get("HTTP_PROXY") is None)
+    assert(env.get("HTTPS_PROXY") is None)

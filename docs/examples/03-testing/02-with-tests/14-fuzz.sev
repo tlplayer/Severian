@@ -5,17 +5,35 @@ The runner should report a seed, minimized input, and reproduction command.
 '''
 
 
-def parse_integer(value: string) -> int | Error:
+class ParseError:
+    message: string
+
+
+def parse_integer(value: string) -> int | ParseError:
+    if value == "":
+        throw ParseError("empty integer")
     return 0
 
 
-test with fuzz:
-    input: string
+test parse_integer with fuzz(input: string):
+    # A multiline `when operation:` block can inspect either generated result.
+    when parse_integer(input):
+        when result is int:
+            formatted = string(result)
+            reparsed = parse_integer(formatted)
 
-    result ?= parse_integer(input)
+            assert(reparsed == result)
 
-    when result is int:
-        formatted := string(result)
-        reparsed := parse_integer(formatted)
+        when result is ParseError:
+            assert(input == "")
+            assert(result.message != "")
 
-        expect(reparsed == result)
+
+test bytes_do_not_crash with fuzz(data: bytes):
+    # Compact operations use the same `operation(value -> expectation)` shape.
+    when(parser.parse(data) -> assert(parser.remains_memory_safe))
+
+
+test with fuzz(age: int { 0 <= age and age <= 130 }):
+    user = User(age=age)
+    assert(user.age == age)

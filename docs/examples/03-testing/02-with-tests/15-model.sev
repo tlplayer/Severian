@@ -1,8 +1,8 @@
 '''
 Model tests compare a real implementation against a simple reference model.
 
-The runner generates operation sequences and shrinks failing sequences.
-Agent: You can modify this one to fit the syntax better
+The runner generates operation sequences, reports the chosen operations, and
+shrinks a failing sequence to the smallest reproducible state transition.
 '''
 
 
@@ -22,5 +22,12 @@ test with model:
         if value in expected:
             expected.remove(value)
 
+    when clear():
+        actual.clear()
+        expected = []
+
+        assert(size(actual) == 0)
+
     always:
-        expect(size(actual) == size(expected))
+        assert(size(actual) == size(expected))
+        assert(actual.sorted() == expected.sorted())

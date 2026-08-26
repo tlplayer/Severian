@@ -1,0 +1,50 @@
+'''
+Mocks replace behavior only inside the active test. A compact mock maps one
+operation to one result. A block groups multiple cases and richer behavior.
+Unmatched calls fail unless the mock declares an explicit fallback.
+'''
+
+
+class ProductError:
+    message: string
+
+
+def fetch_price(product: int) -> int | ProductError:
+    return 0
+
+
+def total(product: int, quantity: int) -> int | ProductError:
+    price = fetch_price(product)
+    return price * quantity
+
+
+test "one-line mock maps one call to one result":
+    mock(fetch_price(10) -> 25)
+
+    assert(fetch_price(10) == 25)
+    assert(total(10, 4) == 100)
+
+
+test "multiline mock groups cases and failures":
+    mock fetch_price:
+        when fetch_price(10):
+            return 25
+
+        when fetch_price(20):
+            return 50
+
+        when fetch_price(product):
+            throw ProductError("unknown product")
+
+    assert(fetch_price(10) == 25)
+    assert(fetch_price(20) == 50)
+    throws(fetch_price(30) -> ProductError)
+
+
+test "mock fallback can delegate to the real implementation":
+    mock fetch_price:
+        when fetch_price(10) -> 25
+        else -> call original
+
+    assert(fetch_price(10) == 25)
+    assert(fetch_price(99) == 0)

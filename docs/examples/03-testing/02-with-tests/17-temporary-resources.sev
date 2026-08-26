@@ -1,0 +1,24 @@
+'''
+Temporary resources are ordinary test-library values. Their ownership should
+remove them automatically; `defer` remains available for explicit cleanup.
+No before-each or after-each language constructs are needed.
+'''
+
+
+test "temporary directory is isolated and automatically removed":
+    directory = temp.dir()
+    config = directory.file("config.toml")
+
+    config.write("port = 8080")
+    assert(config.read() == "port = 8080")
+
+
+test "explicit cleanup composes with normal resource lifetime":
+    server = TestServer(port=0)
+    defer server.close()
+
+    file = temp.file(suffix=".json")
+    file.write('{"ready": true}')
+
+    response = server.upload(file)
+    assert(response.accepted)

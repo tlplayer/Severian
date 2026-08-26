@@ -1,0 +1,17 @@
+'''
+Snapshots are harness-managed files, not language semantics. The test records
+a named value; `sev test --update-snapshots` deliberately accepts changes.
+'''
+
+
+test "parser AST matches its snapshot":
+    source = "value = 1 + 2"
+    tree = parser.parse(source)
+
+    snapshot("parser/simple-add.ast", tree)
+
+
+test "diagnostic rendering matches its snapshot":
+    diagnostic = compiler.check("value: u8 = 300")
+
+    snapshot("diagnostics/u8-overflow.txt", diagnostic.render())

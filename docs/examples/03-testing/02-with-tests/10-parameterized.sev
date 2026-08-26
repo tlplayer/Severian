@@ -1,0 +1,36 @@
+'''
+Table cases should be independently named, reported, filtered, and replayed.
+The `when` binding introduces one row without adding assertion helper APIs.
+'''
+
+
+def square(value: int) -> int:
+    return value * value
+
+
+test with 
+[
+    #name,...params
+    ("zero", 0, 0),
+    ("positive", 3, 9),
+    ("negative", -4, 16),
+    ("larger", 12, 144),
+] as cases:
+    for value, expected in cases:
+        assert(square(value) == expected)
+
+
+def clamp(value: int, minimum: int, maximum: int) -> int:
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+
+test clamp with cases:
+    when "below", (-5, 0, 10) -> 0
+    when "inside", (5, 0, 10) -> 5
+    when "above", (15, 0, 10) -> 10
+
+    assert(clamp(value, minimum, maximum) == expected)

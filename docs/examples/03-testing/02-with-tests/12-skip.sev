@@ -1,0 +1,14 @@
+'''
+Skipping is explicit runner metadata. A skipped test always carries a reason;
+conditional skips expose the condition rather than hiding it inside `when`.
+'''
+
+
+test with skip("requires an AMD GPU") "runs on the ROCm backend":
+    assert(gpu.backend == "rocm")
+
+
+test with skip if target.os == "windows" "uses a Unix domain socket":
+    socket = unix.listen("/tmp/severian-example.sock")
+    defer socket.close()
+    assert(socket.listening)

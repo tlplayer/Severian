@@ -1,0 +1,17 @@
+'''
+Timeout is runner behavior. It must bound the whole test, including cleanup,
+and report the configured deadline when it fails.
+'''
+
+
+def wait_for_worker():
+    # Representative blocking work.
+    return
+
+
+test with timeout(2s) "worker completes before its deadline":
+    wait_for_worker()
+
+
+test with timeout(250ms), repeat(100) "every repeated run is bounded":
+    wait_for_worker()

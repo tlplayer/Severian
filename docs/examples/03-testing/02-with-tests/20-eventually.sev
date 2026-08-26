@@ -1,0 +1,25 @@
+'''
+`eventually` polls a condition without requiring every concurrency test to
+hand-roll sleeping, deadlines, cancellation, and failure diagnostics.
+'''
+
+
+enum WorkerState:
+    Starting
+    Ready
+    Failed
+
+
+test with timeout(5s) "worker eventually becomes ready":
+    worker = Worker.start()
+    defer worker.stop()
+
+    eventually(worker.state == Ready, within=2s, interval=10ms)
+    assert(worker.accepting_requests)
+
+
+test "eventually can retain a useful final observation":
+    job = gpu.submit([1.0, 2.0, 3.0])
+
+    result = eventually(job.result, when=result is Completed, within=2s)
+    assert(result.values ~= [2.0, 4.0, 6.0])
