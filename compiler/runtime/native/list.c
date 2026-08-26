@@ -603,6 +603,10 @@ uint8_t __sev_pointer_index_u8(void *pointer, int64_t index) {
     return ((uint8_t *)pointer)[index];
 }
 
+uint8_t __sev_pointer_index_slot_u8(void *pointer, int64_t index) {
+    return (uint8_t)((uintptr_t *)pointer)[index];
+}
+
 uint32_t __sev_pointer_index_u32(void *pointer, int64_t index) {
     return ((uint32_t *)pointer)[index];
 }
@@ -613,6 +617,10 @@ int64_t __sev_pointer_index_i64(void *pointer, int64_t index) {
 
 void __sev_pointer_set_u8(void *pointer, int64_t index, uint8_t value) {
     ((uint8_t *)pointer)[index] = value;
+}
+
+void __sev_pointer_set_slot_u8(void *pointer, int64_t index, uint8_t value) {
+    ((uintptr_t *)pointer)[index] = (uintptr_t)value;
 }
 
 void __sev_pointer_set_u32(void *pointer, int64_t index, uint32_t value) {
@@ -627,6 +635,10 @@ void *__sev_pointer_add_u8(void *pointer, int64_t offset) {
     return ((uint8_t *)pointer) + offset;
 }
 
+void *__sev_pointer_add_slot_u8(void *pointer, int64_t offset) {
+    return ((uintptr_t *)pointer) + offset;
+}
+
 void *__sev_pointer_add_u32(void *pointer, int64_t offset) {
     return ((uint32_t *)pointer) + offset;
 }
@@ -637,6 +649,10 @@ void *__sev_pointer_add_i64(void *pointer, int64_t offset) {
 
 void *__sev_pointer_subtract_u8(void *pointer, int64_t offset) {
     return ((uint8_t *)pointer) - offset;
+}
+
+void *__sev_pointer_subtract_slot_u8(void *pointer, int64_t offset) {
+    return ((uintptr_t *)pointer) - offset;
 }
 
 void *__sev_pointer_subtract_u32(void *pointer, int64_t offset) {

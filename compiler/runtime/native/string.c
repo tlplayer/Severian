@@ -89,6 +89,11 @@ const char *__sev_string_from_usize(uintptr_t value) {
     return sev_conversion_buffer;
 }
 
+const char *__sev_string_from_pointer(const void *value) {
+    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%p", value);
+    return sev_conversion_buffer;
+}
+
 const char *__sev_type_string(const char *value) {
     (void)value;
     return "string";

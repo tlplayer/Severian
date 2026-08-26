@@ -2,4 +2,5 @@
 Test with shadow is a unique case where we store in package.pkg/target/debug/shadow failed data for 
 the code. If data passes through the tested area we capture and replay so parity with live failures area
 caught faster
+TODO: implement this example and test it
 '''

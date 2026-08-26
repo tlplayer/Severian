@@ -2782,7 +2782,7 @@ impl Analyzer<'_> {
                         ));
                     }
                     let value = self.expression(value, Some(element))?;
-                    let suffix = self.pointer_runtime_suffix(element, *span)?;
+                    let suffix = self.pointer_runtime_operation_suffix(&collection, element, *span)?;
                     return Ok(Statement::Expression(self.runtime_call(
                         &format!("__sev_pointer_set_{suffix}"),
                         &[collection.type_id, index.type_id, element],
@@ -5497,7 +5497,7 @@ impl Analyzer<'_> {
                             Some(index.span),
                         ));
                     }
-                    let suffix = self.pointer_runtime_suffix(element, ast.span)?;
+                    let suffix = self.pointer_runtime_operation_suffix(&object, element, ast.span)?;
                     return Ok(self.runtime_call(
                         &format!("__sev_pointer_index_{suffix}"),
                         &[object.type_id, index.type_id],
@@ -7058,18 +7058,7 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
-                    let index = self.expression(index, None)?;
-                    let index_name = self
-                        .types
-                        .definition(index.type_id)
-                        .map(|definition| definition.name.as_str());
-                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            "pointer offsets must be integers",
-                            Some(index.span),
-                        ));
-                    }
+                    let index = self.pointer_address_index(index, element)?;
                     let storage = self.list_storage_expression(collection, ast.span);
                     let storage_type = storage.type_id;
                     return Ok(self.runtime_call(
@@ -7383,7 +7372,11 @@ impl Analyzer<'_> {
                             .resolve_name("int")
                             .expect("bootstrap defines int");
                         let resolved_right = self.expression(right, Some(integer))?;
-                        let suffix = self.pointer_runtime_suffix(element, ast.span)?;
+                        let suffix = self.pointer_runtime_operation_suffix(
+                            &resolved_left,
+                            element,
+                            ast.span,
+                        )?;
                         let operation = if *operator == AstBinaryOperator::Add {
                             "add"
                         } else {
@@ -9586,6 +9579,19 @@ impl Analyzer<'_> {
                 span,
             ));
         }
+        if self.pointer_elements.contains_key(&value.type_id) {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            return Ok(self.runtime_call(
+                "__sev_string_from_pointer",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            ));
+        }
         if let Some(fallible) = self.fallible_types.get(&value.type_id).copied() {
             let condition = Expression {
                 id: self.next_id(),
@@ -10054,6 +10060,119 @@ impl Analyzer<'_> {
                 Some(span),
             )),
         }
+    }
+
+    fn pointer_runtime_operation_suffix(
+        &self,
+        pointer: &Expression,
+        element: TypeId,
+        span: severian_source::Span,
+    ) -> Result<&'static str, Diagnostic> {
+        let suffix = self.pointer_runtime_suffix(element, span)?;
+        if suffix == "u8" && self.pointer_uses_list_slots(pointer, &mut BTreeSet::new()) {
+            Ok("slot_u8")
+        } else {
+            Ok(suffix)
+        }
+    }
+
+    fn pointer_uses_list_slots(
+        &self,
+        pointer: &Expression,
+        visiting: &mut BTreeSet<BindingId>,
+    ) -> bool {
+        match &pointer.kind {
+            ExpressionKind::Binding(binding) => {
+                visiting.insert(*binding)
+                    && self
+                        .binding_values
+                        .get(binding)
+                        .is_some_and(|value| self.pointer_uses_list_slots(value, visiting))
+            }
+            ExpressionKind::Call {
+                callee: severian_hir::Callee::Direct { function, .. },
+                arguments,
+            } => self.runtime_definitions.iter().any(|(symbol, definition)| {
+                definition == function
+                    && (symbol == "__sev_list_address"
+                        || (symbol.contains("__sev_pointer_") && symbol.ends_with("_slot_u8")))
+            }) || arguments
+                .first()
+                .is_some_and(|value| self.pointer_uses_list_slots(value, visiting)),
+            ExpressionKind::Fallback {
+                value, fallback, ..
+            } => {
+                self.pointer_uses_list_slots(value, visiting)
+                    && self.pointer_uses_list_slots(fallback, visiting)
+            }
+            _ => false,
+        }
+    }
+
+    fn pointer_address_index(
+        &mut self,
+        index: &AstExpression,
+        element: TypeId,
+    ) -> Result<Expression, Diagnostic> {
+        if let AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix }) = &index.kind
+        {
+            let (dimension, value) = measured_literal(magnitude, suffix, index.span)?;
+            if dimension != "data_size" {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    "pointer byte offsets require a data-size unit",
+                    Some(index.span),
+                ));
+            }
+            let LiteralValue::Float(bytes) = value else {
+                unreachable!("measured data sizes use the floating representation")
+            };
+            let bytes = bytes.parse::<f64>().map_err(|_| {
+                Diagnostic::new("E000211", "invalid pointer byte offset", Some(index.span))
+            })?;
+            let (element_bytes, _) = self.type_layout(element, index.span)?;
+            let elements = bytes / element_bytes as f64;
+            if !bytes.is_finite()
+                || bytes < 0.0
+                || bytes.fract() != 0.0
+                || elements.fract() != 0.0
+                || elements > i64::MAX as f64
+            {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!(
+                        "pointer byte offset must be a non-negative multiple of the {element_bytes}-byte element size"
+                    ),
+                    Some(index.span),
+                ));
+            }
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id: integer,
+                kind: ExpressionKind::Literal(LiteralValue::Integer(
+                    (elements as i64).to_string(),
+                )),
+                span: index.span,
+            });
+        }
+
+        let index = self.expression(index, None)?;
+        let index_name = self
+            .types
+            .definition(index.type_id)
+            .map(|definition| definition.name.as_str());
+        if !matches!(index_name, Some("int" | "i64" | "usize")) {
+            return Err(Diagnostic::new(
+                "E000211",
+                "pointer offsets must be integers or exact byte measurements",
+                Some(index.span),
+            ));
+        }
+        Ok(index)
     }
 
     fn type_layout(
@@ -16109,7 +16228,7 @@ mod tests {
     #[test]
     fn raw_pointer_bindings_arithmetic_casts_and_nulls_reach_mir() {
         let (program, _) = analyze_source(
-            "def main():\n    value: u32 := 42\n    unsafe:\n        pointer: *[u32] := &value\n        bytes: *[u8] := [*[u8]](pointer)\n        assert(bytes[] == 42)\n        nullable: *[u32] | None := None\n        assert(nullable == None)\n        memory := allocate[int](2)\n        memory[0] = 1\n        memory[1] = 2\n        assert((memory + 1)[] == 2)\n        free(memory)\n",
+            "def main():\n    value: u32 := 42\n    values: list[u8] = [65, 66, 67]\n    unsafe:\n        pointer: *[u32] := &value\n        bytes: *[u8] := [*[u8]](pointer)\n        assert(bytes[] == 42)\n        list_pointer: *[u8] = &values[0B]\n        print(&values[1B])\n        assert(list_pointer[1] == 66)\n        nullable: *[u32] | None := None\n        assert(nullable == None)\n        memory := allocate[int](2)\n        memory[0] = 1\n        memory[1] = 2\n        assert((memory + 1)[] == 2)\n        free(memory)\n",
         );
         severian_mir::build(&program).unwrap();
     }
