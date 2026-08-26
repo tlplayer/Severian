@@ -351,7 +351,11 @@ impl CfgLowering<'_> {
             } => {
                 let operand = self.lower_operand(body, operand, operations)?;
                 let result = self.new_value(self.lower_mir_type(conversion.to)?);
-                operations.push(LirOperation::Convert { operand, result });
+                operations.push(LirOperation::Convert {
+                    operand,
+                    result,
+                    kind: conversion.kind,
+                });
                 Ok(result)
             }
             severian_mir::Rvalue::BorrowShared(place)

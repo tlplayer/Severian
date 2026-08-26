@@ -1,6 +1,6 @@
 use crate::{
-    BinaryOperator, CompileRoute, CompilerId, DeclarationId, DefId, GenericParamId, LiteralKind,
-    FloatFormat, IntegerWidth, LiteralValue, OperatorSignature, PrimitiveCategory,
+    BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, GenericParamId,
+    LiteralKind, IntegerWidth, LiteralValue, OperatorSignature, PrimitiveCategory,
     PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, Substitution, TyInterner, TypeKind,
     TypeConstraint, TypeId, TypePattern, UnaryOperator,
 };
@@ -486,39 +486,8 @@ impl TypeContext {
                 .iter()
                 .all(|member| self.assignable(*member, expected));
         }
-        let (Some(actual), Some(expected)) = (self.primitive(actual), self.primitive(expected))
-        else {
-            return false;
-        };
-        if matches!(actual.category, PrimitiveCategory::Measured)
-            || matches!(expected.category, PrimitiveCategory::Measured)
-        {
-            return false;
-        }
-        match (actual.representation, expected.representation) {
-            (
-                PrimitiveRepresentation::Integer {
-                    bits: a,
-                    signed: sa,
-                },
-                PrimitiveRepresentation::Integer {
-                    bits: e,
-                    signed: se,
-                },
-            ) if sa == se => integer_width_fits(a, e),
-            (
-                PrimitiveRepresentation::Float { format: a },
-                PrimitiveRepresentation::Float { format: e },
-            ) => float_width(a)
-                .zip(float_width(e))
-                .is_some_and(|(a, e)| a <= e),
-            (
-                PrimitiveRepresentation::Integer { .. }
-                | PrimitiveRepresentation::PointerInteger { .. },
-                PrimitiveRepresentation::Float { .. },
-            ) => true,
-            _ => false,
-        }
+        self.numeric_conversion(actual, expected)
+            .is_some_and(|conversion| conversion.kind <= ConversionKind::Promote)
     }
 
     pub fn resolve_literal(
@@ -719,16 +688,7 @@ fn constraint_conversion_cost(
     match constraint {
         TypeConstraint::Known(actual) if actual == candidate => Some(0),
         TypeConstraint::Known(actual) if context.assignable(actual, candidate) => {
-            let actual = context.primitive(actual)?.representation;
-            let candidate = context.primitive(candidate)?.representation;
-            Some(match (actual, candidate) {
-                (
-                    PrimitiveRepresentation::Integer { .. }
-                    | PrimitiveRepresentation::PointerInteger { .. },
-                    PrimitiveRepresentation::Float { .. },
-                ) => 100,
-                _ => 1,
-            })
+            context.numeric_conversion_cost(actual, candidate)
         }
         TypeConstraint::Literal(kind) => {
             let primitive = context.primitive(candidate)?;
@@ -748,22 +708,6 @@ fn constraint_conversion_cost(
             }
         }
         _ => None,
-    }
-}
-
-fn integer_width_fits(actual: IntegerWidth, expected: IntegerWidth) -> bool {
-    match (actual, expected) {
-        (IntegerWidth::Fixed(actual), IntegerWidth::Fixed(expected)) => actual <= expected,
-        (IntegerWidth::Machine, IntegerWidth::Machine) => true,
-        _ => false,
-    }
-}
-
-fn float_width(format: FloatFormat) -> Option<u16> {
-    match format {
-        FloatFormat::Ieee(bits) => Some(bits),
-        FloatFormat::BrainFloat16 => Some(16),
-        FloatFormat::Machine => None,
     }
 }
 
@@ -835,6 +779,7 @@ impl std::error::Error for TypeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FloatFormat;
 
     fn numeric_context() -> (TypeContext, TypeId, TypeId, TypeId) {
         let mut types = TypeContextBuilder::new();

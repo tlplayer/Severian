@@ -19,6 +19,10 @@ test "type conversion":
     ratio := .5
     name := "severian"
     assert(float(count) + ratio == 10.5)
+    assert(int(0.1010) == 0)
+    assert(int(0.1010, lossy) == 0)
+    wide: i64 = 12
+    assert(i8(wide, checked) == 12)
     #Cannot convert string to name but we can convert 
 
 
@@ -26,4 +30,3 @@ test with compiler "Compiler rejects ":
     #Compiler rejects 
     reject:
         number: int = "h"+1
-    

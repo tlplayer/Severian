@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod context;
+mod conversion;
 mod ids;
 mod literal;
 mod operation_registry;
@@ -10,6 +11,7 @@ mod type_system;
 pub mod types;
 
 pub use context::{UniversalContext, UniversalError};
+pub use conversion::{Constructor, Conversion, ConversionKind};
 pub use ids::{
     CompilerId, DeclarationId, DefId, GenericParamId, InferVarId, InstanceId, PrimitiveId,
     RegionId, TyId, TypeId,

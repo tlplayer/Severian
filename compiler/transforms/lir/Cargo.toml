@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 severian-artifact = { path = "../../artifact" }
 severian-source = { path = "../../source" }
+severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"

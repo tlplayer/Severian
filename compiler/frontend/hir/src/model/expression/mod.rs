@@ -1,6 +1,6 @@
 use crate::{BindingId, DefId, HirId, OpId, Substitution, TypeId, VariantId};
 use severian_source::Span;
-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
+use severian_universal::{BinaryOperator, Conversion, LiteralValue, UnaryOperator};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskOwner {
@@ -91,20 +91,4 @@ pub enum Callee {
         variant: Option<VariantId>,
     },
     Intrinsic(OpId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Conversion {
-    pub from: TypeId,
-    pub to: TypeId,
-    pub kind: ConversionKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConversionKind {
-    NumericWidening,
-    NumericCast,
-    UnionInjection,
-    Borrow,
-    User(DefId),
 }

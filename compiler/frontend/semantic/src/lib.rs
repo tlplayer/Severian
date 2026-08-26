@@ -6459,19 +6459,38 @@ impl Analyzer<'_> {
                         return self.expression(&argument.value, Some(runtime_type));
                     }
                 }
-                if arguments.len() == 1 {
+                if matches!(arguments.len(), 1 | 2) {
                     if let Some(name) = callable_path(callee) {
                         if let Some(target) = self.types.resolve_name(&name) {
                             if self.numeric_primitive(target) {
-                                let operand = self.expression(&arguments[0].value, None)?;
-                                if let Some(converted) = self.enum_accepted_conversion(
-                                    operand.clone(),
-                                    target,
-                                    ast.span,
-                                )? {
-                                    return Ok(converted);
+                                if arguments.iter().any(|argument| {
+                                    argument.name.is_some()
+                                        || argument.spread
+                                        || argument.expected_error.is_some()
+                                }) {
+                                    return Err(Diagnostic::new(
+                                        "E000206",
+                                        "numeric conversion arguments must be positional values",
+                                        Some(ast.span),
+                                    ));
                                 }
-                                return self.coerce(operand, target, true);
+                                let mode = arguments
+                                    .get(1)
+                                    .map(conversion_mode_argument)
+                                    .transpose()?;
+                                let operand = self.expression(&arguments[0].value, None)?;
+                                if mode.is_none() {
+                                    if let Some(converted) = self.enum_accepted_conversion(
+                                        operand.clone(),
+                                        target,
+                                        ast.span,
+                                    )? {
+                                        return Ok(converted);
+                                    }
+                                }
+                                return self.coerce_with_conversion_mode(
+                                    operand, target, true, mode,
+                                );
                             }
                         }
                     }
@@ -7705,8 +7724,34 @@ impl Analyzer<'_> {
         expected: TypeId,
         explicit: bool,
     ) -> Result<Expression, Diagnostic> {
+        self.coerce_with_conversion_mode(expression, expected, explicit, None)
+    }
+
+    fn coerce_with_conversion_mode(
+        &mut self,
+        expression: Expression,
+        expected: TypeId,
+        explicit: bool,
+        requested: Option<severian_universal::ConversionKind>,
+    ) -> Result<Expression, Diagnostic> {
         if expression.type_id == expected {
-            return Ok(expression);
+            let Some(requested) = requested else {
+                return Ok(expression);
+            };
+            let span = expression.span;
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id: expected,
+                kind: ExpressionKind::Convert {
+                    operand: Box::new(expression),
+                    conversion: severian_universal::Conversion {
+                        from: expected,
+                        to: expected,
+                        kind: requested,
+                    },
+                },
+                span,
+            });
         }
         if let Some(members) = self.union_types.get(&expected).cloned() {
             if !explicit && members.contains(&expression.type_id) {
@@ -7714,10 +7759,13 @@ impl Analyzer<'_> {
             }
         }
         if explicit {
-            if let Some(members) = self.union_types.get(&expression.type_id).cloned() {
-                return self.convert_union_expression(expression, &members, expected);
+            if requested.is_none() {
+                if let Some(members) = self.union_types.get(&expression.type_id).cloned() {
+                    return self.convert_union_expression(expression, &members, expected);
+                }
             }
-            if self.types.resolve_name("string") == Some(expression.type_id)
+            if requested.is_none()
+                && self.types.resolve_name("string") == Some(expression.type_id)
                 && matches!(
                     self.types
                         .definition(expected)
@@ -7736,9 +7784,10 @@ impl Analyzer<'_> {
                 ));
             }
         }
-        let numeric =
-            self.numeric_primitive(expression.type_id) && self.numeric_primitive(expected);
-        if !numeric {
+        let Some(mut conversion) = self
+            .types
+            .numeric_conversion(expression.type_id, expected)
+        else {
             if !explicit && self.types.assignable(expression.type_id, expected) {
                 return Ok(expression);
             }
@@ -7750,29 +7799,43 @@ impl Analyzer<'_> {
                 },
                 expression.span,
             ));
+        };
+        if let Some(requested) = requested {
+            let required = conversion.kind;
+            let Some(selected) = conversion.with_kind(requested) else {
+                let source = self
+                    .types
+                    .definition(expression.type_id)
+                    .map_or_else(|| format!("{:?}", expression.type_id), |ty| ty.name.clone());
+                let target = self
+                    .types
+                    .definition(expected)
+                    .map_or_else(|| format!("{expected:?}"), |ty| ty.name.clone());
+                return Err(Diagnostic::new(
+                    "E000204",
+                    format!(
+                        "`{}` conversion cannot convert `{source}` to `{target}`; use `{}`",
+                        requested.name(),
+                        required.name()
+                    ),
+                    Some(expression.span),
+                ));
+            };
+            conversion = selected;
         }
-        if !explicit && !self.types.assignable(expression.type_id, expected) {
+        if !explicit && conversion.kind > severian_universal::ConversionKind::Promote {
             return Err(semantic_error(
                 "expression does not satisfy the expected type".into(),
                 expression.span,
             ));
         }
-        let from = expression.type_id;
         let span = expression.span;
         Ok(Expression {
             id: self.next_id(),
             type_id: expected,
             kind: ExpressionKind::Convert {
                 operand: Box::new(expression),
-                conversion: severian_hir::Conversion {
-                    from,
-                    to: expected,
-                    kind: if explicit {
-                        severian_hir::ConversionKind::NumericCast
-                    } else {
-                        severian_hir::ConversionKind::NumericWidening
-                    },
-                },
+                conversion,
             },
             span,
         })
@@ -13663,6 +13726,26 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
     }
 }
 
+fn conversion_mode_argument(
+    argument: &severian_ast::CallArgument,
+) -> Result<severian_universal::ConversionKind, Diagnostic> {
+    let AstExpressionKind::Name(name) = &argument.value.kind else {
+        return Err(Diagnostic::new(
+            "E000204",
+            "conversion mode must be `identity`, `promote`, `checked`, or `lossy`",
+            Some(argument.span),
+        ));
+    };
+    severian_universal::ConversionKind::from_name(name).ok_or_else(|| {
+        Diagnostic::new(
+            "E000204",
+            format!("unknown conversion mode `{name}`"),
+            Some(argument.span),
+        )
+        .with_help("use `identity`, `promote`, `checked`, or `lossy`")
+    })
+}
+
 fn substituted_expression(
     expression: &AstExpression,
     substitutions: &BTreeMap<String, AstExpression>,
@@ -14393,28 +14476,14 @@ fn conversion_rank(
     if !types.assignable(actual, expected) {
         return None;
     }
-    let actual = types.primitive(actual)?.representation;
-    let expected = types.primitive(expected)?.representation;
-    match (actual, expected) {
-        (
-            severian_universal::PrimitiveRepresentation::Integer {
-                bits: severian_universal::IntegerWidth::Fixed(actual),
-                ..
-            },
-            severian_universal::PrimitiveRepresentation::Integer {
-                bits: severian_universal::IntegerWidth::Fixed(expected),
-                ..
-            },
-        )
-        | (
-            severian_universal::PrimitiveRepresentation::Float {
-                format: severian_universal::FloatFormat::Ieee(actual),
-            },
-            severian_universal::PrimitiveRepresentation::Float {
-                format: severian_universal::FloatFormat::Ieee(expected),
-            },
-        ) => Some(ConversionRank::Widening(expected - actual)),
-        _ => Some(ConversionRank::General),
+    let conversion = types.numeric_conversion(actual, expected)?;
+    match conversion.kind {
+        severian_universal::ConversionKind::Identity => Some(ConversionRank::Exact),
+        severian_universal::ConversionKind::Promote => Some(ConversionRank::Widening(
+            types.numeric_conversion_cost(actual, expected)?.try_into().ok()?,
+        )),
+        severian_universal::ConversionKind::Checked
+        | severian_universal::ConversionKind::Lossy => Some(ConversionRank::General),
     }
 }
 
@@ -16095,7 +16164,7 @@ mod tests {
             left.kind,
             ExpressionKind::Convert {
                 conversion: severian_hir::Conversion {
-                    kind: severian_hir::ConversionKind::NumericWidening,
+                    kind: severian_universal::ConversionKind::Promote,
                     ..
                 },
                 ..
@@ -16104,18 +16173,56 @@ mod tests {
 
         assert_eq!(bindings[3].type_id, int);
         assert_eq!(bindings[4].type_id, float);
-        for binding in [&bindings[3], &bindings[4]] {
-            assert!(matches!(
-                binding.value.kind,
-                ExpressionKind::Convert {
-                    conversion: severian_hir::Conversion {
-                        kind: severian_hir::ConversionKind::NumericCast,
-                        ..
-                    },
+        assert!(matches!(
+            bindings[3].value.kind,
+            ExpressionKind::Convert {
+                conversion: severian_hir::Conversion {
+                    kind: severian_universal::ConversionKind::Lossy,
                     ..
-                }
-            ));
-        }
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            bindings[4].value.kind,
+            ExpressionKind::Convert {
+                conversion: severian_hir::Conversion {
+                    kind: severian_universal::ConversionKind::Promote,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn numeric_constructor_modes_are_optional_and_preserved() {
+        let (program, _) = analyze_source(
+            "ratio = 0.1010\ndefaulted = int(ratio)\nselected = int(ratio, lossy)\nwide: i64 = 12\nnarrowed = i8(wide, checked)\n",
+        );
+        let bindings = &program.modules[0].bindings;
+        let kind = |index: usize| match &bindings[index].value.kind {
+            ExpressionKind::Convert { conversion, .. } => conversion.kind,
+            other => panic!("expected conversion, found {other:?}"),
+        };
+
+        assert_eq!(kind(1), severian_universal::ConversionKind::Lossy);
+        assert_eq!(kind(2), severian_universal::ConversionKind::Lossy);
+        assert_eq!(kind(4), severian_universal::ConversionKind::Checked);
+    }
+
+    #[test]
+    fn numeric_constructor_mode_must_cover_the_source_target_pair() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "conversion.sev",
+            "wide: i64 = 12\nnarrowed = i8(wide, promote)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000204");
+        assert!(error.message.contains("use `checked`"));
     }
 
     #[test]
@@ -16250,7 +16357,7 @@ mod tests {
         let resolve = |name| context.types.resolve_name(name).unwrap();
         let exact = conversion_rank(&context.types, resolve("i32"), resolve("i32")).unwrap();
         let widening = conversion_rank(&context.types, resolve("i32"), resolve("i64")).unwrap();
-        let general = conversion_rank(&context.types, resolve("bf16"), resolve("f32")).unwrap();
+        let general = conversion_rank(&context.types, resolve("i32"), resolve("float")).unwrap();
         assert!(exact < widening);
         assert!(widening < general);
     }

@@ -12,6 +12,7 @@ workspace = true
 severian-artifact = { path = "../../artifact" }
 severian-lir = { path = "../lir" }
 severian-target = { path = "../../target" }
+severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"

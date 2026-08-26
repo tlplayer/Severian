@@ -251,7 +251,9 @@ fn render_block(
                     &format!("{}v{}", c_unary(*operator), operand.0),
                 )?;
             }
-            Operation::Convert { operand, result } => {
+            Operation::Convert {
+                operand, result, ..
+            } => {
                 define_value(
                     output,
                     module,

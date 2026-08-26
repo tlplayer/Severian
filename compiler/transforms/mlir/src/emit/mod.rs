@@ -755,7 +755,9 @@ fn render_cfg_operation(
             operand,
             result,
         } => render_cfg_unary(output, module, *operator, *operand, *result, indent)?,
-        Operation::Convert { operand, result } => {
+        Operation::Convert {
+            operand, result, ..
+        } => {
             render_conversion(output, module, *operand, *result, indent)?
         }
         Operation::Binary {
@@ -1568,7 +1570,9 @@ fn render_block(
                     }
                 }
             }
-            Operation::Convert { operand, result } => {
+            Operation::Convert {
+                operand, result, ..
+            } => {
                 render_conversion(output, module, *operand, *result, indent)?;
             }
             Operation::Binary {
@@ -2505,6 +2509,7 @@ mod tests {
                     Operation::Convert {
                         operand: ValueId(0),
                         result: ValueId(1),
+                        kind: severian_universal::ConversionKind::Lossy,
                     },
                 ],
             },

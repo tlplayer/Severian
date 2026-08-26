@@ -200,6 +200,7 @@ pub enum Operation {
     Convert {
         operand: ValueId,
         result: ValueId,
+        kind: severian_universal::ConversionKind,
     },
     Binary {
         operator: BinaryOperation,

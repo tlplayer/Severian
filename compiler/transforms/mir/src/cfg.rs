@@ -951,7 +951,7 @@ impl BodyBuilder {
                     result.clone(),
                     Rvalue::Convert {
                         operand,
-                        conversion: conversion.clone(),
+                        conversion: *conversion,
                     },
                 ));
             }
