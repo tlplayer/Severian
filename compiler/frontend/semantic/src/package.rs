@@ -165,7 +165,7 @@ pub fn analyze_package_with_context(
                         function,
                     );
                     if let Some(instances) = specializations.get(&id) {
-                        for substitution in instances {
+                        for substitution in instances.keys() {
                             own_instances.push((id, substitution.clone()));
                             ast.items
                                 .push(Item::Function(specialize_function(function, substitution)));
@@ -884,7 +884,7 @@ fn function_instances(
         }
         DefKind::Function(_) => specializations
             .get(&definition)
-            .map(|instances| instances.iter().cloned().collect())
+            .map(|instances| instances.keys().cloned().collect())
             .unwrap_or_default(),
         _ => Vec::new(),
     }

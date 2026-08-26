@@ -437,6 +437,90 @@ fn generic_map_literals_infer_nested_arguments_and_lower_pair_iteration() {
 }
 
 #[test]
+fn comparison_result_expectations_do_not_poison_generic_operands() {
+    let root = temporary();
+    let source = root.join("map-sum-comparison.sev");
+    std::fs::write(
+        &source,
+        "trait Hash:\n    def hash() -> usize\ntrait Equal:\n    def equal(other: Self) -> bool\ntrait Number:\n    def zero() -> Self\n    def add(other: Self) -> Self\ndef sum_values[K: Hash + Equal, V: Number](values: map[K, V]) -> V:\n    total := V.zero()\n    for _, value in values:\n        total = total.add(value)\n    return total\ntest:\n    counts = {\"first\": 34, \"second\": 8}\n    assert(sum_values(counts) == 42)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.name == "sum_values"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn incompatible_generic_inferences_are_reported_at_the_call() {
+    let root = temporary();
+    let source = root.join("generic-conflict.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\ndef selected() -> string:\n    return identity(1)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let source_file = graph.modules[0].source.clone();
+    let error = analyze_package(&graph, &universal).unwrap_err();
+    assert_eq!(error.code, "E000217");
+    assert!(error.message.contains("conflicting inferences for `T`"));
+    assert!(error.message.contains("`string` and `int`"));
+    assert_eq!(
+        source_file
+            .location(error.span.unwrap().start)
+            .unwrap()
+            .line,
+        4
+    );
+    assert!(error
+        .notes
+        .iter()
+        .any(|note| note.contains("first inferred as `string`")));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn generic_constraint_failures_include_call_and_declaration_frames() {
+    let root = temporary();
+    let source = root.join("generic-constraint-origin.sev");
+    std::fs::write(
+        &source,
+        "trait Number:\n    def add(other: Self) -> Self\ndef keep[V: Number](value: V) -> V:\n    return value\ndef selected() -> bool:\n    return keep(true)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let source_file = graph.modules[0].source.clone();
+    let error = analyze_package(&graph, &universal).unwrap_err();
+    assert_eq!(error.code, "E000217");
+    assert!(error.message.contains("keep[V=bool]"));
+    assert_eq!(
+        source_file
+            .location(error.span.unwrap().start)
+            .unwrap()
+            .line,
+        6
+    );
+    assert_eq!(error.additional.len(), 1);
+    assert_eq!(
+        source_file
+            .location(error.additional[0].span.unwrap().start)
+            .unwrap()
+            .line,
+        3
+    );
+    assert!(error.additional[0]
+        .message
+        .contains("`V` must satisfy `Number`"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn trait_typed_parameters_specialize_to_source_classes() {
     let root = temporary();
     let source = root.join("drawable.sev");

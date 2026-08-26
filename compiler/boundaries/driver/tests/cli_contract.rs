@@ -446,6 +446,29 @@ fn constrained_generic_method_traits_specialize_to_executable_instances() {
 }
 
 #[test]
+fn generic_constraint_diagnostics_trace_the_call_to_the_declaration() {
+    let root = temporary("generic-constraint-trace");
+    let source = root.join("generic-trace.sev");
+    fs::write(
+        &source,
+        "trait Number:\n    def add(other: Self) -> Self\ndef keep[V: Number](value: V) -> V:\n    return value\ndef selected() -> bool:\n    return keep(true)\n",
+    )
+    .unwrap();
+    let output = sev().args(["check"]).arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("cannot specialize `keep[V=bool]`"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("generic-trace.sev:6:12"), "{stderr}");
+    assert!(stderr.contains("specialization requested here"), "{stderr}");
+    assert!(stderr.contains("generic-trace.sev:3:10"), "{stderr}");
+    assert!(stderr.contains("constraint declared here"), "{stderr}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn boxed_generic_classes_lower_to_a_native_executable() {
     let root = temporary("boxed-generic");
     let source = root.join("boxed.sev");

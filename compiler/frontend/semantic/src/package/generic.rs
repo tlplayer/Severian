@@ -2,7 +2,17 @@ use super::*;
 use std::collections::BTreeSet;
 
 pub(super) type Substitution = BTreeMap<String, String>;
-pub(super) type Specializations = BTreeMap<DefId, BTreeSet<Substitution>>;
+/// Concrete generic instances and the first source call that requested each
+/// one. Keeping the origin beside the substitution lets later constraint
+/// validation report the call site instead of only the declaration.
+pub(super) type Specializations = BTreeMap<DefId, BTreeMap<Substitution, severian_source::Span>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InferenceConflict {
+    parameter: String,
+    known: String,
+    inferred: String,
+}
 
 pub(super) fn validate_generic_bodies(
     module_graph: &ModuleGraph,
@@ -630,7 +640,7 @@ pub(super) fn collect_generic_specializations(
                         } else {
                             specializations
                                 .get(&id)
-                                .and_then(|instances| instances.iter().next().cloned())
+                                .and_then(|instances| instances.keys().next().cloned())
                         };
                         let Some(substitution) = substitution else {
                             continue;
@@ -688,7 +698,7 @@ fn validate_specializations(
         let DefKind::Function(function) = &index.definitions[definition].kind else {
             continue;
         };
-        for substitution in instances {
+        for (substitution, origin) in instances {
             for constraint in &function.constraints {
                 let severian_ast::GenericConstraint::Parameter {
                     parameter,
@@ -719,14 +729,25 @@ fn validate_specializations(
                 if satisfied {
                     continue;
                 }
+                let function_name = &index.definitions[definition].name;
+                let specialization = format_substitution(substitution);
                 return Err(Diagnostic::new(
                     "E000217",
                     format!(
-                        "`{actual_name}` does not satisfy `{bound_name}` required by `{}`",
-                        index.definitions[definition].name
+                        "cannot specialize `{function_name}[{specialization}]`: `{actual_name}` does not satisfy `{bound_name}`"
                     ),
+                    Some(*origin),
+                )
+                .with_label(*origin, "specialization requested here")
+                .with_note(format!(
+                    "type parameter `{parameter}` was inferred as `{actual_name}`"
+                ))
+                .with_additional([Diagnostic::new(
+                    "E000217",
+                    format!("`{parameter}` must satisfy `{bound_name}`"),
                     Some(*span),
-                ));
+                )
+                .with_label(*span, "constraint declared here")]));
             }
         }
     }
@@ -863,7 +884,15 @@ fn trait_is_structurally_satisfied(
 }
 
 fn specialization_count(specializations: &Specializations) -> usize {
-    specializations.values().map(BTreeSet::len).sum()
+    specializations.values().map(BTreeMap::len).sum()
+}
+
+fn format_substitution(substitution: &Substitution) -> String {
+    substitution
+        .iter()
+        .map(|(parameter, actual)| format!("{parameter}={actual}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn visit_statements_for_specializations(
@@ -1231,7 +1260,9 @@ fn visit_expression_for_specializations(
     match &expression.kind {
         severian_ast::ExpressionKind::Call { callee, arguments } => {
             if let Some(path) = ast_callable_path(callee) {
-                for definition in resolve_path(module, &path, index) {
+                let definitions = resolve_path(module, &path, index);
+                let unambiguous = definitions.len() == 1;
+                for definition in definitions {
                     let DefKind::Function(signature) = &index.definitions[&definition].kind else {
                         continue;
                     };
@@ -1248,30 +1279,36 @@ fn visit_expression_for_specializations(
                         continue;
                     }
                     let mut substitution = Substitution::new();
+                    let mut conflict = None;
                     if !variadic {
                         if let Some(expected) = expected {
-                            infer_substitution(
+                            conflict = infer_substitution(
                                 &signature.result,
                                 expected,
                                 &signature.type_parameters,
                                 &mut substitution,
-                            );
+                            )
+                            .err();
                         }
                     }
                     for (parameter, argument) in signature.parameters[..fixed].iter().zip(arguments)
                     {
+                        if conflict.is_some() {
+                            break;
+                        }
                         if let Some(actual) =
                             expression_type_name(module, &argument.value, names, index)
                         {
-                            infer_substitution(
+                            conflict = infer_substitution(
                                 parameter,
                                 &actual,
                                 &signature.type_parameters,
                                 &mut substitution,
-                            );
+                            )
+                            .err();
                         }
                     }
-                    if variadic {
+                    if variadic && conflict.is_none() {
                         let parameter = &signature.parameters[fixed];
                         for argument in &arguments[fixed..] {
                             if let Some(mut actual) =
@@ -1300,25 +1337,40 @@ fn visit_expression_for_specializations(
                                         _ => {}
                                     }
                                 } else {
-                                    infer_substitution(
+                                    conflict = infer_substitution(
                                         parameter,
                                         &actual,
                                         &signature.type_parameters,
                                         &mut substitution,
-                                    );
+                                    )
+                                    .err();
+                                    if conflict.is_some() {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                    if variadic {
+                    if variadic && conflict.is_none() {
                         if let Some(expected) = expected {
-                            infer_substitution(
+                            conflict = infer_substitution(
                                 &signature.result,
                                 expected,
                                 &signature.type_parameters,
                                 &mut substitution,
-                            );
+                            )
+                            .err();
                         }
+                    }
+                    if let Some(conflict) = conflict {
+                        if unambiguous {
+                            return Err(inference_conflict_diagnostic(
+                                &index.definitions[&definition].name,
+                                &conflict,
+                                expression.span,
+                            ));
+                        }
+                        continue;
                     }
                     if signature
                         .type_parameters
@@ -1328,7 +1380,8 @@ fn visit_expression_for_specializations(
                         specializations
                             .entry(definition)
                             .or_default()
-                            .insert(substitution);
+                            .entry(substitution)
+                            .or_insert(expression.span);
                     }
                 }
             }
@@ -1479,21 +1532,48 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
-        severian_ast::ExpressionKind::Unary { operand, .. } => {
+        severian_ast::ExpressionKind::Unary { operator, operand } => {
+            let operand_expected = match operator {
+                severian_ast::UnaryOperator::Not => Some("bool"),
+                _ => expected,
+            };
             visit_expression_for_specializations(
                 module,
                 operand,
-                expected,
+                operand_expected,
                 names,
                 index,
                 specializations,
             )?;
         }
-        severian_ast::ExpressionKind::Binary { left, right, .. } => {
+        severian_ast::ExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            use severian_ast::BinaryOperator as Binary;
+            // A comparison's result is boolean, but its operands are not.
+            // Forwarding the result expectation into either operand can poison
+            // generic result inference (for example, inferring `V = bool` from
+            // `generic_call() == 42`). Logical operators, conversely, do
+            // require boolean operands. Value-producing operators retain the
+            // surrounding expected type.
+            let operand_expected = match operator {
+                Binary::Equal
+                | Binary::Identity
+                | Binary::NotEqual
+                | Binary::Less
+                | Binary::LessEqual
+                | Binary::Greater
+                | Binary::GreaterEqual
+                | Binary::Contains => None,
+                Binary::And | Binary::Or => Some("bool"),
+                _ => expected,
+            };
             visit_expression_for_specializations(
                 module,
                 left,
-                expected,
+                operand_expected,
                 names,
                 index,
                 specializations,
@@ -1501,7 +1581,7 @@ fn visit_expression_for_specializations(
             visit_expression_for_specializations(
                 module,
                 right,
-                expected,
+                operand_expected,
                 names,
                 index,
                 specializations,
@@ -1686,25 +1766,81 @@ fn infer_substitution(
     actual: &str,
     parameters: &[String],
     substitution: &mut Substitution,
-) {
+) -> Result<(), InferenceConflict> {
     let Some((name, arguments)) = pattern.named_parts() else {
-        return;
+        return Ok(());
     };
     if arguments.is_empty() && parameters.iter().any(|parameter| parameter == name) {
-        substitution
-            .entry(name.to_owned())
-            .or_insert_with(|| actual.to_owned());
-        return;
+        if let Some(known) = substitution.get(name) {
+            if known == actual || default_numeric_matches(actual, known) {
+                return Ok(());
+            }
+            if default_numeric_matches(known, actual) {
+                substitution.insert(name.to_owned(), actual.to_owned());
+                return Ok(());
+            }
+            return Err(InferenceConflict {
+                parameter: name.to_owned(),
+                known: known.clone(),
+                inferred: actual.to_owned(),
+            });
+        } else {
+            substitution.insert(name.to_owned(), actual.to_owned());
+        }
+        return Ok(());
     }
     let Some((actual_name, actual_arguments)) = type_application_parts(actual) else {
-        return;
+        return Ok(());
     };
     if name != actual_name || arguments.len() != actual_arguments.len() {
-        return;
+        return Ok(());
     }
     for (pattern, actual) in arguments.iter().zip(actual_arguments) {
-        infer_substitution(pattern, actual, parameters, substitution);
+        infer_substitution(pattern, actual, parameters, substitution)?;
     }
+    Ok(())
+}
+
+fn default_numeric_matches(default: &str, concrete: &str) -> bool {
+    match default {
+        "int" => matches!(
+            concrete,
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "isize"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "usize"
+        ),
+        "float" => matches!(concrete, "f16" | "bf16" | "f32" | "f64"),
+        _ => false,
+    }
+}
+
+fn inference_conflict_diagnostic(
+    function: &str,
+    conflict: &InferenceConflict,
+    span: severian_source::Span,
+) -> Diagnostic {
+    Diagnostic::new(
+        "E000217",
+        format!(
+            "conflicting inferences for `{}` while specializing `{function}`: `{}` and `{}`",
+            conflict.parameter, conflict.known, conflict.inferred
+        ),
+        Some(span),
+    )
+    .with_label(span, "generic call has incompatible type evidence")
+    .with_note(format!(
+        "`{}` was first inferred as `{}` and later as `{}`",
+        conflict.parameter, conflict.known, conflict.inferred
+    ))
+    .with_help("make the generic result or argument types agree")
 }
 
 fn type_application_parts(value: &str) -> Option<(&str, Vec<&str>)> {
