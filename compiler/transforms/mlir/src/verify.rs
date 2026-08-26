@@ -52,6 +52,7 @@ pub fn compose(
 
     let symbol_table = SymbolTable::new(&module)?;
     let mut artifact_ids = BTreeSet::new();
+    let mut composed_declarations = BTreeSet::new();
     for artifact in artifacts {
         if artifact.target != target.triple {
             return Err(MlirError::TargetMismatch {
@@ -74,6 +75,20 @@ pub fn compose(
                 return Err(MlirError::DuplicateSymbol(symbol));
             }
             unsafe { ffi::mlirSymbolTableErase(symbol_table.raw, declaration) };
+        }
+        let mut declaration = unsafe { ffi::mlirBlockGetFirstOperation(generated.body()) };
+        while !declaration.is_null() {
+            if declaration.ptr != entry.ptr && operation_name(declaration) == "func.func" {
+                if let Some(name) = operation_symbol_name(declaration) {
+                    if composed_declarations.insert(name.clone())
+                        && symbol_table.lookup(&name).is_none()
+                    {
+                        let cloned = unsafe { ffi::mlirOperationClone(declaration) };
+                        unsafe { ffi::mlirBlockAppendOwnedOperation(module.body(), cloned) };
+                    }
+                }
+            }
+            declaration = unsafe { ffi::mlirOperationGetNextInBlock(declaration) };
         }
         let cloned = unsafe { ffi::mlirOperationClone(entry) };
         let symbol_name = unsafe { ffi::mlirStringAttrGet(context.raw, ffi::string_ref(&symbol)) };
@@ -155,15 +170,22 @@ impl<'context> Module<'context> {
         let mut current = unsafe { ffi::mlirBlockGetFirstOperation(self.body()) };
         let mut entry = None;
         let mut count = 0usize;
+        let mut declarations = 0usize;
         while !current.is_null() {
             if operation_name(current) == "func.func" {
-                count += 1;
-                entry = Some(current);
+                if self.operation_has_body(current) {
+                    count += 1;
+                    entry = Some(current);
+                } else {
+                    declarations += 1;
+                }
             }
             current = unsafe { ffi::mlirOperationGetNextInBlock(current) };
         }
         if count == 1 {
             Ok(entry.expect("one entry was counted"))
+        } else if count == 0 && declarations == 1 {
+            Err(MlirError::EntryFunctionIsDeclaration)
         } else {
             Err(MlirError::EntryFunctionCount(count))
         }
@@ -220,6 +242,20 @@ impl<'context> Module<'context> {
         }
         output
     }
+}
+
+fn operation_symbol_name(operation: ffi::MlirOperation) -> Option<String> {
+    let attribute =
+        unsafe { ffi::mlirOperationGetAttributeByName(operation, ffi::string_ref("sym_name")) };
+    if attribute.is_null() {
+        return None;
+    }
+    let value = unsafe { ffi::mlirStringAttrGetValue(attribute) };
+    if value.data.is_null() {
+        return None;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(value.data.cast::<u8>(), value.length) };
+    Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
 impl Drop for Module<'_> {
@@ -296,6 +332,12 @@ fn lowered_type(context: &Context, ty: LoweredType) -> Result<ffi::MlirType, Mli
         match ty {
             LoweredType::Integer { bits, .. } => ffi::mlirIntegerTypeGet(context.raw, bits.into()),
             LoweredType::Float {
+                format: LoweredFloatFormat::Float8E4M3Fn,
+            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f8E4M3FN")),
+            LoweredType::Float {
+                format: LoweredFloatFormat::Float8E5M2,
+            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f8E5M2")),
+            LoweredType::Float {
                 format: LoweredFloatFormat::Ieee(16),
             } => ffi::mlirF16TypeGet(context.raw),
             LoweredType::Float {
@@ -305,9 +347,16 @@ fn lowered_type(context: &Context, ty: LoweredType) -> Result<ffi::MlirType, Mli
                 format: LoweredFloatFormat::Ieee(64),
             } => ffi::mlirF64TypeGet(context.raw),
             LoweredType::Float {
+                format: LoweredFloatFormat::Ieee(128),
+            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f128")),
+            LoweredType::Float {
                 format: LoweredFloatFormat::BrainFloat16,
             } => ffi::mlirBF16TypeGet(context.raw),
             LoweredType::Boolean => ffi::mlirIntegerTypeGet(context.raw, 1),
+            LoweredType::String | LoweredType::Bytes => {
+                ffi::mlirTypeParseGet(context.raw, ffi::string_ref("!llvm.ptr"))
+            }
+            LoweredType::None | LoweredType::Unit => ffi::mlirIntegerTypeGet(context.raw, 8),
             unsupported => return Err(MlirError::UnsupportedType(unsupported)),
         }
     })

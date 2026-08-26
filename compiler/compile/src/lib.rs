@@ -7,8 +7,8 @@ mod registry;
 
 pub use error::CompileError;
 pub use model::{
-    CompileContext, CompilePlan, CompileRegion, EffectSet, PlanSegment, PlannedBlock,
-    PlannedFunction, StandardRegion,
+    CompileContext, CompileOperation, CompilePlan, CompileRegion, EffectSet, PlanSegment,
+    PlannedBlock, PlannedFunction, StandardRegion,
 };
 pub use planner::plan;
 pub use registry::{CompileHandler, CompilerRegistry};

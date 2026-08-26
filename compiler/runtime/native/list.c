@@ -26,6 +26,19 @@ typedef struct {
     size_t size;
 } sev_aggregate_box;
 
+static uintptr_t sev_f64_bits(double value) {
+    uint64_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return (uintptr_t)bits;
+}
+
+static double sev_f64_from_bits(uintptr_t bits) {
+    uint64_t raw = (uint64_t)bits;
+    double value = 0.0;
+    memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
 void *__sev_aggregate_box(const void *value, int64_t size) {
     if (size < 0 || (uint64_t)size > SIZE_MAX - sizeof(sev_aggregate_box)) abort();
     sev_aggregate_box *box = malloc(sizeof(sev_aggregate_box) + (size_t)size);
@@ -180,6 +193,17 @@ void __sev_list_clear(void *storage) {
 void *__sev_list_append_i64(void *storage, int64_t value) {
     __sev_list_push_i64(storage, value);
     return storage;
+}
+
+void *__sev_list_append_f64(void *storage, double value) {
+    sev_list *list = storage;
+    sev_list_reserve(list);
+    list->values[list->length++] = sev_f64_bits(value);
+    return storage;
+}
+
+void *__sev_list_append_float(void *storage, double value) {
+    return __sev_list_append_f64(storage, value);
 }
 
 void *__sev_list_append_u8(void *storage, uint8_t value) {
@@ -466,6 +490,21 @@ _Bool __sev_list_equal_i64(void *left_storage, void *right_storage) {
     return 1;
 }
 
+_Bool __sev_list_equal_f64(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    if (left->length != right->length) return 0;
+    for (size_t index = 0; index < left->length; ++index) {
+        if (sev_f64_from_bits(left->values[index]) !=
+            sev_f64_from_bits(right->values[index])) return 0;
+    }
+    return 1;
+}
+
+_Bool __sev_list_equal_float(void *left_storage, void *right_storage) {
+    return __sev_list_equal_f64(left_storage, right_storage);
+}
+
 _Bool __sev_list_equal_ptr(void *left_storage, void *right_storage) {
     sev_list *left = left_storage;
     sev_list *right = right_storage;
@@ -578,6 +617,17 @@ int64_t __sev_list_get_i64(void *storage, int64_t index) {
     return (int64_t)list->values[index];
 }
 
+double __sev_list_get_f64(void *storage, int64_t index) {
+    sev_list *list = storage;
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return 0.0;
+    return sev_f64_from_bits(list->values[index]);
+}
+
+double __sev_list_get_float(void *storage, int64_t index) {
+    return __sev_list_get_f64(storage, index);
+}
+
 const char *__sev_list_get_ptr(void *storage, int64_t index) {
     sev_list *list = storage;
     if (index < 0) index += (int64_t)list->length;
@@ -595,6 +645,14 @@ _Bool __sev_list_get_bool(void *storage, int64_t index) {
 
 int64_t __sev_list_index_i64(void *storage, int64_t index) {
     return __sev_list_get_i64(storage, index);
+}
+
+double __sev_list_index_f64(void *storage, int64_t index) {
+    return __sev_list_get_f64(storage, index);
+}
+
+double __sev_list_index_float(void *storage, int64_t index) {
+    return __sev_list_get_f64(storage, index);
 }
 
 uint8_t __sev_list_index_u8(void *storage, int64_t index) {
@@ -763,6 +821,17 @@ void __sev_list_set_i64(void *storage, int64_t index, int64_t value) {
     if (index < 0) index += (int64_t)list->length;
     if (index < 0 || (size_t)index >= list->length) return;
     list->values[index] = (uintptr_t)value;
+}
+
+void __sev_list_set_f64(void *storage, int64_t index, double value) {
+    sev_list *list = storage;
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return;
+    list->values[index] = sev_f64_bits(value);
+}
+
+void __sev_list_set_float(void *storage, int64_t index, double value) {
+    __sev_list_set_f64(storage, index, value);
 }
 
 void __sev_list_set_u8(void *storage, int64_t index, uint8_t value) {

@@ -196,13 +196,7 @@ fn validate_generic_statements(
             } => {
                 validate_generic_expression(iterable, names, function, index, types)?;
                 if let Some(initializer) = initializer {
-                    validate_generic_expression(
-                        &initializer.value,
-                        names,
-                        function,
-                        index,
-                        types,
-                    )?;
+                    validate_generic_expression(&initializer.value, names, function, index, types)?;
                 }
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
             }
@@ -285,7 +279,11 @@ fn validate_generic_expression(
             validate_generic_expression(value, names, function, index, types)?;
             Ok(None)
         }
-        Expression::MapComprehension { key, value, clauses } => {
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
             for clause in clauses {
                 validate_generic_expression(&clause.iterable, names, function, index, types)?;
                 if let Some(condition) = &clause.condition {
@@ -1652,7 +1650,11 @@ fn visit_expression_for_specializations(
                 }
             }
         }
-        severian_ast::ExpressionKind::MapComprehension { key, value, clauses } => {
+        severian_ast::ExpressionKind::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
             for expression in [key.as_ref(), value.as_ref()] {
                 visit_expression_for_specializations(
                     module,
@@ -1748,6 +1750,18 @@ fn resolve_path(module: ModuleId, path: &str, index: &ProgramIndex) -> Vec<DefId
         };
         resolution = next;
     }
+    if let Resolution::Module(target) = resolution {
+        // A same-named export is the package's default callable surface, so
+        // generic specialization must see the same `tensor(...)` shorthand
+        // that semantic call resolution accepts.
+        if let Some(default) = index
+            .exports
+            .get(target)
+            .and_then(|exports| exports.get(first))
+        {
+            return resolution_definitions(default);
+        }
+    }
     resolution_definitions(resolution)
 }
 
@@ -1817,7 +1831,10 @@ fn default_numeric_matches(default: &str, concrete: &str) -> bool {
                 | "u128"
                 | "usize"
         ),
-        "float" => matches!(concrete, "f16" | "bf16" | "f32" | "f64"),
+        "float" => matches!(
+            concrete,
+            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128"
+        ),
         _ => false,
     }
 }
@@ -1901,9 +1918,10 @@ fn expression_type_name(
             let path = ast_callable_path(callee)?;
             resolve_path(module, &path, index)
                 .into_iter()
-                .find_map(|definition| {
-                    matches!(index.definitions[&definition].kind, DefKind::Type)
-                        .then(|| index.definitions[&definition].name.clone())
+                .find_map(|definition| match &index.definitions[&definition].kind {
+                    DefKind::Function(function) => type_annotation_name(&function.result),
+                    DefKind::Type => Some(index.definitions[&definition].name.clone()),
+                    _ => None,
                 })
         }
         severian_ast::ExpressionKind::List(values) => {
@@ -1926,6 +1944,36 @@ fn expression_type_name(
             Some(format!("map[{key}, {value}]"))
         }
         _ => None,
+    }
+}
+
+fn type_annotation_name(annotation: &TypeAnnotation) -> Option<String> {
+    match &annotation.kind {
+        TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => Some(name.clone()),
+        TypeAnnotationKind::Named { name, arguments } => Some(format!(
+            "{name}[{}]",
+            arguments
+                .iter()
+                .map(type_annotation_name)
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        TypeAnnotationKind::Function { parameters, result } => Some(format!(
+            "({}) -> {}",
+            parameters
+                .iter()
+                .map(type_annotation_name)
+                .collect::<Option<Vec<_>>>()?
+                .join(", "),
+            type_annotation_name(result)?
+        )),
+        TypeAnnotationKind::Union(members) => Some(
+            members
+                .iter()
+                .map(type_annotation_name)
+                .collect::<Option<Vec<_>>>()?
+                .join(" | "),
+        ),
     }
 }
 

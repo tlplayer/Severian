@@ -1,0 +1,39 @@
+class Tensor[T]:
+    handle: string
+
+
+def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
+
+def shape[T](value: Tensor[T]) -> list[int]
+def values[T](value: Tensor[T]) -> list[float]
+def strides[T](value: Tensor[T]) -> list[int]
+
+def slice[T](value: Tensor[T], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[T]
+def materialize[T](value: Tensor[T]) -> Tensor[T]
+
+def add[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+def subtract[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+def multiply[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+def divide[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+def sum[T](value: Tensor[T]) -> Tensor[T]
+def matmul[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+def transpose(value: Tensor[f64]) -> Tensor[f64]
+
+def f8e4m3fn[T](value: Tensor[T]) -> Tensor[f8e4m3fn]
+def f8e5m2[T](value: Tensor[T]) -> Tensor[f8e5m2]
+def f16[T](value: Tensor[T]) -> Tensor[f16]
+def bf16[T](value: Tensor[T]) -> Tensor[bf16]
+def f32[T](value: Tensor[T]) -> Tensor[f32]
+def f64[T](value: Tensor[T]) -> Tensor[f64]
+def f128[T](value: Tensor[T]) -> Tensor[f128]
+
+def i8[T](value: Tensor[T]) -> Tensor[i8]
+def i16[T](value: Tensor[T]) -> Tensor[i16]
+def i32[T](value: Tensor[T]) -> Tensor[i32]
+def i64[T](value: Tensor[T]) -> Tensor[i64]
+def i128[T](value: Tensor[T]) -> Tensor[i128]
+def u8[T](value: Tensor[T]) -> Tensor[u8]
+def u16[T](value: Tensor[T]) -> Tensor[u16]
+def u32[T](value: Tensor[T]) -> Tensor[u32]
+def u64[T](value: Tensor[T]) -> Tensor[u64]
+def u128[T](value: Tensor[T]) -> Tensor[u128]

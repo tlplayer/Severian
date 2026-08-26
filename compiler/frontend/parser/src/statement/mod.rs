@@ -1142,7 +1142,10 @@ impl Parser<'_> {
             let parenthesized = self.take(&TokenKind::LeftParen).is_some();
             let condition = self.expression(0)?;
             if parenthesized {
-                self.expect(&TokenKind::RightParen, "expected `)` after `when` condition")?;
+                self.expect(
+                    &TokenKind::RightParen,
+                    "expected `)` after `when` condition",
+                )?;
             }
             self.expect(&TokenKind::Colon, "expected `:` after `when` condition")?;
             let (then_block, end) = self.indented_block("when")?;
@@ -2084,9 +2087,9 @@ impl Parser<'_> {
                 contracts.push(FunctionContract {
                     condition,
                     deferred,
-                failure,
-                span: Span::new(start.source, start.start, end),
-            });
+                    failure,
+                    span: Span::new(start.source, start.start, end),
+                });
             }
             if self.take(&TokenKind::Comma).is_none()
                 && !self.at(&TokenKind::Newline)
@@ -2355,16 +2358,16 @@ impl Parser<'_> {
             self.next();
             self.property_constraints()?;
         }
-        if !inferred
-            && (self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent))
-        {
+        if !inferred && (self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent)) {
             if let Some(annotation) = annotation.as_ref() {
                 let value = match annotation.simple_name() {
                     Some("string") => Expression {
                         kind: ExpressionKind::Literal(severian_ast::Literal::String(String::new())),
                         span: annotation.span,
                     },
-                    Some("float" | "f16" | "bf16" | "f32" | "f64" | "f128") => Expression {
+                    Some(
+                        "float" | "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128",
+                    ) => Expression {
                         kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
                         span: annotation.span,
                     },
@@ -2388,12 +2391,10 @@ impl Parser<'_> {
                 });
             }
         }
-        let typed_mutable = !inferred
-            && annotation.is_some()
-            && self.take(&TokenKind::ColonEqual).is_some();
-        let preserve_error = !inferred
-            && !typed_mutable
-            && self.take(&TokenKind::QuestionEqual).is_some();
+        let typed_mutable =
+            !inferred && annotation.is_some() && self.take(&TokenKind::ColonEqual).is_some();
+        let preserve_error =
+            !inferred && !typed_mutable && self.take(&TokenKind::QuestionEqual).is_some();
         if !inferred && !typed_mutable && !preserve_error {
             self.expect(
                 &TokenKind::Equal,
@@ -2514,7 +2515,7 @@ impl Parser<'_> {
                             kind: ExpressionKind::Member {
                                 object: Box::new(object_expression.clone()),
                                 name: field.clone(),
-                                },
+                            },
                         }),
                         right: Box::new(right),
                     },
@@ -3235,9 +3236,7 @@ impl Parser<'_> {
         let mut nested = 0usize;
         while let Some(token) = self.tokens.get(cursor) {
             match token.kind {
-                TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => {
-                    nested += 1
-                }
+                TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => nested += 1,
                 TokenKind::RightParen | TokenKind::RightBracket | TokenKind::Comma
                     if nested == 0 =>
                 {
@@ -3279,7 +3278,10 @@ impl Parser<'_> {
         };
         let closing = self.next();
         let end_inclusive = start_exclusive && closing.kind == TokenKind::RightBracket;
-        if !matches!(closing.kind, TokenKind::RightBracket | TokenKind::RightParen) {
+        if !matches!(
+            closing.kind,
+            TokenKind::RightBracket | TokenKind::RightParen
+        ) {
             return Err(Diagnostic::new(
                 "E000112",
                 "expected `]` or `)` after slice",
@@ -3479,11 +3481,7 @@ impl Parser<'_> {
                         });
                     }
                     let mut entries = vec![severian_ast::MapEntry {
-                        span: Span::new(
-                            first.span.source,
-                            first.span.start,
-                            first_value.span.end,
-                        ),
+                        span: Span::new(first.span.source, first.span.start, first_value.span.end),
                         key: first,
                         value: first_value,
                     }];
@@ -3722,8 +3720,7 @@ impl Parser<'_> {
         let (mut name, start) = self.identifier("expected a type")?;
         let mut name_end = start.end;
         while self.take(&TokenKind::Dot).is_some() {
-            let (member, member_span) =
-                self.identifier("expected a type name after `.`")?;
+            let (member, member_span) = self.identifier("expected a type name after `.`")?;
             name.push('.');
             name.push_str(&member);
             name_end = member_span.end;
@@ -4073,7 +4070,9 @@ fn is_throws_call_statement(statement: &Statement) -> bool {
 fn expression_mentions(expression: &Expression, expected: &str) -> bool {
     match &expression.kind {
         ExpressionKind::Name(name) => name == expected,
-        ExpressionKind::List(values) | ExpressionKind::Set(values) | ExpressionKind::Tuple(values) => values
+        ExpressionKind::List(values)
+        | ExpressionKind::Set(values)
+        | ExpressionKind::Tuple(values) => values
             .iter()
             .any(|value| expression_mentions(value, expected)),
         ExpressionKind::Map(entries) => entries.iter().any(|entry| {
@@ -4090,7 +4089,11 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
                             .is_some_and(|condition| expression_mentions(condition, expected))
                 })
         }
-        ExpressionKind::MapComprehension { key, value, clauses } => {
+        ExpressionKind::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
             expression_mentions(key, expected)
                 || expression_mentions(value, expected)
                 || clauses.iter().any(|clause| {

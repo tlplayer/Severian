@@ -8,6 +8,7 @@ members = [
 
     # CompileType dispatch and custom compiler integration
     "compiler/compile",
+    "library/compute/tensor/compiler",
 
     # Language bootstrap
     "compiler/bootstrap",
@@ -89,6 +90,7 @@ severian-backend = "boundary"
 severian-xxi = "boundary"
 severian-mlir = "boundary"
 severian-driver = "driver"
+severian-tensor-compiler = "library_compiler"
 
 [workspace.metadata.architecture.allow]
 severian-source = []
@@ -179,6 +181,12 @@ severian-driver = [
     "severian-target",
     "severian-universal",
     "severian-xxi",
+    "severian-tensor-compiler",
+]
+severian-tensor-compiler = [
+    "severian-compile",
+    "severian-mlir",
+    "severian-universal",
 ]
 
 [[workspace.metadata.architecture.reject]]

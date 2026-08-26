@@ -6,7 +6,7 @@ use severian_universal::{
 };
 use std::fmt;
 
-pub const INTERFACE_VERSION: u16 = 2;
+pub const INTERFACE_VERSION: u16 = 3;
 
 /// Versioned package-interface DTO. It mirrors universal data for transport;
 /// it deliberately has no lookup, assignability, literal, or operator logic.
@@ -56,6 +56,8 @@ pub enum WidthRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatRecord {
+    Float8E4M3Fn,
+    Float8E5M2,
     Ieee(u16),
     BrainFloat16,
     Machine,
@@ -108,6 +110,8 @@ impl From<PrimitiveRepresentation> for RepresentationRecord {
             },
             PrimitiveRepresentation::Float { format } => Self::Float {
                 format: match format {
+                    FloatFormat::Float8E4M3Fn => FloatRecord::Float8E4M3Fn,
+                    FloatFormat::Float8E5M2 => FloatRecord::Float8E5M2,
                     FloatFormat::Ieee(bits) => FloatRecord::Ieee(bits),
                     FloatFormat::BrainFloat16 => FloatRecord::BrainFloat16,
                     FloatFormat::Machine => FloatRecord::Machine,
@@ -241,6 +245,8 @@ fn encode_representation(bytes: &mut Vec<u8>, representation: &RepresentationRec
                 }
                 FloatRecord::BrainFloat16 => bytes.push(1),
                 FloatRecord::Machine => bytes.push(2),
+                FloatRecord::Float8E4M3Fn => bytes.push(3),
+                FloatRecord::Float8E5M2 => bytes.push(4),
             }
         }
         RepresentationRecord::PointerInteger { signed } => {
@@ -283,6 +289,8 @@ fn decode_representation(
                 0 => FloatRecord::Ieee(u16::from_be_bytes(decoder.array()?)),
                 1 => FloatRecord::BrainFloat16,
                 2 => FloatRecord::Machine,
+                3 => FloatRecord::Float8E4M3Fn,
+                4 => FloatRecord::Float8E5M2,
                 tag => return Err(InterfaceError::InvalidTag(tag)),
             },
         },
@@ -365,5 +373,27 @@ mod tests {
             PrimitiveRecord::decode(&record.encode().unwrap()).unwrap(),
             record
         );
+    }
+
+    #[test]
+    fn tensor_float_formats_round_trip_without_collapsing_dtype() {
+        for format in [
+            FloatRecord::Float8E4M3Fn,
+            FloatRecord::Float8E5M2,
+            FloatRecord::Ieee(128),
+        ] {
+            let record = PrimitiveRecord {
+                version: INTERFACE_VERSION,
+                declaration_id: 7u128.to_be_bytes(),
+                path: "universal.primitive.tensor_element".into(),
+                category: CategoryRecord::Float,
+                representation: RepresentationRecord::Float { format },
+                default_literal: false,
+            };
+            assert_eq!(
+                PrimitiveRecord::decode(&record.encode().unwrap()).unwrap(),
+                record
+            );
+        }
     }
 }

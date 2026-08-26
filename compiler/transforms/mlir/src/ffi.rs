@@ -104,6 +104,7 @@ unsafe extern "C" {
 
     pub fn mlirIdentifierStr(identifier: MlirIdentifier) -> MlirStringRef;
     pub fn mlirStringAttrGet(context: MlirContext, value: MlirStringRef) -> MlirAttribute;
+    pub fn mlirStringAttrGetValue(attribute: MlirAttribute) -> MlirStringRef;
     pub fn mlirAttributeIsAType(attribute: MlirAttribute) -> bool;
     pub fn mlirTypeAttrGetValue(attribute: MlirAttribute) -> MlirType;
 
@@ -113,6 +114,7 @@ unsafe extern "C" {
     pub fn mlirFunctionTypeGetInput(ty: MlirType, position: isize) -> MlirType;
     pub fn mlirFunctionTypeGetResult(ty: MlirType, position: isize) -> MlirType;
     pub fn mlirTypeEqual(left: MlirType, right: MlirType) -> bool;
+    pub fn mlirTypeParseGet(context: MlirContext, source: MlirStringRef) -> MlirType;
     pub fn mlirIntegerTypeGet(context: MlirContext, bits: u32) -> MlirType;
     pub fn mlirBF16TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF16TypeGet(context: MlirContext) -> MlirType;

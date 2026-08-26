@@ -1025,10 +1025,7 @@ impl BodyBuilder {
             }
             severian_hir::ExpressionKind::AddressOf(binding) => {
                 let source = self.bindings[binding].clone();
-                self.push(Statement::Assign(
-                    result.clone(),
-                    Rvalue::AddressOf(source),
-                ));
+                self.push(Statement::Assign(result.clone(), Rvalue::AddressOf(source)));
             }
             severian_hir::ExpressionKind::Move(operand) => {
                 let source = match &operand.kind {
@@ -1072,7 +1069,22 @@ impl BodyBuilder {
                 let arguments = arguments
                     .iter()
                     .map(|argument| Operand::Copy(self.expression(argument)))
-                    .collect();
+                    .collect::<Vec<_>>();
+                if let HirCallee::Intrinsic {
+                    operation,
+                    attributes,
+                } = callee
+                {
+                    self.push(Statement::Operation {
+                        id: *operation,
+                        operands: arguments,
+                        results: vec![result.clone()],
+                        attributes: attributes.clone(),
+                    });
+                    self.expressions
+                        .insert((self.current, expression.id), result.clone());
+                    return result;
+                }
                 let continuation = self.block();
                 let callee = self.callee(callee);
                 self.terminate(Terminator::Call {
@@ -1126,7 +1138,7 @@ impl BodyBuilder {
                 type_def: *type_def,
                 variant: *variant,
             },
-            HirCallee::Intrinsic(operation) => Callee::Intrinsic(*operation),
+            HirCallee::Intrinsic { operation, .. } => Callee::Intrinsic(*operation),
         }
     }
 }

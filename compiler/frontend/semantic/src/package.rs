@@ -188,8 +188,7 @@ pub fn analyze_package_with_context(
             }
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
-        let package_constants =
-            imported_constant_bindings(source_module.id, module_graph, &index);
+        let package_constants = imported_constant_bindings(source_module.id, module_graph, &index);
         visible.extend(
             own_instances
                 .iter()
@@ -215,9 +214,9 @@ pub fn analyze_package_with_context(
                     original,
                     &binding.substitution,
                     &universal.types,
-                        definition.module,
-                        &package_classes,
-                    )?;
+                    definition.module,
+                    &package_classes,
+                )?;
                 Ok(PackageFunction {
                     lookup: binding.lookup,
                     id: stable_instance_function_id(binding.definition, &binding.substitution),
@@ -471,13 +470,18 @@ fn visible_class_names(
         return Vec::new();
     };
     let matches_class = |resolution: &Resolution| {
-        resolution_definitions(resolution).into_iter().any(|definition| {
-            index.definitions.get(&definition).is_some_and(|definition| {
-                definition.module == class.module
-                    && definition.name == class.declaration.name
-                    && matches!(definition.kind, DefKind::Type)
+        resolution_definitions(resolution)
+            .into_iter()
+            .any(|definition| {
+                index
+                    .definitions
+                    .get(&definition)
+                    .is_some_and(|definition| {
+                        definition.module == class.module
+                            && definition.name == class.declaration.name
+                            && matches!(definition.kind, DefKind::Type)
+                    })
             })
-        })
     };
     let mut names = Vec::new();
     for (binding, resolution) in &scope.scope.bindings {
@@ -508,10 +512,8 @@ fn resolve_package_type(
     classes: &[PackageClass],
     lists: &[PackageList],
 ) -> Result<TypeId, Diagnostic> {
-    if let Some((
-        "borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable",
-        [inner],
-    )) = annotation.named_parts()
+    if let Some(("borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable", [inner])) =
+        annotation.named_parts()
     {
         return resolve_package_type(types, inner, module, classes, lists);
     }
@@ -598,6 +600,28 @@ fn resolve_package_type(
         let key = resolve_package_type(types, key, module, classes, lists)?;
         let value = resolve_package_type(types, value, module, classes, lists)?;
         return Ok(crate::map_type_id(key, value));
+    }
+    if let Some((name, arguments)) = annotation.named_parts() {
+        if !arguments.is_empty() {
+            if let Some(class) = package_class_for_lookup(classes, module, name) {
+                if class.declaration.type_parameters.len() != arguments.len() {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        format!(
+                            "class `{name}` expects {} type argument(s), received {}",
+                            class.declaration.type_parameters.len(),
+                            arguments.len()
+                        ),
+                        Some(annotation.span),
+                    ));
+                }
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| resolve_package_type(types, argument, module, classes, lists))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(crate::generic_class_type_id(class.ty, &arguments));
+            }
+        }
     }
     if let Some(name) = annotation.simple_name() {
         if let Some(class) = package_class_for_lookup(classes, module, name) {
@@ -835,14 +859,22 @@ fn imported_constant_bindings(
         if !matches!(item.kind, DefKind::Constant) || item.module == module {
             return;
         }
-        let Some(source) = module_graph.modules.iter().find(|source| source.id == item.module)
+        let Some(source) = module_graph
+            .modules
+            .iter()
+            .find(|source| source.id == item.module)
         else {
             return;
         };
-        let Some(binding) = source.ast.items.iter().find_map(|candidate| match candidate {
-            Item::Binding(binding) if binding.name == item.name => Some(binding),
-            _ => None,
-        }) else {
+        let Some(binding) = source
+            .ast
+            .items
+            .iter()
+            .find_map(|candidate| match candidate {
+                Item::Binding(binding) if binding.name == item.name => Some(binding),
+                _ => None,
+            })
+        else {
             return;
         };
         constants.push(PackageConstant {

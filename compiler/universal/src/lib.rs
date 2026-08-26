@@ -7,6 +7,7 @@ mod literal;
 mod operation_registry;
 mod operator;
 pub mod primitive;
+pub mod tensor;
 mod type_system;
 pub mod types;
 
@@ -20,13 +21,15 @@ pub use literal::{LiteralKind, LiteralValue};
 pub use operation_registry::{
     AttrValue, AttributeId, Attrs, BackendId, CanonicalRewrite, DialectId, EffectSet, IrContext,
     LoweringCapability, OpId, OperationDiagnostic, OperationId, OperationInterface,
-    OperationRegistry, ProviderId, RegisteredOperation, RuntimeId,
+    OperationRegistry, ProviderId, RegisteredOperation, RuntimeId, COMPILED_ARTIFACT_ATTRIBUTE,
+    COMPILE_TYPE_ATTRIBUTE,
 };
 pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
 pub use primitive::{
     install_primitives, FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition,
     PrimitiveRepresentation, PrimitiveSpec, PRIMITIVES,
 };
+pub use tensor::{TensorConversion, TensorDimension, TensorError, TensorShape, TensorType};
 pub use type_system::{
     Constraint, ImplDefinition, ImplId, ImplSelection, ImplTable, InferenceContext, Signature,
     Substitution, TraitRef, TyInterner, TypeKind, UnifyError,

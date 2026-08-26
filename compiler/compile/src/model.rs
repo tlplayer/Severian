@@ -4,7 +4,7 @@ use severian_mir::{
     Value as MirValue,
 };
 use severian_target::TargetSpec;
-use severian_universal::{CompilerId, TypeContext};
+use severian_universal::{Attrs, CompilerId, OpId, TypeContext, TypeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EffectSet {
@@ -18,9 +18,18 @@ pub struct CompileRegion {
     pub id: CompiledRegionId,
     pub compiler: CompilerId,
     pub operations: Vec<MirOperation>,
+    pub compile_operations: Vec<CompileOperation>,
     pub inputs: Vec<MirValue>,
     pub outputs: Vec<MirValue>,
     pub effects: EffectSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileOperation {
+    pub id: OpId,
+    pub operands: Vec<TypeId>,
+    pub results: Vec<TypeId>,
+    pub attributes: Attrs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

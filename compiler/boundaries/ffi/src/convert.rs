@@ -149,6 +149,8 @@ fn lower_semantic(
         ),
         PrimitiveRepresentation::Float { format } => (
             match format {
+                FloatFormat::Float8E4M3Fn => AbiType::float8_e4m3fn(),
+                FloatFormat::Float8E5M2 => AbiType::float8_e5m2(),
                 FloatFormat::Ieee(bits) => AbiType::float(bits),
                 FloatFormat::BrainFloat16 => AbiType::bfloat16(),
                 FloatFormat::Machine => AbiType::float(target.data_layout.machine_float_bits),

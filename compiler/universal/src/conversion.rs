@@ -267,10 +267,13 @@ fn promotion_cost(source: PrimitiveRepresentation, target: PrimitiveRepresentati
 /// Returns `(exponent bits, significand precision)` for known binary formats.
 fn float_shape(format: FloatFormat) -> Option<(u16, u16)> {
     match format {
+        FloatFormat::Float8E4M3Fn => Some((4, 4)),
+        FloatFormat::Float8E5M2 => Some((5, 3)),
         FloatFormat::Ieee(16) => Some((5, 11)),
         FloatFormat::BrainFloat16 => Some((8, 8)),
         FloatFormat::Ieee(32) => Some((8, 24)),
         FloatFormat::Ieee(64) => Some((11, 53)),
+        FloatFormat::Ieee(128) => Some((15, 113)),
         FloatFormat::Ieee(_) | FloatFormat::Machine => None,
     }
 }
@@ -300,8 +303,14 @@ mod tests {
         assert_eq!(kind("i32", "f32"), ConversionKind::Promote);
         assert_eq!(kind("f32", "i32"), ConversionKind::Lossy);
         assert_eq!(kind("f16", "f32"), ConversionKind::Promote);
+        assert_eq!(kind("f8e4m3fn", "f16"), ConversionKind::Promote);
+        assert_eq!(kind("f8e5m2", "f16"), ConversionKind::Promote);
+        assert_eq!(kind("f8e4m3fn", "f8e5m2"), ConversionKind::Lossy);
+        assert_eq!(kind("f8e5m2", "f8e4m3fn"), ConversionKind::Lossy);
         assert_eq!(kind("bf16", "f16"), ConversionKind::Lossy);
         assert_eq!(kind("f64", "f32"), ConversionKind::Lossy);
+        assert_eq!(kind("f64", "f128"), ConversionKind::Promote);
+        assert_eq!(kind("f128", "f64"), ConversionKind::Lossy);
         assert_eq!(kind("int", "data_size"), ConversionKind::Lossy);
         assert_eq!(kind("duration", "float"), ConversionKind::Lossy);
         assert!(types
@@ -346,7 +355,7 @@ mod tests {
             .map(|definition| definition.id)
             .collect::<Vec<_>>();
 
-        assert_eq!(numeric.len(), 18);
+        assert_eq!(numeric.len(), 21);
         for source in &numeric {
             for target in &numeric {
                 assert!(

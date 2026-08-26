@@ -159,7 +159,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
-            && (inputs.iter().any(|ty| matches!(ty, LoweredType::Aggregate(_)))
+            && (inputs
+                .iter()
+                .any(|ty| matches!(ty, LoweredType::Aggregate(_)))
                 || result.is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
     });
     if uses_aggregate_runtime {
@@ -278,6 +280,8 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         .as_ref()
         .expect("CFG rendering is selected only for a CFG module");
     let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
+    let mut artifact_signatures =
+        BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
     let mut string_constants = BTreeMap::<ValueId, String>::new();
     let mut coverage = BTreeSet::new();
     let mut uses_task_lock = false;
@@ -305,6 +309,26 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
                             .collect::<Result<Vec<_>, _>>()?;
                         let result = result.map(|value| value_type(module, value)).transpose()?;
                         runtime_signatures.insert(symbol.clone(), (inputs, result));
+                    }
+                    Operation::ArtifactCall {
+                        artifact,
+                        inputs,
+                        outputs,
+                    } => {
+                        let inputs = inputs
+                            .iter()
+                            .map(|value| value_type(module, *value))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let outputs = outputs
+                            .iter()
+                            .map(|value| value_type(module, *value))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        if let Some(known) = artifact_signatures.get(artifact) {
+                            if known != &(inputs.clone(), outputs.clone()) {
+                                return Err(MlirError::ArtifactSignatureConflict(*artifact));
+                            }
+                        }
+                        artifact_signatures.insert(*artifact, (inputs, outputs));
                     }
                     Operation::Constant {
                         value: Constant::String(value),
@@ -414,7 +438,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     }
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
-            && (inputs.iter().any(|ty| matches!(ty, LoweredType::Aggregate(_)))
+            && (inputs
+                .iter()
+                .any(|ty| matches!(ty, LoweredType::Aggregate(_)))
                 || result.is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
     });
     if uses_aggregate_runtime {
@@ -438,6 +464,26 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             "  func.func private @{symbol}({inputs}){result}\n"
         ));
     }
+    for (artifact, (inputs, outputs)) in artifact_signatures {
+        let inputs = inputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        let outputs = outputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = match outputs.as_slice() {
+            [] => String::new(),
+            [output] => format!(" -> {output}"),
+            outputs => format!(" -> ({})", outputs.join(", ")),
+        };
+        output.push_str(&format!(
+            "  func.func private @{}({inputs}){result}\n",
+            artifact_symbol(artifact)
+        ));
+    }
     let mut declared_external_symbols = BTreeSet::new();
     for function in module
         .functions
@@ -457,7 +503,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     }
     render_cfg_body_function(&mut output, module, "__sev_init", &[], initializer)?;
     output.push_str("  func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {\n");
-    output.push_str("    func.call @__sev_process_set_arguments(%argc, %argv) : (i32, !llvm.ptr) -> ()\n");
+    output.push_str(
+        "    func.call @__sev_process_set_arguments(%argc, %argv) : (i32, !llvm.ptr) -> ()\n",
+    );
     output.push_str("    func.call @__sev_init() : () -> ()\n");
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
@@ -769,9 +817,7 @@ fn render_cfg_operation(
         } => render_cfg_unary(output, module, *operator, *operand, *result, indent)?,
         Operation::Convert {
             operand, result, ..
-        } => {
-            render_conversion(output, module, *operand, *result, indent)?
-        }
+        } => render_conversion(output, module, *operand, *result, indent)?,
         Operation::Binary {
             operator,
             left,
@@ -793,6 +839,43 @@ fn render_cfg_operation(
             arguments,
             result,
         } => render_runtime_call(output, module, symbol, arguments, *result, indent)?,
+        Operation::ArtifactCall {
+            artifact,
+            inputs,
+            outputs,
+        } => {
+            let input_values = inputs
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let input_types = inputs
+                .iter()
+                .map(|value| mlir_type(value_type(module, *value)?))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            let output_values = outputs
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let output_types = outputs
+                .iter()
+                .map(|value| mlir_type(value_type(module, *value)?))
+                .collect::<Result<Vec<_>, _>>()?;
+            let result = match output_types.as_slice() {
+                [] => String::new(),
+                [output] => format!(" -> {output}"),
+                outputs => format!(" -> ({})", outputs.join(", ")),
+            };
+            let assignment = (!output_values.is_empty())
+                .then(|| format!("{output_values} = "))
+                .unwrap_or_default();
+            output.push_str(&format!(
+                "{indentation}{assignment}func.call @{}({input_values}) : ({input_types}){result}\n",
+                artifact_symbol(*artifact)
+            ));
+        }
         Operation::Spawn {
             function: target,
             arguments,
@@ -1274,6 +1357,7 @@ fn render_conversion(
 
 fn float_bits(format: LoweredFloatFormat) -> u16 {
     match format {
+        LoweredFloatFormat::Float8E4M3Fn | LoweredFloatFormat::Float8E5M2 => 8,
         LoweredFloatFormat::Ieee(bits) => bits,
         LoweredFloatFormat::BrainFloat16 => 16,
     }
@@ -1398,7 +1482,10 @@ fn lowered_type_layout(
         size = size.saturating_add(field_size);
     }
     visiting.remove(&id);
-    Ok((size.div_ceil(aggregate_alignment) * aggregate_alignment, aggregate_alignment))
+    Ok((
+        size.div_ceil(aggregate_alignment) * aggregate_alignment,
+        aggregate_alignment,
+    ))
 }
 
 fn render_assert(
@@ -2213,9 +2300,9 @@ fn constant_string(module: &Module, id: ValueId) -> Option<&str> {
             Operation::Constant {
                 value: Constant::String(value),
                 result,
-        } if *result == id => Some(value.as_str()),
-        _ => None,
-    })
+            } if *result == id => Some(value.as_str()),
+            _ => None,
+        })
 }
 
 fn mlir_float_literal(value: &str) -> String {
@@ -2237,6 +2324,12 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
     Ok(match ty {
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
         LoweredType::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn,
+        } => "f8E4M3FN".into(),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Float8E5M2,
+        } => "f8E5M2".into(),
+        LoweredType::Float {
             format: LoweredFloatFormat::Ieee(16),
         } => "f16".into(),
         LoweredType::Float {
@@ -2245,6 +2338,9 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
         LoweredType::Float {
             format: LoweredFloatFormat::Ieee(64),
         } => "f64".into(),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(128),
+        } => "f128".into(),
         LoweredType::Float {
             format: LoweredFloatFormat::BrainFloat16,
         } => "bf16".into(),
@@ -2336,6 +2432,45 @@ mod tests {
             .unwrap(),
             "bf16"
         );
+    }
+
+    #[test]
+    fn tensor_float_widths_keep_their_mlir_spelling() {
+        let cases = [
+            (LoweredFloatFormat::Float8E4M3Fn, "f8E4M3FN"),
+            (LoweredFloatFormat::Float8E5M2, "f8E5M2"),
+            (LoweredFloatFormat::Ieee(16), "f16"),
+            (LoweredFloatFormat::BrainFloat16, "bf16"),
+            (LoweredFloatFormat::Ieee(32), "f32"),
+            (LoweredFloatFormat::Ieee(64), "f64"),
+            (LoweredFloatFormat::Ieee(128), "f128"),
+        ];
+        for (format, expected) in cases {
+            assert_eq!(mlir_type(LoweredType::Float { format }).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn extended_tensor_float_widths_verify_at_the_mlir_boundary() {
+        for (format, spelling) in [
+            (LoweredFloatFormat::Float8E4M3Fn, "f8E4M3FN"),
+            (LoweredFloatFormat::Float8E5M2, "f8E5M2"),
+            (LoweredFloatFormat::Ieee(128), "f128"),
+        ] {
+            let ty = LoweredType::Float { format };
+            verify_artifact(
+                artifact_id(),
+                MlirArtifact {
+                    module: format!(
+                        "module {{ func.func @entry(%arg0: {spelling}) -> {spelling} {{ return %arg0 : {spelling} }} }}"
+                    ),
+                    inputs: vec![ty],
+                    outputs: vec![ty],
+                },
+                &TargetSpec::host(),
+            )
+            .unwrap();
+        }
     }
 
     #[test]

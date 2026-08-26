@@ -91,5 +91,8 @@ pub enum Callee {
         type_def: DefId,
         variant: Option<VariantId>,
     },
-    Intrinsic(OpId),
+    Intrinsic {
+        operation: OpId,
+        attributes: severian_universal::Attrs,
+    },
 }

@@ -11,17 +11,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 pub fn load() -> Result<UniversalContext, BootstrapError> {
-    build_from_packages(
-        severian_compile_protocol::SOURCES
-            .iter()
-            .map(|source| {
-                (
-                    severian_compile_protocol::PACKAGE_NAME,
-                    source.path,
-                    source.source,
-                )
-            }),
-    )
+    build_from_packages(severian_compile_protocol::SOURCES.iter().map(|source| {
+        (
+            severian_compile_protocol::PACKAGE_NAME,
+            source.path,
+            source.source,
+        )
+    }))
 }
 
 fn build_from_packages<'a>(
@@ -149,7 +145,10 @@ fn build_from_packages<'a>(
         }
     }
 
-    Ok(UniversalContext::new(types.build()))
+    let mut context = UniversalContext::new(types.build());
+    severian_universal::tensor::install_operations(&mut context.operations)
+        .map_err(|error| BootstrapError::Type(error.message))?;
+    Ok(context)
 }
 
 fn collect_capabilities(

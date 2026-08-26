@@ -32,6 +32,10 @@ pub struct PrimitiveId(pub DeclarationId);
 pub struct CompilerId(DeclarationId);
 
 impl CompilerId {
+    pub fn from_path(path: &str) -> Self {
+        Self(DeclarationId::from_path(path))
+    }
+
     pub(crate) const fn from_declaration(declaration: DeclarationId) -> Self {
         Self(declaration)
     }

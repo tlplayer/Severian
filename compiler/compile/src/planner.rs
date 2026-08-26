@@ -10,38 +10,25 @@ use severian_universal::{BinaryOperator, CompileRoute, CompilerId, TypeContext};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, CompileError> {
-    let class_types = module
-        .classes
-        .iter()
-        .map(|class| class.id)
-        .collect::<BTreeSet<_>>();
-    for ty in module
-        .globals
-        .iter()
-        .map(|global| global.ty)
-        .chain(module.initializer.locals.iter().map(|local| local.ty))
-        .chain(module.functions.iter().flat_map(|function| {
-            function
-                .parameters
-                .iter()
-                .copied()
-                .chain([function.result])
-                .chain(
-                    function
-                        .body
-                        .iter()
-                        .flat_map(|body| body.locals.iter().map(|local| local.ty)),
-                )
-        }))
-    {
-        if class_types.contains(&ty) || severian_universal::is_raw_pointer_type(ty) {
-            continue;
-        }
-        if let CompileRoute::Compiler(compiler) = types
-            .compile_route(ty)
-            .map_err(|error| CompileError::Type(ty, error.to_string()))?
-        {
-            return Err(CompileError::CfgCompileType(compiler));
+    let mut source = module.clone();
+    let mut nested_regions = Vec::new();
+    let mut next_region = 0u32;
+    extract_cfg_compile_operations(
+        &mut source.initializer,
+        &source.globals,
+        types,
+        &mut next_region,
+        &mut nested_regions,
+    )?;
+    for function in &mut source.functions {
+        if let Some(body) = &mut function.body {
+            extract_cfg_compile_operations(
+                body,
+                &source.globals,
+                types,
+                &mut next_region,
+                &mut nested_regions,
+            )?;
         }
     }
     let initializer = PlannedBlock {
@@ -49,7 +36,7 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
             operations: Vec::new(),
         })],
     };
-    let functions = module
+    let functions = source
         .functions
         .iter()
         .map(|function| PlannedFunction {
@@ -62,11 +49,158 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
         })
         .collect();
     Ok(CompilePlan {
-        source: module.clone(),
+        source,
         initializer,
         functions,
-        nested_regions: Vec::new(),
+        nested_regions,
     })
+}
+
+fn extract_cfg_compile_operations(
+    body: &mut severian_mir::CfgBody,
+    globals: &[severian_mir::GlobalDecl],
+    types: &TypeContext,
+    next_region: &mut u32,
+    regions: &mut Vec<CompileRegion>,
+) -> Result<(), CompileError> {
+    let locals = body.locals.clone();
+    for block in &mut body.blocks {
+        for statement in &mut block.statements {
+            let routed_assignment = match statement {
+                severian_mir::CfgStatement::Assign(
+                    place,
+                    severian_mir::Rvalue::Use(severian_mir::Operand::Constant { .. }),
+                ) => {
+                    let ty = cfg_place_type(&locals, globals, place)?;
+                    // Raw pointers use stable structural TypeIds rather than
+                    // entries in TypeContext. They are always handled by the
+                    // native pipeline, even when initialized from `None`.
+                    if severian_universal::is_raw_pointer_type(ty) {
+                        continue;
+                    }
+                    match types
+                        .compile_route(ty)
+                        .map_err(|error| CompileError::Type(ty, error.to_string()))?
+                    {
+                        CompileRoute::Compiler(compiler) => Some((place.clone(), compiler)),
+                        CompileRoute::Standard => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some((place, compiler)) = routed_assignment {
+                *statement = severian_mir::CfgStatement::Operation {
+                    id: severian_universal::OpId::named("compile", "materialize"),
+                    operands: Vec::new(),
+                    results: vec![place],
+                    attributes: severian_universal::Attrs::from([(
+                        severian_universal::COMPILE_TYPE_ATTRIBUTE,
+                        severian_universal::AttrValue::Compiler(compiler),
+                    )]),
+                };
+            }
+            let severian_mir::CfgStatement::Operation {
+                id,
+                operands,
+                results,
+                attributes,
+            } = statement
+            else {
+                continue;
+            };
+            let Some(severian_universal::AttrValue::Compiler(compiler)) =
+                attributes.get(&severian_universal::COMPILE_TYPE_ATTRIBUTE)
+            else {
+                continue;
+            };
+            let compiler = *compiler;
+            let operand_types = operands
+                .iter()
+                .map(|operand| cfg_operand_type(&locals, globals, operand))
+                .collect::<Result<Vec<_>, _>>()?;
+            let result_types = results
+                .iter()
+                .map(|place| cfg_place_type(&locals, globals, place))
+                .collect::<Result<Vec<_>, _>>()?;
+            let region_id = CompiledRegionId::new(*next_region);
+            *next_region += 1;
+            attributes.insert(
+                severian_universal::COMPILED_ARTIFACT_ATTRIBUTE,
+                severian_universal::AttrValue::Integer(i128::from(region_id.index())),
+            );
+            regions.push(CompileRegion {
+                id: region_id,
+                compiler,
+                operations: Vec::new(),
+                compile_operations: vec![crate::CompileOperation {
+                    id: *id,
+                    operands: operand_types.clone(),
+                    results: result_types.clone(),
+                    attributes: attributes.clone(),
+                }],
+                inputs: operand_types
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, type_id)| Value {
+                        id: ValueId(index as u32),
+                        type_id,
+                    })
+                    .collect(),
+                outputs: result_types
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, type_id)| Value {
+                        id: ValueId(index as u32),
+                        type_id,
+                    })
+                    .collect(),
+                effects: EffectSet {
+                    reads_memory: true,
+                    writes_memory: true,
+                    may_trap: true,
+                },
+            });
+        }
+    }
+    Ok(())
+}
+
+fn cfg_operand_type(
+    locals: &[severian_mir::LocalDecl],
+    globals: &[severian_mir::GlobalDecl],
+    operand: &severian_mir::Operand,
+) -> Result<severian_universal::TypeId, CompileError> {
+    match operand {
+        severian_mir::Operand::Copy(place) | severian_mir::Operand::Move(place) => {
+            cfg_place_type(locals, globals, place)
+        }
+        severian_mir::Operand::Constant { ty, .. } => Ok(*ty),
+        severian_mir::Operand::Function(_) => Err(CompileError::InvalidArtifact(
+            "CompileOp cannot consume a function value".into(),
+        )),
+    }
+}
+
+fn cfg_place_type(
+    locals: &[severian_mir::LocalDecl],
+    globals: &[severian_mir::GlobalDecl],
+    place: &severian_mir::Place,
+) -> Result<severian_universal::TypeId, CompileError> {
+    if !place.projection.is_empty() {
+        return Err(CompileError::InvalidArtifact(
+            "projected CompileOp values are not supported".into(),
+        ));
+    }
+    match place.base {
+        severian_mir::PlaceBase::Local(local) => locals
+            .get(local.0 as usize)
+            .map(|local| local.ty)
+            .ok_or(CompileError::MissingValue(local.0)),
+        severian_mir::PlaceBase::Global(global) => globals
+            .get(global.0 as usize)
+            .map(|global| global.ty)
+            .ok_or(CompileError::MissingValue(global.0)),
+    }
 }
 
 fn plan_block(
@@ -352,6 +486,7 @@ fn build_region(
         id,
         compiler,
         operations,
+        compile_operations: Vec::new(),
         inputs,
         outputs,
         effects,
@@ -377,9 +512,7 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Assign { target, value } => vec![*target, *value],
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
-        Operation::Call { arguments, .. } | Operation::Spawn { arguments, .. } => {
-            arguments.clone()
-        }
+        Operation::Call { arguments, .. } | Operation::Spawn { arguments, .. } => arguments.clone(),
         Operation::Await { task, .. } => vec![*task],
         Operation::Return { value } => value.iter().copied().collect(),
         Operation::Assert {

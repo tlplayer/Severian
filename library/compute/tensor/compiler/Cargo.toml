@@ -1,0 +1,17 @@
+[package]
+name = "severian-tensor-compiler"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+severian-compile = { path = "../../../../compiler/compile" }
+severian-mlir = { path = "../../../../compiler/transforms/mlir" }
+severian-universal = { path = "../../../../compiler/universal" }
+
+[lib]
+path = "src/lib.rs"

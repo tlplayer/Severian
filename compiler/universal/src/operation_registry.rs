@@ -92,7 +92,12 @@ pub enum AttrValue {
     String(String),
     Type(TyId),
     Types(Vec<TyId>),
+    TensorShape(crate::TensorShape),
+    Compiler(crate::CompilerId),
 }
+
+pub const COMPILE_TYPE_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.type");
+pub const COMPILED_ARTIFACT_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.artifact");
 
 pub type Attrs = BTreeMap<AttributeId, AttrValue>;
 
@@ -269,7 +274,10 @@ mod tests {
         assert_eq!(OPERATION.dialect, DialectId::from_name("arith"));
         assert_eq!(OPERATION.operation, OperationId::from_name("add"));
         assert_ne!(OPERATION.operation, OperationId::from_name("subtract"));
-        assert_ne!(AttributeId::from_name("type"), AttributeId::from_name("value"));
+        assert_ne!(
+            AttributeId::from_name("type"),
+            AttributeId::from_name("value")
+        );
         assert_ne!(BackendId::from_name("native"), BackendId::from_name("wasm"));
         assert_ne!(RuntimeId::from_name("host"), RuntimeId::from_name("device"));
         assert_ne!(ProviderId::from_name("cpu"), ProviderId::from_name("gpu"));
@@ -311,12 +319,23 @@ mod tests {
         registry.register(id, interface.clone()).unwrap();
         let duplicate = registry.register(id, interface).unwrap_err();
         assert_eq!(duplicate.operation, id);
-        assert_eq!(duplicate.message, "operation interface is already registered");
-        assert!(registry.interface(OpId::named("missing", "operation")).is_none());
-        assert_eq!(format!("{registry:?}"), "OperationRegistry { interfaces: 1 }");
+        assert_eq!(
+            duplicate.message,
+            "operation interface is already registered"
+        );
+        assert!(registry
+            .interface(OpId::named("missing", "operation"))
+            .is_none());
+        assert_eq!(
+            format!("{registry:?}"),
+            "OperationRegistry { interfaces: 1 }"
+        );
 
         let interface = registry.interface(id).unwrap();
-        assert_eq!(interface.infer_types(&[TypeId(1)], &Attrs::new()).unwrap(), [TypeId(7)]);
+        assert_eq!(
+            interface.infer_types(&[TypeId(1)], &Attrs::new()).unwrap(),
+            [TypeId(7)]
+        );
         assert!(interface.infer_types(&[], &Attrs::new()).is_err());
         assert_eq!(interface.lowering_capabilities(), capabilities);
 

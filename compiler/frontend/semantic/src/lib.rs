@@ -169,6 +169,8 @@ pub(crate) fn analyze_with_package_functions(
         enum_binding_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
+        generic_class_constructors: BTreeMap::new(),
+        tensor_elements: BTreeMap::new(),
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
         pointer_types: BTreeMap::new(),
@@ -211,7 +213,25 @@ pub(crate) fn analyze_with_package_functions(
             .value_substitutions
             .insert(constant.lookup.clone(), value);
     }
+    let universal_type_ids = types
+        .definitions()
+        .map(|definition| definition.id)
+        .collect::<Vec<_>>();
     for function in visible_functions {
+        for function_type in function
+            .parameters
+            .iter()
+            .copied()
+            .chain(std::iter::once(function.result))
+        {
+            if let Some(element) = universal_type_ids
+                .iter()
+                .copied()
+                .find(|element| list_type_id(*element) == function_type)
+            {
+                analyzer.instantiate_list_type(element);
+            }
+        }
         for members in function
             .parameter_unions
             .iter()
@@ -807,7 +827,9 @@ pub(crate) fn analyze_with_package_functions(
                 let previous_substitutions = analyzer.value_substitutions.clone();
                 for (parameter, value) in test.parameters.iter().zip(&values) {
                     let value = analyzer.expression(value, None)?;
-                    analyzer.value_substitutions.insert(parameter.clone(), value);
+                    analyzer
+                        .value_substitutions
+                        .insert(parameter.clone(), value);
                 }
                 for statement in &test.body {
                     if module.tests[offset]
@@ -941,7 +963,9 @@ pub(crate) fn normalize_extensions(
                     ),
                     Some(operator.span),
                 )
-                .with_help("remove the extension operator; `extend` never participates in overriding"));
+                .with_help(
+                    "remove the extension operator; `extend` never participates in overriding",
+                ));
             }
         }
 
@@ -1004,6 +1028,8 @@ struct Analyzer<'a> {
     enum_binding_variants: BTreeMap<severian_hir::VariableId, (String, String)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
+    generic_class_constructors: BTreeMap<String, TypeId>,
+    tensor_elements: BTreeMap<TypeId, TypeId>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
     pointer_types: BTreeMap<TypeId, TypeId>,
@@ -1478,8 +1504,8 @@ impl Analyzer<'_> {
         // annotations may refer forward and through an imported namespace.
         let mut resolved_visible_instances = self.class_instances.clone();
         for package_class in classes {
-            if source_module
-                .is_some_and(|module| !package_class.lookups.contains_key(&module))
+            if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
+                && package_class.declaration.name != "Tensor"
             {
                 continue;
             }
@@ -1493,6 +1519,14 @@ impl Analyzer<'_> {
                     {
                         self.classes
                             .insert(lookup.clone(), package_class.declaration.clone());
+                        self.generic_class_constructors
+                            .insert(lookup.clone(), package_class.ty);
+                    }
+                    if package_class.declaration.name == "Tensor" {
+                        self.classes
+                            .insert("Tensor".into(), package_class.declaration.clone());
+                        self.generic_class_constructors
+                            .insert("Tensor".into(), package_class.ty);
                     }
                 }
                 continue;
@@ -1529,8 +1563,8 @@ impl Analyzer<'_> {
             }
         }
         for package_class in classes {
-            if source_module
-                .is_some_and(|module| !package_class.lookups.contains_key(&module))
+            if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
+                && package_class.declaration.name != "Tensor"
             {
                 continue;
             }
@@ -1712,6 +1746,13 @@ impl Analyzer<'_> {
             let value = self.resolve_source_type(value)?;
             return Ok(self.instantiate_map_type(key, value));
         }
+        if let Some((name, arguments)) = annotation.named_parts() {
+            if !arguments.is_empty() && self.classes.contains_key(name) {
+                return self
+                    .instantiate_class(name, arguments, annotation.span)
+                    .map(|class| class.ty);
+            }
+        }
         if let Some(name) = annotation.simple_name() {
             if let Some(ty) = self.active_type_aliases.get(name) {
                 return Ok(*ty);
@@ -1814,18 +1855,18 @@ impl Analyzer<'_> {
                 if is_update {
                     return Err(Diagnostic::new(
                         "E000205",
-                    "lambda bindings cannot be reassigned",
-                    Some(ast_binding.span),
-                ));
-            }
-            self.lambda_binding_value(parameters, body, ast_binding.value.span)?
-        } else {
-            if ast_binding.preserve_error {
-                self.preserve_error_depth += 1;
-            }
-            let value = self.expression(&ast_binding.value, expected);
-            if ast_binding.preserve_error {
-                self.preserve_error_depth -= 1;
+                        "lambda bindings cannot be reassigned",
+                        Some(ast_binding.span),
+                    ));
+                }
+                self.lambda_binding_value(parameters, body, ast_binding.value.span)?
+            } else {
+                if ast_binding.preserve_error {
+                    self.preserve_error_depth += 1;
+                }
+                let value = self.expression(&ast_binding.value, expected);
+                if ast_binding.preserve_error {
+                    self.preserve_error_depth -= 1;
                 }
                 (value?, None)
             };
@@ -2605,14 +2646,14 @@ impl Analyzer<'_> {
                 loop_body.statements.push(increment);
 
                 let mut statements = vec![
-                        Statement::Binding(iterable_id),
-                        Statement::Binding(index_id),
-                        Statement::While {
-                            condition,
-                            body: loop_body,
-                            span: *span,
-                        },
-                    ];
+                    Statement::Binding(iterable_id),
+                    Statement::Binding(index_id),
+                    Statement::While {
+                        condition,
+                        body: loop_body,
+                        span: *span,
+                    },
+                ];
                 if let Some(initializer) = initializer_statement {
                     statements.insert(0, initializer);
                 }
@@ -2782,7 +2823,8 @@ impl Analyzer<'_> {
                         ));
                     }
                     let value = self.expression(value, Some(element))?;
-                    let suffix = self.pointer_runtime_operation_suffix(&collection, element, *span)?;
+                    let suffix =
+                        self.pointer_runtime_operation_suffix(&collection, element, *span)?;
                     return Ok(Statement::Expression(self.runtime_call(
                         &format!("__sev_pointer_set_{suffix}"),
                         &[collection.type_id, index.type_id, element],
@@ -2822,8 +2864,7 @@ impl Analyzer<'_> {
                 {
                     let key = self.expression(index, Some(key_type))?;
                     let value = self.expression(value, Some(value_type))?;
-                    let keys =
-                        self.collection_storage_expression(collection.clone(), 0, *span);
+                    let keys = self.collection_storage_expression(collection.clone(), 0, *span);
                     let values = self.collection_storage_expression(collection, 1, *span);
                     let storage_type = keys.type_id;
                     let key_suffix = self.list_runtime_suffix(key_type, *span)?;
@@ -2912,9 +2953,7 @@ impl Analyzer<'_> {
                         let message = self.string_expression(
                             format!(
                                 "expectation failed in {}",
-                                self.active_function_name
-                                    .as_deref()
-                                    .unwrap_or("<test>")
+                                self.active_function_name.as_deref().unwrap_or("<test>")
                             ),
                             expression.span,
                         );
@@ -3147,12 +3186,16 @@ impl Analyzer<'_> {
                     right,
                 } = &condition_ast.kind
                 {
-                    if let (AstExpressionKind::Name(binding_name), AstExpressionKind::Name(type_name)) =
-                        (&left.kind, &right.kind)
+                    if let (
+                        AstExpressionKind::Name(binding_name),
+                        AstExpressionKind::Name(type_name),
+                    ) = (&left.kind, &right.kind)
                     {
-                        if let Some((binding, _, binding_type)) = self.names.get(binding_name).copied()
+                        if let Some((binding, _, binding_type)) =
+                            self.names.get(binding_name).copied()
                         {
-                            if let Some(fallible) = self.fallible_types.get(&binding_type).copied() {
+                            if let Some(fallible) = self.fallible_types.get(&binding_type).copied()
+                            {
                                 let target = self
                                     .class_instances
                                     .get(&(type_name.clone(), Vec::new()))
@@ -3182,10 +3225,8 @@ impl Analyzer<'_> {
                                         },
                                         span: left.span,
                                     };
-                                    self.value_substitutions.insert(
-                                        binding_name.clone(),
-                                        narrowed,
-                                    );
+                                    self.value_substitutions
+                                        .insert(binding_name.clone(), narrowed);
                                 }
                             }
                         }
@@ -3765,8 +3806,9 @@ impl Analyzer<'_> {
             | AstStatement::FallibleElse { value, .. }
             | AstStatement::Return {
                 value: Some(value), ..
-            } => self
-                .lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?,
+            } => {
+                self.lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?
+            }
             AstStatement::Assert {
                 condition, message, ..
             } => {
@@ -3801,18 +3843,8 @@ impl Analyzer<'_> {
                 }
             }
             AstStatement::FieldAssignment { object, value, .. } => {
-                self.lower_expression_comprehensions(
-                    object,
-                    bindings,
-                    result_type,
-                    &mut preludes,
-                )?;
-                self.lower_expression_comprehensions(
-                    value,
-                    bindings,
-                    result_type,
-                    &mut preludes,
-                )?;
+                self.lower_expression_comprehensions(object, bindings, result_type, &mut preludes)?;
+                self.lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?;
             }
             _ => {}
         }
@@ -3843,12 +3875,7 @@ impl Analyzer<'_> {
             | AstExpressionKind::Set(values)
             | AstExpressionKind::Tuple(values) => {
                 for value in values {
-                    self.lower_expression_comprehensions(
-                        value,
-                        bindings,
-                        result_type,
-                        preludes,
-                    )?;
+                    self.lower_expression_comprehensions(value, bindings, result_type, preludes)?;
                 }
             }
             AstExpressionKind::Map(entries) => {
@@ -3876,25 +3903,10 @@ impl Analyzer<'_> {
             | AstExpressionKind::Throw { error: object }
             | AstExpressionKind::Unary {
                 operand: object, ..
-            } => self.lower_expression_comprehensions(
-                object,
-                bindings,
-                result_type,
-                preludes,
-            )?,
+            } => self.lower_expression_comprehensions(object, bindings, result_type, preludes)?,
             AstExpressionKind::Index { object, index } => {
-                self.lower_expression_comprehensions(
-                    object,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
-                self.lower_expression_comprehensions(
-                    index,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
+                self.lower_expression_comprehensions(object, bindings, result_type, preludes)?;
+                self.lower_expression_comprehensions(index, bindings, result_type, preludes)?;
             }
             AstExpressionKind::Slice {
                 object,
@@ -3903,28 +3915,13 @@ impl Analyzer<'_> {
                 step,
                 ..
             } => {
-                self.lower_expression_comprehensions(
-                    object,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
+                self.lower_expression_comprehensions(object, bindings, result_type, preludes)?;
                 for bound in [start, end, step].into_iter().flatten() {
-                    self.lower_expression_comprehensions(
-                        bound,
-                        bindings,
-                        result_type,
-                        preludes,
-                    )?;
+                    self.lower_expression_comprehensions(bound, bindings, result_type, preludes)?;
                 }
             }
             AstExpressionKind::Call { callee, arguments } => {
-                self.lower_expression_comprehensions(
-                    callee,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
+                self.lower_expression_comprehensions(callee, bindings, result_type, preludes)?;
                 for argument in arguments {
                     self.lower_expression_comprehensions(
                         &mut argument.value,
@@ -3939,24 +3936,9 @@ impl Analyzer<'_> {
                 condition,
                 fallback,
             } => {
-                self.lower_expression_comprehensions(
-                    value,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
-                self.lower_expression_comprehensions(
-                    condition,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
-                self.lower_expression_comprehensions(
-                    fallback,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
+                self.lower_expression_comprehensions(value, bindings, result_type, preludes)?;
+                self.lower_expression_comprehensions(condition, bindings, result_type, preludes)?;
+                self.lower_expression_comprehensions(fallback, bindings, result_type, preludes)?;
             }
             AstExpressionKind::Fallback { value, fallback }
             | AstExpressionKind::Binary {
@@ -3964,25 +3946,12 @@ impl Analyzer<'_> {
                 right: fallback,
                 ..
             } => {
-                self.lower_expression_comprehensions(
-                    value,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
-                self.lower_expression_comprehensions(
-                    fallback,
-                    bindings,
-                    result_type,
-                    preludes,
-                )?;
+                self.lower_expression_comprehensions(value, bindings, result_type, preludes)?;
+                self.lower_expression_comprehensions(fallback, bindings, result_type, preludes)?;
             }
-            AstExpressionKind::Lambda { body, .. } => self.lower_expression_comprehensions(
-                body,
-                bindings,
-                result_type,
-                preludes,
-            )?,
+            AstExpressionKind::Lambda { body, .. } => {
+                self.lower_expression_comprehensions(body, bindings, result_type, preludes)?
+            }
             AstExpressionKind::Mock { .. }
             | AstExpressionKind::Literal(_)
             | AstExpressionKind::Name(_)
@@ -4031,8 +4000,7 @@ impl Analyzer<'_> {
                     self.list_elements.get(&iterable.type_id).copied()
                 {
                     vec![element]
-                } else if let Some((key, value)) =
-                    self.map_elements.get(&iterable.type_id).copied()
+                } else if let Some((key, value)) = self.map_elements.get(&iterable.type_id).copied()
                 {
                     vec![key, value]
                 } else {
@@ -4566,9 +4534,11 @@ impl Analyzer<'_> {
     }
 
     fn inferred_parameter_effect(&self, body: &Block, parameter: BindingId) -> ParameterEffect {
-        body.statements.iter().fold(ParameterEffect::Shared, |effect, statement| {
-            effect.max(self.statement_parameter_effect(statement, parameter))
-        })
+        body.statements
+            .iter()
+            .fold(ParameterEffect::Shared, |effect, statement| {
+                effect.max(self.statement_parameter_effect(statement, parameter))
+            })
     }
 
     fn statement_parameter_effect(
@@ -4655,9 +4625,9 @@ impl Analyzer<'_> {
         parameter: BindingId,
     ) -> ParameterEffect {
         match &expression.kind {
-            ExpressionKind::Literal(_) | ExpressionKind::Binding(_) | ExpressionKind::Function(_) => {
-                ParameterEffect::Shared
-            }
+            ExpressionKind::Literal(_)
+            | ExpressionKind::Binding(_)
+            | ExpressionKind::Function(_) => ParameterEffect::Shared,
             ExpressionKind::AddressOf(binding) => {
                 if *binding == parameter {
                     ParameterEffect::Exclusive
@@ -4665,24 +4635,27 @@ impl Analyzer<'_> {
                     ParameterEffect::Shared
                 }
             }
-            ExpressionKind::Aggregate { fields, .. } => fields.iter().fold(
-                ParameterEffect::Shared,
-                |effect, field| effect.max(self.expression_parameter_effect(field, parameter)),
-            ),
+            ExpressionKind::Aggregate { fields, .. } => fields
+                .iter()
+                .fold(ParameterEffect::Shared, |effect, field| {
+                    effect.max(self.expression_parameter_effect(field, parameter))
+                }),
             ExpressionKind::Field { object, .. }
             | ExpressionKind::Await(object)
             | ExpressionKind::Throw(object)
-            | ExpressionKind::Convert { operand: object, .. }
-            | ExpressionKind::Unary { operand: object, .. } => {
-                self.expression_parameter_effect(object, parameter)
+            | ExpressionKind::Convert {
+                operand: object, ..
             }
+            | ExpressionKind::Unary {
+                operand: object, ..
+            } => self.expression_parameter_effect(object, parameter),
             ExpressionKind::Call { callee, arguments } => {
-                let mut effect = arguments.iter().fold(
-                    ParameterEffect::Shared,
-                    |effect, argument| {
-                        effect.max(self.expression_parameter_effect(argument, parameter))
-                    },
-                );
+                let mut effect =
+                    arguments
+                        .iter()
+                        .fold(ParameterEffect::Shared, |effect, argument| {
+                            effect.max(self.expression_parameter_effect(argument, parameter))
+                        });
                 if self.mutating_runtime_callee(callee)
                     && arguments
                         .iter()
@@ -5125,7 +5098,8 @@ impl Analyzer<'_> {
                 if matches!(value, AstLiteral::None)
                     && expected.is_some_and(|expected| self.optional_types.contains(&expected))
                 {
-                    if expected.is_some_and(|expected| self.pointer_elements.contains_key(&expected))
+                    if expected
+                        .is_some_and(|expected| self.pointer_elements.contains_key(&expected))
                     {
                         return Ok(Expression {
                             id: self.next_id(),
@@ -5333,6 +5307,19 @@ impl Analyzer<'_> {
                     }
                 }
                 let object = self.expression(object, None)?;
+                if self
+                    .resolve_tensor_element_type(object.type_id, ast.span)
+                    .is_some()
+                    && matches!(name.as_str(), "shape" | "strides" | "values")
+                {
+                    let operation = match name.as_str() {
+                        "shape" => severian_universal::tensor::SHAPE,
+                        "strides" => severian_universal::tensor::STRIDES,
+                        "values" => severian_universal::tensor::VALUES,
+                        _ => unreachable!(),
+                    };
+                    return self.tensor_list_property(operation, object, expected, ast.span);
+                }
                 if let Some(fallible) = self.fallible_types.get(&object.type_id).copied() {
                     if self.types.resolve_name("Error") == Some(fallible.error)
                         && (name == "message" || name == "call_stack")
@@ -5497,7 +5484,8 @@ impl Analyzer<'_> {
                             Some(index.span),
                         ));
                     }
-                    let suffix = self.pointer_runtime_operation_suffix(&object, element, ast.span)?;
+                    let suffix =
+                        self.pointer_runtime_operation_suffix(&object, element, ast.span)?;
                     return Ok(self.runtime_call(
                         &format!("__sev_pointer_index_{suffix}"),
                         &[object.type_id, index.type_id],
@@ -5556,8 +5544,7 @@ impl Analyzer<'_> {
                 if let Some((key_type, value_type)) =
                     self.map_elements.get(&object.type_id).copied()
                 {
-                    if expected
-                        .is_some_and(|expected| !self.types.assignable(value_type, expected))
+                    if expected.is_some_and(|expected| !self.types.assignable(value_type, expected))
                     {
                         return Err(semantic_error(
                             "map value does not satisfy the expected type".into(),
@@ -5684,9 +5671,7 @@ impl Analyzer<'_> {
                     ));
                 }
                 let result_type = object_value.type_id;
-                if expected
-                    .is_some_and(|expected| !self.types.assignable(result_type, expected))
-                {
+                if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
                     return Err(semantic_error(
                         "slice result does not satisfy the expected type".into(),
                         ast.span,
@@ -5899,7 +5884,11 @@ impl Analyzer<'_> {
                             let (size, alignment) = self.type_layout(queried, ast.span)?;
                             let value = match name.as_str() {
                                 "bytes" | "alignment" if arguments.is_empty() => {
-                                    if name == "bytes" { size } else { alignment }
+                                    if name == "bytes" {
+                                        size
+                                    } else {
+                                        alignment
+                                    }
                                 }
                                 "offset" => {
                                     let [field] = arguments.as_slice() else {
@@ -5993,8 +5982,7 @@ impl Analyzer<'_> {
                         .resolve_name("bool")
                         .expect("bootstrap defines bool");
                     let list_type = self.instantiate_list_type(boolean);
-                    let collection =
-                        self.expression(&arguments[0].value, Some(list_type))?;
+                    let collection = self.expression(&arguments[0].value, Some(list_type))?;
                     if self.list_elements.get(&collection.type_id).copied() != Some(boolean) {
                         return Err(Diagnostic::new(
                             "E000206",
@@ -6166,8 +6154,7 @@ impl Analyzer<'_> {
                     && arguments[0].name.is_none()
                 {
                     let collection = self.expression(&arguments[0].value, None)?;
-                    let Some(element) = self.list_elements.get(&collection.type_id).copied()
-                    else {
+                    let Some(element) = self.list_elements.get(&collection.type_id).copied() else {
                         return Err(Diagnostic::new(
                             "E000206",
                             "`enumerate` expects a list",
@@ -6205,10 +6192,19 @@ impl Analyzer<'_> {
                     let left = self.expression(&arguments[0].value, None)?;
                     let right = self.expression(&arguments[1].value, None)?;
                     let Some(left_element) = self.list_elements.get(&left.type_id).copied() else {
-                        return Err(Diagnostic::new("E000206", "`zip` expects lists", Some(ast.span)));
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`zip` expects lists",
+                            Some(ast.span),
+                        ));
                     };
-                    let Some(right_element) = self.list_elements.get(&right.type_id).copied() else {
-                        return Err(Diagnostic::new("E000206", "`zip` expects lists", Some(ast.span)));
+                    let Some(right_element) = self.list_elements.get(&right.type_id).copied()
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`zip` expects lists",
+                            Some(ast.span),
+                        ));
                     };
                     let map_type = self.instantiate_map_type(left_element, right_element);
                     let left = self.list_storage_expression(left, ast.span);
@@ -6242,7 +6238,9 @@ impl Analyzer<'_> {
                     && arguments.is_empty()
                 {
                     let element = expected.and_then(|expected| {
-                        (self.set_type == Some(expected)).then_some(self.set_element).flatten()
+                        (self.set_type == Some(expected))
+                            .then_some(self.set_element)
+                            .flatten()
                     });
                     return self.empty_set_expression(element, ast.span);
                 }
@@ -6332,8 +6330,13 @@ impl Analyzer<'_> {
                     }
                     if matches!(
                         name.as_str(),
-                        "appendleft" | "extend" | "popleft" | "insert" | "remove"
-                            | "heap_push" | "heap_pop"
+                        "appendleft"
+                            | "extend"
+                            | "popleft"
+                            | "insert"
+                            | "remove"
+                            | "heap_push"
+                            | "heap_pop"
                     ) && !callable_path(callee)
                         .is_some_and(|path| self.functions.contains_key(&path))
                     {
@@ -6363,8 +6366,8 @@ impl Analyzer<'_> {
                                 }
                                 "extend" if arguments.len() == 1 => {
                                     let list_type = self.instantiate_list_type(element);
-                                    let other = self
-                                        .expression(&arguments[0].value, Some(list_type))?;
+                                    let other =
+                                        self.expression(&arguments[0].value, Some(list_type))?;
                                     let other = self.list_storage_expression(other, ast.span);
                                     (
                                         "__sev_list_extend".into(),
@@ -6404,7 +6407,9 @@ impl Analyzer<'_> {
                                 _ => {
                                     return Err(Diagnostic::new(
                                         "E000206",
-                                        format!("list method `{name}` received incompatible arguments"),
+                                        format!(
+                                            "list method `{name}` received incompatible arguments"
+                                        ),
                                         Some(ast.span),
                                     ));
                                 }
@@ -6549,10 +6554,8 @@ impl Analyzer<'_> {
                                         Some(ast.span),
                                     ));
                                 }
-                                let mode = arguments
-                                    .get(1)
-                                    .map(conversion_mode_argument)
-                                    .transpose()?;
+                                let mode =
+                                    arguments.get(1).map(conversion_mode_argument).transpose()?;
                                 let operand = self.expression(&arguments[0].value, None)?;
                                 if mode.is_none() {
                                     if let Some(converted) = self.enum_accepted_conversion(
@@ -6563,9 +6566,8 @@ impl Analyzer<'_> {
                                         return Ok(converted);
                                     }
                                 }
-                                return self.coerce_with_conversion_mode(
-                                    operand, target, true, mode,
-                                );
+                                return self
+                                    .coerce_with_conversion_mode(operand, target, true, mode);
                             }
                         }
                     }
@@ -6725,6 +6727,9 @@ impl Analyzer<'_> {
                         );
                     }
                 }
+                if let Some(tensor) = self.tensor_call(callee, arguments, expected, ast.span)? {
+                    return Ok(tensor);
+                }
                 if let Some(path) = callable_path(callee) {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
@@ -6735,24 +6740,13 @@ impl Analyzer<'_> {
                             .iter()
                             .any(|variant| !variant.accepted_values.is_empty())
                     }) {
-                        return self.enum_value_constructor(
-                            &path,
-                            arguments,
-                            expected,
-                            ast.span,
-                        );
+                        return self.enum_value_constructor(&path, arguments, expected, ast.span);
                     }
                     if self
                         .class_instances
                         .contains_key(&(path.clone(), Vec::new()))
                     {
-                        return self.class_constructor(
-                            &path,
-                            &[],
-                            arguments,
-                            expected,
-                            ast.span,
-                        );
+                        return self.class_constructor(&path, &[], arguments, expected, ast.span);
                     }
                 }
                 if let Some((class, type_arguments)) = class_application(callee) {
@@ -6832,53 +6826,54 @@ impl Analyzer<'_> {
                 if callable_path(callee).as_deref() == Some("print")
                     && !arguments.is_empty()
                     && arguments.iter().all(|argument| argument.name.is_none())
-                    && arguments.len() > 1 {
-                        let values = arguments
-                            .iter()
-                            .map(|argument| self.expression(&argument.value, None))
-                            .collect::<Result<Vec<_>, Diagnostic>>()?;
-                        let string = self
-                            .types
-                            .resolve_name("string")
-                            .expect("bootstrap defines string");
-                        let mut values = values.into_iter();
-                        let first = values.next().expect("print has multiple arguments");
-                        let mut rendered = self.display_string(first, ast.span)?;
-                        for value in values {
-                            let space = Expression {
-                                id: self.next_id(),
-                                type_id: string,
-                                kind: ExpressionKind::Literal(LiteralValue::String(" ".into())),
-                                span: ast.span,
-                            };
-                            rendered = self.runtime_call(
-                                "__sev_string_concat",
-                                &[string, string],
-                                string,
-                                vec![rendered, space],
-                                ast.span,
-                            );
-                            let value = self.display_string(value, ast.span)?;
-                            rendered = self.runtime_call(
-                                "__sev_string_concat",
-                                &[string, string],
-                                string,
-                                vec![rendered, value],
-                                ast.span,
-                            );
-                        }
-                        let result = self
-                            .types
-                            .resolve_name("i32")
-                            .expect("bootstrap defines i32");
-                        return Ok(self.runtime_call(
-                            "__sev_print_string",
-                            &[string],
-                            result,
-                            vec![rendered],
+                    && arguments.len() > 1
+                {
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.expression(&argument.value, None))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    let mut values = values.into_iter();
+                    let first = values.next().expect("print has multiple arguments");
+                    let mut rendered = self.display_string(first, ast.span)?;
+                    for value in values {
+                        let space = Expression {
+                            id: self.next_id(),
+                            type_id: string,
+                            kind: ExpressionKind::Literal(LiteralValue::String(" ".into())),
+                            span: ast.span,
+                        };
+                        rendered = self.runtime_call(
+                            "__sev_string_concat",
+                            &[string, string],
+                            string,
+                            vec![rendered, space],
                             ast.span,
-                        ));
+                        );
+                        let value = self.display_string(value, ast.span)?;
+                        rendered = self.runtime_call(
+                            "__sev_string_concat",
+                            &[string, string],
+                            string,
+                            vec![rendered, value],
+                            ast.span,
+                        );
                     }
+                    let result = self
+                        .types
+                        .resolve_name("i32")
+                        .expect("bootstrap defines i32");
+                    return Ok(self.runtime_call(
+                        "__sev_print_string",
+                        &[string],
+                        result,
+                        vec![rendered],
+                        ast.span,
+                    ));
+                }
                 if callable_path(callee).as_deref() == Some("print")
                     && arguments.len() == 1
                     && arguments[0].name.is_none()
@@ -6924,7 +6919,17 @@ impl Analyzer<'_> {
                         Some(callee.span),
                     ));
                 };
-                let candidates = self.functions.get(&name).cloned().unwrap_or_default();
+                // A package may expose a same-named constructor as its default
+                // callable surface (`import tensor`; `tensor(...)`). Keep the
+                // qualified function as the declaration identity while making
+                // the module spelling usable at the call site.
+                let qualified_default = format!("{name}.{name}");
+                let candidates = self
+                    .functions
+                    .get(&name)
+                    .or_else(|| self.functions.get(&qualified_default))
+                    .cloned()
+                    .unwrap_or_default();
                 let mut matches = Vec::new();
                 for function in candidates {
                     let signature = self.signatures[&function].clone();
@@ -6964,6 +6969,13 @@ impl Analyzer<'_> {
                     .into_iter()
                     .filter(|candidate| Some(candidate.1) == specificity)
                     .collect::<Vec<_>>();
+                if best.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("no declaration of `{name}` accepts these argument types"),
+                        Some(ast.span),
+                    ));
+                }
                 let [(_, _, function, result, arguments)] = best.as_slice() else {
                     return Err(Diagnostic::new(
                         "E000206",
@@ -7043,8 +7055,7 @@ impl Analyzer<'_> {
                         ));
                     };
                     let collection = self.expression(object, None)?;
-                    let Some(element) = self.list_elements.get(&collection.type_id).copied()
-                    else {
+                    let Some(element) = self.list_elements.get(&collection.type_id).copied() else {
                         return Err(Diagnostic::new(
                             "E000211",
                             "raw address-of requires a list element",
@@ -7222,6 +7233,34 @@ impl Analyzer<'_> {
                 }
                 if matches!(
                     operator,
+                    AstBinaryOperator::Add
+                        | AstBinaryOperator::Subtract
+                        | AstBinaryOperator::Multiply
+                        | AstBinaryOperator::Divide
+                ) {
+                    let left_value = self.expression(left, None)?;
+                    if self
+                        .resolve_tensor_element_type(left_value.type_id, ast.span)
+                        .is_some()
+                    {
+                        let right_value = self.expression(right, Some(left_value.type_id))?;
+                        let operation = match operator {
+                            AstBinaryOperator::Add => severian_universal::tensor::ADD,
+                            AstBinaryOperator::Subtract => severian_universal::tensor::SUBTRACT,
+                            AstBinaryOperator::Multiply => severian_universal::tensor::MULTIPLY,
+                            AstBinaryOperator::Divide => severian_universal::tensor::DIVIDE,
+                            _ => unreachable!(),
+                        };
+                        return Ok(self.tensor_operation(
+                            operation,
+                            vec![left_value, right_value],
+                            expected,
+                            ast.span,
+                        )?);
+                    }
+                }
+                if matches!(
+                    operator,
                     AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
                 ) {
                     if let AstExpressionKind::Name(type_name) = &right.kind {
@@ -7356,9 +7395,13 @@ impl Analyzer<'_> {
                         ast.span,
                     ));
                 }
-                if matches!(operator, AstBinaryOperator::Add | AstBinaryOperator::Subtract) {
+                if matches!(
+                    operator,
+                    AstBinaryOperator::Add | AstBinaryOperator::Subtract
+                ) {
                     let resolved_left = self.expression(left, None)?;
-                    if let Some(element) = self.pointer_elements.get(&resolved_left.type_id).copied()
+                    if let Some(element) =
+                        self.pointer_elements.get(&resolved_left.type_id).copied()
                     {
                         if self.unsafe_depth == 0 {
                             return Err(Diagnostic::new(
@@ -7933,9 +7976,7 @@ impl Analyzer<'_> {
                 ));
             }
         }
-        let Some(mut conversion) = self
-            .types
-            .numeric_conversion(expression.type_id, expected)
+        let Some(mut conversion) = self.types.numeric_conversion(expression.type_id, expected)
         else {
             if !explicit && self.types.assignable(expression.type_id, expected) {
                 return Ok(expression);
@@ -8334,6 +8375,9 @@ impl Analyzer<'_> {
         }
         let key = (name.to_owned(), concrete.to_vec());
         if let Some(instance) = self.class_instances.get(&key) {
+            if name.rsplit('.').next() == Some("Tensor") {
+                self.tensor_elements.insert(instance.ty, concrete[0]);
+            }
             return Ok(instance.clone());
         }
         let substitution = declaration
@@ -8350,8 +8394,16 @@ impl Analyzer<'_> {
                 ty,
             });
         }
-        let ty = TypeId(self.next_class_type);
-        self.next_class_type = self.next_class_type.saturating_sub(1);
+        let ty = self
+            .generic_class_constructors
+            .get(name)
+            .copied()
+            .map(|constructor| generic_class_type_id(constructor, concrete))
+            .unwrap_or_else(|| {
+                let ty = TypeId(self.next_class_type);
+                self.next_class_type = self.next_class_type.saturating_sub(1);
+                ty
+            });
         let instance = ClassInstance {
             ty,
             name: name.to_owned(),
@@ -8362,6 +8414,9 @@ impl Analyzer<'_> {
         };
         self.class_instances.insert(key, instance.clone());
         self.class_instances_by_type.insert(ty, instance.clone());
+        if name.rsplit('.').next() == Some("Tensor") {
+            self.tensor_elements.insert(ty, concrete[0]);
+        }
         self.lowered_classes.push(HirClassDeclaration {
             id: ty,
             name: format!(
@@ -8413,6 +8468,15 @@ impl Analyzer<'_> {
             let key = self.resolve_instantiated_type(&arguments[0], substitution)?;
             let value = self.resolve_instantiated_type(&arguments[1], substitution)?;
             return Ok(self.instantiate_map_type(key, value));
+        }
+        if self.classes.contains_key(name) {
+            let concrete = arguments
+                .iter()
+                .map(|argument| self.resolve_instantiated_type(argument, substitution))
+                .collect::<Result<Vec<_>, _>>()?;
+            return self
+                .instantiate_class_types(name, &concrete, annotation.span)
+                .map(|class| class.ty);
         }
         Err(Diagnostic::new(
             "E000204",
@@ -9069,10 +9133,8 @@ impl Analyzer<'_> {
             .types
             .resolve_name("bool")
             .expect("bootstrap defines bool");
-        let error = self.core_error_expression(
-            format!("value is not accepted by enum `{enum_name}`"),
-            span,
-        );
+        let error = self
+            .core_error_expression(format!("value is not accepted by enum `{enum_name}`"), span);
         let mut converted = Expression {
             id: self.next_id(),
             type_id: instance.ty,
@@ -9299,8 +9361,7 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("string")
                 .expect("bootstrap defines pointer-backed string");
-            let keys =
-                self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+            let keys = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
             let values =
                 self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
             return Ok(Expression {
@@ -9668,13 +9729,17 @@ impl Analyzer<'_> {
                 span,
             ));
         }
-        if self.types.primitive(value.type_id).is_some_and(|primitive| {
-            matches!(
-                primitive.category,
-                severian_universal::PrimitiveCategory::Float
-                    | severian_universal::PrimitiveCategory::Measured
-            )
-        }) {
+        if self
+            .types
+            .primitive(value.type_id)
+            .is_some_and(|primitive| {
+                matches!(
+                    primitive.category,
+                    severian_universal::PrimitiveCategory::Float
+                        | severian_universal::PrimitiveCategory::Measured
+                )
+            })
+        {
             let float = self
                 .types
                 .resolve_name("float")
@@ -9745,10 +9810,7 @@ impl Analyzer<'_> {
                 .resolve_name("i32")
                 .expect("bootstrap defines i32");
             let path = self.expression(&arguments[0].value, Some(string))?;
-            let byte = self
-                .types
-                .resolve_name("u8")
-                .expect("bootstrap defines u8");
+            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
             let byte_list = self.instantiate_list_type(byte);
             let contents = if matches!(arguments[1].value.kind, AstExpressionKind::List(_)) {
                 self.expression(&arguments[1].value, Some(byte_list))?
@@ -9864,10 +9926,7 @@ impl Analyzer<'_> {
                     vec![handle, count],
                     span,
                 );
-                let byte = self
-                    .types
-                    .resolve_name("u8")
-                    .expect("bootstrap defines u8");
+                let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
                 let result = self.instantiate_list_type(byte);
                 return Ok(Some(Expression {
                     id: self.next_id(),
@@ -9886,17 +9945,8 @@ impl Analyzer<'_> {
                 .resolve_name("string")
                 .expect("bootstrap defines string");
             let path = self.expression(&arguments[0].value, Some(string))?;
-            let storage = self.runtime_call(
-                "__sev_file_map",
-                &[string],
-                string,
-                vec![path],
-                span,
-            );
-            let byte = self
-                .types
-                .resolve_name("u8")
-                .expect("bootstrap defines u8");
+            let storage = self.runtime_call("__sev_file_map", &[string], string, vec![path], span);
+            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
             let result = self.instantiate_list_type(byte);
             return Ok(Some(Expression {
                 id: self.next_id(),
@@ -9958,11 +10008,8 @@ impl Analyzer<'_> {
                     })?;
                 let _target = self.expression(&target.value, Some(target_type))?;
                 let queried_type = self.resolve_source_type(queried)?;
-                let instance = self.instantiate_class(
-                    "platform.Layout",
-                    std::slice::from_ref(queried),
-                    span,
-                )?;
+                let instance =
+                    self.instantiate_class("platform.Layout", std::slice::from_ref(queried), span)?;
                 let (size, alignment) = self.type_layout(queried_type, span)?;
                 let data_size = self
                     .types
@@ -9988,21 +10035,14 @@ impl Analyzer<'_> {
                 }));
             }
         }
-        if callable_path(callee).as_deref() == Some("process.arguments")
-            && arguments.is_empty()
-        {
+        if callable_path(callee).as_deref() == Some("process.arguments") && arguments.is_empty() {
             let string = self
                 .types
                 .resolve_name("string")
                 .expect("bootstrap defines string");
             let list = self.instantiate_list_type(string);
-            let storage = self.runtime_call(
-                "__sev_process_arguments",
-                &[],
-                string,
-                Vec::new(),
-                span,
-            );
+            let storage =
+                self.runtime_call("__sev_process_arguments", &[], string, Vec::new(), span);
             return Ok(Some(Expression {
                 id: self.next_id(),
                 type_id: list,
@@ -10021,10 +10061,7 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("int")
                 .expect("bootstrap defines int");
-            let byte = self
-                .types
-                .resolve_name("u8")
-                .expect("bootstrap defines u8");
+            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
             let bytes_type = self.instantiate_list_type(byte);
             let writer = self.expression(&arguments[0].value, Some(integer))?;
             let bytes = self.expression(&arguments[1].value, Some(bytes_type))?;
@@ -10131,17 +10168,9 @@ impl Analyzer<'_> {
                 .resolve_name("string")
                 .expect("bootstrap defines string");
             let value = self.expression(object, Some(string))?;
-            let storage = self.runtime_call(
-                "__sev_string_bytes",
-                &[string],
-                string,
-                vec![value],
-                span,
-            );
-            let byte = self
-                .types
-                .resolve_name("u8")
-                .expect("bootstrap defines u8");
+            let storage =
+                self.runtime_call("__sev_string_bytes", &[string], string, vec![value], span);
+            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
             let bytes = self.instantiate_list_type(byte);
             return Ok(Some(Expression {
                 id: self.next_id(),
@@ -10231,6 +10260,8 @@ impl Analyzer<'_> {
         match name {
             _ if self.any_type == Some(element) => Ok("pair_i64"),
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
+            Some("float") => Ok("float"),
+            Some("f64") => Ok("f64"),
             Some("u8") => Ok("u8"),
             Some("bool") => Ok("bool"),
             Some("string") => Ok("ptr"),
@@ -10306,13 +10337,15 @@ impl Analyzer<'_> {
             ExpressionKind::Call {
                 callee: severian_hir::Callee::Direct { function, .. },
                 arguments,
-            } => self.runtime_definitions.iter().any(|(symbol, definition)| {
-                definition == function
-                    && (symbol == "__sev_list_address"
-                        || (symbol.contains("__sev_pointer_") && symbol.ends_with("_slot_u8")))
-            }) || arguments
-                .first()
-                .is_some_and(|value| self.pointer_uses_list_slots(value, visiting)),
+            } => {
+                self.runtime_definitions.iter().any(|(symbol, definition)| {
+                    definition == function
+                        && (symbol == "__sev_list_address"
+                            || (symbol.contains("__sev_pointer_") && symbol.ends_with("_slot_u8")))
+                }) || arguments
+                    .first()
+                    .is_some_and(|value| self.pointer_uses_list_slots(value, visiting))
+            }
             ExpressionKind::Fallback {
                 value, fallback, ..
             } => {
@@ -10367,9 +10400,7 @@ impl Analyzer<'_> {
             return Ok(Expression {
                 id: self.next_id(),
                 type_id: integer,
-                kind: ExpressionKind::Literal(LiteralValue::Integer(
-                    (elements as i64).to_string(),
-                )),
+                kind: ExpressionKind::Literal(LiteralValue::Integer((elements as i64).to_string())),
                 span: index.span,
             });
         }
@@ -10431,6 +10462,9 @@ impl Analyzer<'_> {
                 PrimitiveRepresentation::Float {
                     format: FloatFormat::BrainFloat16,
                 } => 2,
+                PrimitiveRepresentation::Float {
+                    format: FloatFormat::Float8E4M3Fn | FloatFormat::Float8E5M2,
+                } => 1,
                 PrimitiveRepresentation::Boolean => 1,
                 PrimitiveRepresentation::Character => 4,
                 PrimitiveRepresentation::None | PrimitiveRepresentation::Unit => 0,
@@ -10454,8 +10488,7 @@ impl Analyzer<'_> {
         let mut size = 0u64;
         let mut aggregate_alignment = 1u64;
         for field in &class.fields {
-            let (field_size, field_alignment) =
-                self.type_layout_inner(field.ty, span, visiting)?;
+            let (field_size, field_alignment) = self.type_layout_inner(field.ty, span, visiting)?;
             aggregate_alignment = aggregate_alignment.max(field_alignment);
             size = align_layout(size, field_alignment);
             size = size.saturating_add(field_size);
@@ -10616,6 +10649,416 @@ impl Analyzer<'_> {
             },
             span,
         }
+    }
+
+    fn tensor_element_type(&self, ty: TypeId) -> Option<TypeId> {
+        self.tensor_elements.get(&ty).copied().or_else(|| {
+            if self
+                .class_instances_by_type
+                .get(&ty)
+                .is_some_and(|class| class.name == "Tensor")
+            {
+                return self.types.resolve_name("f64");
+            }
+            let class = self.lowered_classes.iter().find(|class| class.id == ty)?;
+            let element = class.name.strip_prefix("Tensor[")?.strip_suffix(']')?;
+            self.types.resolve_name(element)
+        })
+    }
+
+    fn resolve_tensor_element_type(
+        &mut self,
+        ty: TypeId,
+        span: severian_source::Span,
+    ) -> Option<TypeId> {
+        if let Some(element) = self.tensor_element_type(ty) {
+            return Some(element);
+        }
+        let elements = self
+            .types
+            .definitions()
+            .filter_map(|definition| {
+                self.types.primitive(definition.id).and_then(|primitive| {
+                    matches!(
+                        primitive.category,
+                        severian_universal::PrimitiveCategory::Integer
+                            | severian_universal::PrimitiveCategory::Float
+                            | severian_universal::PrimitiveCategory::Measured
+                    )
+                    .then_some(definition.id)
+                })
+            })
+            .collect::<Vec<_>>();
+        for element in elements {
+            if self.tensor_type(element, span).ok() == Some(ty) {
+                self.tensor_elements.insert(ty, element);
+                return Some(element);
+            }
+        }
+        None
+    }
+
+    fn tensor_type(
+        &mut self,
+        element: TypeId,
+        span: severian_source::Span,
+    ) -> Result<TypeId, Diagnostic> {
+        let name = self.tensor_class_name().ok_or_else(|| {
+            Diagnostic::new("E000204", "tensor package is not visible", Some(span))
+        })?;
+        self.instantiate_class_types(&name, &[element], span)
+            .map(|instance| instance.ty)
+    }
+
+    fn tensor_class_name(&self) -> Option<String> {
+        self.classes
+            .contains_key("Tensor")
+            .then(|| "Tensor".to_owned())
+            .or_else(|| {
+                self.classes
+                    .keys()
+                    .find(|name| name.rsplit('.').next() == Some("Tensor"))
+                    .cloned()
+            })
+    }
+
+    fn tensor_intrinsic(
+        &mut self,
+        operation: severian_universal::OpId,
+        arguments: Vec<Expression>,
+        result: TypeId,
+        mut attributes: severian_universal::Attrs,
+        span: severian_source::Span,
+    ) -> Expression {
+        attributes.insert(
+            severian_universal::COMPILE_TYPE_ATTRIBUTE,
+            severian_universal::AttrValue::Compiler(severian_universal::tensor::compiler_id()),
+        );
+        if let Some(element) = self.tensor_element_type(result) {
+            attributes.insert(
+                severian_universal::tensor::ELEMENT_TYPE,
+                severian_universal::AttrValue::Type(element),
+            );
+        }
+        Expression {
+            id: self.next_id(),
+            type_id: result,
+            kind: ExpressionKind::Call {
+                callee: severian_hir::Callee::Intrinsic {
+                    operation,
+                    attributes,
+                },
+                arguments,
+            },
+            span,
+        }
+    }
+
+    fn tensor_operation(
+        &mut self,
+        operation: severian_universal::OpId,
+        arguments: Vec<Expression>,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let result = arguments
+            .first()
+            .map(|argument| argument.type_id)
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000206",
+                    "tensor operation requires an operand",
+                    Some(span),
+                )
+            })?;
+        if expected.is_some_and(|expected| expected != result) {
+            return Err(semantic_error(
+                "tensor operation does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        Ok(self.tensor_intrinsic(
+            operation,
+            arguments,
+            result,
+            severian_universal::Attrs::new(),
+            span,
+        ))
+    }
+
+    fn tensor_list_property(
+        &mut self,
+        operation: severian_universal::OpId,
+        tensor: Expression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let element = if operation == severian_universal::tensor::VALUES {
+            self.types
+                .resolve_name("float")
+                .expect("bootstrap defines float")
+        } else {
+            self.types
+                .resolve_name("int")
+                .expect("bootstrap defines int")
+        };
+        let list = self.instantiate_list_type(element);
+        if expected.is_some_and(|expected| expected != list) {
+            return Err(semantic_error(
+                "tensor property does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed storage");
+        let value = self.tensor_intrinsic(
+            operation,
+            vec![tensor],
+            storage,
+            severian_universal::Attrs::new(),
+            span,
+        );
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: list,
+            kind: ExpressionKind::Aggregate {
+                class: list,
+                fields: vec![value],
+            },
+            span,
+        })
+    }
+
+    fn tensor_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        if self.tensor_class_name().is_none() || arguments.iter().any(|arg| arg.name.is_some()) {
+            return Ok(None);
+        }
+        let Some(path) = callable_path(callee) else {
+            return Ok(None);
+        };
+        let name = path.rsplit('.').next().unwrap_or(&path);
+
+        if let AstExpressionKind::Member { object, name } = &callee.kind {
+            if !matches!(&object.kind, AstExpressionKind::Name(package) if package == "tensor") {
+                let receiver = self.expression(object, None)?;
+                if self
+                    .resolve_tensor_element_type(receiver.type_id, span)
+                    .is_some()
+                {
+                    return match (name.as_str(), arguments) {
+                        ("strides", []) => self
+                            .tensor_list_property(
+                                severian_universal::tensor::STRIDES,
+                                receiver,
+                                expected,
+                                span,
+                            )
+                            .map(Some),
+                        ("materialize", []) => self
+                            .tensor_operation(
+                                severian_universal::tensor::MATERIALIZE,
+                                vec![receiver],
+                                expected,
+                                span,
+                            )
+                            .map(Some),
+                        ("slice", [starts, ends, steps]) => {
+                            let integer = self
+                                .types
+                                .resolve_name("int")
+                                .expect("bootstrap defines int");
+                            let list = self.instantiate_list_type(integer);
+                            let starts = self.expression(&starts.value, Some(list))?;
+                            let ends = self.expression(&ends.value, Some(list))?;
+                            let steps = self.expression(&steps.value, Some(list))?;
+                            let starts = self.list_storage_expression(starts, span);
+                            let ends = self.list_storage_expression(ends, span);
+                            let steps = self.list_storage_expression(steps, span);
+                            self.tensor_operation(
+                                severian_universal::tensor::SLICE,
+                                vec![receiver, starts, ends, steps],
+                                expected,
+                                span,
+                            )
+                            .map(Some)
+                        }
+                        _ => Ok(None),
+                    };
+                }
+            }
+        }
+
+        if matches!(path.as_str(), "tensor" | "tensor.tensor") && arguments.len() == 2 {
+            let float = self
+                .types
+                .resolve_name("float")
+                .expect("bootstrap defines float");
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let values_type = self.instantiate_list_type(float);
+            let shape_type = self.instantiate_list_type(integer);
+            let values = self.expression(&arguments[0].value, Some(values_type))?;
+            let shape = self.expression(&arguments[1].value, Some(shape_type))?;
+            let values = self.list_storage_expression(values, span);
+            let shape = self.list_storage_expression(shape, span);
+            let f64_type = self
+                .types
+                .resolve_name("f64")
+                .expect("bootstrap defines f64");
+            let result = self.tensor_type(f64_type, span)?;
+            if expected.is_some_and(|expected| expected != result) {
+                return Err(semantic_error(
+                    "tensor constructor does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            let mut attributes = severian_universal::Attrs::new();
+            if let Some(shape) = tensor_literal_shape(&arguments[1].value) {
+                attributes.insert(
+                    severian_universal::tensor::RESULT_SHAPE,
+                    severian_universal::AttrValue::TensorShape(shape),
+                );
+            }
+            return Ok(Some(self.tensor_intrinsic(
+                severian_universal::tensor::FROM_ELEMENTS,
+                vec![values, shape],
+                result,
+                attributes,
+                span,
+            )));
+        }
+
+        if matches!(name, "shape" | "strides" | "values") && arguments.len() == 1 {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let operation = match name {
+                    "shape" => severian_universal::tensor::SHAPE,
+                    "strides" => severian_universal::tensor::STRIDES,
+                    "values" => severian_universal::tensor::VALUES,
+                    _ => unreachable!(),
+                };
+                return self
+                    .tensor_list_property(operation, value, expected, span)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        if name == "slice" && arguments.len() == 4 {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let list = self.instantiate_list_type(integer);
+                let mut resolved = vec![value];
+                for argument in &arguments[1..] {
+                    let list = self.expression(&argument.value, Some(list))?;
+                    resolved.push(self.list_storage_expression(list, span));
+                }
+                return self
+                    .tensor_operation(severian_universal::tensor::SLICE, resolved, expected, span)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        let operation = match name {
+            "add" => Some(severian_universal::tensor::ADD),
+            "subtract" => Some(severian_universal::tensor::SUBTRACT),
+            "multiply" => Some(severian_universal::tensor::MULTIPLY),
+            "divide" => Some(severian_universal::tensor::DIVIDE),
+            "sum" => Some(severian_universal::tensor::REDUCE_SUM),
+            "matmul" => Some(severian_universal::tensor::MATMUL),
+            "transpose" => Some(severian_universal::tensor::TRANSPOSE),
+            "materialize" => Some(severian_universal::tensor::MATERIALIZE),
+            _ => None,
+        };
+        if let Some(operation) = operation {
+            let expected_arity = if matches!(
+                operation,
+                severian_universal::tensor::ADD
+                    | severian_universal::tensor::SUBTRACT
+                    | severian_universal::tensor::MULTIPLY
+                    | severian_universal::tensor::DIVIDE
+                    | severian_universal::tensor::MATMUL
+            ) {
+                2
+            } else {
+                1
+            };
+            if arguments.len() == expected_arity {
+                let first = self.expression(&arguments[0].value, None)?;
+                if self
+                    .resolve_tensor_element_type(first.type_id, span)
+                    .is_some()
+                {
+                    let mut resolved = vec![first.clone()];
+                    for argument in &arguments[1..] {
+                        resolved.push(self.expression(&argument.value, Some(first.type_id))?);
+                    }
+                    return self
+                        .tensor_operation(operation, resolved, expected, span)
+                        .map(Some);
+                }
+            }
+        }
+
+        let target_element = match name {
+            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128" | "i8" | "i16"
+            | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
+                self.types.resolve_name(name)
+            }
+            _ => None,
+        };
+        if let (Some(target_element), [argument]) = (target_element, arguments) {
+            let value = self.expression(&argument.value, None)?;
+            let Some(source_element) = self.resolve_tensor_element_type(value.type_id, span) else {
+                return Ok(None);
+            };
+            let result = self.tensor_type(target_element, span)?;
+            if expected.is_some_and(|expected| expected != result) {
+                return Err(semantic_error(
+                    "tensor conversion does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            let mut attributes = severian_universal::Attrs::new();
+            attributes.insert(
+                severian_universal::tensor::ELEMENT_TYPE,
+                severian_universal::AttrValue::Type(source_element),
+            );
+            attributes.insert(
+                severian_universal::tensor::TARGET_ELEMENT_TYPE,
+                severian_universal::AttrValue::Type(target_element),
+            );
+            return Ok(Some(self.tensor_intrinsic(
+                severian_universal::tensor::CONVERT,
+                vec![value],
+                result,
+                attributes,
+                span,
+            )));
+        }
+
+        Ok(None)
     }
 
     fn approximate_call(
@@ -11503,8 +11946,8 @@ impl Analyzer<'_> {
                     id: self.next_id(),
                     type_id: boolean,
                     kind: ExpressionKind::Binary {
-                    operator: BinaryOperator::And,
-                    left: Box::new(left),
+                        operator: BinaryOperator::And,
+                        left: Box::new(left),
                         right: Box::new(right),
                     },
                     span: case.span,
@@ -11513,8 +11956,8 @@ impl Analyzer<'_> {
                     id: self.next_id(),
                     type_id: boolean,
                     kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
-                span: case.span,
-            });
+                    span: case.span,
+                });
             let value = self.expression(&case.result, Some(result_type))?;
             selected = Expression {
                 id: self.next_id(),
@@ -12145,14 +12588,8 @@ impl Analyzer<'_> {
         };
         let path = format!("{namespace}.{operator}");
         if let Some(extension) = self.namespace_extension_operators.get(&path).cloned() {
-            return self.extension_namespace_operator(
-                &path,
-                extension,
-                left,
-                right,
-                expected,
-                span,
-            );
+            return self
+                .extension_namespace_operator(&path, extension, left, right, expected, span);
         }
         let namespace_operator = self
             .namespace_operators
@@ -12384,7 +12821,10 @@ impl Analyzer<'_> {
             }
         }
         if name == "sorted"
-            && matches!(arguments.first().map(|argument| &argument.value.kind), Some(AstExpressionKind::Lambda { .. }))
+            && matches!(
+                arguments.first().map(|argument| &argument.value.kind),
+                Some(AstExpressionKind::Lambda { .. })
+            )
         {
             let AstExpressionKind::List(values) = &object.kind else {
                 return Err(Diagnostic::new(
@@ -12395,9 +12835,14 @@ impl Analyzer<'_> {
             };
             let mut values = values.clone();
             if values.iter().all(|value| string_literal(value).is_some()) {
-                values.sort_by_key(|value| string_literal(value).map(str::chars).map(Iterator::count));
+                values.sort_by_key(|value| {
+                    string_literal(value).map(str::chars).map(Iterator::count)
+                });
                 let descending = arguments.get(1).is_some_and(|argument| {
-                    matches!(argument.value.kind, AstExpressionKind::Literal(AstLiteral::Boolean(true)))
+                    matches!(
+                        argument.value.kind,
+                        AstExpressionKind::Literal(AstLiteral::Boolean(true))
+                    )
                 });
                 if descending {
                     values.reverse();
@@ -12595,9 +13040,9 @@ impl Analyzer<'_> {
                         span,
                     }));
                 }
-                "length" | "upper" | "contains" | "split" | "strip" | "lower"
-                | "replace" | "starts_with" | "ends_with" | "find" | "count"
-                | "characters" | "bytes" | "frequencies" => {
+                "length" | "upper" | "contains" | "split" | "strip" | "lower" | "replace"
+                | "starts_with" | "ends_with" | "find" | "count" | "characters" | "bytes"
+                | "frequencies" => {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("string method `{name}` received incompatible arguments"),
@@ -12721,9 +13166,12 @@ impl Analyzer<'_> {
             }
             if name == "sorted" {
                 if arguments.len() > 1
-                    || arguments
-                        .first()
-                        .is_some_and(|argument| !matches!(argument.value.kind, AstExpressionKind::Literal(AstLiteral::Boolean(_))))
+                    || arguments.first().is_some_and(|argument| {
+                        !matches!(
+                            argument.value.kind,
+                            AstExpressionKind::Literal(AstLiteral::Boolean(_))
+                        )
+                    })
                 {
                     return Err(Diagnostic::new(
                         "E000206",
@@ -12790,7 +13238,11 @@ impl Analyzer<'_> {
                 let storage_type = keys.type_id;
                 let key_suffix = self.list_runtime_suffix(key_type, span)?;
                 let value_suffix = self.list_runtime_suffix(value_type, span)?;
-                let operation = if name == "get" { "get_default" } else { "set_default" };
+                let operation = if name == "get" {
+                    "get_default"
+                } else {
+                    "set_default"
+                };
                 return Ok(Some(self.runtime_call(
                     &format!("__sev_map_{operation}_{key_suffix}_{value_suffix}"),
                     &[storage_type, storage_type, key_type, value_type],
@@ -12801,7 +13253,10 @@ impl Analyzer<'_> {
             }
         }
         if self.set_type == Some(object.type_id)
-            && matches!(name.as_str(), "union" | "intersection" | "symmetric_difference")
+            && matches!(
+                name.as_str(),
+                "union" | "intersection" | "symmetric_difference"
+            )
             && arguments.len() == 1
         {
             let other = self.expression(&arguments[0].value, Some(object.type_id))?;
@@ -13487,6 +13942,22 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
 pub(crate) fn list_type_id(element: TypeId) -> TypeId {
     let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
     TypeId(0x0c00_0000 | (hash & 0x03ff_ffff))
+}
+
+pub(crate) fn generic_class_type_id(constructor: TypeId, arguments: &[TypeId]) -> TypeId {
+    // Package signature collection and per-module semantic analysis must agree
+    // on instantiated nominal identities. Include the constructor in the hash
+    // so unrelated families instantiated with the same arguments stay
+    // distinct.
+    let hash = std::iter::once(&constructor)
+        .chain(arguments)
+        .fold(0x811c_9dc5u32, |hash, ty| {
+            (hash ^ ty.0).wrapping_mul(0x0100_0193)
+        });
+    // Do not use 0x08..=0x0b: universal reserves that entire masked range for
+    // structural raw pointers. Applied classes must continue to lower as
+    // aggregates even when their element happens to be a pointer.
+    TypeId(0xe000_0000 | (hash & 0x0fff_ffff))
 }
 
 pub(crate) const fn any_type_id() -> TypeId {
@@ -14556,7 +15027,11 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
                 }
             }
         }
-        AstExpressionKind::MapComprehension { key, value, clauses } => {
+        AstExpressionKind::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
             collect_expression_names(key, names);
             collect_expression_names(value, names);
             for clause in clauses {
@@ -14670,6 +15145,22 @@ fn is_binary_operator_spelling(operator: &str) -> bool {
             | "and"
             | "or"
     )
+}
+
+fn tensor_literal_shape(expression: &AstExpression) -> Option<severian_universal::TensorShape> {
+    let AstExpressionKind::List(dimensions) = &expression.kind else {
+        return None;
+    };
+    dimensions
+        .iter()
+        .map(|dimension| {
+            let AstExpressionKind::Literal(AstLiteral::Integer(value)) = &dimension.kind else {
+                return None;
+            };
+            value.parse::<u64>().ok()
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(severian_universal::TensorShape::ranked)
 }
 
 fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
@@ -14990,10 +15481,14 @@ fn conversion_rank(
     match conversion.kind {
         severian_universal::ConversionKind::Identity => Some(ConversionRank::Exact),
         severian_universal::ConversionKind::Promote => Some(ConversionRank::Widening(
-            types.numeric_conversion_cost(actual, expected)?.try_into().ok()?,
+            types
+                .numeric_conversion_cost(actual, expected)?
+                .try_into()
+                .ok()?,
         )),
-        severian_universal::ConversionKind::Checked
-        | severian_universal::ConversionKind::Lossy => Some(ConversionRank::General),
+        severian_universal::ConversionKind::Checked | severian_universal::ConversionKind::Lossy => {
+            Some(ConversionRank::General)
+        }
     }
 }
 
@@ -15035,9 +15530,7 @@ fn test_mode(
             let value = name.trim_start_matches("timeout:");
             let split = value
                 .find(|character: char| character.is_ascii_alphabetic())
-                .ok_or_else(|| {
-                    Diagnostic::new("E000217", "invalid test timeout", Some(span))
-                })?;
+                .ok_or_else(|| Diagnostic::new("E000217", "invalid test timeout", Some(span)))?;
             let (magnitude, suffix) = value.split_at(split);
             Ok(severian_hir::TestMode::Timeout(duration_nanos(
                 magnitude, suffix, span,
@@ -15223,9 +15716,7 @@ fn profile_statement_expectation(
         return Ok(None);
     };
     let profile_field = |expression: &AstExpression| match &expression.kind {
-        AstExpressionKind::Member { object, name }
-            if matches!(&object.kind, AstExpressionKind::Name(root) if root == "profile") =>
-        {
+        AstExpressionKind::Member { object, name } if matches!(&object.kind, AstExpressionKind::Name(root) if root == "profile") => {
             Some(name.clone())
         }
         _ => None,
@@ -15813,7 +16304,9 @@ mod tests {
         );
         let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
         let error = analyze(&ast, &context.types).unwrap_err();
-        assert!(error.message.contains("cannot replace behavior `Counter.get`"));
+        assert!(error
+            .message
+            .contains("cannot replace behavior `Counter.get`"));
     }
 
     #[test]
@@ -15842,7 +16335,9 @@ mod tests {
         );
         let ast = severian_parser::parse(&severian_lexer::scan(&overwrite).unwrap()).unwrap();
         let error = analyze(&ast, &context.types).unwrap_err();
-        assert!(error.message.contains("cannot replace behavior `set.contains`"));
+        assert!(error
+            .message
+            .contains("cannot replace behavior `set.contains`"));
     }
 
     #[test]
@@ -15854,7 +16349,9 @@ mod tests {
             ),
             (
                 "namespace-extensions.sev",
-                include_str!("../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"),
+                include_str!(
+                    "../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"
+                ),
             ),
         ] {
             let context = severian_bootstrap::load().unwrap();
@@ -16812,11 +17309,11 @@ mod tests {
                 matches!(
                     statement,
                     Statement::Return(Some(Expression {
-                    kind: ExpressionKind::Fallback { .. },
-                    ..
-                }))
-            )
-        }));
+                        kind: ExpressionKind::Fallback { .. },
+                        ..
+                    }))
+                )
+            }));
         let float = context.types.resolve_name("float").unwrap();
         assert_eq!(to_float.result.ty, float);
         severian_mir::build(&program).unwrap();
@@ -16978,7 +17475,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(program.modules[0].tests[0].modes, [severian_hir::TestMode::Property]);
+        assert_eq!(
+            program.modules[0].tests[0].modes,
+            [severian_hir::TestMode::Property]
+        );
         severian_mir::build(&program).unwrap();
     }
 
@@ -17048,8 +17548,8 @@ mod tests {
                 .body
                 .as_ref()
                 .is_none_or(|body| body.blocks.iter().all(|block| {
-                !matches!(block.terminator, severian_mir::Terminator::Throw(_))
-            }))));
+                    !matches!(block.terminator, severian_mir::Terminator::Throw(_))
+                }))));
     }
 
     #[test]

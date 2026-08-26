@@ -43,6 +43,8 @@ pub enum IntegerWidth {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatFormat {
+    Float8E4M3Fn,
+    Float8E5M2,
     Ieee(u16),
     BrainFloat16,
     Machine,
@@ -195,6 +197,22 @@ pub const PRIMITIVES: &[PrimitiveSpec] = &[
         default_literal: true,
     },
     PrimitiveSpec {
+        name: "f8e4m3fn",
+        category: PrimitiveCategory::Float,
+        representation: PrimitiveRepresentation::Float {
+            format: FloatFormat::Float8E4M3Fn,
+        },
+        default_literal: false,
+    },
+    PrimitiveSpec {
+        name: "f8e5m2",
+        category: PrimitiveCategory::Float,
+        representation: PrimitiveRepresentation::Float {
+            format: FloatFormat::Float8E5M2,
+        },
+        default_literal: false,
+    },
+    PrimitiveSpec {
         name: "f16",
         category: PrimitiveCategory::Float,
         representation: ieee_float(16),
@@ -218,6 +236,12 @@ pub const PRIMITIVES: &[PrimitiveSpec] = &[
         name: "f64",
         category: PrimitiveCategory::Float,
         representation: ieee_float(64),
+        default_literal: false,
+    },
+    PrimitiveSpec {
+        name: "f128",
+        category: PrimitiveCategory::Float,
+        representation: ieee_float(128),
         default_literal: false,
     },
     PrimitiveSpec {

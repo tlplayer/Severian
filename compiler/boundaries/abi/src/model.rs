@@ -19,6 +19,8 @@ pub enum ScalarType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AbiFloatFormat {
+    Float8E4M3Fn,
+    Float8E5M2,
     Ieee(u16),
     BrainFloat16,
 }
@@ -26,6 +28,7 @@ pub enum AbiFloatFormat {
 impl AbiFloatFormat {
     pub const fn bits(self) -> u16 {
         match self {
+            Self::Float8E4M3Fn | Self::Float8E5M2 => 8,
             Self::Ieee(bits) => bits,
             Self::BrainFloat16 => 16,
         }
@@ -103,6 +106,18 @@ impl AbiType {
     pub const fn bfloat16() -> Self {
         Self::Scalar(ScalarType::Float {
             format: AbiFloatFormat::BrainFloat16,
+        })
+    }
+
+    pub const fn float8_e4m3fn() -> Self {
+        Self::Scalar(ScalarType::Float {
+            format: AbiFloatFormat::Float8E4M3Fn,
+        })
+    }
+
+    pub const fn float8_e5m2() -> Self {
+        Self::Scalar(ScalarType::Float {
+            format: AbiFloatFormat::Float8E5M2,
         })
     }
 

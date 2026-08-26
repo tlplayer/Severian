@@ -5,6 +5,8 @@ use severian_source::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoweredFloatFormat {
+    Float8E4M3Fn,
+    Float8E5M2,
     Ieee(u16),
     BrainFloat16,
 }

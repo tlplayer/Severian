@@ -171,6 +171,7 @@ dependencies = [
  "severian-semantic",
  "severian-source",
  "severian-target",
+ "severian-tensor-compiler",
  "severian-universal",
  "severian-xxi",
  "toml",
@@ -304,6 +305,15 @@ version = "0.1.0"
 [[package]]
 name = "severian-target"
 version = "0.1.0"
+
+[[package]]
+name = "severian-tensor-compiler"
+version = "0.1.0"
+dependencies = [
+ "severian-compile",
+ "severian-mlir",
+ "severian-universal",
+]
 
 [[package]]
 name = "severian-universal"

@@ -13,6 +13,7 @@ pub fn native_sources() -> Vec<PathBuf> {
         "string.c",
         "any.c",
         "list.c",
+        "tensor.c",
         "channel.c",
         "io.c",
         "filesystem.c",

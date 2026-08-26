@@ -97,10 +97,17 @@ impl Compiler {
     }
 
     pub fn with_context(context: UniversalContext, target: TargetSpec) -> Self {
+        let mut compile_handlers = CompilerRegistry::new();
+        compile_handlers
+            .register(
+                severian_universal::tensor::compiler_id(),
+                severian_tensor_compiler::TensorCompiler,
+            )
+            .expect("the built-in tensor compiler is registered once");
         Self {
             context,
             target,
-            compile_handlers: CompilerRegistry::new(),
+            compile_handlers,
             packages: None,
             coverage: false,
             max_errors: 5,
@@ -761,8 +768,8 @@ impl Compiler {
                 ))
             })?;
             arguments.push(bridge.to_string_lossy().into_owned());
-            let python_config = std::env::var("SEVERIAN_PYTHON_CONFIG")
-                .unwrap_or_else(|_| "python3-config".into());
+            let python_config =
+                std::env::var("SEVERIAN_PYTHON_CONFIG").unwrap_or_else(|_| "python3-config".into());
             for option in [["--embed", "--cflags"], ["--embed", "--ldflags"]] {
                 let result = Command::new(&python_config)
                     .args(option)
@@ -844,6 +851,7 @@ impl Compiler {
             ("path", repository.join("library/system/path")),
             ("platform", repository.join("library/system/platform")),
             ("process", repository.join("library/system/process")),
+            ("tensor", repository.join("library/tensor")),
         ];
         let mut next = packages
             .packages
@@ -854,7 +862,11 @@ impl Compiler {
             .saturating_add(1);
         let mut standard_ids = BTreeMap::new();
         for (name, root) in standard {
-            let library = root.join("src/lib.sev");
+            let library = if name == "tensor" {
+                root.join("src/compiler.sev")
+            } else {
+                root.join("src/lib.sev")
+            };
             if !library.is_file() {
                 return Err(CompileError::Diagnostic(Diagnostic::new(
                     "C001001",
@@ -940,8 +952,8 @@ fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &S
     for block in &mut body.blocks {
         for statement in &mut block.statements {
             match statement {
-            CfgStatement::Coverage(point) => {
-                let before = source
+                CfgStatement::Coverage(point) => {
+                    let before = source
                         .text
                         .get(..usize::try_from(point.span_start).unwrap_or(0))
                         .unwrap_or("");
@@ -950,20 +962,20 @@ fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &S
                             .unwrap_or(u32::MAX);
                     let kind = match point.kind {
                         severian_mir::CoverageKind::Line => "line",
-                    severian_mir::CoverageKind::Branch => "branch",
-                };
-                let file = source.path.display().to_string();
-                point.key = Some(format!(
-                    "{file}|{kind}|{line}|{}|{}",
-                    point.span_start, point.ordinal
-                ));
-                point.file = Some(file);
-                point.line = Some(line);
-            }
-            CfgStatement::Assert { origin, .. } => {
-                origin.location = assertion_location(origin, source);
-            }
-            _ => {}
+                        severian_mir::CoverageKind::Branch => "branch",
+                    };
+                    let file = source.path.display().to_string();
+                    point.key = Some(format!(
+                        "{file}|{kind}|{line}|{}|{}",
+                        point.span_start, point.ordinal
+                    ));
+                    point.file = Some(file);
+                    point.line = Some(line);
+                }
+                CfgStatement::Assert { origin, .. } => {
+                    origin.location = assertion_location(origin, source);
+                }
+                _ => {}
             }
         }
     }
@@ -1047,14 +1059,11 @@ struct NativeProviderSources {
 
 impl NativeProviderSources {
     fn discover(source: &Path) -> Result<Option<Self>, CompileError> {
-        let Some(root) = source
-            .parent()
-            .and_then(|directory| {
-                directory
-                    .ancestors()
-                    .find(|ancestor| ancestor.join("package.toml").is_file())
-            })
-        else {
+        let Some(root) = source.parent().and_then(|directory| {
+            directory
+                .ancestors()
+                .find(|ancestor| ancestor.join("package.toml").is_file())
+        }) else {
             return Ok(None);
         };
         let manifest_path = root.join("package.toml");
@@ -1220,16 +1229,44 @@ fn python_c_type(
     }
     match ty {
         AbiType::Void => Ok("void"),
-        AbiType::Scalar(ScalarType::Integer { bits: 8, signed: true }) => Ok("int8_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 16, signed: true }) => Ok("int16_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 32, signed: true }) => Ok("int32_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 64, signed: true }) => Ok("int64_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 8, signed: false }) => Ok("uint8_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 16, signed: false }) => Ok("uint16_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 32, signed: false }) => Ok("uint32_t"),
-        AbiType::Scalar(ScalarType::Integer { bits: 64, signed: false }) => Ok("uint64_t"),
-        AbiType::Scalar(ScalarType::Float { format: AbiFloatFormat::Ieee(32) }) => Ok("float"),
-        AbiType::Scalar(ScalarType::Float { format: AbiFloatFormat::Ieee(64) }) => Ok("double"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 8,
+            signed: true,
+        }) => Ok("int8_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 16,
+            signed: true,
+        }) => Ok("int16_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 32,
+            signed: true,
+        }) => Ok("int32_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 64,
+            signed: true,
+        }) => Ok("int64_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 8,
+            signed: false,
+        }) => Ok("uint8_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 16,
+            signed: false,
+        }) => Ok("uint16_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 32,
+            signed: false,
+        }) => Ok("uint32_t"),
+        AbiType::Scalar(ScalarType::Integer {
+            bits: 64,
+            signed: false,
+        }) => Ok("uint64_t"),
+        AbiType::Scalar(ScalarType::Float {
+            format: AbiFloatFormat::Ieee(32),
+        }) => Ok("float"),
+        AbiType::Scalar(ScalarType::Float {
+            format: AbiFloatFormat::Ieee(64),
+        }) => Ok("double"),
         AbiType::Scalar(ScalarType::Boolean) => Ok("_Bool"),
         _ => Err("Python FFI currently supports scalar and string ABI values".into()),
     }
