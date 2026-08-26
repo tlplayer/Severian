@@ -45,6 +45,15 @@ detect-all = []
 detect-any = []
 
 [[component]]
+id = "compiler.stablehlo"
+kind = "compiler"
+device = "accelerator"
+vendor = "openxla"
+provides = ["mlir.stablehlo"]
+detect-all = []
+detect-any = ["target/components/bin/severian-stablehlo-opt"]
+
+[[component]]
 id = "runtime.mlir-rocm"
 kind = "runtime"
 device = "gpu"

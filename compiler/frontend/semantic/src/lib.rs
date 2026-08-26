@@ -166,6 +166,7 @@ pub(crate) fn analyze_with_package_functions(
         namespace_extension_operators,
         namespace_hooks,
         active_operator_namespaces: BTreeMap::new(),
+        allow_qualified_function_suffix: false,
         active_function_name: None,
         signatures: BTreeMap::new(),
         classes: ast
@@ -1050,6 +1051,7 @@ struct Analyzer<'a> {
     namespace_extension_operators: BTreeMap<String, NamespaceExtensionOperator>,
     namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
     active_operator_namespaces: BTreeMap<String, Vec<String>>,
+    allow_qualified_function_suffix: bool,
     active_function_name: Option<String>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
@@ -7135,12 +7137,24 @@ impl Analyzer<'_> {
                 // qualified function as the declaration identity while making
                 // the module spelling usable at the call site.
                 let qualified_default = format!("{name}.{name}");
-                let candidates = self
+                let mut candidates = self
                     .functions
                     .get(&name)
                     .or_else(|| self.functions.get(&qualified_default))
                     .cloned()
                     .unwrap_or_default();
+                if candidates.is_empty() && self.allow_qualified_function_suffix {
+                    let suffix = format!(".{name}");
+                    let qualified = self
+                        .functions
+                        .iter()
+                        .filter(|(candidate, _)| candidate.ends_with(&suffix))
+                        .map(|(_, functions)| functions)
+                        .collect::<Vec<_>>();
+                    if let [functions] = qualified.as_slice() {
+                        candidates = (*functions).clone();
+                    }
+                }
                 let mut matches = Vec::new();
                 for function in candidates {
                     let signature = self.signatures[&function].clone();
@@ -11239,7 +11253,17 @@ impl Analyzer<'_> {
         let name = path.rsplit('.').next().unwrap_or(&path);
 
         if let AstExpressionKind::Member { object, name } = &callee.kind {
-            if !matches!(&object.kind, AstExpressionKind::Name(package) if package == "tensor") {
+            let object_path = callable_path(object);
+            let package_namespace = object_path.as_ref().is_some_and(|namespace| {
+                !self.names.contains_key(namespace)
+                    && self
+                        .functions
+                        .keys()
+                        .any(|function| function.starts_with(&format!("{namespace}.")))
+            });
+            if !matches!(&object.kind, AstExpressionKind::Name(package) if package == "tensor")
+                && !package_namespace
+            {
                 let receiver = self.expression(object, None)?;
                 if self
                     .resolve_tensor_element_type(receiver.type_id, span)
@@ -12605,7 +12629,21 @@ impl Analyzer<'_> {
         if matches!(&object.kind, AstExpressionKind::Name(name) if self.names.contains_key(name)) {
             return Ok(None);
         }
-        let Some(namespace_method) = self.namespace_methods.get(&path).cloned() else {
+        let registry_path = if self.namespace_methods.contains_key(&path) {
+            path.clone()
+        } else if let Some((package, member)) = path.split_once('.') {
+            let prefix = format!("{package}.");
+            if self.namespace_methods.contains_key(member)
+                && self.functions.keys().any(|name| name.starts_with(&prefix))
+            {
+                member.to_owned()
+            } else {
+                return Ok(None);
+            }
+        } else {
+            return Ok(None);
+        };
+        let Some(namespace_method) = self.namespace_methods.get(&registry_path).cloned() else {
             return Ok(None);
         };
 
@@ -12690,6 +12728,8 @@ impl Analyzer<'_> {
             .expect("bootstrap defines bool");
         for (class_name, implementation) in namespace_method.implementations.iter().rev() {
             let previous = self.value_substitutions.clone();
+            let previous_suffix_resolution = self.allow_qualified_function_suffix;
+            self.allow_qualified_function_suffix = true;
             let candidate = (|| {
                 for (parameter, value) in implementation.parameters.iter().zip(&resolved_arguments)
                 {
@@ -12751,6 +12791,7 @@ impl Analyzer<'_> {
                 let value = self.expression(value, Some(result))?;
                 Ok((condition, value))
             })();
+            self.allow_qualified_function_suffix = previous_suffix_resolution;
             self.value_substitutions = previous;
             let (condition, value) = candidate?;
             selected = Expression {

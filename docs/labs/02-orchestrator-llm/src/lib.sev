@@ -1,0 +1,34 @@
+import ai
+
+def escape_json(value: string) -> string:
+    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+
+def info_json(model: ai.LoadedModel, replica: string, accelerator: string) -> string:
+    return "{\"model\":\"" + model.artifact.identifier + "\",\"architecture\":\"" + model.architecture + "\",\"parameters\":" + string(model.parameters) + ",\"dtype\":\"" + model.dtype + "\",\"revision\":\"" + model.artifact.revision + "\",\"replica\":\"" + escape_json(replica) + "\",\"accelerator\":\"" + escape_json(accelerator) + "\"}"
+
+def control_response(request: string, ready: bool, model: ai.LoadedModel, replica: string, accelerator: string, requests: int) -> string:
+    command = request.strip()
+    if command.starts_with("GET /live"):
+        return "{\"live\":true,\"replica\":\"" + escape_json(replica) + "\"}"
+    if command.starts_with("GET /ready"):
+        value = "true" if ready else "false"
+        return "{\"ready\":" + value + ",\"replica\":\"" + escape_json(replica) + "\"}"
+    if command.starts_with("GET /metrics"):
+        value = 1 if ready else 0
+        return "requests_total " + string(requests) + "\nmodel_loaded " + string(value) + "\nmodel_ready " + string(value) + "\n"
+    if command.starts_with("GET /info"):
+        return info_json(model, replica, accelerator)
+    return ""
+
+test "worker protocol keeps liveness separate from model readiness":
+    selected = ai.artifact(ai.SmolLm2, ai.SmolLm2Revision, "/tmp/model-missing")
+    model = ai.LoadedModel(selected, "LlamaForCausalLM", ai.SmolLm2Parameters, "bf16")
+    assert("\"live\":true" in control_response("GET /live", false, model, "tiny-llm-0", "native", 0))
+    assert("\"ready\":false" in control_response("GET /ready", false, model, "tiny-llm-0", "native", 0))
+
+test "model info reports the immutable artifact revision":
+    selected = ai.artifact(ai.SmolLm2, ai.SmolLm2Revision, "/tmp/model-missing")
+    model = ai.LoadedModel(selected, "LlamaForCausalLM", ai.SmolLm2Parameters, "bf16")
+    rendered = info_json(model, "tiny-llm-0", "gfx1101")
+    assert(ai.SmolLm2Revision in rendered)
+    assert(rendered.contains("golden-smoke") == false)

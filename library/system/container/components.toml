@@ -63,3 +63,21 @@ arguments = ["install", "-y", "socat"]
 os = ["arch", "manjaro"]
 program = "pacman"
 arguments = ["-S", "--needed", "--noconfirm", "socat"]
+
+# Vendor toolkits materialize CDI specifications. The orchestrator allocates
+# only qualified CDI names; it never injects vendor device nodes itself.
+[[component]]
+id = "runtime.oci-cdi-amd"
+kind = "runtime"
+provides = ["runtime.oci.cdi", "device.gpu.amd"]
+detect-any = ["/etc/cdi/amd.json", "/var/run/cdi/amd.json"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "amd-container-toolkit"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "amd-container-toolkit"]

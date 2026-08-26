@@ -1,0 +1,94 @@
+import os
+import path
+import process
+
+class ModelError: Error
+    message: string
+
+class Artifact:
+    identifier: string
+    revision: string
+    root: string
+    config: string
+    tokenizer: string
+    weights: string
+
+    def ready() -> bool:
+        return valid_artifact(root)
+
+class LoadedModel:
+    artifact: Artifact
+    architecture: string
+    parameters: int
+    dtype: string
+
+    def ready() -> bool:
+        return artifact.ready()
+
+trait Model:
+    @model
+    def load(identifier: string, root: string) -> LoadedModel with { (identifier, root) -> bool }
+
+SmolLm2 = "HuggingFaceTB/SmolLM2-135M-Instruct"
+SmolLm2Revision = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+SmolLm2Parameters = 134515008
+
+def shell_quote(value: string) -> string:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def artifact(identifier: string, revision: string, root: string) -> Artifact:
+    return Artifact(
+        identifier,
+        revision,
+        root,
+        root + "/config.json",
+        root + "/tokenizer.json",
+        root + "/model.safetensors",
+    )
+
+def valid_artifact(root: string) -> bool:
+    config = root + "/config.json"
+    tokenizer = root + "/tokenizer.json"
+    weights = root + "/model.safetensors"
+    # The official BF16 checkpoint is hundreds of MB. This rejects the empty
+    # marker and miniature fixture that previously made workers look ready.
+    return os.is_file(config) and os.file_size(config) > 0B and os.is_file(tokenizer) and os.file_size(tokenizer) > 0B and os.is_file(weights) and os.file_size(weights) > 200MB
+
+def download(repository: string, revision: string, name: string, destination: string) -> bool:
+    temporary = destination + ".partial"
+    url = "https://huggingface.co/" + repository + "/resolve/" + revision + "/" + name
+    command = "curl --fail --location --retry 3 --continue-at - --output " + shell_quote(temporary) + " " + shell_quote(url)
+    if process.run(command) != 0:
+        return false
+    return os.rename(temporary, destination) == 0
+
+def acquire_smollm2(root: string) -> Artifact:
+    selected = artifact(SmolLm2, SmolLm2Revision, root)
+    if selected.ready():
+        return selected
+    if not os.make_directories(root):
+        assert(false, "could not create model cache " + root)
+    for name in ["config.json", "tokenizer.json", "model.safetensors"]:
+        destination = root + "/" + name
+        if not os.is_file(destination) and not download(SmolLm2, SmolLm2Revision, name, destination):
+            assert(false, "could not acquire " + name + " for " + SmolLm2)
+    if not selected.ready():
+        assert(false, "downloaded SmolLM2 artifact did not pass size and file validation")
+    return selected
+
+def load_smollm2(root: string) -> LoadedModel:
+    selected = acquire_smollm2(root)
+    return LoadedModel(selected, "LlamaForCausalLM", SmolLm2Parameters, "bf16")
+
+class SmolLm2Model: Model
+    def load(identifier: string, root: string) -> LoadedModel with { identifier == SmolLm2 }:
+        return load_smollm2(root)
+
+test "SmolLM2 provider owns its pinned artifact identity":
+    selected = artifact(SmolLm2, SmolLm2Revision, "/tmp/severian-model-that-does-not-exist")
+    assert(selected.identifier == SmolLm2)
+    assert(selected.revision == SmolLm2Revision)
+    assert(not selected.ready())
+
+test "partial metadata is never model readiness":
+    assert(not valid_artifact("/tmp/severian-model-that-does-not-exist"))

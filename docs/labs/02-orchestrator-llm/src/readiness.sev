@@ -1,0 +1,4 @@
+import ai
+
+def model_files(model_root: string) -> bool:
+    return ai.valid_artifact(model_root)

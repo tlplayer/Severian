@@ -88,8 +88,20 @@ double __sev_os_file_size(const char *value) {
 }
 
 _Bool __sev_os_make_directories(const char *value) {
-    if (mkdir(value, 0777) == 0 || errno == EEXIST) return __sev_path_is_dir(value);
-    return 0;
+    size_t length = strlen(value);
+    if (length == 0 || length >= SEV_PATH_CAPACITY) return 0;
+    char path[SEV_PATH_CAPACITY];
+    memcpy(path, value, length + 1);
+    while (length > 1 && path[length - 1] == '/') path[--length] = '\0';
+    for (char *separator = path + 1; *separator != '\0'; ++separator) {
+        if (*separator != '/') continue;
+        *separator = '\0';
+        if (mkdir(path, 0777) != 0 && errno != EEXIST) return 0;
+        if (!__sev_path_is_dir(path)) return 0;
+        *separator = '/';
+    }
+    if (mkdir(path, 0777) != 0 && errno != EEXIST) return 0;
+    return __sev_path_is_dir(path);
 }
 
 int32_t __sev_file_write_text(const char *path, const char *contents) {

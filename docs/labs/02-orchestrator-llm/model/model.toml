@@ -1,0 +1,13 @@
+[model]
+name = "HuggingFaceTB/SmolLM2-135M-Instruct"
+revision = "main"
+revision-sha = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+architecture = "LlamaForCausalLM"
+parameters = 135000000
+dtype = "bf16"
+max-generated-tokens = 32
+
+[artifact]
+registry = "https://huggingface.co"
+repository = "HuggingFaceTB/SmolLM2-135M-Instruct"
+files = ["config.json", "tokenizer.json", "model.safetensors"]

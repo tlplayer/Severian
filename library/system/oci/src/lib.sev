@@ -15,20 +15,40 @@ class Bundle:
 def quote(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-def runtime_config(
+def string_array(values: list[string]) -> string:
+    output := "["
+    for index in indices(values):
+        if index > 0:
+            output += ","
+        output += quote(values[index])
+    return output + "]"
+
+def service_runtime_config(
     executable: string,
     data: string,
+    arguments: list[string],
+    environment: list[string],
+    hostname: string,
+    cpu_millis: int,
+    memory_mi_b: int,
+    devices: list[string],
     user_id: int = 1000,
     group_id: int = 1000,
 ) -> string:
+    process_arguments := ["/app/server", "/data"]
+    process_arguments.extend(arguments)
+    process_environment := ["PATH=/usr/bin:/bin", "SEVERIAN_CONTAINER=oci"]
+    process_environment.extend(environment)
     config := "{\"ociVersion\":\"1.0.2\","
     config += "\"process\":{\"terminal\":false,"
     config += "\"user\":{\"uid\":" + string(user_id) + ",\"gid\":" + string(group_id) + "},"
-    config += "\"args\":[\"/app/server\",\"/data\"],"
-    config += "\"env\":[\"PATH=/usr/bin:/bin\",\"SEVERIAN_CONTAINER=oci\"],"
+    config += "\"args\":" + string_array(process_arguments) + ","
+    config += "\"env\":" + string_array(process_environment) + ","
     config += "\"cwd\":\"/\",\"noNewPrivileges\":true},"
     config += "\"root\":{\"path\":\"rootfs\",\"readonly\":true},"
-    config += "\"hostname\":\"severian-container-database\","
+    config += "\"hostname\":" + quote(hostname) + ","
+    if size(devices) > 0:
+        config += "\"annotations\":{\"cdi.k8s.io/devices\":" + quote(devices.join(",")) + "},"
     config += "\"mounts\":["
     config += "{\"destination\":\"/proc\",\"type\":\"proc\",\"source\":\"proc\"},"
     config += "{\"destination\":\"/tmp\",\"type\":\"tmpfs\",\"source\":\"tmpfs\"},"
@@ -38,8 +58,22 @@ def runtime_config(
     config += "{\"destination\":\"/lib64\",\"type\":\"bind\",\"source\":\"/lib64\",\"options\":[\"rbind\",\"ro\"]},"
     config += "{\"destination\":\"/usr/lib\",\"type\":\"bind\",\"source\":\"/usr/lib\",\"options\":[\"rbind\",\"ro\"]},"
     config += "{\"destination\":\"/etc\",\"type\":\"bind\",\"source\":\"/etc\",\"options\":[\"rbind\",\"ro\"]}],"
-    config += "\"linux\":{\"namespaces\":[{\"type\":\"pid\"},{\"type\":\"ipc\"},{\"type\":\"uts\"},{\"type\":\"mount\"}]}}"
+    config += "\"linux\":{"
+    if cpu_millis > 0 and memory_mi_b > 0:
+        quota = cpu_millis * 100
+        memory_bytes = memory_mi_b * 1024 * 1024
+        config += "\"resources\":{\"cpu\":{\"quota\":" + string(quota) + ",\"period\":100000},"
+        config += "\"memory\":{\"limit\":" + string(memory_bytes) + "}},"
+    config += "\"namespaces\":[{\"type\":\"pid\"},{\"type\":\"ipc\"},{\"type\":\"uts\"},{\"type\":\"mount\"}]}}"
     return config
+
+def runtime_config(
+    executable: string,
+    data: string,
+    user_id: int = 1000,
+    group_id: int = 1000,
+) -> string:
+    return service_runtime_config(executable, data, [], [], "severian-container-database", 0, 0, [], user_id, group_id)
 
 def prepare_bundle(
     id: string,
@@ -66,8 +100,55 @@ def prepare_bundle(
     file.write(config, runtime_config(executable, data))
     return Bundle(id, path, rootfs, config, ports)
 
+def prepare_service_bundle(
+    id: string,
+    path: string,
+    executable: string,
+    data: string,
+    arguments: list[string],
+    environment: list[string],
+    cpu_millis: int,
+    memory_mi_b: int,
+    devices: list[string],
+    ports: list[PortForward] = [],
+) -> Bundle:
+    rootfs = path + "/rootfs"
+    os.make_directories(path)
+    os.make_directories(rootfs)
+    os.make_directories(rootfs + "/app")
+    os.make_directories(rootfs + "/data")
+    os.make_directories(rootfs + "/dev")
+    os.make_directories(rootfs + "/proc")
+    os.make_directories(rootfs + "/tmp")
+    os.make_directories(rootfs + "/lib")
+    os.make_directories(rootfs + "/lib64")
+    os.make_directories(rootfs + "/usr/lib")
+    os.make_directories(rootfs + "/sys")
+    os.make_directories(rootfs + "/etc")
+    file.write(rootfs + "/app/server", "")
+    config = path + "/config.json"
+    contents = service_runtime_config(executable, data, arguments, environment, id, cpu_millis, memory_mi_b, devices)
+    file.write(config, contents)
+    return Bundle(id, path, rootfs, config, ports)
+
 test "OCI bundle configuration preserves the executable and data mounts":
     config = runtime_config("/tmp/server", "/tmp/data")
     assert("\"ociVersion\":\"1.0.2\"" in config)
     assert("/tmp/server" in config)
     assert("/tmp/data" in config)
+
+test "service bundles encode limits arguments and CDI claims":
+    config = service_runtime_config(
+        "/tmp/worker",
+        "/tmp/model",
+        ["19081", "tiny-llm-0"],
+        ["SEVERIAN_REPLICA=0"],
+        "tiny-llm-0",
+        2000,
+        1024,
+        ["amd.com/gpu=0"],
+    )
+    assert("amd.com/gpu=0" in config)
+    assert("SEVERIAN_REPLICA=0" in config)
+    assert("\"quota\":200000" in config)
+    assert("\"limit\":1073741824" in config)

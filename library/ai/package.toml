@@ -1,0 +1,18 @@
+[package]
+name = "ai"
+version = "0.1.0"
+edition = "2026"
+description = "Model discovery, artifact acquisition, and inference contracts"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+os = { path = "../system/os", version = "0.1.0" }
+path = { path = "../system/path", version = "0.1.0" }
+process = { path = "../system/process", version = "0.1.0" }
+
+[package.metadata.library]
+category = "ai"
+implementation = "source-and-compiler-contracts"
+status = "experimental"

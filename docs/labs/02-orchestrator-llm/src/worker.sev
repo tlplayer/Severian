@@ -1,0 +1,30 @@
+import ai
+import environment
+import "lib.sev" as llm
+import network
+import process
+import "readiness.sev" as readiness
+
+def main():
+    arguments = process.arguments()
+    model_root = arguments[1] if size(arguments) > 1 else "model"
+    replica = arguments[3] if size(arguments) > 3 else "tiny-llm-0"
+    base_port = 19181 if environment.get("SEVERIAN_CONTAINER") == "oci" else 18181
+    replica_offset = 2 if replica.ends_with("-2") else (1 if replica.ends_with("-1") else 0)
+    port = base_port + replica_offset
+    accelerator = environment.get("SEVERIAN_ACCELERATOR", "native")
+    model ?= ai.model.load(ai.SmolLm2, model_root)
+    listener = network.listen_text("0.0.0.0", port)
+    ready = model.ready() and readiness.model_files(model_root)
+    requests := 0
+    print(replica + " listening on " + string(port) + " using " + accelerator)
+    while true:
+        connection = network.accept(listener)
+        request = network.read_text(connection, 16384)
+        requests += 1
+        answer = llm.control_response(request, ready, model, replica, accelerator, requests)
+        if request.strip().starts_with("POST /generate"):
+            # Never replace missing decoder lowering with prompt branches.
+            answer = "{\"error\":\"SmolLM2 decoder lowering is unavailable\"}"
+        _written = network.write_text(connection, answer)
+        network.close(connection)

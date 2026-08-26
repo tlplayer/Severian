@@ -792,11 +792,22 @@ pub fn emit_mlir_executable_with_linker_arguments(
         clang_arguments.extend([
             "-L/opt/rocm/lib".into(),
             "-L/opt/rocm/lib64".into(),
+            "-L/usr/lib/x86_64-linux-gnu".into(),
             "-Wl,-rpath,/opt/rocm/lib".into(),
             "-Wl,-rpath,/opt/rocm/lib64".into(),
             "-lamdhip64".into(),
-            "-lmlir_rocm_runtime".into(),
         ]);
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("backend crate is nested below the repository root");
+        let component_runtime = repository
+            .join("target/components/rocm-runtime/libmlir_rocm_runtime.so");
+        if component_runtime.is_file() {
+            clang_arguments.push(component_runtime.to_string_lossy().into_owned());
+        } else {
+            clang_arguments.push("-lmlir_rocm_runtime".into());
+        }
     }
     clang_arguments.extend(linker_arguments.iter().cloned());
     clang_arguments.extend(["-lm".into(), "-o".into(), output_path]);

@@ -1,0 +1,51 @@
+[package]
+name = "orchestrator-llm"
+version = "0.1.0"
+edition = "2026"
+license = "Severian License"
+publish = false
+default-run = "tiny-llm-cluster"
+
+[[bin]]
+name = "tiny-llm-cluster"
+path = "src/cluster.sev"
+
+[[bin]]
+name = "tiny-llm-worker"
+path = "src/worker.sev"
+
+[[bin]]
+name = "tiny-llm-client"
+path = "src/client.sev"
+
+[lib]
+name = "orchestrator_llm"
+path = "src/lib.sev"
+
+[dependencies]
+ai = { path = "../../../library/ai", version = "0.1.0" }
+container = { path = "../../../library/system/container", version = "0.1.0" }
+device = { path = "../../../library/system/device", version = "0.1.0" }
+environment = { path = "../../../library/system/environment", version = "0.1.0" }
+file = { path = "../../../library/system/file", version = "0.1.0" }
+network = { path = "../../../library/network", version = "0.1.0" }
+oci = { path = "../../../library/system/oci", version = "0.1.0" }
+orchestrator = { path = "../../../library/system/orchestrator", version = "0.1.0" }
+os = { path = "../../../library/system/os", version = "0.1.0" }
+path = { path = "../../../library/system/path", version = "0.1.0" }
+process = { path = "../../../library/system/process", version = "0.1.0" }
+
+[build]
+profile = "dev"
+target = "host"
+incremental = true
+
+[diagnostics]
+mode = "user"
+message-format = "text"
+max-errors = 10
+
+[test]
+coverage-min = 0
+memory-max = "1GB"
+leaks = "deny"

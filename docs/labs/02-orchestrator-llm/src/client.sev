@@ -1,0 +1,14 @@
+import network
+import process
+
+def main():
+    arguments = process.arguments()
+    request := arguments[1] if size(arguments) > 1 else "GET /status"
+    if request == "generate":
+        prompt = arguments[2] if size(arguments) > 2 else "2 + 2 ="
+        request = "POST /generate\n" + prompt
+    response = network.exchange_text("127.0.0.1", 8080, request + "\n")
+    if response == "":
+        print("could not connect to the tiny-llm orchestrator on 127.0.0.1:8080")
+    else:
+        print(response)

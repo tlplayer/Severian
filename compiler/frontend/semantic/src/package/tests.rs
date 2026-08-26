@@ -44,6 +44,26 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
 }
 
 #[test]
+fn imported_trait_namespace_dispatch_keeps_the_package_qualifier() {
+    let root = temporary();
+    std::fs::write(
+        root.join("models.sev"),
+        "trait Model:\n    @model\n    def load(name: string) -> string with { (name) -> bool }\ndef load_tiny(name: string) -> string:\n    return name\nclass Tiny: Model\n    def load(name: string) -> string with { name == \"tiny\" }:\n        return load_tiny(name)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"models.sev\" as ai\ndef selected() -> string:\n    return ai.model.load(\"tiny\")\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn extensions_survive_package_indexing_and_lowering() {
     let root = temporary();
     std::fs::write(
@@ -669,6 +689,34 @@ fn package_class_fields_survive_diamond_relative_imports() {
     std::fs::write(
         root.join("lib.sev"),
         "import \"ids.sev\"\nimport \"operator.sev\"\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(
+        &severian_modules::resolve(&root.join("lib.sev")).unwrap(),
+        &universal,
+    )
+    .unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn tensor_intrinsics_do_not_consume_other_package_namespaces_as_receivers() {
+    let root = temporary();
+    std::fs::write(
+        root.join("paths.sev"),
+        "def exists(value: string) -> bool:\n    return value != \"\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tensor.sev"),
+        "class Tensor[T]:\n    handle: string\ndef tensor(values: list[float], shape: list[int]) -> Tensor[f64]:\n    return Tensor[f64](\"\")\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.sev"),
+        "import \"paths.sev\" as path\nimport \"tensor.sev\" as tensor\ndef ready(value: string) -> bool:\n    return path.exists(value)\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();

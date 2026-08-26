@@ -861,6 +861,7 @@ impl Compiler {
             .expect("the driver crate is nested below the repository root");
         let standard = [
             ("abi", repository.join("library/interop/abi")),
+            ("ai", repository.join("library/ai")),
             ("cli", repository.join("library/system/cli")),
             ("csv", repository.join("library/data/csv")),
             ("data_format", repository.join("library/data/format")),

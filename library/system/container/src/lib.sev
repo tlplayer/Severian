@@ -46,12 +46,18 @@ def start_forwards(bundle: oci.Bundle) -> list[int]:
         processes.append(process.spawn(forward_command(port)))
     return processes
 
+def run_without_forwards(bundle: oci.Bundle) -> int:
+    runtime = selected_runtime()
+    if runtime == "":
+        return 127
+    return process.run("runc --root /tmp/severian-runc run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id)) if runtime == "runc" else process.run("crun --root /tmp/severian-crun --cgroup-manager disabled run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id))
+
 def run(bundle: oci.Bundle) -> int:
     runtime = selected_runtime()
     if runtime == "":
         return 127
     forwarders = start_forwards(bundle)
-    status = process.run("runc --root /tmp/severian-runc run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id)) if runtime == "runc" else process.run("crun --root /tmp/severian-crun --cgroup-manager disabled run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id))
+    status = run_without_forwards(bundle)
     if status != 0:
         for forwarder in forwarders:
             process.kill(forwarder)

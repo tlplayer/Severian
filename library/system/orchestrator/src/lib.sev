@@ -1,6 +1,228 @@
 import container
-import database
-import pql
+import device
+import oci
+
+Created = "created"
+Starting = "starting"
+GpuInitializing = "gpu-initializing"
+ModelLoading = "model-loading"
+ModelWarming = "model-warming"
+Ready = "ready"
+Unhealthy = "unhealthy"
+Restarting = "restarting"
+Backoff = "backoff"
+
+class DeviceClaim:
+    kind: string
+    vendor: string
+    count: int
+    memory_mi_b: int
+    required: bool
+
+class Resources:
+    cpumillis: int
+    memory_mi_b: int
+    devices: list[DeviceClaim]
+
+class Health:
+    live: string
+    ready: string
+    interval_seconds: int
+    healthy_threshold: int
+    failure_threshold: int
+
+class Service:
+    namespace: string
+    name: string
+    image: string
+    replicas: int
+    resources: Resources
+    port: int
+    health: Health
+    restart: string
+
+class NodeInventory:
+    name: string
+    cpumillis: int
+    memory_mi_b: int
+    devices: list[device.ResourceDevice]
+    healthy: bool
+
+class Replica:
+    id: string
+    node: string
+    host_port: int
+    container_port: int
+    devices: list[string]
+    generation: int
+    state: string
+    successes: int
+    failures: int
+    requests: int
+
+class ServiceStatus:
+    desired: int
+    running: int
+    ready: int
+    restarts: int
+    requests: int
+
+def service_errors(service: Service) -> list[string]:
+    failures: list[string] = []
+    if service.namespace == "":
+        failures.append("namespace is empty")
+    if service.name == "":
+        failures.append("service name is empty")
+    if service.image == "":
+        failures.append("service image is empty")
+    if service.replicas < 0:
+        failures.append("replicas cannot be negative")
+    if service.resources.cpumillis < 1 or service.resources.memory_mi_b < 1:
+        failures.append("resource requests must be positive")
+    if service.port < 1 or service.port > 65535:
+        failures.append("service port is invalid")
+    for claim in service.resources.devices:
+        if claim.count < 0 or claim.memory_mi_b < 0:
+            failures.append("device claims cannot be negative")
+    return failures
+
+def device_matches(current: device.ResourceDevice, claim: DeviceClaim) -> bool:
+    if not current.healthy or current.kind != claim.kind:
+        return false
+    if claim.vendor != "any" and current.vendor != claim.vendor:
+        return false
+    if current.memory_mi_b > 0 and current.memory_mi_b < claim.memory_mi_b:
+        return false
+    return current.cdi_name != ""
+
+def claim_devices(claim: DeviceClaim, devices: list[device.ResourceDevice], allocated: list[string]) -> list[string]:
+    selected: list[string] = []
+    for current in devices:
+        if size(selected) < claim.count and device_matches(current, claim) and not allocated.contains(current.cdi_name):
+            selected.append(current.cdi_name)
+    return selected
+
+def schedule_service(
+    service: Service,
+    nodes: list[NodeInventory],
+    host_port_base: int,
+    container_port_base: int,
+) -> list[Replica]:
+    assert(size(service_errors(service)) == 0)
+    replicas: list[Replica] = []
+    allocated_devices: list[string] = []
+    remaining_cpu: list[int] = []
+    remaining_memory: list[int] = []
+    for node in nodes:
+        remaining_cpu.append(node.cpumillis)
+        remaining_memory.append(node.memory_mi_b)
+    node_count = int(size(nodes))
+    for replica_index in range(0, service.replicas):
+        placed := false
+        for offset in range(0, node_count):
+            node_index = (replica_index + offset) % node_count
+            node = nodes[node_index]
+            if not placed and node.healthy and remaining_cpu[node_index] >= service.resources.cpumillis and remaining_memory[node_index] >= service.resources.memory_mi_b:
+                selected_devices: list[string] = []
+                claims_satisfied := true
+                for claim in service.resources.devices:
+                    selected = claim_devices(claim, node.devices, allocated_devices)
+                    if size(selected) < claim.count and claim.required:
+                        claims_satisfied = false
+                    else:
+                        selected_devices.extend(selected)
+                if claims_satisfied:
+                    replica_id = service.name + "-" + string(replica_index)
+                    replicas.append(Replica(replica_id, node.name, host_port_base + replica_index, container_port_base + replica_index, selected_devices, 1, Created, 0, 0, 0))
+                    remaining_cpu[node_index] -= service.resources.cpumillis
+                    remaining_memory[node_index] -= service.resources.memory_mi_b
+                    allocated_devices.extend(selected_devices)
+                    placed = true
+    return replicas
+
+def record_probe(replica: Replica, live: bool, ready: bool, health: Health) -> Replica:
+    if live and ready:
+        replica.successes += 1
+        replica.failures = 0
+        if replica.successes >= health.healthy_threshold:
+            replica.state = Ready
+        return replica
+    replica.successes = 0
+    replica.failures += 1
+    if replica.failures >= health.failure_threshold:
+        replica.state = Unhealthy
+    return replica
+
+def ready_ports(replicas: list[Replica]) -> list[int]:
+    ports: list[int] = []
+    for replica in replicas:
+        if replica.state == Ready:
+            ports.append(replica.host_port)
+    return ports
+
+def route(replicas: list[Replica], cursor: int) -> int:
+    ports = ready_ports(replicas)
+    if size(ports) == 0:
+        return 0
+    return ports[cursor % int(size(ports))]
+
+def reconcile_service(service: Service, replicas: list[Replica]) -> list[string]:
+    actions: list[string] = []
+    if size(replicas) < service.replicas:
+        for index in range(int(size(replicas)), service.replicas):
+            actions.append("create " + service.name + "-" + string(index))
+    if size(replicas) > service.replicas:
+        for index in range(service.replicas, int(size(replicas))):
+            actions.append("delete " + replicas[index].id)
+    for replica in replicas:
+        if replica.state == Unhealthy and service.restart == "on-failure":
+            actions.append("restart " + replica.id + " generation " + string(replica.generation + 1))
+    if size(actions) == 0:
+        actions.append("stable")
+    return actions
+
+def status(service: Service, replicas: list[Replica]) -> ServiceStatus:
+    ready := 0
+    restarts := 0
+    requests := 0
+    for replica in replicas:
+        if replica.state == Ready:
+            ready += 1
+        restarts += replica.generation - 1
+        requests += replica.requests
+    return ServiceStatus(service.replicas, int(size(replicas)), ready, restarts, requests)
+
+def describe(service: Service, replicas: list[Replica]) -> string:
+    observed = status(service, replicas)
+    output := service.namespace + "/" + service.name + "\n"
+    output += "state " + (Ready if observed.ready == observed.desired else "degraded") + "\n"
+    output += "replicas " + string(observed.ready) + "/" + string(observed.desired) + "\n"
+    output += "requests " + string(observed.requests) + "\n"
+    output += "restarts " + string(observed.restarts)
+    for replica in replicas:
+        accelerator = replica.devices.join(",") if size(replica.devices) > 0 else "native"
+        output += "\n" + replica.id + " " + replica.state + " " + replica.node + " " + accelerator
+    return output
+
+def bundle_for(
+    replica: Replica,
+    service: Service,
+    executable: string,
+    model_root: string,
+    bundle_root: string,
+) -> oci.Bundle:
+    return oci.prepare_service_bundle(
+        replica.id,
+        bundle_root + "/" + replica.id,
+        executable,
+        model_root,
+        [string(replica.container_port), replica.id],
+        ["SEVERIAN_REPLICA=" + replica.id],
+        service.resources.cpumillis,
+        service.resources.memory_mi_b,
+        replica.devices,
+        [oci.PortForward(replica.host_port, replica.container_port)],
+    )
 
 class Workload:
     namespace: string
@@ -25,7 +247,7 @@ class ObservedWorkload:
     version: string
 
 def workload_errors(workload: Workload) -> list[string]:
-    failures := []
+    failures: list[string] = []
     if workload.namespace == "":
         failures.append("namespace is empty")
     if workload.name == "":
@@ -45,11 +267,11 @@ def workload_valid(workload: Workload) -> bool:
 
 def schedule(workload: Workload, nodes: list[Node]) -> list[string]:
     assert(workload_valid(workload))
-    placements := []
+    placements: list[string] = []
     if size(nodes) == 0:
         return ["unscheduled " + workload.name + ": no nodes"]
     for replica in range(0, workload.replicas):
-        node = nodes[replica % size(nodes)]
+        node = nodes[replica % int(size(nodes))]
         if node.healthy and node.cpumillis >= workload.cpumillis and node.memory_mi_b >= workload.memory_mi_b:
             placements.append(workload.name + "-" + string(replica) + " -> " + node.name)
         else:
@@ -58,7 +280,7 @@ def schedule(workload: Workload, nodes: list[Node]) -> list[string]:
 
 def reconcile(workload: Workload, observed: ObservedWorkload) -> list[string]:
     assert(workload_valid(workload))
-    actions := []
+    actions: list[string] = []
     if observed.replicas < 0:
         actions.append("create " + workload.namespace + "/" + workload.name)
         actions.append("scale 0->" + string(workload.replicas))
@@ -114,21 +336,6 @@ def volume_claim(workload: Workload, size_gi_b: int, storage_class: string) -> l
     assert(size_gi_b > 0)
     return ["claim " + workload.namespace + "/" + workload.volume, "sizeGiB " + string(size_gi_b), "class " + storage_class, "mount /var/lib/" + workload.name]
 
-def initialize_controller_history(connection: Database) -> int:
-    return database.must_execute(connection, "CREATE TABLE controller_events(id INTEGER PRIMARY KEY, namespace TEXT, workload TEXT, action TEXT)")
-
-def record_controller_event(connection: Database, workload: Workload, action: string) -> int:
-    statement = "INSERT INTO controller_events(namespace, workload, action) VALUES ('" + workload.namespace + "', '" + workload.name + "', '" + action + "')"
-    return database.must_execute(connection, statement)
-
-def controller_history(connection: Database) -> Result[list[list[string]], DatabaseError]:
-    return database.query(connection, "SELECT namespace, workload, action FROM controller_events ORDER BY id")
-
-def controller_sql() -> string:
-    events = pql.Schema("controller_events", ["id", "namespace", "workload", "action"], ["int", "string", "string", "string"], [false, false, false, false], "id")
-    query = pql.Query("controller_events", ["id", "action"], ["id", "action"], [false, false], "namespace", "string", [])
-    return pql.sql(events, query, "postgres")
-
 test "scheduler places replicas deterministically":
     workload = Workload("prod", "api", "sev://images/api:v2", 3, 250, 128, 8080, "api-state", "v2")
     nodes = [Node("node-a", 2000, 4096, true), Node("node-b", 2000, 4096, true)]
@@ -163,21 +370,44 @@ test "rollouts include promotion and rollback policy":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
     assert(rollout_plan(workload, "v1", 1) == ["rollout api", "from v1", "to v2", "maxUnavailable 1", "health before promote", "rollback on failure"])
 
-test "controller history executes against the database":
-    workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
-    match database.memory():
-        case connection:
-            initialize_controller_history(connection)
-            assert(record_controller_event(connection, workload, "stable") == 1)
-            match controller_history(connection):
-                case rows:
-                    assert(rows[0][0] == "prod")
-                    assert(rows[0][1] == "api")
-                    assert(rows[0][2] == "stable")
-                case error:
-                    assert(false, error)
-        case error:
-            assert(false, error)
+test "service scheduler allocates three replicas and distinct CDI devices":
+    gpu0 = device.ResourceDevice("gpu0", device.Gpu, "gfx942", device.Rocm, "amd", 24576, 304, "amd.com/gpu=0", true)
+    gpu1 = device.ResourceDevice("gpu1", device.Gpu, "gfx942", device.Rocm, "amd", 24576, 304, "amd.com/gpu=1", true)
+    gpu2 = device.ResourceDevice("gpu2", device.Gpu, "gfx942", device.Rocm, "amd", 24576, 304, "amd.com/gpu=2", true)
+    nodes = [NodeInventory("node-a", 8000, 32768, [gpu0, gpu1, gpu2], true)]
+    claim = DeviceClaim(device.Gpu, "amd", 1, 16384, true)
+    resources = Resources(1000, 1024, [claim])
+    health = Health("/live", "/ready", 2, 1, 2)
+    service = Service("models", "tiny-llm", "tiny-llm:latest", 3, resources, 8080, health, "on-failure")
+    replicas = schedule_service(service, nodes, 18181, 19181)
+    assert(size(replicas) == 3)
+    assert(replicas[0].devices == ["amd.com/gpu=0"])
+    assert(replicas[1].devices == ["amd.com/gpu=1"])
+    assert(replicas[2].devices == ["amd.com/gpu=2"])
 
-test "controller queries are PQL validated before emission":
-    assert(controller_sql() == "SELECT id, action FROM controller_events WHERE namespace = $1")
+test "portable device claims preserve native fallback":
+    cpu = device.ResourceDevice("host-cpu", device.Cpu, "x86_64", "native", "host", 0, 0, "", true)
+    nodes = [NodeInventory("local", 4000, 4096, [cpu], true)]
+    claim = DeviceClaim(device.Gpu, "amd", 1, 1024, false)
+    service = Service("models", "tiny-llm", "tiny-llm:latest", 3, Resources(500, 256, [claim]), 8080, Health("/live", "/ready", 2, 1, 2), "on-failure")
+    replicas = schedule_service(service, nodes, 18181, 19181)
+    assert(size(replicas) == 3)
+    assert(replicas[0].devices == [])
+    assert(replicas[2].devices == [])
+
+test "readiness gates round robin routing and failures reconcile":
+    health = Health("/live", "/ready", 2, 1, 2)
+    first := Replica("tiny-llm-0", "node-a", 18181, 19181, [], 1, Starting, 0, 0, 4)
+    second := Replica("tiny-llm-1", "node-a", 18182, 19182, [], 1, Starting, 0, 0, 7)
+    third := Replica("tiny-llm-2", "node-a", 18183, 19183, [], 1, Starting, 0, 0, 1)
+    first = record_probe(first, true, true, health)
+    second = record_probe(second, true, true, health)
+    third = record_probe(third, false, false, health)
+    third = record_probe(third, false, false, health)
+    replicas = [first, second, third]
+    assert(route(replicas, 0) == 18181)
+    assert(route(replicas, 1) == 18182)
+    assert(route(replicas, 2) == 18181)
+    service = Service("models", "tiny-llm", "tiny-llm:latest", 3, Resources(500, 256, []), 8080, health, "on-failure")
+    assert(reconcile_service(service, replicas) == ["restart tiny-llm-2 generation 2"])
+    assert(status(service, replicas).requests == 12)

@@ -1,0 +1,145 @@
+import ai
+import container
+import device
+import environment
+import network
+import oci
+import orchestrator
+import os
+import process
+
+def quote(value: string) -> string:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def service() -> orchestrator.Service:
+    gpu = orchestrator.DeviceClaim(device.Gpu, "amd", 1, 1024, false)
+    resources = orchestrator.Resources(1000, 1024, [gpu])
+    health = orchestrator.Health("/live", "/ready", 2, 1, 2)
+    return orchestrator.Service("models", "tiny-llm", "tiny-llm:latest", 3, resources, 8080, health, "on-failure")
+
+def launch_native(replica: orchestrator.Replica, executable: string, model_root: string) -> int:
+    accelerator = replica.devices.join(",") if size(replica.devices) > 0 else "native"
+    command = "SEVERIAN_ACCELERATOR=" + quote(accelerator) + " " + quote(executable) + " " + quote(model_root) + " " + string(replica.host_port) + " " + quote(replica.id)
+    return process.spawn(command)
+
+def launch(replica: orchestrator.Replica, specification: orchestrator.Service, executable: string, model_root: string, bundle_root: string) -> string:
+    if container.selected_runtime() != "":
+        bundle = orchestrator.bundle_for(replica, specification, executable, model_root, bundle_root)
+        if container.run(bundle) == 0:
+            return "oci"
+    process_id = launch_native(replica, executable, model_root)
+    return "native:" + string(process_id)
+
+def relaunch(replica: orchestrator.Replica, specification: orchestrator.Service, executable: string, model_root: string, bundle_root: string) -> string:
+    if container.selected_runtime() != "":
+        bundle = orchestrator.bundle_for(replica, specification, executable, model_root, bundle_root)
+        if container.run_without_forwards(bundle) == 0:
+            return "oci"
+    process_id = launch_native(replica, executable, model_root)
+    return "native:" + string(process_id)
+
+def probe(replicas: list[orchestrator.Replica], health: orchestrator.Health) -> list[orchestrator.Replica]:
+    observed: list[orchestrator.Replica] = []
+    for replica in replicas:
+        live_response = network.exchange_text("127.0.0.1", replica.host_port, "GET " + health.live + "\n")
+        live = "\"live\":true" in live_response
+        ready_response = network.exchange_text("127.0.0.1", replica.host_port, "GET " + health.ready + "\n")
+        ready = "\"ready\":true" in ready_response
+        observed.append(orchestrator.record_probe(replica, live, ready, health))
+    return observed
+
+def record_request(replicas: list[orchestrator.Replica], port: int) -> list[orchestrator.Replica]:
+    updated: list[orchestrator.Replica] = []
+    for replica in replicas:
+        if replica.host_port == port:
+            replica.requests += 1
+        updated.append(replica)
+    return updated
+
+def repair(
+    replicas: list[orchestrator.Replica],
+    specification: orchestrator.Service,
+    executable: string,
+    model_root: string,
+    bundle_root: string,
+) -> list[orchestrator.Replica]:
+    repaired: list[orchestrator.Replica] = []
+    for replica in replicas:
+        if replica.state == orchestrator.Unhealthy and specification.restart == "on-failure":
+            if container.selected_runtime() != "":
+                _killed = container.kill(replica.id)
+                _deleted = container.delete(replica.id)
+            replica.generation += 1
+            replica.state = orchestrator.Restarting
+            replica.failures = 0
+            replica.successes = 0
+            mode = relaunch(replica, specification, executable, model_root, bundle_root)
+            print("restarted " + replica.id + " generation " + string(replica.generation) + " via " + mode)
+        repaired.append(replica)
+    return repaired
+
+def aggregate_metrics(specification: orchestrator.Service, replicas: list[orchestrator.Replica]) -> string:
+    observed = orchestrator.status(specification, replicas)
+    output := "service_replicas_desired " + string(observed.desired) + "\n"
+    output += "service_replicas_running " + string(observed.running) + "\n"
+    output += "service_replicas_ready " + string(observed.ready) + "\n"
+    output += "container_restart_total " + string(observed.restarts) + "\n"
+    output += "requests_total " + string(observed.requests) + "\n"
+    for replica in replicas:
+        worker = network.exchange_text("127.0.0.1", replica.host_port, "GET /metrics\n")
+        output += replica.id + "\n" + worker
+    return output
+
+def gateway(
+    specification: orchestrator.Service,
+    replicas: list[orchestrator.Replica],
+    executable: string,
+    model_root: string,
+    bundle_root: string,
+):
+    listener = network.listen_text("0.0.0.0", specification.port)
+    cursor := 0
+    current := replicas
+    print("tiny-llm orchestrator listening on 127.0.0.1:" + string(specification.port))
+    while true:
+        current = probe(current, specification.health)
+        current = repair(current, specification, executable, model_root, bundle_root)
+        connection = network.accept(listener)
+        request = network.read_text(connection, 16384)
+        command = request.strip()
+        response := ""
+        if command.starts_with("GET /status"):
+            response = orchestrator.describe(specification, current)
+        else:
+            if command.starts_with("GET /metrics"):
+                response = aggregate_metrics(specification, current)
+            else:
+                port = orchestrator.route(current, cursor)
+                if port == 0:
+                    response = "{\"error\":\"no ready tiny-llm replicas\"}"
+                else:
+                    response = network.exchange_text("127.0.0.1", port, request)
+                    current = record_request(current, port)
+                    cursor += 1
+        _written = network.write_text(connection, response)
+        network.close(connection)
+
+def main():
+    root = environment.get("PWD", ".")
+    model_root = root + "/target/models/SmolLM2-135M-Instruct/" + ai.SmolLm2Revision
+    executable = root + "/target/host/dev/bin/tiny-llm-worker"
+    bundle_root = root + "/target/oci/tiny-llm"
+    if process.run("sev build --bin tiny-llm-worker") != 0:
+        print("could not build tiny-llm-worker")
+        return
+    specification = service()
+    node = orchestrator.NodeInventory("local", 8000, 8192, device.inventory(), true)
+    replicas = orchestrator.schedule_service(specification, [node], 18181, 19181)
+    if size(replicas) != 3:
+        print("could not schedule all three tiny-llm replicas")
+        return
+    for replica in replicas:
+        mode = launch(replica, specification, executable, model_root, bundle_root)
+        print("started " + replica.id + " via " + mode)
+    os.wait(1s)
+    gateway(specification, replicas, executable, model_root, bundle_root)

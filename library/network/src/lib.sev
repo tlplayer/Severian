@@ -1,7 +1,7 @@
 import io
 import "ffi.sev" as externs
 
-class NetworkError:
+class NetworkError: Error
     message: string
     code: int = -1
 
@@ -220,6 +220,19 @@ def close(listener: TcpListener):
     assert(externs.close_simple(listener.handle) == 0, "could not close TCP listener")
     listener.handle = 0
     return
+
+def exchange_text(host: string, port: int, request: string, limit: int = 16384) -> string:
+    if not valid_port(port) or limit < 0:
+        return ""
+    handle = externs.connect_simple(host, port)
+    if handle == 0:
+        return ""
+    connection = TcpConnection(handle)
+    _written = write_text(connection, request)
+    shutdown_write(connection)
+    response = read_text(connection, limit)
+    close(connection)
+    return response
 
 def resolve(host: string) -> Result[list[Ip], NetworkError]:
     if size(host.strip()) == 0:

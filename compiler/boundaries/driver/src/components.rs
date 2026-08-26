@@ -47,8 +47,10 @@ pub(crate) fn ensure_for_plan(
         return Ok(resolved);
     }
     ensure_component(&catalog, "compiler", "mlir.rocdl")?;
+    ensure_component(&catalog, "compiler", "mlir.stablehlo")?;
     resolved.capabilities.insert("mlir.dialect.gpu");
     resolved.capabilities.insert("mlir.dialect.rocdl");
+    resolved.capabilities.insert("mlir.dialect.stablehlo");
     if resolved.rocm_device().is_some() {
         return Ok(resolved);
     }
@@ -165,6 +167,11 @@ fn catalog() -> Result<Catalog, String> {
 }
 
 fn installed(component: &Component) -> bool {
+    if let Some(path) = local_component(component) {
+        if path.is_file() {
+            return true;
+        }
+    }
     let all = component
         .detect_all
         .iter()
@@ -175,6 +182,21 @@ fn installed(component: &Component) -> bool {
             .iter()
             .any(|path| Path::new(path).exists());
     all && any
+}
+
+fn local_component(component: &Component) -> Option<std::path::PathBuf> {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)?;
+    match component.id.as_str() {
+        "compiler.stablehlo" => Some(
+            repository.join("target/components/bin/severian-stablehlo-opt"),
+        ),
+        "runtime.mlir-rocm" => Some(
+            repository.join("target/components/rocm-runtime/libmlir_rocm_runtime.so"),
+        ),
+        _ => None,
+    }
 }
 
 fn install(component: &Component) -> Result<(), String> {

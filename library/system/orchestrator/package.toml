@@ -9,7 +9,8 @@ path = "src/lib.sev"
 
 [dependencies]
 container = { path = "../container", version = "0.1.0" }
-database = { path = "../database", version = "0.1.0" }
+device = { path = "../device", version = "0.1.0" }
+oci = { path = "../oci", version = "0.1.0" }
 
 [package.metadata.library]
 category = "infrastructure"
