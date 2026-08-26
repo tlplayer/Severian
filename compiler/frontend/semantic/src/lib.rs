@@ -9726,6 +9726,12 @@ impl Analyzer<'_> {
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
         let callable = callable_path(callee);
+        if callable
+            .as_ref()
+            .is_some_and(|path| self.namespace_methods.contains_key(path))
+        {
+            return Ok(None);
+        }
         let positional = arguments
             .iter()
             .all(|argument| argument.name.is_none() && !argument.spread);
