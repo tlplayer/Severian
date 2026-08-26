@@ -82,9 +82,9 @@ mod tests {
 
     #[test]
     fn identity_depends_on_path_not_registration_order() {
-        let before = DeclarationId::from_path("core.primitives.i32");
-        let unrelated = DeclarationId::from_path("core.primitives.f128");
-        let after = DeclarationId::from_path("core.primitives.i32");
+        let before = DeclarationId::from_path("universal.primitive.i32");
+        let unrelated = DeclarationId::from_path("universal.primitive.f128");
+        let after = DeclarationId::from_path("universal.primitive.i32");
         assert_eq!(before, after);
         assert_ne!(before, unrelated);
     }

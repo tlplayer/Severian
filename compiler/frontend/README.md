@@ -33,7 +33,7 @@ Frontend code must not:
 - Maintain a list such as `integer`, `float`, `boolean`, `text`, `absence`, or `unit`.
 - Check `primitive.supports("+")` directly.
 - Match primitive representations.
-- Reload `library/core/primitives`.
+- Define or reload primitive declarations outside `compiler/universal/primitive`.
 - Assign primitive IDs from declaration order.
 
 The frontend asks `UniversalContext` to resolve a literal or operator and translates the returned typed error into a source diagnostic.

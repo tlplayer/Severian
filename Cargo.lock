@@ -122,7 +122,6 @@ dependencies = [
  "severian-diagnostics",
  "severian-lexer",
  "severian-parser",
- "severian-primitives",
  "severian-source",
  "severian-universal",
 ]
@@ -274,10 +273,6 @@ dependencies = [
  "severian-lexer",
  "severian-source",
 ]
-
-[[package]]
-name = "severian-primitives"
-version = "0.1.0"
 
 [[package]]
 name = "severian-runtime"

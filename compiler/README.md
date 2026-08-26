@@ -2,6 +2,44 @@
 
 The compiler uses one owner for each semantic concept. Compiler phases may carry different representations, but they may not independently redefine the same language rule.
 
+## Rust directory map
+
+```text
+compiler/
+  universal/            language-wide semantic authority
+    primitive/          primitive schema, capabilities, and operators
+    types/              type context, compatibility, and resolution
+    literal.rs          canonical literal kinds and values
+    operator.rs         canonical operator identities and signatures
+    ids.rs              stable universal identities
+    type_system.rs      structural types, inference, and constraints
+  source/               source files, spans, and source identity
+  frontend/
+    lexer/              tokenization
+    parser/             syntax construction
+    ast/                source-preserving syntax model
+    modules/            packages, modules, imports, and visibility
+    semantic/           validation and enrichment through universal
+    hir/                typed program representation
+    ownership/          ownership and effect validation
+  transforms/
+    mir/                control/data-flow representation
+    lir/                target-resolved lowering representation
+    lowering/           MIR to LIR
+    mlir/               MLIR construction and verification
+  compile/              CompileType planning and dispatch
+  bootstrap/            universal context and source-protocol assembly
+  target/               target, device, feature, and capability selection
+  diagnostics/          diagnostics and rendering
+  boundaries/           ABI, FFI, interfaces, backends, XXI, and driver
+  runtime/              native runtime implementations
+  artifact/             compiled artifact identities and metadata
+```
+
+AST, HIR, MIR, and LIR may retain stage-specific representations, but language
+facts shared between stages must be referenced from `universal` rather than
+redeclared by those stages.
+
 ## Pipeline
 
 ```text
@@ -34,7 +72,8 @@ XXI, FFI, or ABI phases.
 | Concept | Sole owner |
 | --- | --- |
 | Stable declaration and type identities | `compiler/universal` |
-| Type definitions and primitive metadata | `compiler/universal` |
+| Primitive definitions, metadata, capabilities, and operators | `compiler/universal/primitive` |
+| Structural and nominal type context | `compiler/universal/types` |
 | Literal kinds, canonical constant values, and literal resolution | `compiler/universal` |
 | Operator identities, signatures, and result resolution | `compiler/universal` |
 | Raw source spelling and source spans | AST |
@@ -50,7 +89,6 @@ XXI, FFI, or ABI phases.
 | `@c`/`@rust` declarations and external imports | `compiler/boundaries/xxi` |
 | C, MLIR, LLVM, XLA, or Triton spelling | The corresponding backend/emitter |
 | `.pkg` and `.pkgi` serialization | `compiler/boundaries/interface` |
-| Loading `library/core/primitives` | `compiler/bootstrap` |
 | Loading compiler protocols into stable routes | `compiler/bootstrap` |
 
 ## Dependency direction
@@ -67,12 +105,12 @@ library source never depends on Rust compiler crates.
 compile -> universal + MIR + MLIR interface + target
 ```
 
-`compiler/universal` must not depend on frontend, HIR, MIR, LIR, lowering, a backend, an interface format, or `library/core/primitives`.
+`compiler/universal` must not depend on frontend, HIR, MIR, LIR, lowering, a backend, an interface format, or the standard library.
 
 ## Hard rules
 
-1. Primitive names, categories, representations, literal defaults, and operator names are not matched directly outside bootstrap validation and universal resolution.
-2. Only `compiler/bootstrap` reads `library/core/primitives`.
+1. Primitive names, categories, representations, literal defaults, capabilities, and operator signatures are defined only in `compiler/universal/primitive`.
+2. Bootstrap installs universal primitives before loading source-defined compiler protocols.
 3. A compiler phase receives `&UniversalContext`; it does not call a global `load()` function.
 4. Semantic analysis delegates literal and operator resolution to `compiler/universal`.
 5. Lowering accepts typed definitions and a neutral `TargetSpec`; it does not reinterpret source strings.

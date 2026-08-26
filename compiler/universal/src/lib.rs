@@ -5,6 +5,7 @@ mod ids;
 mod literal;
 mod operation_registry;
 mod operator;
+pub mod primitive;
 mod type_system;
 pub mod types;
 
@@ -20,12 +21,15 @@ pub use operation_registry::{
     OperationRegistry, ProviderId, RegisteredOperation, RuntimeId,
 };
 pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
+pub use primitive::{
+    install_primitives, FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition,
+    PrimitiveRepresentation, PrimitiveSpec, PRIMITIVES,
+};
 pub use type_system::{
     Constraint, ImplDefinition, ImplId, ImplSelection, ImplTable, InferenceContext, Signature,
     Substitution, TraitRef, TyInterner, TypeKind, UnifyError,
 };
 pub use types::{
-    FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition, PrimitiveRepresentation,
     ResolvedBinary, ResolvedUnary, TypeContext, TypeContextBuilder, TypeDefinition,
     TypeDefinitionKind, TypeError,
 };

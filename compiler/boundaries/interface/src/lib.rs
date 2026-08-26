@@ -353,7 +353,7 @@ mod tests {
         let record = PrimitiveRecord {
             version: INTERFACE_VERSION,
             declaration_id: 42u128.to_be_bytes(),
-            path: "core.primitives.i32".into(),
+            path: "universal.primitive.i32".into(),
             category: CategoryRecord::Integer,
             representation: RepresentationRecord::Integer {
                 bits: WidthRecord::Fixed(32),

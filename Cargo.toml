@@ -12,7 +12,6 @@ members = [
     # Language bootstrap
     "compiler/bootstrap",
     "library/core/compile",
-    "library/core/primitives",
 
     # Boundaries
     "compiler/boundaries/abi",
@@ -76,7 +75,6 @@ severian-compile = "compile"
 severian-artifact = "artifact"
 severian-runtime = "runtime"
 severian-compile-protocol = "core_source"
-severian-primitives = "primitive_source"
 severian-hir = "semantic"
 severian-semantic = "semantic"
 severian-ownership = "semantic"
@@ -122,7 +120,6 @@ severian-compile = [
 severian-artifact = []
 severian-runtime = []
 severian-compile-protocol = []
-severian-primitives = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
     "severian-ast",
@@ -139,7 +136,6 @@ severian-bootstrap = [
     "severian-lexer",
     "severian-parser",
     "severian-compile-protocol",
-    "severian-primitives",
     "severian-source",
     "severian-universal",
 ]

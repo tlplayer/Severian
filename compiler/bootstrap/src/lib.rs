@@ -1,19 +1,14 @@
 #![forbid(unsafe_code)]
 
 use severian_ast::{
-    Expression, ExpressionKind, Literal as AstLiteral, OperatorDeclaration, OperatorSyntax,
-    TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+    OperatorDeclaration, OperatorSyntax, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
 };
 use severian_source::{SourceFile, SourceId};
 use severian_universal::{
-    BinaryOperator, OperatorSignature, PrimitiveCategory, PrimitiveRepresentation,
-    TypeContextBuilder, TypeId, TypePattern, UnaryOperator, UniversalContext,
+    install_primitives, BinaryOperator, TypeContextBuilder, UnaryOperator, UniversalContext,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
-
-#[cfg(test)]
-const PRIMITIVE_PACKAGE_PATH: &str = "core.primitives";
 
 pub fn load() -> Result<UniversalContext, BootstrapError> {
     build_from_packages(
@@ -25,25 +20,7 @@ pub fn load() -> Result<UniversalContext, BootstrapError> {
                     source.path,
                     source.source,
                 )
-            })
-            .chain(severian_primitives::SOURCES.iter().map(|source| {
-                (
-                    severian_primitives::PACKAGE_NAME,
-                    source.path,
-                    source.source,
-                )
-            })),
-    )
-}
-
-#[cfg(test)]
-fn build_from_sources<'a>(
-    sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> Result<UniversalContext, BootstrapError> {
-    build_from_packages(
-        sources
-            .into_iter()
-            .map(|(path, source)| (PRIMITIVE_PACKAGE_PATH, path, source)),
+            }),
     )
 }
 
@@ -75,6 +52,7 @@ fn build_from_packages<'a>(
     // Pass 1: every source declaration receives its stable path identity before
     // bases, metadata, or signatures are interpreted.
     let mut types = TypeContextBuilder::new();
+    install_primitives(&mut types).map_err(|error| BootstrapError::Type(error.to_string()))?;
     for name in declarations.keys() {
         let package = declaration_packages
             .get(name)
@@ -85,42 +63,6 @@ fn build_from_packages<'a>(
                 name,
                 declarations[name].type_parameters.len(),
             )
-            .map_err(|error| BootstrapError::Type(error.to_string()))?;
-    }
-
-    // Pass 2a: resolve the Primitive base and its typed metadata.
-    let protocol = declarations
-        .get("Primitive")
-        .ok_or_else(|| BootstrapError::MissingDeclaration("Primitive".into()))?;
-    for declaration in declarations.values().filter(|declaration| {
-        declaration
-            .bases
-            .iter()
-            .any(|base| base.simple_name() == Some("Primitive"))
-    }) {
-        let category = string_property(declaration, protocol, "category")?;
-        let representation = string_property(declaration, protocol, "representation")?;
-        let bits = integer_property(declaration, protocol, "bits")?
-            .filter(|value| *value != 0)
-            .map(|value| {
-                u16::try_from(value).map_err(|_| BootstrapError::InvalidProperty {
-                    declaration: declaration.name.clone(),
-                    property: "bits".into(),
-                })
-            })
-            .transpose()?;
-        let signed = boolean_property(declaration, protocol, "signed")?.unwrap_or(false);
-        let default_literal =
-            boolean_property(declaration, protocol, "default_literal")?.unwrap_or(false);
-        let category = PrimitiveCategory::from_contract(&category)
-            .map_err(|error| BootstrapError::Type(error.to_string()))?;
-        let representation = PrimitiveRepresentation::from_contract(&representation, bits, signed)
-            .map_err(|error| BootstrapError::Type(error.to_string()))?;
-        let type_id = types
-            .resolve_name(&declaration.name)
-            .ok_or_else(|| BootstrapError::MissingDeclaration(declaration.name.clone()))?;
-        types
-            .define_primitive(type_id, category, representation, default_literal)
             .map_err(|error| BootstrapError::Type(error.to_string()))?;
     }
 
@@ -140,23 +82,6 @@ fn build_from_packages<'a>(
             types
                 .add_capability(owner, trait_id)
                 .map_err(|error| BootstrapError::Type(error.to_string()))?;
-        }
-    }
-
-    // Pass 2b: expand typed operators after all result/operand names exist.
-    for declaration in declarations.values().filter(|declaration| {
-        declaration
-            .bases
-            .iter()
-            .any(|base| base.simple_name() == Some("Primitive"))
-    }) {
-        let owner = types
-            .resolve_name(&declaration.name)
-            .ok_or_else(|| BootstrapError::MissingDeclaration(declaration.name.clone()))?;
-        let mut operators = Vec::new();
-        collect_operators(declaration, &HashMap::new(), &declarations, &mut operators)?;
-        for operator in operators {
-            add_operator(&mut types, owner, operator)?;
         }
     }
 
@@ -271,7 +196,6 @@ fn inherits_protocol(
 struct ResolvedOperator {
     operator: OperatorSyntax,
     parameters: Vec<TypeAnnotation>,
-    result: TypeAnnotation,
 }
 
 fn collect_operators(
@@ -321,7 +245,6 @@ fn resolve_operator(
             .iter()
             .map(|parameter| substitute_type(&parameter.annotation, substitutions))
             .collect(),
-        result: substitute_type(&operator.result, substitutions),
     }
 }
 
@@ -366,46 +289,6 @@ fn substitute_type(
     }
 }
 
-fn add_operator(
-    types: &mut TypeContextBuilder,
-    owner: TypeId,
-    operator: ResolvedOperator,
-) -> Result<(), BootstrapError> {
-    let result = resolve_source_type(types, &operator.result)?;
-    match operator.parameters.as_slice() {
-        [] => {
-            let unary = universal_unary(operator.operator)
-                .ok_or(BootstrapError::UnknownOperator(operator.operator))?;
-            types.add_unary(unary, owner, result);
-        }
-        [right] => {
-            let binary = universal_binary(operator.operator)
-                .ok_or(BootstrapError::UnknownOperator(operator.operator))?;
-            let right = resolve_source_type(types, right)?;
-            types.add_binary(OperatorSignature {
-                operator: binary,
-                left: TypePattern::Exact(owner),
-                right: TypePattern::Exact(right),
-                result: TypePattern::Exact(result),
-            });
-        }
-        _ => return Err(BootstrapError::OperatorArity(operator.operator)),
-    }
-    Ok(())
-}
-
-fn resolve_source_type(
-    types: &TypeContextBuilder,
-    annotation: &TypeAnnotation,
-) -> Result<TypeId, BootstrapError> {
-    let name = annotation
-        .simple_name()
-        .ok_or_else(|| BootstrapError::UnsupportedTypeAnnotation(annotation.clone()))?;
-    types
-        .resolve_name(name)
-        .ok_or_else(|| BootstrapError::MissingDeclaration(name.to_owned()))
-}
-
 fn universal_unary(operator: OperatorSyntax) -> Option<UnaryOperator> {
     Some(match operator {
         OperatorSyntax::Plus => UnaryOperator::Positive,
@@ -439,97 +322,13 @@ fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
     })
 }
 
-fn property<'a>(
-    declaration: &'a TraitDeclaration,
-    protocol: &'a TraitDeclaration,
-    name: &str,
-) -> Option<&'a Expression> {
-    declaration
-        .properties
-        .iter()
-        .find(|property| property.name == name)
-        .and_then(|property| property.default.as_ref())
-        .or_else(|| {
-            protocol
-                .properties
-                .iter()
-                .find(|property| property.name == name)
-                .and_then(|property| property.default.as_ref())
-        })
-}
-
-fn string_property(
-    declaration: &TraitDeclaration,
-    protocol: &TraitDeclaration,
-    name: &str,
-) -> Result<String, BootstrapError> {
-    match property(declaration, protocol, name) {
-        Some(Expression {
-            kind: ExpressionKind::Literal(AstLiteral::String(value)),
-            ..
-        }) => Ok(value.clone()),
-        _ => Err(BootstrapError::InvalidProperty {
-            declaration: declaration.name.clone(),
-            property: name.into(),
-        }),
-    }
-}
-
-fn integer_property(
-    declaration: &TraitDeclaration,
-    protocol: &TraitDeclaration,
-    name: &str,
-) -> Result<Option<u64>, BootstrapError> {
-    match property(declaration, protocol, name) {
-        Some(Expression {
-            kind: ExpressionKind::Literal(AstLiteral::Integer(value)),
-            ..
-        }) => value
-            .parse()
-            .map(Some)
-            .map_err(|_| BootstrapError::InvalidProperty {
-                declaration: declaration.name.clone(),
-                property: name.into(),
-            }),
-        None => Ok(None),
-        _ => Err(BootstrapError::InvalidProperty {
-            declaration: declaration.name.clone(),
-            property: name.into(),
-        }),
-    }
-}
-
-fn boolean_property(
-    declaration: &TraitDeclaration,
-    protocol: &TraitDeclaration,
-    name: &str,
-) -> Result<Option<bool>, BootstrapError> {
-    match property(declaration, protocol, name) {
-        Some(Expression {
-            kind: ExpressionKind::Literal(AstLiteral::Boolean(value)),
-            ..
-        }) => Ok(Some(*value)),
-        None => Ok(None),
-        _ => Err(BootstrapError::InvalidProperty {
-            declaration: declaration.name.clone(),
-            property: name.into(),
-        }),
-    }
-}
-
 #[derive(Debug)]
 pub enum BootstrapError {
     Parse(severian_diagnostics::Diagnostic),
     DuplicateDeclaration(String),
     MissingDeclaration(String),
-    InvalidProperty {
-        declaration: String,
-        property: String,
-    },
     InvalidCompiler(String),
     GenericArity(String),
-    OperatorArity(OperatorSyntax),
-    UnknownOperator(OperatorSyntax),
     UnsupportedTypeAnnotation(TypeAnnotation),
     Type(String),
 }
@@ -545,10 +344,13 @@ impl std::error::Error for BootstrapError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_universal::{CompileRoute, IntegerWidth, LiteralKind, TypeConstraint};
+    use severian_universal::{
+        CompileRoute, IntegerWidth, LiteralKind, PrimitiveCategory, PrimitiveRepresentation,
+        TypeConstraint,
+    };
 
     #[test]
-    fn loads_sources_through_the_real_parser() {
+    fn loads_compiler_owned_primitives() {
         let context = load().unwrap();
         let i32 = context.types.resolve_name("i32").unwrap();
         let definition = context.types.primitive(i32).unwrap();
@@ -562,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn character_literals_are_defined_by_the_core_primitive_contract() {
+    fn character_literals_are_defined_by_the_universal_primitive_catalog() {
         let context = load().unwrap();
         let character = context.types.resolve_name("char").unwrap();
         let definition = context.types.primitive(character).unwrap();
@@ -622,19 +424,8 @@ mod tests {
 
     #[test]
     fn primitive_ids_do_not_depend_on_source_order() {
-        let forward = build_from_sources(
-            severian_primitives::SOURCES
-                .iter()
-                .map(|source| (source.path, source.source)),
-        )
-        .unwrap();
-        let reverse = build_from_sources(
-            severian_primitives::SOURCES
-                .iter()
-                .rev()
-                .map(|source| (source.path, source.source)),
-        )
-        .unwrap();
+        let forward = load().unwrap();
+        let reverse = load().unwrap();
         let id = |context: &UniversalContext| {
             context
                 .types
@@ -646,34 +437,12 @@ mod tests {
     }
 
     #[test]
-    fn a_new_float_family_member_needs_no_semantic_branch() {
-        const F128: &str = "trait f128: Primitive + Floating[f128]\n    property category: string = \"float\"\n    property representation: string = \"ieee-float\"\n    property bits: int = 128\n";
-        let context = build_from_sources(
-            severian_primitives::SOURCES
-                .iter()
-                .map(|source| (source.path, source.source))
-                .chain(std::iter::once(("src/f128.sev", F128))),
-        )
-        .unwrap();
-        let f128 = context.types.resolve_name("f128").unwrap();
+    fn primitive_paths_are_owned_by_universal() {
+        let context = load().unwrap();
+        let i32 = context.types.resolve_name("i32").unwrap();
         assert_eq!(
-            context.types.primitive(f128).unwrap().representation,
-            PrimitiveRepresentation::Float {
-                format: severian_universal::FloatFormat::Ieee(128)
-            }
-        );
-        assert_eq!(
-            context
-                .types
-                .resolve_binary(
-                    BinaryOperator::Add,
-                    TypeConstraint::Known(f128),
-                    TypeConstraint::Literal(LiteralKind::Float),
-                    None,
-                )
-                .unwrap()
-                .result,
-            f128
+            context.types.definition(i32).unwrap().path,
+            "universal.primitive.i32"
         );
     }
 
@@ -690,13 +459,6 @@ mod tests {
                         source.source,
                     )
                 })
-                .chain(severian_primitives::SOURCES.iter().map(|source| {
-                    (
-                        severian_primitives::PACKAGE_NAME,
-                        source.path,
-                        source.source,
-                    )
-                }))
                 .chain(std::iter::once(("test.compile", "src/mod.sev", SPECIAL))),
         )
         .unwrap();

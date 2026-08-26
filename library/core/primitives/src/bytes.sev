@@ -1,7 +1,0 @@
-trait bytes: Primitive
-    property category: string = "bytes"
-    property representation: string = "byte-string"
-
-    operator ==(right: bytes) -> bool
-    operator !=(right: bytes) -> bool
-    operator +(right: bytes) -> bytes

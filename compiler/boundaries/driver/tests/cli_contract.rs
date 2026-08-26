@@ -38,17 +38,6 @@ fn core_compile_resolves_through_its_library_target() {
 }
 
 #[test]
-fn primitive_submodules_resolve_relative_to_their_module_root() {
-    let package = repository_root().join("library/core/primitives");
-    let output = sev().args(["check"]).arg(package).output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
 fn bare_source_runs_globals_before_main() {
     let root = temporary("entry");
     let source = root.join("entry.sev");

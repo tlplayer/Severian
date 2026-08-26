@@ -1,125 +1,11 @@
 use crate::{
     BinaryOperator, CompileRoute, CompilerId, DeclarationId, DefId, GenericParamId, LiteralKind,
-    LiteralValue, OperatorSignature, PrimitiveId, Substitution, TyInterner, TypeKind, TypeConstraint,
-    TypeId, TypePattern, UnaryOperator,
+    FloatFormat, IntegerWidth, LiteralValue, OperatorSignature, PrimitiveCategory,
+    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, Substitution, TyInterner, TypeKind,
+    TypeConstraint, TypeId, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PrimitiveCategory {
-    Boolean,
-    Character,
-    Integer,
-    Float,
-    Measured,
-    Text,
-    Bytes,
-    Absence,
-    Unit,
-    Arguments,
-}
-
-impl PrimitiveCategory {
-    pub fn from_contract(value: &str) -> Result<Self, TypeError> {
-        match value {
-            "boolean" => Ok(Self::Boolean),
-            "character" => Ok(Self::Character),
-            "integer" => Ok(Self::Integer),
-            "float" => Ok(Self::Float),
-            "measured" => Ok(Self::Measured),
-            "text" => Ok(Self::Text),
-            "bytes" => Ok(Self::Bytes),
-            "absence" => Ok(Self::Absence),
-            "unit" => Ok(Self::Unit),
-            "arguments" => Ok(Self::Arguments),
-            value => Err(TypeError::UnknownCategory(value.to_owned())),
-        }
-    }
-
-    pub const fn literal_kind(self) -> Option<LiteralKind> {
-        match self {
-            Self::Boolean => Some(LiteralKind::Boolean),
-            Self::Character => Some(LiteralKind::Character),
-            Self::Integer => Some(LiteralKind::Integer),
-            Self::Float => Some(LiteralKind::Float),
-            Self::Measured | Self::Arguments => None,
-            Self::Text => Some(LiteralKind::String),
-            Self::Bytes => Some(LiteralKind::Bytes),
-            Self::Absence => Some(LiteralKind::None),
-            Self::Unit => Some(LiteralKind::Unit),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntegerWidth {
-    Fixed(u16),
-    Machine,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FloatFormat {
-    Ieee(u16),
-    BrainFloat16,
-    Machine,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrimitiveRepresentation {
-    Integer { bits: IntegerWidth, signed: bool },
-    Float { format: FloatFormat },
-    PointerInteger { signed: bool },
-    Boolean,
-    Character,
-    String,
-    Bytes,
-    None,
-    Unit,
-    Arguments,
-}
-
-impl PrimitiveRepresentation {
-    pub fn from_contract(value: &str, bits: Option<u16>, signed: bool) -> Result<Self, TypeError> {
-        match value {
-            "fixed-integer" => Ok(Self::Integer {
-                bits: IntegerWidth::Fixed(bits.ok_or(TypeError::MissingBitWidth)?),
-                signed,
-            }),
-            "machine-signed" => Ok(Self::Integer {
-                bits: IntegerWidth::Machine,
-                signed: true,
-            }),
-            "pointer-integer" => Ok(Self::PointerInteger { signed }),
-            "machine-float" => Ok(Self::Float {
-                format: FloatFormat::Machine,
-            }),
-            "ieee-float" => Ok(Self::Float {
-                format: FloatFormat::Ieee(bits.ok_or(TypeError::MissingBitWidth)?),
-            }),
-            "brain-float" if bits == Some(16) => Ok(Self::Float {
-                format: FloatFormat::BrainFloat16,
-            }),
-            "i1" => Ok(Self::Boolean),
-            "unicode-scalar" => Ok(Self::Character),
-            "string" => Ok(Self::String),
-            "byte-string" => Ok(Self::Bytes),
-            "none" => Ok(Self::None),
-            "unit" => Ok(Self::Unit),
-            "arguments" => Ok(Self::Arguments),
-            value => Err(TypeError::UnknownRepresentation(value.to_owned())),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrimitiveDefinition {
-    pub id: PrimitiveId,
-    pub type_id: TypeId,
-    pub category: PrimitiveCategory,
-    pub representation: PrimitiveRepresentation,
-    pub default_literal: bool,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeDefinitionKind {
@@ -924,12 +810,10 @@ pub enum TypeError {
         actual: usize,
     },
     DuplicateName(String),
+    UnknownName(String),
     IdentityCollision(String, String),
     UnknownTypeId(TypeId),
     AlreadyDefined(String),
-    UnknownCategory(String),
-    UnknownRepresentation(String),
-    MissingBitWidth,
     InvalidDefaultLiteralCategory,
     DuplicateDefault(LiteralKind),
     NoLiteralDefault(LiteralKind),
@@ -1037,16 +921,6 @@ mod tests {
         assert_eq!(resolved.left, float);
         assert_eq!(resolved.right, float);
         assert_eq!(resolved.result, float);
-    }
-
-    #[test]
-    fn pointer_integer_representation_has_no_fixed_width() {
-        let representation =
-            PrimitiveRepresentation::from_contract("pointer-integer", None, false).unwrap();
-        assert_eq!(
-            representation,
-            PrimitiveRepresentation::PointerInteger { signed: false }
-        );
     }
 
     #[test]
