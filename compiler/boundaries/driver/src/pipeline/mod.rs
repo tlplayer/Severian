@@ -719,7 +719,8 @@ impl Compiler {
         source: &Path,
         output: &Path,
     ) -> Result<Vec<String>, CompileError> {
-        let Some(providers) = NativeProviderSources::discover(source)? else {
+        let Some(providers) = NativeProviderSources::discover(source, self.packages.as_ref())?
+        else {
             return Ok(Vec::new());
         };
         let mut arguments = providers
@@ -727,6 +728,18 @@ impl Compiler {
             .iter()
             .map(|source| source.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        arguments.extend(
+            providers
+                .include
+                .iter()
+                .map(|path| format!("-I{}", path.display())),
+        );
+        arguments.extend(
+            providers
+                .libraries
+                .iter()
+                .map(|library| format!("-l{library}")),
+        );
 
         for (index, source) in providers.rust.iter().enumerate() {
             let archive = output.with_extension(format!("ffi-rust-{index}.a"));
@@ -847,12 +860,17 @@ impl Compiler {
             .nth(3)
             .expect("the driver crate is nested below the repository root");
         let standard = [
+            ("abi", repository.join("library/interop/abi")),
             ("cli", repository.join("library/system/cli")),
+            ("csv", repository.join("library/data/csv")),
+            ("data_format", repository.join("library/data/format")),
             ("device", repository.join("library/system/device")),
             ("driver", repository.join("library/system/driver")),
             ("environment", repository.join("library/system/environment")),
+            ("ffi", repository.join("library/interop/ffi")),
             ("file", repository.join("library/system/file")),
             ("io", repository.join("library/system/io")),
+            ("json", repository.join("library/data/json")),
             ("math", repository.join("library/core/math")),
             ("os", repository.join("library/system/os")),
             ("parallel", repository.join("library/compute/parallel")),
@@ -860,6 +878,7 @@ impl Compiler {
             ("platform", repository.join("library/system/platform")),
             ("process", repository.join("library/system/process")),
             ("tensor", repository.join("library/tensor")),
+            ("yaml", repository.join("library/data/yaml")),
         ];
         let mut next = packages
             .packages
@@ -1063,10 +1082,15 @@ struct NativeProviderSources {
     c: Vec<PathBuf>,
     rust: Vec<PathBuf>,
     python: Vec<PathBuf>,
+    include: Vec<PathBuf>,
+    libraries: Vec<String>,
 }
 
 impl NativeProviderSources {
-    fn discover(source: &Path) -> Result<Option<Self>, CompileError> {
+    fn discover(
+        source: &Path,
+        packages: Option<&severian_modules::PackageGraph>,
+    ) -> Result<Option<Self>, CompileError> {
         let Some(root) = source.parent().and_then(|directory| {
             directory
                 .ancestors()
@@ -1074,7 +1098,41 @@ impl NativeProviderSources {
         }) else {
             return Ok(None);
         };
+        let mut roots = BTreeSet::from([root.to_owned()]);
+        if let Some(packages) = packages {
+            roots.extend(
+                packages
+                    .packages
+                    .values()
+                    .map(|package| package.root.clone()),
+            );
+        }
+        let mut providers = Self::default();
+        for root in roots {
+            providers.discover_manifest(&root)?;
+        }
+        providers.c.sort();
+        providers.c.dedup();
+        providers.rust.sort();
+        providers.rust.dedup();
+        providers.python.sort();
+        providers.python.dedup();
+        providers.include.sort();
+        providers.include.dedup();
+        providers.libraries.sort();
+        providers.libraries.dedup();
+        if providers.c.is_empty() && providers.rust.is_empty() && providers.python.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(providers))
+        }
+    }
+
+    fn discover_manifest(&mut self, root: &Path) -> Result<(), CompileError> {
         let manifest_path = root.join("package.toml");
+        if !manifest_path.is_file() {
+            return Ok(());
+        }
         let manifest = std::fs::read_to_string(&manifest_path).map_err(|error| {
             CompileError::NativeLink(format!(
                 "could not read FFI manifest {}: {error}",
@@ -1087,11 +1145,10 @@ impl NativeProviderSources {
                 manifest_path.display()
             ))
         })?;
-        let mut providers = Self::default();
         for (language, output) in [
-            ("c", &mut providers.c),
-            ("rust", &mut providers.rust),
-            ("python", &mut providers.python),
+            ("c", &mut self.c),
+            ("rust", &mut self.rust),
+            ("python", &mut self.python),
         ] {
             let Some(sources) = document
                 .get("xxi")
@@ -1117,12 +1174,86 @@ impl NativeProviderSources {
                 output.push(path);
             }
         }
-        if providers.c.is_empty() && providers.rust.is_empty() && providers.python.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(providers))
+
+        if let Some(entries) = document.get("ffi").and_then(toml::Value::as_array) {
+            for entry in entries {
+                let Some(table) = entry.as_table() else {
+                    return Err(CompileError::NativeLink(format!(
+                        "[[ffi]] entries in {} must be tables",
+                        manifest_path.display()
+                    )));
+                };
+                let abi = table
+                    .get("abi")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or("c-v1");
+                if abi != "c-v1" {
+                    continue;
+                }
+                append_paths(root, &manifest_path, table.get("sources"), &mut self.c)?;
+                append_paths(
+                    root,
+                    &manifest_path,
+                    table.get("include"),
+                    &mut self.include,
+                )?;
+                if let Some(libraries) = table.get("libraries") {
+                    for library in libraries.as_array().ok_or_else(|| {
+                        CompileError::NativeLink(format!(
+                            "ffi libraries in {} must be an array",
+                            manifest_path.display()
+                        ))
+                    })? {
+                        self.libraries.push(
+                            library
+                                .as_str()
+                                .ok_or_else(|| {
+                                    CompileError::NativeLink(format!(
+                                        "ffi libraries in {} must be strings",
+                                        manifest_path.display()
+                                    ))
+                                })?
+                                .to_owned(),
+                        );
+                    }
+                }
+            }
         }
+        Ok(())
     }
+}
+
+fn append_paths(
+    root: &Path,
+    manifest: &Path,
+    values: Option<&toml::Value>,
+    output: &mut Vec<PathBuf>,
+) -> Result<(), CompileError> {
+    let Some(values) = values else {
+        return Ok(());
+    };
+    for value in values.as_array().ok_or_else(|| {
+        CompileError::NativeLink(format!(
+            "ffi paths in {} must be an array",
+            manifest.display()
+        ))
+    })? {
+        let relative = value.as_str().ok_or_else(|| {
+            CompileError::NativeLink(format!(
+                "ffi paths in {} must be strings",
+                manifest.display()
+            ))
+        })?;
+        let path = root.join(relative);
+        if !path.exists() {
+            return Err(CompileError::NativeLink(format!(
+                "FFI path {} does not exist",
+                path.display()
+            )));
+        }
+        output.push(path);
+    }
+    Ok(())
 }
 
 fn render_python_bridge(
@@ -1636,12 +1767,14 @@ mod tests {
             "environment",
             "file",
             "io",
+            "json",
             "math",
             "os",
             "parallel",
             "path",
             "process",
             "tensor",
+            "yaml",
         ] {
             assert!(
                 dependencies.contains_key(package),
@@ -1707,7 +1840,7 @@ mod tests {
         )
         .unwrap();
 
-        let providers = NativeProviderSources::discover(&source)
+        let providers = NativeProviderSources::discover(&source, None)
             .unwrap()
             .expect("native provider declarations");
         assert_eq!(providers.c, [root.join("native.c")]);

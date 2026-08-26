@@ -1,0 +1,23 @@
+import "lib.sev" as database
+import environment
+import network
+import process
+
+def serve(connection: network.TcpConnection, data_root: string):
+    request = network.read_text(connection, 4096)
+    response = database.execute(request, data_root)
+    _written = network.write_text(connection, response)
+    _closed = network.close(connection)
+
+def run(listener: network.TcpListener, data_root: string, port: int):
+    print("container database listening on port " + string(port))
+    while true:
+        connection = network.accept(listener)
+        serve(connection, data_root)
+
+def main():
+    arguments = process.arguments()
+    data_root = arguments[1] if size(arguments) > 1 else "data"
+    port = 18080 if environment.get("SEVERIAN_CONTAINER") == "oci" else 8080
+    listener = network.listen_text("0.0.0.0", port)
+    run(listener, data_root, port)

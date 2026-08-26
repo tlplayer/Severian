@@ -1,4 +1,4 @@
-#include "network_abi.h"
+#include "../include/network_abi.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -285,6 +285,11 @@ void sev_abi_v1_network_bytes_release(sev_handle_v1 handle) {
     free(bytes);
 }
 
+sev_string_view_v1 sev_abi_v1_network_decode_utf8(sev_bytes_view_v1 bytes) {
+    sev_string_view_v1 text = { .data = bytes.data, .length = bytes.length };
+    return text;
+}
+
 static int32_t sev_socket_timeout(sev_handle_v1 connection, int option, uint64_t milliseconds, sev_error_v1 *error) {
     sev_network_socket *socket = NULL;
     if (!sev_socket_kind(connection, SEV_NETWORK_TCP, &socket)) return sev_fail(error, EBADF, "network connection is closed");
@@ -531,4 +536,96 @@ void sev_abi_v1_network_text_release(sev_handle_v1 handle) {
     sev_network_text *text = handle.value;
     if (!text || text->kind != SEV_NETWORK_TEXT) return;
     free(text->value); free(text);
+}
+
+static uint8_t *sev_simple_read_buffer;
+static char *sev_simple_text_buffer;
+
+intptr_t sev_abi_v1_network_connect_simple(const char *host, int64_t port) {
+    sev_handle_v1 connection = {0};
+    sev_error_v1 error = {0};
+    return port >= 0 && port <= UINT16_MAX && sev_abi_v1_network_connect(sev_view(host), (uint16_t)port, &connection, &error) == 0
+        ? (intptr_t)connection.value
+        : 0;
+}
+
+intptr_t sev_abi_v1_network_listen_simple(const char *host, int64_t port) {
+    sev_handle_v1 listener = {0};
+    sev_error_v1 error = {0};
+    return port >= 0 && port <= UINT16_MAX && sev_abi_v1_network_listen(sev_view(host), (uint16_t)port, &listener, &error) == 0
+        ? (intptr_t)listener.value
+        : 0;
+}
+
+intptr_t sev_abi_v1_network_accept_simple(intptr_t listener) {
+    sev_handle_v1 output = {0};
+    sev_handle_v1 input = { .value = (void *)listener };
+    sev_error_v1 error = {0};
+    return sev_abi_v1_network_accept(input, &output, &error) == 0
+        ? (intptr_t)output.value
+        : 0;
+}
+
+const char *sev_abi_v1_network_read_text_simple(intptr_t connection, int64_t count) {
+    free(sev_simple_read_buffer);
+    sev_simple_read_buffer = NULL;
+    sev_handle_v1 bytes_handle = {0};
+    sev_handle_v1 input = { .value = (void *)connection };
+    sev_error_v1 error = {0};
+    if (count < 0 || sev_abi_v1_network_read(input, (size_t)count, &bytes_handle, &error) != 0) {
+        return "";
+    }
+    sev_network_bytes *bytes = bytes_handle.value;
+    if (!bytes || bytes->kind != SEV_NETWORK_BYTES) return "";
+    sev_simple_read_buffer = realloc(bytes->data, bytes->length + 1);
+    if (!sev_simple_read_buffer) {
+        free(bytes->data);
+        free(bytes);
+        return "";
+    }
+    sev_simple_read_buffer[bytes->length] = '\0';
+    free(bytes);
+    return (const char *)sev_simple_read_buffer;
+}
+
+int64_t sev_abi_v1_network_write_text_simple(intptr_t connection, const char *data) {
+    sev_handle_v1 input = { .value = (void *)connection };
+    sev_bytes_view_v1 bytes = {
+        .data = (const uint8_t *)data,
+        .length = data ? strlen(data) : 0,
+    };
+    sev_error_v1 error = {0};
+    size_t written = 0;
+    return sev_abi_v1_network_write(input, bytes, &written, &error) == 0
+        ? (int64_t)written
+        : -1;
+}
+
+int64_t sev_abi_v1_network_shutdown_simple(intptr_t connection, int64_t direction) {
+    sev_handle_v1 input = { .value = (void *)connection };
+    sev_error_v1 error = {0};
+    return sev_abi_v1_network_shutdown(input, (int32_t)direction, &error);
+}
+
+int64_t sev_abi_v1_network_close_simple(intptr_t handle) {
+    sev_handle_v1 input = { .value = (void *)handle };
+    sev_network_socket *socket = input.value;
+    sev_error_v1 error = {0};
+    if (!socket) return -1;
+    return sev_close_socket(input, socket->kind, &error);
+}
+
+const char *sev_abi_v1_network_loopback_echo_simple(const char *message) {
+    free(sev_simple_text_buffer);
+    sev_simple_text_buffer = NULL;
+    sev_handle_v1 output = {0};
+    sev_error_v1 error = {0};
+    if (sev_abi_v1_network_loopback_echo(sev_view(message), &output, &error) != 0) {
+        return "";
+    }
+    sev_network_text *text = output.value;
+    if (!text || text->kind != SEV_NETWORK_TEXT) return "";
+    sev_simple_text_buffer = text->value;
+    free(text);
+    return sev_simple_text_buffer;
 }

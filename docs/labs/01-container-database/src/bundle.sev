@@ -1,0 +1,21 @@
+import container
+import oci
+import process
+
+def main():
+    arguments = process.arguments()
+    if size(arguments) < 4:
+        print("usage: container-database-bundle SERVER BUNDLE DATA")
+        return
+    bundle = oci.prepare_bundle(
+        "severian-container-database",
+        arguments[2],
+        arguments[1],
+        arguments[3],
+        [oci.PortForward(8080, 18080)],
+    )
+    status = container.run(bundle)
+    if status == 0:
+        print("container started; connect to 127.0.0.1:8080")
+    else:
+        print("OCI runtime failed with status " + string(status))

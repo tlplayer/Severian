@@ -57,7 +57,19 @@ pub fn analyze_with_context(
     types: &TypeContext,
     context: AnalysisContext<'_>,
 ) -> Result<Program, Diagnostic> {
-    analyze_with_package_functions(ast, types, context, &[], &[], &[], &[], &[], &[], None)
+    analyze_with_package_functions(
+        ast,
+        types,
+        context,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -110,15 +122,17 @@ pub(crate) fn analyze_with_package_functions(
     package_lists: &[PackageList],
     package_constants: &[PackageConstant],
     source_module: Option<severian_modules::ModuleId>,
+    registry_ast: Option<&severian_ast::Module>,
 ) -> Result<Program, Diagnostic> {
     let normalized_ast = normalize_extensions(ast)?;
     let ast = &normalized_ast;
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
-    let namespace_methods = collect_trait_namespace_methods(ast)?;
-    let namespace_operators = collect_trait_namespace_operators(ast)?;
+    let registry_ast = registry_ast.unwrap_or(ast);
+    let namespace_methods = collect_trait_namespace_methods(registry_ast)?;
+    let namespace_operators = collect_trait_namespace_operators(registry_ast)?;
     let namespace_extension_operators = collect_extension_namespace_operators(ast)?;
-    let namespace_hooks = collect_trait_namespace_hooks(ast)?;
+    let namespace_hooks = collect_trait_namespace_hooks(registry_ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -239,7 +253,21 @@ pub(crate) fn analyze_with_package_functions(
             .chain(std::iter::once(&function.result_union))
             .flatten()
         {
-            analyzer.instantiate_union_type(members);
+            let success = members
+                .iter()
+                .copied()
+                .filter(|member| !analyzer.is_error_type(*member))
+                .collect::<Vec<_>>();
+            let errors = members
+                .iter()
+                .copied()
+                .filter(|member| analyzer.is_error_type(*member))
+                .collect::<Vec<_>>();
+            if let ([success], [error]) = (success.as_slice(), errors.as_slice()) {
+                analyzer.instantiate_fallible_type(*success, *error);
+            } else {
+                analyzer.instantiate_union_type(members);
+            }
         }
         analyzer
             .functions
@@ -1549,6 +1577,12 @@ impl Analyzer<'_> {
             };
             self.class_instances_by_type
                 .insert(package_class.ty, placeholder.clone());
+            if source_module == Some(package_class.module) {
+                self.class_instances.insert(
+                    (package_class.declaration.name.clone(), Vec::new()),
+                    placeholder.clone(),
+                );
+            }
             if let Some(source_module) = source_module {
                 for lookup in package_class
                     .lookups
@@ -1629,6 +1663,12 @@ impl Analyzer<'_> {
             self.class_instances = resolved_visible_instances;
             self.class_instances_by_type
                 .insert(package_class.ty, instance.clone());
+            if source_module == Some(package_class.module) {
+                self.class_instances.insert(
+                    (package_class.declaration.name.clone(), Vec::new()),
+                    instance.clone(),
+                );
+            }
             if let Some(source_module) = source_module {
                 for lookup in package_class
                     .lookups
@@ -1720,6 +1760,18 @@ impl Analyzer<'_> {
                 "fallible unions currently require one success type and one error type",
                 Some(annotation.span),
             ));
+        }
+        if let Some(("Result", [success, error])) = annotation.named_parts() {
+            let success = self.resolve_source_type(success)?;
+            let error = self.resolve_source_type(error)?;
+            if !self.is_error_type(error) {
+                return Err(Diagnostic::new(
+                    "E000204",
+                    "the second Result type must be an error type",
+                    Some(annotation.span),
+                ));
+            }
+            return Ok(self.instantiate_fallible_type(success, error));
         }
         if let Some(("list", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
@@ -2272,15 +2324,14 @@ impl Analyzer<'_> {
                 Ok(Statement::Sequence(lowered?))
             }
             AstStatement::Placement { policy, body, span } => {
-                let placement = severian_universal::ExecutionPlacement::parse(policy).ok_or_else(
-                    || {
+                let placement =
+                    severian_universal::ExecutionPlacement::parse(policy).ok_or_else(|| {
                         Diagnostic::new(
                             "E000211",
                             format!("unsupported execution placement `{policy}`"),
                             Some(*span),
                         )
-                    },
-                )?;
+                    })?;
                 let previous = self.execution_placement.replace(placement);
                 let lowered = self.block(body, bindings, result_type);
                 self.execution_placement = previous;
@@ -3191,11 +3242,29 @@ impl Analyzer<'_> {
                         }
                     }
                     None if result_type != unit => {
-                        return Err(Diagnostic::new(
-                            "E000210",
-                            "this function must return its declared result",
-                            Some(*span),
-                        ))
+                        if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                            if fallible.success == unit {
+                                let value = self.default_expression(unit, *span)?;
+                                Some(self.fallible_success_expression(
+                                    result_type,
+                                    fallible,
+                                    value,
+                                    *span,
+                                )?)
+                            } else {
+                                return Err(Diagnostic::new(
+                                    "E000210",
+                                    "this function must return its declared result",
+                                    Some(*span),
+                                ));
+                            }
+                        } else {
+                            return Err(Diagnostic::new(
+                                "E000210",
+                                "this function must return its declared result",
+                                Some(*span),
+                            ));
+                        }
                     }
                     None => None,
                 };
@@ -7978,17 +8047,19 @@ impl Analyzer<'_> {
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
                 let fixed_width_float = |constraint| match constraint {
-                    TypeConstraint::Known(ty) => self.types.primitive(ty).is_some_and(|primitive| {
-                        matches!(
-                            primitive.representation,
-                            severian_universal::PrimitiveRepresentation::Float {
-                                format: severian_universal::FloatFormat::Ieee(_)
-                                    | severian_universal::FloatFormat::BrainFloat16
-                                    | severian_universal::FloatFormat::Float8E4M3Fn
-                                    | severian_universal::FloatFormat::Float8E5M2
-                            }
-                        )
-                    }),
+                    TypeConstraint::Known(ty) => {
+                        self.types.primitive(ty).is_some_and(|primitive| {
+                            matches!(
+                                primitive.representation,
+                                severian_universal::PrimitiveRepresentation::Float {
+                                    format: severian_universal::FloatFormat::Ieee(_)
+                                        | severian_universal::FloatFormat::BrainFloat16
+                                        | severian_universal::FloatFormat::Float8E4M3Fn
+                                        | severian_universal::FloatFormat::Float8E5M2
+                                }
+                            )
+                        })
+                    }
                     TypeConstraint::Literal(_) => false,
                 };
                 let known_integer = |constraint| match constraint {
@@ -8294,7 +8365,7 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let instance = if type_arguments.is_empty() {
+        let mut instance = if type_arguments.is_empty() {
             self.class_instances
                 .get(&(class.to_owned(), Vec::new()))
                 .cloned()
@@ -8303,11 +8374,23 @@ impl Analyzer<'_> {
         } else {
             self.instantiate_class(class, type_arguments, span)?
         };
-        if expected.is_some_and(|expected| expected != instance.ty) {
-            return Err(semantic_error(
-                "constructed class does not satisfy the expected type".into(),
-                span,
-            ));
+        if let Some(expected) = expected.filter(|expected| *expected != instance.ty) {
+            if let Some(expected_instance) = self
+                .class_instances_by_type
+                .get(&expected)
+                .filter(|expected_instance| expected_instance.name == instance.name)
+                .cloned()
+            {
+                instance = expected_instance;
+            } else {
+                return Err(semantic_error(
+                    format!(
+                        "constructed class `{}` ({:?}) does not satisfy expected type {:?}",
+                        instance.name, instance.ty, expected
+                    ),
+                    span,
+                ));
+            }
         }
         let constructor = instance
             .constructors
@@ -9962,9 +10045,17 @@ impl Analyzer<'_> {
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
         let callable = callable_path(callee);
-        if callable
-            .as_ref()
-            .is_some_and(|path| self.namespace_methods.contains_key(path))
+        let builtin_file_read = callable.as_deref() == Some("file.read")
+            && self.functions.contains_key("file.read")
+            && (arguments.len() == 2
+                || arguments.first().is_some_and(|argument| {
+                    self.constant_string_value(&argument.value)
+                        .is_some_and(|path| path.ends_with(".json"))
+                }));
+        if !builtin_file_read
+            && callable
+                .as_ref()
+                .is_some_and(|path| self.namespace_methods.contains_key(path))
         {
             return Ok(None);
         }
@@ -10071,13 +10162,7 @@ impl Analyzer<'_> {
                         span,
                     }));
                 }
-                return Ok(Some(self.runtime_call(
-                    "__sev_file_read_text",
-                    &[string],
-                    string,
-                    vec![path],
-                    span,
-                )));
+                return Ok(None);
             }
             if let [handle, count] = arguments {
                 let integer = self
@@ -10361,10 +10446,45 @@ impl Analyzer<'_> {
             AstExpressionKind::Literal(AstLiteral::String(value)) => Some(value.clone()),
             AstExpressionKind::Name(name) => {
                 let (binding, _, _) = self.names.get(name)?;
-                match &self.binding_values.get(binding)?.kind {
-                    ExpressionKind::Literal(LiteralValue::String(value)) => Some(value.clone()),
-                    _ => None,
-                }
+                self.constant_bound_string(*binding, &mut BTreeSet::new())
+            }
+            _ => None,
+        }
+    }
+
+    fn constant_bound_string(
+        &self,
+        binding: BindingId,
+        visiting: &mut BTreeSet<BindingId>,
+    ) -> Option<String> {
+        if !visiting.insert(binding) {
+            return None;
+        }
+        let value = self.binding_values.get(&binding)?;
+        match &value.kind {
+            ExpressionKind::Literal(LiteralValue::String(value)) => Some(value.clone()),
+            ExpressionKind::Binding(binding) => self.constant_bound_string(*binding, visiting),
+            ExpressionKind::Borrow { operand, .. }
+            | ExpressionKind::Move(operand)
+            | ExpressionKind::Convert { operand, .. } => {
+                self.constant_expression_string(operand, visiting)
+            }
+            _ => None,
+        }
+    }
+
+    fn constant_expression_string(
+        &self,
+        expression: &Expression,
+        visiting: &mut BTreeSet<BindingId>,
+    ) -> Option<String> {
+        match &expression.kind {
+            ExpressionKind::Literal(LiteralValue::String(value)) => Some(value.clone()),
+            ExpressionKind::Binding(binding) => self.constant_bound_string(*binding, visiting),
+            ExpressionKind::Borrow { operand, .. }
+            | ExpressionKind::Move(operand)
+            | ExpressionKind::Convert { operand, .. } => {
+                self.constant_expression_string(operand, visiting)
             }
             _ => None,
         }
@@ -12417,10 +12537,23 @@ impl Analyzer<'_> {
         parameter_types: &[TypeId],
         result_type: TypeId,
     ) -> DefId {
-        if let Some(definition) = self.runtime_definitions.get(symbol) {
+        let signature = if symbol.contains("_aggregate") {
+            format!(
+                "{symbol}({})->{}",
+                parameter_types
+                    .iter()
+                    .map(|ty| ty.0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                result_type.0
+            )
+        } else {
+            symbol.to_owned()
+        };
+        if let Some(definition) = self.runtime_definitions.get(&signature) {
             return *definition;
         }
-        let definition = synthetic_runtime_definition(symbol);
+        let definition = synthetic_runtime_definition(&signature);
         let id = FunctionId(definition.declaration.0);
         let parameters = parameter_types
             .iter()
@@ -12449,7 +12582,7 @@ impl Analyzer<'_> {
             }),
             body: None,
         });
-        self.runtime_definitions.insert(symbol.into(), definition);
+        self.runtime_definitions.insert(signature, definition);
         definition
     }
 
@@ -12463,7 +12596,7 @@ impl Analyzer<'_> {
         let Some(path) = callable_path(callee) else {
             return Ok(None);
         };
-        if self.functions.contains_key(&path) {
+        if path != "file.read" && self.functions.contains_key(&path) {
             return Ok(None);
         }
         let AstExpressionKind::Member { object, .. } = &callee.kind else {
@@ -13807,7 +13940,17 @@ impl Analyzer<'_> {
                     self.value_substitutions
                         .insert(parameter.name.clone(), value);
                 }
-                self.expression(return_value, Some(result_type))
+                if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                    let value = self.expression(return_value, Some(fallible.success))?;
+                    self.fallible_success_expression(
+                        result_type,
+                        fallible,
+                        value,
+                        return_value.span,
+                    )
+                } else {
+                    self.expression(return_value, Some(result_type))
+                }
             })();
             self.value_substitutions = previous;
             return resolved.map(Some);

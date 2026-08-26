@@ -1,0 +1,6 @@
+---
+event: package-published
+package: container_database
+---
+event: container-started
+port: 8080

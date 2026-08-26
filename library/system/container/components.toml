@@ -1,0 +1,65 @@
+# OCI runtimes are replaceable components. The container package defaults to
+# crun; installers consume this manifest rather than hard-coding distributions.
+
+[[component]]
+id = "runtime.oci-crun"
+kind = "runtime"
+provides = ["runtime.oci"]
+detect-any = ["/usr/bin/crun", "/usr/local/bin/crun"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "crun"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "crun"]
+
+[[component.install]]
+os = ["arch", "manjaro"]
+program = "pacman"
+arguments = ["-S", "--needed", "--noconfirm", "crun"]
+
+[[component]]
+id = "runtime.oci-runc"
+kind = "runtime"
+provides = ["runtime.oci"]
+detect-any = ["/usr/bin/runc", "/usr/local/bin/runc"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "runc"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "runc"]
+
+[[component.install]]
+os = ["arch", "manjaro"]
+program = "pacman"
+arguments = ["-S", "--needed", "--noconfirm", "runc"]
+
+[[component]]
+id = "runtime.oci-port-forward"
+kind = "runtime"
+provides = ["runtime.oci.network"]
+detect-all = ["/usr/bin/socat"]
+
+[[component.install]]
+os = ["ubuntu", "debian"]
+program = "apt-get"
+arguments = ["install", "-y", "socat"]
+
+[[component.install]]
+os = ["fedora", "rhel"]
+program = "dnf"
+arguments = ["install", "-y", "socat"]
+
+[[component.install]]
+os = ["arch", "manjaro"]
+program = "pacman"
+arguments = ["-S", "--needed", "--noconfirm", "socat"]

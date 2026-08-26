@@ -1,0 +1,38 @@
+import data_format
+import file
+
+class YamlStreamFile: File
+    def read(path: string) -> string with { path.ends_with(".ymls") }:
+        return file.raw(path)
+
+class YamlFile: File
+    def read(path: string) -> string with { path.ends_with(".yml") or path.ends_with(".yaml") }:
+        return file.raw(path)
+
+class Document: data_format.Data
+    source: string
+    stream: bool
+
+    def text() -> string:
+        return source
+
+def decode(source: string) -> Document:
+    return Document(source, false)
+
+def decode_stream(source: string) -> Document:
+    return Document(source, true)
+
+def encode(document: Document) -> string:
+    return document.source
+
+def read(path: string) -> string:
+    return decode(file.raw(path)).text()
+
+def read_stream(path: string) -> string:
+    return decode_stream(file.raw(path)).text()
+
+test "YAML adapters retain ordinary and stream documents":
+    ordinary = decode("service: severian")
+    stream = decode_stream("---\nservice: one\n---\nservice: two")
+    assert(ordinary.text() == "service: severian")
+    assert(stream.stream)

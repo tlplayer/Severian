@@ -1,47 +1,86 @@
-import ffi
+class Handle:
+    opaque: isize
 
-unsafe:
-    extern("sev_abi_v1_network_connect") def connect_raw(host: ffi.StringView, port: u16, connection: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_listen") def listen_raw(host: ffi.StringView, port: u16, listener: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_accept") def accept(listener: ffi.Handle, connection: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_read") def read(connection: ffi.Handle, count: usize, bytes: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_write") def write(connection: ffi.Handle, data: ffi.BytesView, written: ffi.OutUsize, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_close") def close(connection: ffi.Handle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_descriptor") def descriptor(connection: ffi.Handle) -> i32
-    extern("sev_abi_v1_network_listener_close") def listener_close(listener: ffi.Handle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_local_address") def local_address(connection: ffi.Handle, address: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_remote_address") def remote_address(connection: ffi.Handle, address: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_listener_address") def listener_address(listener: ffi.Handle, address: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_set_read_timeout") def set_read_timeout(connection: ffi.Handle, milliseconds: u64, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_set_write_timeout") def set_write_timeout(connection: ffi.Handle, milliseconds: u64, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_set_keep_alive") def set_keep_alive(connection: ffi.Handle, enabled: bool, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_shutdown") def shutdown(connection: ffi.Handle, direction: i32, error: ffi.OutError) -> i32
+class StringView:
+    data: string
 
-    extern("sev_abi_v1_network_address_host") def address_host(address: ffi.Handle) -> string
-    extern("sev_abi_v1_network_address_port") def address_port(address: ffi.Handle) -> u16
-    extern("sev_abi_v1_network_address_family") def address_family(address: ffi.Handle) -> i32
-    extern("sev_abi_v1_network_address_release") def address_release(address: ffi.Handle)
+class BytesView:
+    data: list[int]
 
-    extern("sev_abi_v1_network_bytes_length") def bytes_length(bytes: ffi.Handle) -> usize
-    extern("sev_abi_v1_network_bytes_at") def bytes_at(bytes: ffi.Handle, index: usize) -> u8
-    extern("sev_abi_v1_network_bytes_release") def bytes_release(bytes: ffi.Handle)
+class OutHandle:
+    value: isize
 
-    extern("sev_abi_v1_network_resolve") def resolve_raw(host: ffi.StringView, addresses: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_address_list_length") def address_list_length(addresses: ffi.Handle) -> usize
-    extern("sev_abi_v1_network_address_list_at") def address_list_at(addresses: ffi.Handle, index: usize) -> string
-    extern("sev_abi_v1_network_address_list_release") def address_list_release(addresses: ffi.Handle)
-    extern("sev_abi_v1_network_parse_ip") def parse_ip_raw(value: ffi.StringView, address: ffi.OutHandle, error: ffi.OutError) -> i32
+class OutError:
+    code: i32
+    message: string
 
-    extern("sev_abi_v1_network_udp_bind") def udp_bind_raw(host: ffi.StringView, port: u16, socket: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_udp_send_to") def udp_send_to(socket: ffi.Handle, data: ffi.BytesView, host: ffi.StringView, port: u16, sent: ffi.OutUsize, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_udp_receive_from") def udp_receive_from(socket: ffi.Handle, count: usize, packet: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_udp_close") def udp_close(socket: ffi.Handle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_packet_length") def packet_length(packet: ffi.Handle) -> usize
-    extern("sev_abi_v1_network_packet_at") def packet_at(packet: ffi.Handle, index: usize) -> u8
-    extern("sev_abi_v1_network_packet_host") def packet_host(packet: ffi.Handle) -> string
-    extern("sev_abi_v1_network_packet_port") def packet_port(packet: ffi.Handle) -> u16
-    extern("sev_abi_v1_network_packet_release") def packet_release(packet: ffi.Handle)
+class OutUsize:
+    value: usize
+def connect_raw(host: StringView, port: u16, connection: OutHandle, error: OutError) -> i32
+def listen_raw(host: StringView, port: u16, listener: OutHandle, error: OutError) -> i32
+def accept(listener: Handle, connection: OutHandle, error: OutError) -> i32
+def read(connection: Handle, count: usize, bytes: OutHandle, error: OutError) -> i32
+def write(connection: Handle, data: BytesView, written: OutUsize, error: OutError) -> i32
+def close(connection: Handle, error: OutError) -> i32
+def descriptor(connection: Handle) -> i32
+def listener_close(listener: Handle, error: OutError) -> i32
+def local_address(connection: Handle, address: OutHandle, error: OutError) -> i32
+def remote_address(connection: Handle, address: OutHandle, error: OutError) -> i32
+def listener_address(listener: Handle, address: OutHandle, error: OutError) -> i32
+def set_read_timeout(connection: Handle, milliseconds: u64, error: OutError) -> i32
+def set_write_timeout(connection: Handle, milliseconds: u64, error: OutError) -> i32
+def set_keep_alive(connection: Handle, enabled: bool, error: OutError) -> i32
+def shutdown(connection: Handle, direction: i32, error: OutError) -> i32
 
-    extern("sev_abi_v1_network_loopback_echo") def loopback_echo_raw(message: ffi.StringView, text: ffi.OutHandle, error: ffi.OutError) -> i32
-    extern("sev_abi_v1_network_text_value") def text_value(text: ffi.Handle) -> string
-    extern("sev_abi_v1_network_text_release") def text_release(text: ffi.Handle)
+def address_host(address: Handle) -> string
+def address_port(address: Handle) -> u16
+def address_family(address: Handle) -> i32
+def address_release(address: Handle)
+
+def bytes_length(bytes: Handle) -> usize
+def bytes_at(bytes: Handle, index: usize) -> u8
+def bytes_release(bytes: Handle)
+
+def resolve_raw(host: StringView, addresses: OutHandle, error: OutError) -> i32
+def address_list_length(addresses: Handle) -> usize
+def address_list_at(addresses: Handle, index: usize) -> string
+def address_list_release(addresses: Handle)
+def parse_ip_raw(value: StringView, address: OutHandle, error: OutError) -> i32
+
+def udp_bind_raw(host: StringView, port: u16, socket: OutHandle, error: OutError) -> i32
+def udp_send_to(socket: Handle, data: BytesView, host: StringView, port: u16, sent: OutUsize, error: OutError) -> i32
+def udp_receive_from(socket: Handle, count: usize, packet: OutHandle, error: OutError) -> i32
+def udp_close(socket: Handle, error: OutError) -> i32
+def packet_length(packet: Handle) -> usize
+def packet_at(packet: Handle, index: usize) -> u8
+def packet_host(packet: Handle) -> string
+def packet_port(packet: Handle) -> u16
+def packet_release(packet: Handle)
+
+def loopback_echo_raw(message: StringView, text: OutHandle, error: OutError) -> i32
+def text_value(text: Handle) -> string
+def text_release(text: Handle)
+
+@c(symbol = "sev_abi_v1_network_connect_simple")
+def connect_simple(host: string, port: int) -> isize
+
+@c(symbol = "sev_abi_v1_network_listen_simple")
+def listen_simple(host: string, port: int) -> isize
+
+@c(symbol = "sev_abi_v1_network_accept_simple")
+def accept_simple(listener: isize) -> isize
+
+@c(symbol = "sev_abi_v1_network_read_text_simple")
+def read_text_simple(connection: isize, count: int) -> string
+
+@c(symbol = "sev_abi_v1_network_write_text_simple")
+def write_text_simple(connection: isize, data: string) -> int
+
+@c(symbol = "sev_abi_v1_network_shutdown_simple")
+def shutdown_simple(connection: isize, direction: int) -> int
+
+@c(symbol = "sev_abi_v1_network_close_simple")
+def close_simple(handle: isize) -> int
+
+@c(symbol = "sev_abi_v1_network_loopback_echo_simple")
+def loopback_echo_simple(message: string) -> string

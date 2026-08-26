@@ -1,0 +1,4 @@
+service: severian-container-database
+port: 8080
+runtime: crun
+network: user-space-port-forward

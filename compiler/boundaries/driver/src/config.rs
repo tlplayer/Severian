@@ -540,30 +540,71 @@ impl<'a> PackageGraphBuilder<'a> {
     }
 }
 
-fn dependency_path<'a>(
-    alias: &str,
-    declaration: &'a DependencyDeclaration,
-) -> Result<&'a Path, String> {
+fn dependency_path(alias: &str, declaration: &DependencyDeclaration) -> Result<PathBuf, String> {
     match declaration {
         DependencyDeclaration::Detailed(detail) => {
             if let Some(path) = detail.path.as_deref() {
-                return Ok(path);
+                return Ok(path.to_owned());
             }
-            let source = if detail.git.is_some() {
-                "git"
-            } else if detail.registry.is_some() || detail.version.is_some() {
-                "registry"
-            } else {
-                "unspecified"
-            };
-            Err(format!(
-                "dependency `{alias}` uses unsupported {source} resolution; a local `path` is required"
-            ))
+            if detail.git.is_some() {
+                return Err(format!(
+                    "dependency `{alias}` uses unsupported git resolution"
+                ));
+            }
+            let version = detail.version.as_deref().ok_or_else(|| {
+                format!("registry dependency `{alias}` requires an exact version")
+            })?;
+            registry_package(alias, version, detail.registry.as_deref())
         }
-        DependencyDeclaration::Version(version) => Err(format!(
-            "dependency `{alias}` uses unsupported registry version `{version}`; a local `path` is required"
-        )),
+        DependencyDeclaration::Version(version) => registry_package(alias, version, None),
     }
+}
+
+fn registry_package(name: &str, version: &str, registry: Option<&str>) -> Result<PathBuf, String> {
+    let root = registry_root(registry)?;
+    let source = registry_release_path(&root, name, version)?.join("source");
+    if source.join("package.toml").is_file() {
+        Ok(source)
+    } else {
+        Err(format!(
+            "package `{name}` version `{version}` is not present in registry `{}`; publish or pull it first",
+            root.display()
+        ))
+    }
+}
+
+pub fn registry_release_path(root: &Path, name: &str, version: &str) -> Result<PathBuf, String> {
+    for (label, value) in [("package", name), ("version", version)] {
+        if value.is_empty()
+            || matches!(value, "." | "..")
+            || value.contains('/')
+            || value.contains('\\')
+        {
+            return Err(format!("invalid registry {label} component `{value}`"));
+        }
+    }
+    Ok(root.join("packages").join(name).join(version))
+}
+
+pub fn registry_root(registry: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(registry) = registry.filter(|registry| *registry != "default") {
+        if registry.contains("://") {
+            return Err(format!(
+                "remote registry transport `{registry}` is not implemented; use a filesystem registry"
+            ));
+        }
+        return Ok(PathBuf::from(registry));
+    }
+    if let Some(path) = std::env::var_os("SEVERIAN_REGISTRY") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(path).join("severian/registry"));
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|path| path.join(".local/share/severian/registry"))
+        .ok_or_else(|| "could not locate the default registry; set SEVERIAN_REGISTRY".to_owned())
 }
 
 fn validate_configuration(catalog: &Catalog, document: &toml::Value) -> Result<(), String> {
@@ -771,6 +812,17 @@ mod tests {
         assert!(template.contains("profile = \"dev\""));
         assert!(template.contains("target = \"host\""));
         assert!(!template.contains("backend ="));
+    }
+
+    #[test]
+    fn registry_release_paths_cannot_escape_the_registry() {
+        let root = Path::new("/tmp/severian-registry-test");
+        assert_eq!(
+            registry_release_path(root, "example", "1.2.3").unwrap(),
+            root.join("packages/example/1.2.3")
+        );
+        assert!(registry_release_path(root, "../example", "1.2.3").is_err());
+        assert!(registry_release_path(root, "example", "../1.2.3").is_err());
     }
 
     #[test]

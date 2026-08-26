@@ -1,0 +1,18 @@
+[package]
+name = "container"
+version = "0.1.0"
+edition = "2026"
+description = "Container lifecycle over OCI runtimes"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+oci = { path = "../oci", version = "0.1.0" }
+os = { path = "../os", version = "0.1.0" }
+process = { path = "../process", version = "0.1.0" }
+
+[package.metadata.library]
+category = "containers"
+implementation = "source"
+status = "experimental"

@@ -1,3 +1,15 @@
+import csv
+import json
+import yaml
+
+trait File:
+    @file
+    def read(path: string) -> string with { (path) -> bool }
+
+class TextFile: File
+    def read(path: string) -> string with { path.ends_with(".txt") }:
+        return file.raw(path)
+
 @c(symbol = "__sev_file_write_text")
 def write(path: string, contents: string) -> i32
 
@@ -5,6 +17,11 @@ def write(path: string, contents: list[u8]) -> i32
 
 @c(symbol = "__sev_file_read_text")
 def read(path: string) -> string
+
+# The untyped storage boundary used by format packages and File dispatch
+# implementations. Applications should normally call `file.read`.
+@c(symbol = "__sev_file_read_text")
+def raw(path: string) -> string
 
 def open(path: string) -> int
 

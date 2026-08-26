@@ -1,0 +1,48 @@
+[package]
+name = "container-database"
+version = "0.1.0"
+edition = "2026"
+license = "Severian License"
+publish = true
+default-run = "container-database-server"
+
+[[bin]]
+name = "container-database-server"
+path = "src/server.sev"
+
+[[bin]]
+name = "container-database-client"
+path = "src/client.sev"
+
+[[bin]]
+name = "container-database-bundle"
+path = "src/bundle.sev"
+
+[lib]
+name = "container_database"
+path = "src/lib.sev"
+
+[dependencies]
+container = { path = "../../../library/system/container", version = "0.1.0" }
+network = { path = "../../../library/network", version = "0.1.0" }
+oci = { path = "../../../library/system/oci", version = "0.1.0" }
+
+[publish]
+registry = "default"
+include-source = true
+include-interface = true
+
+[build]
+profile = "dev"
+target = "host"
+incremental = true
+
+[diagnostics]
+mode = "user"
+message-format = "text"
+max-errors = 10
+
+[test]
+coverage-min = 0
+memory-max = "512MB"
+leaks = "deny"

@@ -8,8 +8,8 @@ description = "CSV documents, rows, mutation, and encoding"
 path = "src/lib.sev"
 
 [dependencies]
-data = { path = "../data", version = "0.1.0" }
-platform = { path = "../platform", version = "0.1.0" }
+data_format = { path = "../format", version = "0.1.0" }
+file = { path = "../../system/file", version = "0.1.0" }
 
 [package.metadata.library]
 category = "data-formats"

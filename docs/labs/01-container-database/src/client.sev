@@ -1,0 +1,12 @@
+import network
+import process
+
+def main():
+    arguments = process.arguments()
+    command = arguments[1] if size(arguments) > 1 else "LIST"
+    connection = network.connect_text("127.0.0.1", 8080)
+    _written = network.write_text(connection, command + "\n")
+    network.shutdown_write(connection)
+    response = network.read_text(connection, 16384)
+    print(response)
+    network.close(connection)

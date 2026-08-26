@@ -1,7 +1,8 @@
 # Data
 
-`data` is Severian's format-independent table layer. Formats implement
-`data.Source` when they can expose tabular values:
+`data` is Severian's format-independent table layer. Serializable documents
+implement the shared `data_format.Data` contract, and formats implement
+`data.Source` when they can additionally expose tabular values:
 
 ```sev
 table = file.read("dialogs.csv").data()

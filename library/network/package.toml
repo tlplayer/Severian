@@ -12,8 +12,11 @@ sources = ["src/ffi.sev"]
 path = "src/lib.sev"
 
 [dependencies]
-ffi = { path = "../ffi", version = "0.1.0" }
-io = { path = "../io", version = "0.1.0" }
+ffi = { path = "../interop/ffi", version = "0.1.0" }
+io = { path = "../system/io", version = "0.1.0" }
+
+[xxi.c]
+sources = ["native/posix/network.c"]
 
 [[ffi.c]]
 name = "network-posix"

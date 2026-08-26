@@ -1,0 +1,13 @@
+[package]
+name = "data_format"
+version = "0.1.0"
+edition = "2026"
+description = "Shared contract for serializable data documents"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "data-formats"
+implementation = "source"
+status = "experimental"

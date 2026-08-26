@@ -93,9 +93,11 @@ Rules:
    `[dev-dependencies]`.
 8. Source paths and package archive entries may not escape their package root.
 
-Registry and Git dependency declarations are reserved by the schema, but the
-current resolver deliberately requires a local `path`. It must report that
-limitation rather than silently selecting unrelated source.
+Exact-version dependencies may resolve from the default local filesystem
+registry (or one selected by `SEVERIAN_REGISTRY`). `sev publish` writes both the
+versioned `.pkg` artifact and its source realization there. Remote registry
+transport, Git dependencies, ranges, and authentication remain explicit
+errors; the resolver never silently selects unrelated source.
 
 ## Lockfile contract
 
@@ -259,8 +261,9 @@ warning, but it does not silently bypass the program's safety model.
 | Local target layout shown above | Implemented |
 | `SEVPKG` v1 reachable-source library writer | Implemented |
 | Consuming an emitted `.pkg` as a dependency | Not implemented |
+| `sev publish` and exact-version local registry source consumption | Implemented |
 | General package interfaces (`.pkgi`) | Partial; primitive interface records exist |
-| Registry/Git resolution and lockfile generation | Reserved, not implemented |
+| Remote registry/Git resolution and lockfile generation | Reserved, not implemented |
 | Rich indexed `.pkg` archive and artifact selection | Design contract |
 | Network/container policy enforcement | Design contract |
 

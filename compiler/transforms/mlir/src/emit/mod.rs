@@ -450,6 +450,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             ));
         }
     }
+    let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
             && (inputs
@@ -477,6 +478,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         output.push_str(&format!(
             "  func.func private @{symbol}({inputs}){result}\n"
         ));
+        declared_external_symbols.insert(symbol);
     }
     for (artifact, (inputs, outputs)) in artifact_signatures {
         let inputs = inputs
@@ -498,7 +500,6 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             artifact_symbol(artifact)
         ));
     }
-    let mut declared_external_symbols = BTreeSet::new();
     for function in module
         .functions
         .iter()

@@ -1,0 +1,13 @@
+[package]
+name = "container-database-consumer"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "consumer"
+
+[[bin]]
+name = "consumer"
+path = "src/main.sev"
+
+[dependencies]
+container_database = "0.1.0"

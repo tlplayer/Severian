@@ -1,0 +1,67 @@
+import file
+import os
+
+class Entry:
+    option: int
+    name: string
+    filename: string
+    media_type: string
+
+def entries() -> list[Entry]:
+    return [
+        Entry(1, "service record", "service.json", "application/json"),
+        Entry(2, "release notes", "notes.txt", "text/plain"),
+        Entry(3, "deployment", "deployment.yml", "application/yaml"),
+        Entry(4, "event stream", "events.ymls", "application/yaml-stream"),
+    ]
+
+def menu() -> string:
+    return "Commands:\n  LIST  list available documents\n  GET 1 service.json\n  GET 2 notes.txt\n  GET 3 deployment.yml\n  GET 4 events.ymls\n  QUIT  close this connection\n"
+
+def read_at(data_root: string, filename: string) -> string:
+    return file.read(data_root + "/" + filename)
+
+def document(option: int, data_root: string) -> string:
+    if option == 1:
+        return read_at(data_root, "service.json")
+    if option == 2:
+        return read_at(data_root, "notes.txt")
+    if option == 3:
+        return read_at(data_root, "deployment.yml")
+    if option == 4:
+        return read_at(data_root, "events.ymls")
+    return "unknown document; send LIST for available commands\n"
+
+def execute(command: string, data_root: string) -> string:
+    request = command.strip()
+    if request == "LIST":
+        return menu()
+    if request == "GET 1":
+        return document(1, data_root)
+    if request == "GET 2":
+        return document(2, data_root)
+    if request == "GET 3":
+        return document(3, data_root)
+    if request == "GET 4":
+        return document(4, data_root)
+    if request == "QUIT":
+        return "bye\n"
+    return "unknown command\n" + menu()
+
+def fixture_root() -> string:
+    if os.exists("data/service.json"):
+        return "data"
+    return "docs/labs/01-container-database/data"
+
+test "default file namespace dispatches every supported format":
+    root = fixture_root()
+    assert(read_at(root, "service.json") == file.raw(root + "/service.json"))
+    assert(read_at(root, "notes.txt") == file.raw(root + "/notes.txt"))
+    assert(read_at(root, "deployment.yml") == file.raw(root + "/deployment.yml"))
+    assert(read_at(root, "events.ymls") == file.raw(root + "/events.ymls"))
+
+test "database command protocol lists and selects documents":
+    root = fixture_root()
+    assert("GET 4 events.ymls" in execute("LIST", root))
+    assert("Severian" in execute("GET 1", root))
+    assert("unknown command" in execute("WHAT", root))

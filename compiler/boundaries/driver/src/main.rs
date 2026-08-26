@@ -2,7 +2,10 @@ mod example_validation;
 mod mutation;
 mod test_runner;
 
-use severian_driver::config::{BinaryTarget, Catalog, DeclaredTarget, LibraryTarget, Manifest};
+use severian_driver::config::{
+    registry_release_path, registry_root, BinaryTarget, Catalog, DeclaredTarget, LibraryTarget,
+    Manifest,
+};
 use severian_driver::{Compiler, EmitStage};
 use severian_target::TargetSpec;
 use std::collections::BTreeMap;
@@ -73,6 +76,7 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
             test(options, &catalog, mutate)
         }
         "config" => config(arguments, &catalog),
+        "publish" => publish_package(parse_common(arguments)?, &catalog),
         "new" => create_project(arguments, &catalog, true),
         "init" => create_project(arguments, &catalog, false),
         reserved => Err(format!(
@@ -84,7 +88,7 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
 fn is_command(argument: &str) -> bool {
     matches!(
         argument,
-        "check" | "build" | "compile" | "run" | "test" | "new" | "init" | "config"
+        "check" | "build" | "compile" | "run" | "test" | "new" | "init" | "config" | "publish"
     )
 }
 
@@ -398,17 +402,133 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
                 compiler
                     .check_file(&library.path)
                     .map_err(|error| error.to_string())?;
-                emit_library_package(
-                    library,
-                    manifest.expect("library targets belong to packages"),
-                    &output,
-                )?;
+                emit_library_package(library, &compiler, &output)?;
             }
         }
         println!("built {}", output.display());
         artifacts.push(output);
     }
     Ok(artifacts)
+}
+
+fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+    if options.bin.is_some()
+        || options.output.is_some()
+        || options.emit.is_some()
+        || !options.application_args.is_empty()
+    {
+        return Err("`sev publish` accepts only a package path, profile, and target".into());
+    }
+    let input = discover(options.path.as_deref(), catalog)?;
+    let Input::Package(manifest) = input else {
+        return Err("`sev publish` requires a package.toml".into());
+    };
+    if !manifest.publish {
+        return Err(format!(
+            "package `{}` is marked publish = false",
+            manifest.name
+        ));
+    }
+    let library = manifest
+        .library
+        .as_ref()
+        .ok_or_else(|| format!("package `{}` has no library target", manifest.name))?;
+    let config = resolve_config(catalog, Some(&manifest), &options)?;
+    let compiler = compiler(&config, Some(&manifest), false)?;
+    compiler
+        .check_file(&library.path)
+        .map_err(|error| error.to_string())?;
+
+    let selected_registry = manifest
+        .values
+        .get("publish.registry")
+        .map(String::as_str)
+        .unwrap_or("default");
+    let registry = registry_root(Some(selected_registry))?;
+    let release = registry_release_path(&registry, &library.name, &library.version)?;
+    if release.exists() {
+        return Err(format!(
+            "{} version {} is already published in {}",
+            library.name,
+            library.version,
+            registry.display()
+        ));
+    }
+    let invocation = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("could not identify publish invocation: {error}"))?
+        .as_nanos();
+    let staging = registry.join(format!(".publish-{}-{invocation}", process::id()));
+    let source_output = staging.join("source");
+    fs::create_dir_all(&source_output)
+        .map_err(|error| format!("could not create {}: {error}", source_output.display()))?;
+
+    let source_root = fs::canonicalize(library.path.parent().unwrap_or_else(|| Path::new(".")))
+        .map_err(|error| format!("could not resolve package source root: {error}"))?;
+    for module in compiler
+        .resolved_module_paths(&library.path)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|module| module.starts_with(&source_root))
+    {
+        let relative = module.strip_prefix(&source_root).map_err(|_| {
+            format!(
+                "library source import `{}` escapes `{}`",
+                module.display(),
+                source_root.display()
+            )
+        })?;
+        let destination = source_output.join(relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        fs::copy(&module, &destination).map_err(|error| {
+            format!(
+                "could not copy {} to {}: {error}",
+                module.display(),
+                destination.display()
+            )
+        })?;
+    }
+    let library_relative = library.path.strip_prefix(&source_root).map_err(|_| {
+        format!(
+            "library source `{}` escapes `{}`",
+            library.path.display(),
+            source_root.display()
+        )
+    })?;
+    fs::write(
+        source_output.join("package.toml"),
+        format!(
+            "[package]\nname = {:?}\nversion = {:?}\npublish = false\n\n[lib]\nname = {:?}\npath = {:?}\n",
+            library.name,
+            library.version,
+            library.name,
+            library_relative.to_string_lossy()
+        ),
+    )
+    .map_err(|error| format!("could not write published source manifest: {error}"))?;
+    let artifact = staging.join(format!("{}-{}.pkg", library.name, library.version));
+    emit_library_package(library, &compiler, &artifact)?;
+    if let Some(parent) = release.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    fs::rename(&staging, &release).map_err(|error| {
+        format!(
+            "could not publish {} to {}: {error}",
+            library.name,
+            release.display()
+        )
+    })?;
+    println!(
+        "published {} {} to {}",
+        library.name,
+        library.version,
+        registry.display()
+    );
+    Ok(())
 }
 
 fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
@@ -688,35 +808,31 @@ fn artifact_path(root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) 
 
 fn emit_library_package(
     library: &LibraryTarget,
-    manifest: &Manifest,
+    compiler: &Compiler,
     output: &Path,
 ) -> Result<(), String> {
-    let packages = manifest.module_graph(false);
-    let root_package = packages.root;
-    let graph = severian_modules::resolve_with_packages(&library.path, &packages)
-        .map_err(|error| error.to_string())?;
-    let modules = graph
-        .modules
-        .into_iter()
-        .filter(|module| module.package == root_package)
-        .collect::<Vec<_>>();
     let name = library.name.as_bytes();
     let source_root = fs::canonicalize(library.path.parent().unwrap_or_else(|| Path::new(".")))
         .map_err(|error| format!("could not resolve package source root: {error}"))?;
+    let modules = compiler
+        .resolved_module_paths(&library.path)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|module| module.starts_with(&source_root))
+        .collect::<Vec<_>>();
     let mut package = b"SEVPKG\0\x01".to_vec();
     package.extend_from_slice(&(name.len() as u32).to_be_bytes());
     package.extend_from_slice(name);
     package.extend_from_slice(&(modules.len() as u32).to_be_bytes());
     for module in modules {
-        let source = fs::read(&module.path)
-            .map_err(|error| format!("could not read {}: {error}", module.path.display()))?;
+        let source = fs::read(&module)
+            .map_err(|error| format!("could not read {}: {error}", module.display()))?;
         let relative = module
-            .path
             .strip_prefix(&source_root)
             .map_err(|_| {
                 format!(
                     "library source import `{}` escapes `{}`",
-                    module.path.display(),
+                    module.display(),
                     source_root.display()
                 )
             })?
@@ -856,7 +972,7 @@ fn help(catalog: &Catalog) -> String {
     let mut output = String::from(
         "usage: sev [command] [path] [options] [-- application-args]\n\n\
 default:\n  sev [path] [-- args...]       Check, build, and run the default binary.\n\n\
-commands:\n  check   build   compile   run   test   new   init   config <show|sync|defaults>\n\n\
+commands:\n  check   build   compile   run   test   publish   new   init   config <show|sync|defaults>\n\n\
 build options:\n",
     );
     for path in ["build.profile", "build.target"] {

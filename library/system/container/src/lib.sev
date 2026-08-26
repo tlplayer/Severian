@@ -1,0 +1,77 @@
+import oci
+import os
+import process
+
+trait Runtime:
+    def create(bundle: oci.Bundle) -> int
+    def start(id: string) -> int
+    def kill(id: string) -> int
+    def state(id: string) -> int
+    def delete(id: string) -> int
+
+class Crun: Runtime
+    root: string = "/tmp/severian-crun"
+
+    def create(bundle: oci.Bundle) -> int:
+        return process.run("crun --root " + root + " --cgroup-manager disabled create --bundle " + bundle.path + " " + bundle.id)
+
+    def start(id: string) -> int:
+        return process.run("crun --root " + root + " start " + id)
+
+    def kill(id: string) -> int:
+        return process.run("crun --root " + root + " kill " + id + " TERM")
+
+    def state(id: string) -> int:
+        return process.run("crun --root " + root + " state " + id)
+
+    def delete(id: string) -> int:
+        return process.run("crun --root " + root + " delete --force " + id)
+
+def selected_runtime() -> string:
+    if os.exists("/usr/bin/crun") or os.exists("/usr/local/bin/crun"):
+        return "crun"
+    if os.exists("/usr/bin/runc") or os.exists("/usr/local/bin/runc"):
+        return "runc"
+    return ""
+
+def shell(value: string) -> string:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def forward_command(port: oci.PortForward) -> string:
+    return "exec setsid socat TCP-LISTEN:" + string(port.host_port) + ",bind=127.0.0.1,reuseaddr,fork TCP:127.0.0.1:" + string(port.container_port)
+
+def start_forwards(bundle: oci.Bundle) -> list[int]:
+    processes: list[int] = []
+    for port in bundle.ports:
+        processes.append(process.spawn(forward_command(port)))
+    return processes
+
+def run(bundle: oci.Bundle) -> int:
+    runtime = selected_runtime()
+    if runtime == "":
+        return 127
+    forwarders = start_forwards(bundle)
+    status = process.run("runc --root /tmp/severian-runc run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id)) if runtime == "runc" else process.run("crun --root /tmp/severian-crun --cgroup-manager disabled run --bundle " + shell(bundle.path) + " --detach " + shell(bundle.id))
+    if status != 0:
+        for forwarder in forwarders:
+            process.kill(forwarder)
+    return status
+
+def kill(id: string) -> int:
+    if selected_runtime() == "runc":
+        return process.run("runc --root /tmp/severian-runc kill " + id + " TERM")
+    return process.run("crun --root /tmp/severian-crun kill " + id + " TERM")
+
+def delete(id: string) -> int:
+    if selected_runtime() == "runc":
+        return process.run("runc --root /tmp/severian-runc delete --force " + id)
+    return process.run("crun --root /tmp/severian-crun delete --force " + id)
+
+test "port forwards preserve distinct host and container ports":
+    command = forward_command(oci.PortForward(8080, 18080))
+    assert("TCP-LISTEN:8080" in command)
+    assert("TCP:127.0.0.1:18080" in command)
+    bundle = oci.Bundle("test", "/tmp/test", "/tmp/test/rootfs", "/tmp/test/config.json", [oci.PortForward(8080, 18080)])
+    for forwarded in bundle.ports:
+        nested = forward_command(forwarded)
+        assert("TCP:127.0.0.1:18080" in nested)

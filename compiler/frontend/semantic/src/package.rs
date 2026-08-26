@@ -148,6 +148,19 @@ pub fn analyze_package_with_context(
     let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
     let package_classes = collect_package_classes(module_graph, &index);
     let package_lists = collect_package_lists(module_graph, &universal.types);
+    // Trait namespaces are extension registries. Their declarations and
+    // implementations intentionally cross module/package boundaries, while
+    // ordinary declarations remain scoped through the package index.
+    let registry_ast = severian_ast::Module {
+        items: module_graph
+            .modules
+            .iter()
+            .flat_map(|module| module.ast.items.iter())
+            .filter(|item| matches!(item, Item::Trait(_) | Item::Class(_)))
+            .cloned()
+            .collect(),
+    };
+    crate::validate_trait_implementations(&registry_ast)?;
 
     let mut next_binding = 0u32;
     let mut hir = Program::default();
@@ -315,6 +328,7 @@ pub fn analyze_package_with_context(
             &package_lists,
             &package_constants,
             Some(source_module.id),
+            Some(&registry_ast),
         )?
         .modules
         .pop()
@@ -581,6 +595,28 @@ fn resolve_package_type(
             "fallible unions currently require one success type and one error type",
             Some(annotation.span),
         ));
+    }
+    if let Some(("Result", [success, error])) = annotation.named_parts() {
+        let success = resolve_package_type(types, success, module, classes, lists)?;
+        let error_ty = resolve_package_type(types, error, module, classes, lists)?;
+        let source_error = error.simple_name().is_some_and(|name| {
+            name.ends_with("Error")
+                || package_class_for_lookup(classes, module, name).is_some_and(|class| {
+                    class
+                        .declaration
+                        .traits
+                        .iter()
+                        .any(|implemented| implemented.simple_name() == Some("Error"))
+                })
+        });
+        if types.resolve_name("Error") != Some(error_ty) && !source_error {
+            return Err(Diagnostic::new(
+                "E000204",
+                "the second Result type must be an error type",
+                Some(annotation.span),
+            ));
+        }
+        return Ok(crate::fallible_type_id(success, error_ty));
     }
     if let Some(("tuple", elements)) = annotation.named_parts() {
         let elements = elements

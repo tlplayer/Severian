@@ -1,0 +1,30 @@
+import data_format
+import file
+
+class JsonFile: File
+    def read(path: string) -> string with { path.ends_with(".json") }:
+        return file.raw(path)
+
+class Document: data_format.Data
+    source: string
+
+    def text() -> string:
+        return source
+
+def decode(source: string) -> Document:
+    normalized = source.strip()
+    if size(normalized) == 0:
+        return Document("")
+    if not normalized.starts_with("{") and not normalized.starts_with("["):
+        return Document("")
+    return Document(source)
+
+def encode(document: Document) -> string:
+    return document.source
+
+def read(path: string) -> string:
+    return decode(file.raw(path)).text()
+
+test "JSON file adapter preserves a document":
+    document = decode("{\"service\": \"severian\"}")
+    assert(document.text() == "{\"service\": \"severian\"}")

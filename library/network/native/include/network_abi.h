@@ -34,6 +34,7 @@ void sev_abi_v1_network_address_release(sev_handle_v1 address);
 size_t sev_abi_v1_network_bytes_length(sev_handle_v1 bytes);
 uint8_t sev_abi_v1_network_bytes_at(sev_handle_v1 bytes, size_t index);
 void sev_abi_v1_network_bytes_release(sev_handle_v1 bytes);
+sev_string_view_v1 sev_abi_v1_network_decode_utf8(sev_bytes_view_v1 bytes);
 
 int32_t sev_abi_v1_network_resolve(sev_string_view_v1 host, sev_handle_v1 *addresses, sev_error_v1 *error);
 size_t sev_abi_v1_network_address_list_length(sev_handle_v1 addresses);
@@ -54,5 +55,14 @@ void sev_abi_v1_network_packet_release(sev_handle_v1 packet);
 int32_t sev_abi_v1_network_loopback_echo(sev_string_view_v1 message, sev_handle_v1 *text, sev_error_v1 *error);
 sev_string_view_v1 sev_abi_v1_network_text_value(sev_handle_v1 text);
 void sev_abi_v1_network_text_release(sev_handle_v1 text);
+
+intptr_t sev_abi_v1_network_connect_simple(const char *host, int64_t port);
+intptr_t sev_abi_v1_network_listen_simple(const char *host, int64_t port);
+intptr_t sev_abi_v1_network_accept_simple(intptr_t listener);
+const char *sev_abi_v1_network_read_text_simple(intptr_t connection, int64_t count);
+int64_t sev_abi_v1_network_write_text_simple(intptr_t connection, const char *data);
+int64_t sev_abi_v1_network_shutdown_simple(intptr_t connection, int64_t direction);
+int64_t sev_abi_v1_network_close_simple(intptr_t handle);
+const char *sev_abi_v1_network_loopback_echo_simple(const char *message);
 
 #endif

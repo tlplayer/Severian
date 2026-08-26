@@ -615,6 +615,39 @@ impl CfgLowering<'_> {
                         .map(|argument| self.lower_operand(body, argument, operations))
                         .collect::<Result<Vec<_>, _>>()?,
                 );
+                if let Some(external) = self
+                    .mir
+                    .functions
+                    .iter()
+                    .find(|candidate| candidate.id.0 == function.0)
+                    .and_then(|candidate| match &candidate.call_type {
+                        severian_mir::CallType::External(call)
+                            if call.interface.0 == "native-runtime"
+                                && call.symbol.0.contains("_aggregate") =>
+                        {
+                            Some((call.symbol.0.clone(), candidate.result))
+                        }
+                        _ => None,
+                    })
+                {
+                    let result_type = self.lower_mir_type(external.1)?;
+                    let result =
+                        (result_type != LoweredType::Unit).then(|| self.new_value(result_type));
+                    operations.push(LirOperation::RuntimeCall {
+                        symbol: external.0,
+                        arguments: lowered_arguments,
+                        result,
+                    });
+                    if let (Some(result), Some(destination)) = (result, destination) {
+                        operations.push(LirOperation::Store {
+                            place: self.lower_place(destination),
+                            value: result,
+                        });
+                    }
+                    return Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(
+                        target.0,
+                    )));
+                }
                 Ok(severian_lir::Terminator::Call {
                     function,
                     arguments: lowered_arguments,

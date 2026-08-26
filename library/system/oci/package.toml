@@ -1,0 +1,17 @@
+[package]
+name = "oci"
+version = "0.1.0"
+edition = "2026"
+description = "OCI runtime bundle and image metadata"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+file = { path = "../file", version = "0.1.0" }
+os = { path = "../os", version = "0.1.0" }
+
+[package.metadata.library]
+category = "containers"
+implementation = "source"
+status = "experimental"
