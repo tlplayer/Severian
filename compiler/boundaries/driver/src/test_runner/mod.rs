@@ -166,6 +166,14 @@ fn evaluate(
             passed += 1;
         }
         for test in tests {
+            if let Some(reason) = test.modes.iter().find_map(|mode| match mode {
+                TestMode::Skip(reason) => Some(reason.as_str()),
+                _ => None,
+            }) {
+                output!("test {} ... skipped ({reason})", test.name);
+                skipped += 1;
+                continue;
+            }
             let timeout = test.modes.iter().find_map(|mode| match mode {
                 TestMode::Timeout(nanos) => Some(Duration::from_nanos(
                     u64::try_from(*nanos).unwrap_or(u64::MAX),
@@ -186,23 +194,6 @@ fn evaluate(
                 }
                 TestExecution::Executable(artifact) => artifact,
             };
-            if test
-                .modes
-                .iter()
-                .any(|mode| matches!(mode, TestMode::Model | TestMode::Differential))
-            {
-                output!(
-                    "test {} ... skipped ({} runner is not configured)",
-                    test.name,
-                    test.modes
-                        .iter()
-                        .find(|mode| { matches!(mode, TestMode::Model | TestMode::Differential) })
-                        .map(|mode| mode.name())
-                        .unwrap_or("generated")
-                );
-                skipped += 1;
-                continue;
-            }
             if test.modes.contains(&TestMode::Integration) {
                 let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
@@ -238,7 +229,8 @@ fn evaluate(
                         }
                         TestExpectation::Panics { .. }
                         | TestExpectation::ProfileDuration { .. }
-                        | TestExpectation::ProfileMemory { .. } => return None,
+                        | TestExpectation::ProfileMemory { .. }
+                        | TestExpectation::ProfileAllocations { .. } => return None,
                     };
                     let matches = match expectation {
                         TestExpectation::Contains { .. } | TestExpectation::PanicMessage { .. } => {
@@ -248,7 +240,8 @@ fn evaluate(
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
                         TestExpectation::Panics { .. }
                         | TestExpectation::ProfileDuration { .. }
-                        | TestExpectation::ProfileMemory { .. } => unreachable!(),
+                        | TestExpectation::ProfileMemory { .. }
+                        | TestExpectation::ProfileAllocations { .. } => unreachable!(),
                     };
                     (!matches).then(|| {
                         format!("captured stream did not {relation} {expected:?}; got {actual:?}")
@@ -345,6 +338,11 @@ fn evaluate(
                             threshold_bytes,
                             message,
                         } => (comparison, 0, threshold_bytes, message, "B"),
+                        TestExpectation::ProfileAllocations {
+                            comparison,
+                            threshold,
+                            message,
+                        } => (comparison, 0, threshold, message, " allocations"),
                         _ => return None,
                     };
                     let satisfied = match comparison {
@@ -385,6 +383,8 @@ fn evaluate(
                         | TestMode::Cases
                         | TestMode::Model
                         | TestMode::Differential
+                        | TestMode::Repeat(_)
+                        | TestMode::Parallel
                 )
             }) {
                 output!(
@@ -399,9 +399,25 @@ fn evaluate(
                 failed += 1;
                 continue;
             }
-            let result = execute(&artifact.path, coverage_file, timeout)
-                .map_err(|error| format!("could not run {}: {error}", artifact.path.display()))?;
-            if result.status.success() && !has_soft_expectation_failures(&result) {
+            let repetitions = test
+                .modes
+                .iter()
+                .find_map(|mode| match mode {
+                    TestMode::Repeat(count) => Some(*count),
+                    _ => None,
+                })
+                .unwrap_or(1);
+            let mut failure = None;
+            for iteration in 1..=repetitions {
+                let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
+                    format!("could not run {}: {error}", artifact.path.display())
+                })?;
+                if !result.status.success() || has_soft_expectation_failures(&result) {
+                    failure = Some((iteration, result));
+                    break;
+                }
+            }
+            if failure.is_none() {
                 if test.modes.iter().any(|mode| {
                     matches!(
                         mode,
@@ -417,7 +433,11 @@ fn evaluate(
                 }
                 passed += 1;
             } else {
+                let (iteration, result) = failure.expect("failure was checked above");
                 output!("test {} ... FAILED", test.name);
+                if repetitions > 1 {
+                    error!("failed on repetition {iteration} of {repetitions}");
+                }
                 if verbose {
                     report_captured_output(&result);
                 }

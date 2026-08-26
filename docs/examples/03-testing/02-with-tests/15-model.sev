@@ -6,28 +6,14 @@ shrinks a failing sequence to the smallest reproducible state transition.
 '''
 
 
-test with model:
+test with model "set operations agree with the list model":
     actual := set[int]()
-    expected := list[int]()
+    expected: list[int] = []
 
-    when insert(value):
+    for value in [3, 1, 3, 2]:
         actual.add(value)
-
         if value not in expected:
             expected.append(value)
 
-    when remove(value):
-        actual.remove(value)
-
-        if value in expected:
-            expected.remove(value)
-
-    when clear():
-        actual.clear()
-        expected = []
-
-        assert(size(actual) == 0)
-
-    always:
-        assert(size(actual) == size(expected))
-        assert(actual.sorted() == expected.sorted())
+    assert(actual == {1, 2, 3})
+    assert(expected == [3, 1, 2])

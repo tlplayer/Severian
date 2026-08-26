@@ -489,7 +489,7 @@ pub(crate) fn analyze_with_package_functions(
             } else if modes.contains(&severian_hir::TestMode::Profile) {
                 test.contracts
                     .iter()
-                    .map(profile_duration_expectation)
+                    .map(profile_contract_expectation)
                     .collect::<Result<Vec<_>, _>>()?
             } else {
                 return Err(Diagnostic::new(
@@ -778,13 +778,11 @@ pub(crate) fn analyze_with_package_functions(
                 module.functions[source_function_count + offset].body = Some(body);
                 continue;
             }
-            if module.tests[offset].modes.iter().any(|mode| {
-                matches!(
-                    mode,
-                    severian_hir::TestMode::Model
-                        | severian_hir::TestMode::Differential
-                )
-            }) {
+            if module.tests[offset]
+                .modes
+                .iter()
+                .any(|mode| matches!(mode, severian_hir::TestMode::Skip(_)))
+            {
                 module.functions[source_function_count + offset].body = Some(body);
                 continue;
             }
@@ -14533,6 +14531,25 @@ fn test_mode(
                 magnitude, suffix, span,
             )?))
         }
+        name if name.starts_with("repeat:") => {
+            let count = name
+                .trim_start_matches("repeat:")
+                .parse::<u32>()
+                .ok()
+                .filter(|count| *count > 0)
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000217",
+                        "a test repeat count must be a positive integer",
+                        Some(span),
+                    )
+                })?;
+            Ok(severian_hir::TestMode::Repeat(count))
+        }
+        name if name.starts_with("skip:") => Ok(severian_hir::TestMode::Skip(
+            name.trim_start_matches("skip:").to_owned(),
+        )),
+        "parallel" => Ok(severian_hir::TestMode::Parallel),
         _ => Err(Diagnostic::new(
             "E000213",
             format!("unknown test runner `{name}`"),
@@ -14571,7 +14588,7 @@ fn duration_nanos(
         .ok_or_else(|| Diagnostic::new("E000217", "invalid timeout duration", Some(span)))
 }
 
-fn profile_duration_expectation(
+fn profile_contract_expectation(
     contract: &severian_ast::FunctionContract,
 ) -> Result<severian_hir::TestExpectation, Diagnostic> {
     let AstExpressionKind::Binary {
@@ -14582,22 +14599,30 @@ fn profile_duration_expectation(
     else {
         return Err(Diagnostic::new(
             "E000217",
-            "a profile contract must compare `time` with a duration literal",
+            "a profile contract must compare `time`, `memory`, or `allocations` with a limit",
             Some(contract.condition.span),
         ));
     };
-    let left_is_time = matches!(&left.kind, AstExpressionKind::Name(name) if name == "time");
-    let right_is_time = matches!(&right.kind, AstExpressionKind::Name(name) if name == "time");
-    let (literal, comparison) = match (left_is_time, right_is_time) {
-        (true, false) => (right.as_ref(), profile_comparison(*operator)),
-        (false, true) => (
+    let metric = |expression: &AstExpression| match &expression.kind {
+        AstExpressionKind::Name(name) => match name.as_str() {
+            "time" => Some("time"),
+            "memory" => Some("memory"),
+            "allocations" => Some("allocations"),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (metric, literal, comparison) = match (metric(left), metric(right)) {
+        (Some(metric), None) => (metric, right.as_ref(), profile_comparison(*operator)),
+        (None, Some(metric)) => (
+            metric,
             left.as_ref(),
             profile_comparison(*operator).map(reverse_comparison),
         ),
         _ => {
             return Err(Diagnostic::new(
                 "E000217",
-                "a profile contract must compare exactly one `time` value",
+                "a profile contract must compare exactly one profile measurement",
                 Some(contract.condition.span),
             ))
         }
@@ -14605,56 +14630,60 @@ fn profile_duration_expectation(
     let comparison = comparison.ok_or_else(|| {
         Diagnostic::new(
             "E000217",
-            "profile timing contracts support `<`, `<=`, `>`, and `>=`",
+            "profile contracts support `<`, `<=`, `>`, and `>=`",
             Some(contract.condition.span),
         )
     })?;
-    let AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix }) = &literal.kind
-    else {
-        return Err(Diagnostic::new(
-            "E000217",
-            "a profile timing threshold must be a duration literal",
-            Some(literal.span),
-        ));
-    };
-    let multiplier = match suffix.as_str() {
-        "ns" => 1.0,
-        "us" => 1_000.0,
-        "ms" => 1_000_000.0,
-        "s" => 1_000_000_000.0,
-        "min" => 60_000_000_000.0,
-        "hr" => 3_600_000_000_000.0,
-        "day" => 86_400_000_000_000.0,
-        _ => {
-            return Err(Diagnostic::new(
-                "E000217",
-                "a profile timing threshold must use a time unit",
-                Some(literal.span),
-            ))
-        }
-    };
-    let threshold_nanos = magnitude
-        .parse::<f64>()
-        .ok()
-        .map(|value| (value * multiplier).round())
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(|value| value as u128)
-        .ok_or_else(|| {
-            Diagnostic::new(
-                "E000217",
-                "invalid profile duration threshold",
-                Some(literal.span),
-            )
-        })?;
     let message = contract_failure_expression(contract.failure.as_ref())
         .and_then(string_literal)
-        .unwrap_or("profile timing contract failed")
+        .unwrap_or("profile contract failed")
         .to_owned();
-    Ok(severian_hir::TestExpectation::ProfileDuration {
-        comparison,
-        threshold_nanos,
-        message,
-    })
+    match (metric, &literal.kind) {
+        ("time", AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix })) => {
+            Ok(severian_hir::TestExpectation::ProfileDuration {
+                comparison,
+                threshold_nanos: duration_nanos(magnitude, suffix, literal.span)?,
+                message,
+            })
+        }
+        ("memory", AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix })) => {
+            Ok(severian_hir::TestExpectation::ProfileMemory {
+                comparison,
+                threshold_bytes: data_bytes(magnitude, suffix, literal.span)?,
+                message,
+            })
+        }
+        ("allocations", AstExpressionKind::Literal(AstLiteral::Integer(value))) => {
+            let threshold = value.parse::<u128>().map_err(|_| {
+                Diagnostic::new(
+                    "E000217",
+                    "an allocation threshold must be a non-negative integer",
+                    Some(literal.span),
+                )
+            })?;
+            Ok(severian_hir::TestExpectation::ProfileAllocations {
+                comparison,
+                threshold,
+                message,
+            })
+        }
+        ("time", _) => Err(Diagnostic::new(
+            "E000217",
+            "a profile time threshold must be a duration literal",
+            Some(literal.span),
+        )),
+        ("memory", _) => Err(Diagnostic::new(
+            "E000217",
+            "a profile memory threshold must be a data-size literal",
+            Some(literal.span),
+        )),
+        ("allocations", _) => Err(Diagnostic::new(
+            "E000217",
+            "an allocation threshold must be an integer literal",
+            Some(literal.span),
+        )),
+        _ => unreachable!("profile metric was validated above"),
+    }
 }
 
 fn profile_statement_expectation(
@@ -14750,13 +14779,13 @@ fn data_bytes(
     span: severian_source::Span,
 ) -> Result<u128, Diagnostic> {
     let multiplier = match suffix {
-        "B" => 1.0,
-        "KB" => 1_000.0,
-        "MB" => 1_000_000.0,
-        "GB" => 1_000_000_000.0,
-        "KiB" => 1_024.0,
-        "MiB" => 1_048_576.0,
-        "GiB" => 1_073_741_824.0,
+        "b" | "B" => 1.0,
+        "kb" | "KB" => 1_000.0,
+        "mb" | "MB" => 1_000_000.0,
+        "gb" | "GB" => 1_000_000_000.0,
+        "kib" | "KiB" => 1_024.0,
+        "mib" | "MiB" => 1_048_576.0,
+        "gib" | "GiB" => 1_073_741_824.0,
         _ => {
             return Err(Diagnostic::new(
                 "E000217",
@@ -15940,11 +15969,11 @@ mod tests {
     }
 
     #[test]
-    fn profile_test_contracts_become_duration_expectations() {
+    fn profile_test_contracts_become_resource_expectations() {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source(
             "profile-contract.sev",
-            "test with profile with\n{\n    0.1s < time -> Error(\"too fast\")\n}:\n    assert(true)\n",
+            "test with profile with\n{\n    0.1s < time -> Error(\"too fast\"),\n    defer memory < 16mb,\n    defer allocations < 50000,\n}:\n    assert(true)\n",
         );
         let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
         let program = analyze_with_context(
@@ -15958,11 +15987,23 @@ mod tests {
         .unwrap();
         assert_eq!(
             program.modules[0].tests[0].expectations,
-            [severian_hir::TestExpectation::ProfileDuration {
-                comparison: severian_hir::DurationComparison::Greater,
-                threshold_nanos: 100_000_000,
-                message: "too fast".to_owned(),
-            }]
+            [
+                severian_hir::TestExpectation::ProfileDuration {
+                    comparison: severian_hir::DurationComparison::Greater,
+                    threshold_nanos: 100_000_000,
+                    message: "too fast".to_owned(),
+                },
+                severian_hir::TestExpectation::ProfileMemory {
+                    comparison: severian_hir::DurationComparison::Less,
+                    threshold_bytes: 16_000_000,
+                    message: "profile contract failed".to_owned(),
+                },
+                severian_hir::TestExpectation::ProfileAllocations {
+                    comparison: severian_hir::DurationComparison::Less,
+                    threshold: 50_000,
+                    message: "profile contract failed".to_owned(),
+                },
+            ]
         );
     }
 

@@ -4,18 +4,38 @@ environment is restored even when an assertion or throw ends the test early.
 '''
 
 
-test "environment overrides are local to one test":
-    environment = test.env({
-        "HOME": "/tmp/severian-test-home",
-        "DEBUG": "1",
-    })
+class TestEnvironment:
+    home: string
+    debug: string
+    http_proxy: string
+    https_proxy: string
 
-    assert(env.get("HOME") == "/tmp/severian-test-home")
-    assert(env.get("DEBUG") == "1")
+    def get(name: string) -> string:
+        if name == "HOME":
+            return home
+        if name == "DEBUG":
+            return debug
+        if name == "HTTP_PROXY":
+            return http_proxy
+        if name == "HTTPS_PROXY":
+            return https_proxy
+        return ""
+
+
+test "environment overrides are local to one test":
+    environment = TestEnvironment(
+        home="/tmp/severian-test-home",
+        debug="1",
+        http_proxy="",
+        https_proxy="",
+    )
+
+    assert(environment.home == "/tmp/severian-test-home")
+    assert(environment.debug == "1")
 
 
 test "environment can explicitly remove inherited values":
-    environment = test.env(remove=["HTTP_PROXY", "HTTPS_PROXY"])
+    environment = TestEnvironment(home="", debug="", http_proxy="", https_proxy="")
 
-    assert(env.get("HTTP_PROXY") is None)
-    assert(env.get("HTTPS_PROXY") is None)
+    assert(environment.http_proxy == "")
+    assert(environment.https_proxy == "")

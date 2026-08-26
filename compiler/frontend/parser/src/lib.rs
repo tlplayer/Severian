@@ -757,6 +757,26 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_configured_and_marker_test_modes() {
+        let source = SourceFile::virtual_source(
+            "configured-modes.sev",
+            "test with repeat(3) and timeout(20ms) and parallel \"repeated\":\n    assert(true)\n\ntest with skip(\"not available\") \"skipped\":\n    missing_binding()\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let tests = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Test(test) => Some(test),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tests.len(), 2);
+        assert_eq!(tests[0].modes, ["repeat:3", "timeout:20ms", "parallel"]);
+        assert_eq!(tests[1].modes, ["skip:not available"]);
+    }
+
+    #[test]
     fn parses_source_first_selective_imports() {
         let source = SourceFile::virtual_source("imports.sev", "from os import wait as pause\n");
         let module = parse(&scan(&source).unwrap()).unwrap();

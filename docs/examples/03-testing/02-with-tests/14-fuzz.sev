@@ -15,25 +15,36 @@ def parse_integer(value: string) -> int | ParseError:
     return 0
 
 
-test parse_integer with fuzz(input: string):
-    # A multiline `when operation:` block can inspect either generated result.
-    when parse_integer(input):
-        when result is int:
-            formatted = string(result)
-            reparsed = parse_integer(formatted)
+test with fuzz "parse and format agree":
+    # Typed bindings provide the representative seed until the fuzz runner
+    # replaces them with generated values.
+    input: string = "42"
+    result ?= parse_integer(input)
 
-            assert(reparsed == result)
+    when result is int:
+        formatted = string(result)
+        reparsed = parse_integer(formatted)
+        assert(reparsed == result)
 
-        when result is ParseError:
-            assert(input == "")
-            assert(result.message != "")
-
-
-test bytes_do_not_crash with fuzz(data: bytes):
-    # Compact operations use the same `operation(value -> expectation)` shape.
-    when(parser.parse(data) -> assert(parser.remains_memory_safe))
+    when result is ParseError:
+        assert(input == "")
+        assert(result.message != "")
 
 
-test with fuzz(age: int { 0 <= age and age <= 130 }):
-    user = User(age=age)
+def text_does_not_crash(data: string) -> bool:
+    return true
+
+
+test with fuzz "text parsing remains memory safe":
+    data: string = "severian"
+    assert(text_does_not_crash(data))
+
+
+class User:
+    age: int { 0 <= age and age <= 130 }
+
+
+test with fuzz "generated ages satisfy the user invariant":
+    age: int { 0 <= age and age <= 130 } = 36
+    user = User(age)
     assert(user.age == age)

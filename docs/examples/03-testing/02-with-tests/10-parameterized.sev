@@ -1,6 +1,6 @@
 '''
-Table cases should be independently named, reported, filtered, and replayed.
-The `when` binding introduces one row without adding assertion helper APIs.
+Table cases share one declaration shape: named parameters followed by `with
+cases` and a brace-delimited table. Each row executes the same test body.
 '''
 
 
@@ -8,16 +8,14 @@ def square(value: int) -> int:
     return value * value
 
 
-test with 
-[
-    #name,...params
-    ("zero", 0, 0),
-    ("positive", 3, 9),
-    ("negative", -4, 16),
-    ("larger", 12, 144),
-] as cases:
-    for value, expected in cases:
-        assert(square(value) == expected)
+test square(value, expected) with cases "squares signed integers"
+{
+    (0, 0),
+    (3, 9),
+    (-4, 16),
+    (12, 144),
+}:
+    assert(square(value) == expected)
 
 
 def clamp(value: int, minimum: int, maximum: int) -> int:
@@ -28,9 +26,10 @@ def clamp(value: int, minimum: int, maximum: int) -> int:
     return value
 
 
-test clamp with cases:
-    when "below", (-5, 0, 10) -> 0
-    when "inside", (5, 0, 10) -> 5
-    when "above", (15, 0, 10) -> 10
-
+test clamp(value, minimum, maximum, expected) with cases "clamps each range position"
+{
+    (-5, 0, 10, 0),
+    (5, 0, 10, 5),
+    (15, 0, 10, 10),
+}:
     assert(clamp(value, minimum, maximum) == expected)

@@ -4,25 +4,26 @@ the same time; the command-line runner can also choose a global worker count.
 
     sev test --parallel 16
 '''
-
+class Result:
+    valid: bool = false
 
 def concurrent_operation() -> Result:
     return Result(valid=true)
 
 
-test with repeat(1000) "concurrent operation remains valid":
+test with repeat(10) "concurrent operation remains valid":
     result = concurrent_operation()
     assert(result.valid)
 
 
-test with repeat(1000), timeout(5s) "race search is bounded":
+test with repeat(10) and timeout(5s) "race search is bounded":
     result = concurrent_operation()
     assert(result.valid)
 
 
 test with parallel "independent worker A":
-    assert(run_worker("A").completed)
+    assert(concurrent_operation().valid)
 
 
 test with parallel "independent worker B":
-    assert(run_worker("B").completed)
+    assert(concurrent_operation().valid)

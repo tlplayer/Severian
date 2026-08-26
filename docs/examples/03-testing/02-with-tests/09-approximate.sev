@@ -1,18 +1,16 @@
 '''
 Approximate comparison is a numeric test utility, not another assertion
-primitive. The operator form is concise; the function form exposes tolerances.
+primitive. The predicate exposes explicit absolute and relative tolerances.
 '''
 
 
 test "floating-point values compare approximately":
     result = 0.1 + 0.2
 
-    assert(result ~= 0.3)
-    assert(approx(result, 0.3, rtol=1e-5, atol=1e-7))
+    assert(approximate(result, 0.3, rtol=1e-5, atol=1e-7))
 
 
 test "approximate comparison works element by element":
-    actual = [0.30000001, 0.99999998, 2.00000003]
-    expected = [0.3, 1.0, 2.0]
-
-    assert(approx(actual, expected, rtol=1e-5, atol=1e-7))
+    assert(approximate(0.30000001, 0.3, rtol=1e-5, atol=1e-7))
+    assert(approximate(0.99999998, 1.0, rtol=1e-5, atol=1e-7))
+    assert(approximate(2.00000003, 2.0, rtol=1e-5, atol=1e-7))

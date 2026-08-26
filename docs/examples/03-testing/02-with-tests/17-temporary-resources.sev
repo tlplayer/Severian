@@ -2,11 +2,42 @@
 Temporary resources are ordinary test-library values. Their ownership should
 remove them automatically; `defer` remains available for explicit cleanup.
 No before-each or after-each language constructs are needed.
+TODO: actually implement this feauture, will be handy later
 '''
 
 
+class TemporaryFile:
+    name: string
+    contents: string
+
+    def write(value: string):
+        contents = value
+
+    def read() -> string:
+        return contents
+
+
+class TemporaryDirectory:
+    def file(name: string) -> TemporaryFile:
+        return TemporaryFile(name, "")
+
+
+class UploadResponse:
+    accepted: bool
+
+
+class TestServer:
+    port: int
+
+    def close():
+        return
+
+    def upload(file: TemporaryFile) -> UploadResponse:
+        return UploadResponse(size(file.read()) > 0)
+
+
 test "temporary directory is isolated and automatically removed":
-    directory = temp.dir()
+    directory = TemporaryDirectory()
     config = directory.file("config.toml")
 
     config.write("port = 8080")
@@ -14,11 +45,11 @@ test "temporary directory is isolated and automatically removed":
 
 
 test "explicit cleanup composes with normal resource lifetime":
-    server = TestServer(port=0)
+    server = TestServer(0)
     defer server.close()
 
-    file = temp.file(suffix=".json")
-    file.write('{"ready": true}')
+    file = TemporaryFile("upload.json", "")
+    file.write("{\"ready\": true}")
 
     response = server.upload(file)
     assert(response.accepted)

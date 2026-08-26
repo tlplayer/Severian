@@ -966,6 +966,32 @@ fn property_runner_executes_a_deterministic_seed() {
 }
 
 #[test]
+fn repeat_and_skip_modes_are_runner_enforced() {
+    let root = temporary("repeat-and-skip");
+    let source = root.join("modes.sev");
+    fs::write(
+        &source,
+        "test with repeat(3) and parallel \"repeated\":\n    assert(true)\n\ntest with skip(\"fixture is unavailable\") \"skipped\":\n    missing_binding()\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test repeated ... ok"), "{stdout}");
+    assert!(
+        stdout.contains("test skipped ... skipped (fixture is unavailable)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 passed; 0 failed; 1 skipped"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn timeout_and_soft_expectations_are_runner_enforced() {
     let root = temporary("timeout-and-expect");
     let passing = root.join("passing.sev");

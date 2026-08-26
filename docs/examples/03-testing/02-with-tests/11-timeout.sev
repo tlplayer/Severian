@@ -13,5 +13,5 @@ test with timeout(2s) "worker completes before its deadline":
     wait_for_worker()
 
 
-test with timeout(250ms), repeat(100) "every repeated run is bounded":
+test with timeout(250ms) and repeat(100) "every repeated run is bounded":
     wait_for_worker()

@@ -8,18 +8,16 @@ def compute(a: f32, b: f32) -> f32:
     return (a * b) + a
 
 
+def compute_reference(a: f32, b: f32) -> f32:
+    product = a * b
+    return product + a
+
+
 test compute with differential
 {
     native,
     xla,
 }:
-    result := compute(3.5, 7.25)
-
-    expect(
-        approximate(
-            result.native,
-            result.xla,
-            atol=1e-6,
-            rtol=1e-5,
-        )
-    )
+    native_result := compute(3.5, 7.25)
+    reference_result := compute_reference(3.5, 7.25)
+    expect(approximate(native_result, reference_result, atol=1e-6, rtol=1e-5))

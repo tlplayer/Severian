@@ -557,24 +557,59 @@ impl Parser<'_> {
         if self.at_identifier("with") {
             self.next();
             loop {
-                let (mut mode, mode_span) =
-                    self.identifier("expected a test mode after `with`")?;
-                if mode == "timeout" {
-                    self.expect(&TokenKind::LeftParen, "expected `(` after `timeout`")?;
-                    let deadline = self.expression(0)?;
-                    self.expect(&TokenKind::RightParen, "expected `)` after timeout deadline")?;
-                    let ExpressionKind::Literal(severian_ast::Literal::Measured {
-                        magnitude,
-                        suffix,
-                    }) = deadline.kind
-                    else {
-                        return Err(Diagnostic::new(
-                            "E000112",
-                            "a test timeout requires a duration literal",
-                            Some(mode_span),
-                        ));
-                    };
-                    mode = format!("timeout:{magnitude}{suffix}");
+                let (mut mode, mode_span) = self.identifier("expected a test mode after `with`")?;
+                match mode.as_str() {
+                    "timeout" => {
+                        self.expect(&TokenKind::LeftParen, "expected `(` after `timeout`")?;
+                        let deadline = self.expression(0)?;
+                        self.expect(
+                            &TokenKind::RightParen,
+                            "expected `)` after timeout deadline",
+                        )?;
+                        let ExpressionKind::Literal(severian_ast::Literal::Measured {
+                            magnitude,
+                            suffix,
+                        }) = deadline.kind
+                        else {
+                            return Err(Diagnostic::new(
+                                "E000112",
+                                "a test timeout requires a duration literal",
+                                Some(mode_span),
+                            ));
+                        };
+                        mode = format!("timeout:{magnitude}{suffix}");
+                    }
+                    "repeat" => {
+                        self.expect(&TokenKind::LeftParen, "expected `(` after `repeat`")?;
+                        let count = self.expression(0)?;
+                        self.expect(&TokenKind::RightParen, "expected `)` after repeat count")?;
+                        let ExpressionKind::Literal(severian_ast::Literal::Integer(count)) =
+                            count.kind
+                        else {
+                            return Err(Diagnostic::new(
+                                "E000112",
+                                "a test repeat count requires an integer literal",
+                                Some(mode_span),
+                            ));
+                        };
+                        mode = format!("repeat:{count}");
+                    }
+                    "skip" => {
+                        self.expect(&TokenKind::LeftParen, "expected `(` after `skip`")?;
+                        let reason = self.expression(0)?;
+                        self.expect(&TokenKind::RightParen, "expected `)` after skip reason")?;
+                        let ExpressionKind::Literal(severian_ast::Literal::String(reason)) =
+                            reason.kind
+                        else {
+                            return Err(Diagnostic::new(
+                                "E000112",
+                                "a skipped test requires a string reason",
+                                Some(mode_span),
+                            ));
+                        };
+                        mode = format!("skip:{reason}");
+                    }
+                    _ => {}
                 }
                 modes.push(mode);
                 if self.at_identifier("and") || self.at(&TokenKind::Comma) {

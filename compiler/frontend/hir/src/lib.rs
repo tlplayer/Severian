@@ -101,7 +101,7 @@ pub struct TestDeclaration {
     pub expectations: Vec<TestExpectation>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestMode {
     Property,
     Cases,
@@ -114,10 +114,13 @@ pub enum TestMode {
     Compiler,
     Integration,
     Timeout(u128),
+    Repeat(u32),
+    Skip(String),
+    Parallel,
 }
 
 impl TestMode {
-    pub const fn name(self) -> &'static str {
+    pub const fn name(&self) -> &'static str {
         match self {
             Self::Property => "property",
             Self::Cases => "cases",
@@ -130,6 +133,9 @@ impl TestMode {
             Self::Compiler => "compiler",
             Self::Integration => "integ",
             Self::Timeout(_) => "timeout",
+            Self::Repeat(_) => "repeat",
+            Self::Skip(_) => "skip",
+            Self::Parallel => "parallel",
         }
     }
 }
@@ -170,6 +176,11 @@ pub enum TestExpectation {
     ProfileMemory {
         comparison: DurationComparison,
         threshold_bytes: u128,
+        message: String,
+    },
+    ProfileAllocations {
+        comparison: DurationComparison,
+        threshold: u128,
         message: String,
     },
 }
