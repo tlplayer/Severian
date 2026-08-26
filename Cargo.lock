@@ -159,6 +159,7 @@ dependencies = [
  "severian-bootstrap",
  "severian-compile",
  "severian-diagnostics",
+ "severian-ffi",
  "severian-hir",
  "severian-lexer",
  "severian-lowering",

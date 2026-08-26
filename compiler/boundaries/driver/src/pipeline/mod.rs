@@ -7,7 +7,8 @@ use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -19,6 +20,7 @@ pub enum CompileError {
     Lowering(severian_lowering::LoweringError),
     Mlir(severian_mlir::MlirError),
     Backend(BackendError),
+    NativeLink(String),
 }
 
 /// A compiler representation that can be inspected without producing or
@@ -43,6 +45,7 @@ impl fmt::Display for CompileError {
             Self::Lowering(error) => write!(formatter, "lowering failed: {error}"),
             Self::Mlir(error) => write!(formatter, "MLIR generation failed: {error}"),
             Self::Backend(error) => error.fmt(formatter),
+            Self::NativeLink(error) => formatter.write_str(error),
         }
     }
 }
@@ -169,7 +172,7 @@ impl Compiler {
         output: &Path,
     ) -> Result<Artifact, CompileError> {
         let mir = self.check_source_to_mir(source)?;
-        self.compile_mir(&mir, output)
+        self.compile_mir(&mir, output, None)
     }
 
     fn check_source_to_mir(&self, source: &SourceFile) -> Result<MirModule, CompileError> {
@@ -230,7 +233,7 @@ impl Compiler {
 
     pub fn compile_file(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
         let mir = self.check_file_to_mir(source, CompileMode::Build)?;
-        self.compile_mir(&mir, output)
+        self.compile_mir(&mir, output, Some(source))
     }
 
     /// Run the normal checked compilation pipeline through `stage` and return
@@ -435,6 +438,7 @@ impl Compiler {
         graph: severian_modules::ModuleGraph,
         output_directory: &Path,
     ) -> Result<Vec<CompiledTest>, CompileError> {
+        let native_root = graph.modules.last().map(|module| module.path.clone());
         let compiler_results = self.compiler_test_results(&graph)?;
         let mir = self.check_graph_to_mir(graph, CompileMode::Test)?;
         let mut compiler_results = compiler_results.into_iter();
@@ -479,8 +483,11 @@ impl Compiler {
                     test.function
                 };
                 let selected = select_test(&mir, selected_id);
-                let artifact =
-                    self.compile_mir(&selected, &output_directory.join(format!("test-{index}")))?;
+                let artifact = self.compile_mir(
+                    &selected,
+                    &output_directory.join(format!("test-{index}")),
+                    native_root.as_deref(),
+                )?;
                 Ok(CompiledTest {
                     name: test.name.clone(),
                     modes: test.modes.clone(),
@@ -665,10 +672,19 @@ impl Compiler {
         Ok(merged)
     }
 
-    fn compile_mir(&self, mir: &MirModule, output: &Path) -> Result<Artifact, CompileError> {
+    fn compile_mir(
+        &self,
+        mir: &MirModule,
+        output: &Path,
+        source: Option<&Path>,
+    ) -> Result<Artifact, CompileError> {
+        let linker_arguments = source
+            .map(|source| self.native_linker_arguments(source, output))
+            .transpose()?
+            .unwrap_or_default();
         let plan =
             severian_compile::plan(mir, &self.context.types).map_err(CompileError::Compile)?;
-        if !plan.has_custom_regions() {
+        if linker_arguments.is_empty() && !plan.has_custom_regions() {
             let resumed = plan.resumed_mir();
             let lir = severian_lowering::lower(&resumed, &self.context.types, &self.target)
                 .map_err(CompileError::Lowering)?;
@@ -678,8 +694,113 @@ impl Compiler {
             }
         }
         let mlir = self.compile_plan_to_mlir(&plan)?;
-        severian_backend::emit_mlir_executable(&mlir, &self.target.triple, output)
-            .map_err(CompileError::Backend)
+        severian_backend::emit_mlir_executable_with_linker_arguments(
+            &mlir,
+            &self.target.triple,
+            output,
+            &linker_arguments,
+        )
+        .map_err(CompileError::Backend)
+    }
+
+    fn native_linker_arguments(
+        &self,
+        source: &Path,
+        output: &Path,
+    ) -> Result<Vec<String>, CompileError> {
+        let Some(providers) = NativeProviderSources::discover(source)? else {
+            return Ok(Vec::new());
+        };
+        let mut arguments = providers
+            .c
+            .iter()
+            .map(|source| source.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        for (index, source) in providers.rust.iter().enumerate() {
+            let archive = output.with_extension(format!("ffi-rust-{index}.a"));
+            let rustc = std::env::var("SEVERIAN_RUSTC").unwrap_or_else(|_| "rustc".into());
+            let result = Command::new(&rustc)
+                .arg(source)
+                .args(["--crate-type", "staticlib"])
+                .arg("-o")
+                .arg(&archive)
+                .output()
+                .map_err(|error| {
+                    CompileError::NativeLink(format!(
+                        "could not start Rust FFI compiler `{rustc}`: {error}"
+                    ))
+                })?;
+            if !result.status.success() {
+                return Err(CompileError::NativeLink(format!(
+                    "Rust FFI compilation failed for {}:\n{}",
+                    source.display(),
+                    String::from_utf8_lossy(&result.stderr).trim()
+                )));
+            }
+            arguments.extend([
+                "-Wl,--whole-archive".into(),
+                "-Xlinker".into(),
+                archive.to_string_lossy().into_owned(),
+                "-Wl,--no-whole-archive".into(),
+            ]);
+        }
+
+        if !providers.python.is_empty() {
+            if providers.python.len() != 1 {
+                return Err(CompileError::NativeLink(
+                    "Python FFI currently requires exactly one source module per package".into(),
+                ));
+            }
+            let bridge = output.with_extension("ffi-python.c");
+            let bridge_source = self.python_bridge(source, &providers.python[0])?;
+            std::fs::write(&bridge, bridge_source).map_err(|error| {
+                CompileError::NativeLink(format!(
+                    "could not write Python FFI bridge {}: {error}",
+                    bridge.display()
+                ))
+            })?;
+            arguments.push(bridge.to_string_lossy().into_owned());
+            let python_config = std::env::var("SEVERIAN_PYTHON_CONFIG")
+                .unwrap_or_else(|_| "python3-config".into());
+            for option in [["--embed", "--cflags"], ["--embed", "--ldflags"]] {
+                let result = Command::new(&python_config)
+                    .args(option)
+                    .output()
+                    .map_err(|error| {
+                        CompileError::NativeLink(format!(
+                            "could not start Python FFI configuration tool `{python_config}`: {error}"
+                        ))
+                    })?;
+                if !result.status.success() {
+                    return Err(CompileError::NativeLink(format!(
+                        "Python FFI configuration failed:\n{}",
+                        String::from_utf8_lossy(&result.stderr).trim()
+                    )));
+                }
+                arguments.extend(
+                    String::from_utf8_lossy(&result.stdout)
+                        .split_whitespace()
+                        .map(str::to_owned),
+                );
+            }
+        }
+        Ok(arguments)
+    }
+
+    fn python_bridge(&self, source: &Path, python: &Path) -> Result<String, CompileError> {
+        let source_file = SourceFile::load(source).map_err(|error| {
+            CompileError::NativeLink(format!("could not read {}: {error}", source.display()))
+        })?;
+        let tokens = severian_lexer::scan(&source_file).map_err(CompileError::Diagnostic)?;
+        let ast = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+        let external = severian_xxi::resolve(
+            &ast,
+            &self.context.types,
+            &severian_abi::AbiTarget::derive(&self.target),
+        )
+        .map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        render_python_bridge(python, &external.plans).map_err(CompileError::NativeLink)
     }
 
     fn resolve_modules(
@@ -915,6 +1036,225 @@ fn assertion_location(
         column,
         expression,
     })
+}
+
+#[derive(Debug, Default)]
+struct NativeProviderSources {
+    c: Vec<PathBuf>,
+    rust: Vec<PathBuf>,
+    python: Vec<PathBuf>,
+}
+
+impl NativeProviderSources {
+    fn discover(source: &Path) -> Result<Option<Self>, CompileError> {
+        let Some(root) = source
+            .parent()
+            .and_then(|directory| {
+                directory
+                    .ancestors()
+                    .find(|ancestor| ancestor.join("package.toml").is_file())
+            })
+        else {
+            return Ok(None);
+        };
+        let manifest_path = root.join("package.toml");
+        let manifest = std::fs::read_to_string(&manifest_path).map_err(|error| {
+            CompileError::NativeLink(format!(
+                "could not read FFI manifest {}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let document = manifest.parse::<toml::Value>().map_err(|error| {
+            CompileError::NativeLink(format!(
+                "invalid FFI manifest {}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let mut providers = Self::default();
+        for (language, output) in [
+            ("c", &mut providers.c),
+            ("rust", &mut providers.rust),
+            ("python", &mut providers.python),
+        ] {
+            let Some(sources) = document
+                .get("xxi")
+                .and_then(|xxi| xxi.get(language))
+                .and_then(|provider| provider.get("sources"))
+                .and_then(toml::Value::as_array)
+            else {
+                continue;
+            };
+            for declared in sources {
+                let declared = declared.as_str().ok_or_else(|| {
+                    CompileError::NativeLink(format!(
+                        "[xxi.{language}].sources entries must be paths"
+                    ))
+                })?;
+                let path = root.join(declared);
+                if !path.is_file() {
+                    return Err(CompileError::NativeLink(format!(
+                        "FFI source {} does not exist",
+                        path.display()
+                    )));
+                }
+                output.push(path);
+            }
+        }
+        if providers.c.is_empty() && providers.rust.is_empty() && providers.python.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(providers))
+        }
+    }
+}
+
+fn render_python_bridge(
+    source: &Path,
+    plans: &[severian_ffi::BoundaryPlan],
+) -> Result<String, String> {
+    use severian_abi::{AbiType, ScalarType};
+    use severian_ffi::Conversion;
+
+    let directory = source
+        .parent()
+        .ok_or_else(|| format!("Python FFI source {} has no parent", source.display()))?;
+    let module = source
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("Python FFI source {} has no module name", source.display()))?;
+    let mut output = format!(
+        "#include <Python.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\nstatic PyObject *sev_python_module;\n\nstatic void sev_python_fail(void) {{\n    PyErr_Print();\n    abort();\n}}\n\nstatic void sev_python_initialize(void) {{\n    if (sev_python_module != NULL) return;\n    if (!Py_IsInitialized()) Py_Initialize();\n    PyObject *path = PyUnicode_FromString(\"{}\");\n    if (path == NULL || PyList_Insert(PySys_GetObject(\"path\"), 0, path) != 0) sev_python_fail();\n    Py_DECREF(path);\n    sev_python_module = PyImport_ImportModule(\"{}\");\n    if (sev_python_module == NULL) sev_python_fail();\n}}\n",
+        c_string_contents(&directory.to_string_lossy()),
+        c_string_contents(module),
+    );
+    for plan in plans {
+        let symbol = plan.symbol.name.as_str();
+        if !c_identifier(symbol) {
+            return Err(format!(
+                "Python FFI symbol `{symbol}` cannot be represented as a native C symbol"
+            ));
+        }
+        let result_type = python_c_type(&plan.result_type, &plan.result_conversion)?;
+        let parameters = plan
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(index, parameter)| {
+                python_c_type(&parameter.abi_type, &parameter.conversion)
+                    .map(|ty| format!("{ty} argument_{index}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        output.push_str(&format!(
+            "\n{result_type} {symbol}({}) {{\n    sev_python_initialize();\n    PyObject *callable = PyObject_GetAttrString(sev_python_module, \"{}\");\n    if (callable == NULL) sev_python_fail();\n    PyObject *arguments = PyTuple_New({});\n    if (arguments == NULL) sev_python_fail();\n",
+            if parameters.is_empty() { "void" } else { &parameters },
+            c_string_contents(symbol),
+            plan.parameters.len(),
+        ));
+        for (index, parameter) in plan.parameters.iter().enumerate() {
+            let conversion = match (&parameter.conversion, &parameter.abi_type) {
+                (Conversion::Utf8View, _) => {
+                    format!("PyUnicode_FromString(argument_{index})")
+                }
+                (_, AbiType::Scalar(ScalarType::Integer { signed: true, .. })) => {
+                    format!("PyLong_FromLongLong((long long)argument_{index})")
+                }
+                (_, AbiType::Scalar(ScalarType::Integer { signed: false, .. })) => {
+                    format!("PyLong_FromUnsignedLongLong((unsigned long long)argument_{index})")
+                }
+                (_, AbiType::Scalar(ScalarType::Float { .. })) => {
+                    format!("PyFloat_FromDouble((double)argument_{index})")
+                }
+                (_, AbiType::Scalar(ScalarType::Boolean)) => {
+                    format!("PyBool_FromLong(argument_{index} != 0)")
+                }
+                _ => {
+                    return Err(format!(
+                        "Python FFI parameter `{}` uses an unsupported ABI conversion",
+                        parameter.name
+                    ))
+                }
+            };
+            output.push_str(&format!(
+                "    PyObject *python_{index} = {conversion};\n    if (python_{index} == NULL) sev_python_fail();\n    PyTuple_SET_ITEM(arguments, {index}, python_{index});\n"
+            ));
+        }
+        output.push_str(
+            "    PyObject *result = PyObject_CallObject(callable, arguments);\n    Py_DECREF(arguments);\n    Py_DECREF(callable);\n    if (result == NULL) sev_python_fail();\n",
+        );
+        match (&plan.result_conversion, &plan.result_type) {
+            (_, AbiType::Void) => output.push_str("    Py_DECREF(result);\n    return;\n"),
+            (Conversion::Utf8View, _) => output.push_str(
+                "    const char *text = PyUnicode_AsUTF8(result);\n    if (text == NULL) sev_python_fail();\n    size_t length = strlen(text);\n    char *copy = malloc(length + 1);\n    if (copy == NULL) abort();\n    memcpy(copy, text, length + 1);\n    Py_DECREF(result);\n    return copy;\n",
+            ),
+            (_, AbiType::Scalar(ScalarType::Integer { signed: true, .. })) => output.push_str(
+                "    long long value = PyLong_AsLongLong(result);\n    if (value == -1 && PyErr_Occurred()) sev_python_fail();\n    Py_DECREF(result);\n    return value;\n",
+            ),
+            (_, AbiType::Scalar(ScalarType::Integer { signed: false, .. })) => output.push_str(
+                "    unsigned long long value = PyLong_AsUnsignedLongLong(result);\n    if (value == (unsigned long long)-1 && PyErr_Occurred()) sev_python_fail();\n    Py_DECREF(result);\n    return value;\n",
+            ),
+            (_, AbiType::Scalar(ScalarType::Float { .. })) => output.push_str(
+                "    double value = PyFloat_AsDouble(result);\n    if (value == -1.0 && PyErr_Occurred()) sev_python_fail();\n    Py_DECREF(result);\n    return value;\n",
+            ),
+            (_, AbiType::Scalar(ScalarType::Boolean)) => output.push_str(
+                "    int value = PyObject_IsTrue(result);\n    if (value < 0) sev_python_fail();\n    Py_DECREF(result);\n    return value != 0;\n",
+            ),
+            _ => {
+                return Err(format!(
+                    "Python FFI symbol `{symbol}` uses an unsupported result conversion"
+                ))
+            }
+        }
+        output.push_str("}\n");
+    }
+    Ok(output)
+}
+
+fn python_c_type(
+    ty: &severian_abi::AbiType,
+    conversion: &severian_ffi::Conversion,
+) -> Result<&'static str, String> {
+    use severian_abi::{AbiFloatFormat, AbiType, ScalarType};
+    if matches!(conversion, severian_ffi::Conversion::Utf8View) {
+        return Ok("const char *");
+    }
+    match ty {
+        AbiType::Void => Ok("void"),
+        AbiType::Scalar(ScalarType::Integer { bits: 8, signed: true }) => Ok("int8_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 16, signed: true }) => Ok("int16_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 32, signed: true }) => Ok("int32_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 64, signed: true }) => Ok("int64_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 8, signed: false }) => Ok("uint8_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 16, signed: false }) => Ok("uint16_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 32, signed: false }) => Ok("uint32_t"),
+        AbiType::Scalar(ScalarType::Integer { bits: 64, signed: false }) => Ok("uint64_t"),
+        AbiType::Scalar(ScalarType::Float { format: AbiFloatFormat::Ieee(32) }) => Ok("float"),
+        AbiType::Scalar(ScalarType::Float { format: AbiFloatFormat::Ieee(64) }) => Ok("double"),
+        AbiType::Scalar(ScalarType::Boolean) => Ok("_Bool"),
+        _ => Err("Python FFI currently supports scalar and string ABI values".into()),
+    }
+}
+
+fn c_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
+fn c_string_contents(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| match character {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect(),
+            '\n' => "\\n".chars().collect(),
+            '\r' => "\\r".chars().collect(),
+            '\t' => "\\t".chars().collect(),
+            character => vec![character],
+        })
+        .collect()
 }
 
 fn module_name(path: &Path) -> String {
@@ -1294,5 +1634,31 @@ mod tests {
         assert_eq!(selected.functions.len(), 1);
         assert_eq!(selected.functions[0].id, severian_mir::FunctionId(0));
         assert!(selected.tests.is_empty());
+    }
+
+    #[test]
+    fn native_provider_sources_are_resolved_from_the_package_manifest() {
+        let root = temporary_package();
+        let source_directory = root.join("src");
+        std::fs::create_dir_all(&source_directory).unwrap();
+        let source = source_directory.join("main.sev");
+        std::fs::write(&source, "def main():\n    pass\n").unwrap();
+        std::fs::write(root.join("native.c"), "").unwrap();
+        std::fs::write(root.join("native.rs"), "").unwrap();
+        std::fs::write(root.join("native.py"), "").unwrap();
+        std::fs::write(
+            root.join("package.toml"),
+            "[package]\nname = \"native-providers\"\nversion = \"0.1.0\"\n\n[xxi.c]\nsources = [\"native.c\"]\n\n[xxi.rust]\nsources = [\"native.rs\"]\n\n[xxi.python]\nsources = [\"native.py\"]\n",
+        )
+        .unwrap();
+
+        let providers = NativeProviderSources::discover(&source)
+            .unwrap()
+            .expect("native provider declarations");
+        assert_eq!(providers.c, [root.join("native.c")]);
+        assert_eq!(providers.rust, [root.join("native.rs")]);
+        assert_eq!(providers.python, [root.join("native.py")]);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -696,6 +696,15 @@ pub fn emit_mlir_executable(
     target_triple: &str,
     output: &Path,
 ) -> Result<Artifact, BackendError> {
+    emit_mlir_executable_with_linker_arguments(module, target_triple, output, &[])
+}
+
+pub fn emit_mlir_executable_with_linker_arguments(
+    module: &str,
+    target_triple: &str,
+    output: &Path,
+    linker_arguments: &[String],
+) -> Result<Artifact, BackendError> {
     let lowered = run_tool(
         "mlir-opt",
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
@@ -763,6 +772,7 @@ pub fn emit_mlir_executable(
             "-lmlir_async_runtime".into(),
         ]);
     }
+    clang_arguments.extend(linker_arguments.iter().cloned());
     clang_arguments.extend(["-lm".into(), "-o".into(), output_path]);
     let clang_arguments = clang_arguments
         .iter()

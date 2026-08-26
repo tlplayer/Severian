@@ -16,6 +16,7 @@ severian-backend = { path = "../backend" }
 severian-bootstrap = { path = "../../bootstrap" }
 severian-compile = { path = "../../compile" }
 severian-diagnostics = { path = "../../diagnostics" }
+severian-ffi = { path = "../ffi" }
 severian-lexer = { path = "../../frontend/lexer" }
 severian-hir = { path = "../../frontend/hir" }
 severian-modules = { path = "../../frontend/modules" }
