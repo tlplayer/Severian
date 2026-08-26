@@ -634,6 +634,11 @@ fn render_cfg_operation(
                     result.0,
                     string_symbol(*result)
                 ));
+            } else if matches!(value, Constant::None) && mlir_type(ty)? == "!llvm.ptr" {
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.mlir.zero : !llvm.ptr\n",
+                    result.0
+                ));
             } else {
                 let literal = match value {
                     Constant::Integer(value) => value.clone(),
@@ -717,6 +722,13 @@ fn render_cfg_operation(
                     mlir_type(ty)?
                 ));
             }
+        }
+        Operation::AddressOf { place, result } => {
+            output.push_str(&format!(
+                "{indentation}%v{} = builtin.unrealized_conversion_cast {} : !llvm.ptr to !llvm.ptr\n",
+                result.0,
+                cfg_place_address(place)?
+            ));
         }
         Operation::Store { place, value } => {
             let ty = value_type(module, *value)?;
@@ -1520,6 +1532,13 @@ fn render_block(
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
                 let spelling = mlir_type(ty)?;
+                if matches!(value, Constant::None) && spelling == "!llvm.ptr" {
+                    output.push_str(&format!(
+                        "{indentation}%v{} = llvm.mlir.zero : !llvm.ptr\n",
+                        result.0
+                    ));
+                    continue;
+                }
                 let literal = match value {
                     Constant::Integer(value) => value.clone(),
                     Constant::Float(value) => mlir_float_literal(value),
@@ -1653,6 +1672,13 @@ fn render_block(
                     result.0,
                     cfg_place_address(place)?,
                     mlir_type(ty)?
+                ));
+            }
+            Operation::AddressOf { place, result } => {
+                output.push_str(&format!(
+                    "{indentation}%v{} = builtin.unrealized_conversion_cast {} : !llvm.ptr to !llvm.ptr\n",
+                    result.0,
+                    cfg_place_address(place)?
                 ));
             }
             Operation::Store { place, value } => {

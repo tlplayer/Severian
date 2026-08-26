@@ -475,6 +475,9 @@ fn inspect_rvalue(
                 errors,
             );
         }
+        Rvalue::AddressOf(place) => {
+            inspect_operand(&Operand::Copy(place.clone()), state, errors)
+        }
         Rvalue::Aggregate { fields, .. } => {
             for field in fields {
                 inspect_operand(field, state, errors);
@@ -688,7 +691,9 @@ fn use_rvalue(value: &Rvalue, live: &mut BTreeSet<LocalId>) {
             use_operand(left, live);
             use_operand(right, live);
         }
-        Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) => use_place(place, live),
+        Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) | Rvalue::AddressOf(place) => {
+            use_place(place, live)
+        }
         Rvalue::Aggregate { fields, .. } => {
             for field in fields {
                 use_operand(field, live);

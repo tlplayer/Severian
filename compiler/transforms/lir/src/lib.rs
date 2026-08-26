@@ -228,6 +228,10 @@ pub enum Operation {
         place: Place,
         result: ValueId,
     },
+    AddressOf {
+        place: Place,
+        result: ValueId,
+    },
     Store {
         place: Place,
         value: ValueId,

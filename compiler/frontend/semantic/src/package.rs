@@ -1453,7 +1453,9 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
 
 fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
     match &mut expression.kind {
-        ExpressionKind::Binding(binding) => binding.0 += offset,
+        ExpressionKind::Binding(binding) | ExpressionKind::AddressOf(binding) => {
+            binding.0 += offset
+        }
         ExpressionKind::Aggregate { fields, .. } => {
             for field in fields {
                 remap_expression_bindings(field, offset);

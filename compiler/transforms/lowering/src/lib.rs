@@ -362,6 +362,14 @@ impl CfgLowering<'_> {
             | severian_mir::Rvalue::BorrowExclusive(place) => {
                 self.load_place(body, place, operations)
             }
+            severian_mir::Rvalue::AddressOf(place) => {
+                let result = self.new_value(LoweredType::Bytes);
+                operations.push(LirOperation::AddressOf {
+                    place: self.lower_place(place),
+                    result,
+                });
+                Ok(result)
+            }
             severian_mir::Rvalue::Unary { operator, operand } => {
                 let operand = self.lower_operand(body, operand, operations)?;
                 let result = self.new_value(self.value_type(operand));

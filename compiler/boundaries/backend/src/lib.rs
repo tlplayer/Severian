@@ -292,7 +292,7 @@ fn render_block(
                     "aggregate classes require the MLIR backend".into(),
                 ));
             }
-            Operation::Load { .. } | Operation::Store { .. } => {
+            Operation::Load { .. } | Operation::AddressOf { .. } | Operation::Store { .. } => {
                 return Err(BackendError::UnsupportedOperation(
                     "place-based LIR requires the CFG backend".into(),
                 ));

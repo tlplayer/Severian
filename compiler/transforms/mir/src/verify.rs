@@ -427,7 +427,7 @@ fn verify_rvalue(
         | Rvalue::Await { task: operand } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
         Rvalue::Aggregate { fields, .. } => fields.iter().collect(),
-        Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) => {
+        Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) | Rvalue::AddressOf(place) => {
             verify_place(body, globals, place)?;
             if let Some(local) = place.local_id().filter(|local| !state.contains(local)) {
                 return Err(VerifyError::UseBeforeDefinition {

@@ -116,6 +116,7 @@ pub enum Rvalue {
     },
     BorrowShared(Place),
     BorrowExclusive(Place),
+    AddressOf(Place),
     Convert {
         operand: Operand,
         conversion: Conversion,
@@ -1020,6 +1021,13 @@ impl BodyBuilder {
                     } else {
                         Rvalue::BorrowShared(source)
                     },
+                ));
+            }
+            severian_hir::ExpressionKind::AddressOf(binding) => {
+                let source = self.bindings[binding].clone();
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::AddressOf(source),
                 ));
             }
             severian_hir::ExpressionKind::Move(operand) => {

@@ -180,6 +180,12 @@ fn validate_expression(
             "value used before it is available",
             Some(expression.span),
         )),
+        ExpressionKind::AddressOf(id) if declared.contains(id) => Ok(()),
+        ExpressionKind::AddressOf(_) => Err(Diagnostic::new(
+            "E000301",
+            "value addressed before it is available",
+            Some(expression.span),
+        )),
         ExpressionKind::Call { arguments, .. } => {
             for argument in arguments {
                 validate_expression(argument, declared)?;

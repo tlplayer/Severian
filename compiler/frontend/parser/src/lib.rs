@@ -822,6 +822,47 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_typed_mutable_pointer_casts_and_empty_dereferences() {
+        let source = SourceFile::virtual_source(
+            "pointer-cast.sev",
+            "test:\n    value: u32 := 42\n    unsafe:\n        pointer: *[u32] := &value\n        bytes: *[u8] := [*[u8]](pointer)\n        assert(bytes[] == 42)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Binding(value) = &test.body[0] else {
+            panic!("expected typed mutable value")
+        };
+        assert!(value.mutable);
+        let severian_ast::Statement::Unsafe { body, .. } = &test.body[1] else {
+            panic!("expected unsafe block")
+        };
+        let severian_ast::Statement::Binding(bytes) = &body[1] else {
+            panic!("expected byte pointer binding")
+        };
+        assert!(bytes.mutable);
+        assert!(matches!(
+            bytes.value.kind,
+            severian_ast::ExpressionKind::Call { .. }
+        ));
+        let severian_ast::Statement::Assert { condition, .. } = &body[2] else {
+            panic!("expected assertion")
+        };
+        let severian_ast::ExpressionKind::Binary { left, .. } = &condition.kind else {
+            panic!("expected comparison")
+        };
+        let severian_ast::ExpressionKind::Index { index, .. } = &left.kind else {
+            panic!("expected empty pointer dereference")
+        };
+        assert!(matches!(
+            index.kind,
+            severian_ast::ExpressionKind::Literal(severian_ast::Literal::Integer(ref value))
+                if value == "0"
+        ));
+    }
+
+    #[test]
     fn parses_profile_test_timing_contracts() {
         let source = SourceFile::virtual_source(
             "profile.sev",

@@ -62,6 +62,7 @@ pub enum ExpressionKind {
         operand: Box<Expression>,
         exclusive: bool,
     },
+    AddressOf(BindingId),
     Move(Box<Expression>),
     Unary {
         operator: UnaryOperator,

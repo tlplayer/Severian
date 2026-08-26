@@ -2364,8 +2364,13 @@ impl Parser<'_> {
                 });
             }
         }
-        let preserve_error = !inferred && self.take(&TokenKind::QuestionEqual).is_some();
-        if !inferred && !preserve_error {
+        let typed_mutable = !inferred
+            && annotation.is_some()
+            && self.take(&TokenKind::ColonEqual).is_some();
+        let preserve_error = !inferred
+            && !typed_mutable
+            && self.take(&TokenKind::QuestionEqual).is_some();
+        if !inferred && !typed_mutable && !preserve_error {
             self.expect(
                 &TokenKind::Equal,
                 "expected `=`, `?=`, or `:=` after binding name",
@@ -2377,7 +2382,7 @@ impl Parser<'_> {
             annotation,
             span: Span::new(name_span.source, name_span.start, value.span.end),
             value,
-            mutable: inferred,
+            mutable: inferred || typed_mutable,
             update: false,
             preserve_error,
         })
@@ -2975,8 +2980,13 @@ impl Parser<'_> {
                     },
                     span,
                 };
-            } else if self.take(&TokenKind::LeftBracket).is_some() {
-                let start = if self.at(&TokenKind::Colon) {
+            } else if let Some(open) = self.take(&TokenKind::LeftBracket) {
+                let start = if self.at(&TokenKind::RightBracket) {
+                    Some(Box::new(Expression {
+                        kind: ExpressionKind::Literal(Literal::Integer("0".into())),
+                        span: open.span,
+                    }))
+                } else if self.at(&TokenKind::Colon) {
                     None
                 } else {
                     Some(Box::new(self.expression(0)?))
@@ -3333,6 +3343,49 @@ impl Parser<'_> {
             }
             TokenKind::LeftBracket => {
                 self.line_breaks();
+                if self.at(&TokenKind::Star) {
+                    let target = self.type_annotation()?;
+                    self.expect(
+                        &TokenKind::RightBracket,
+                        "expected `]` after pointer cast type",
+                    )?;
+                    self.expect(
+                        &TokenKind::LeftParen,
+                        "expected `(` after pointer cast type",
+                    )?;
+                    let value = self.expression(0)?;
+                    let end = self
+                        .expect(
+                            &TokenKind::RightParen,
+                            "expected `)` after pointer cast value",
+                        )?
+                        .span
+                        .end;
+                    let value_span = value.span;
+                    let callee = Expression {
+                        kind: ExpressionKind::TypeApplication {
+                            callee: Box::new(Expression {
+                                kind: ExpressionKind::Name("__pointer_cast".into()),
+                                span: token.span,
+                            }),
+                            arguments: vec![target],
+                        },
+                        span: Span::new(token.span.source, token.span.start, value_span.start),
+                    };
+                    return Ok(Expression {
+                        kind: ExpressionKind::Call {
+                            callee: Box::new(callee),
+                            arguments: vec![severian_ast::CallArgument {
+                                name: None,
+                                spread: false,
+                                value,
+                                expected_error: None,
+                                span: value_span,
+                            }],
+                        },
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
                 if self.at(&TokenKind::RightBracket) {
                     let end = self.next().span.end;
                     return Ok(Expression {

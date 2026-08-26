@@ -2782,7 +2782,7 @@ impl Analyzer<'_> {
                         ));
                     }
                     let value = self.expression(value, Some(element))?;
-                    let suffix = self.list_runtime_suffix(element, *span)?;
+                    let suffix = self.pointer_runtime_suffix(element, *span)?;
                     return Ok(Statement::Expression(self.runtime_call(
                         &format!("__sev_pointer_set_{suffix}"),
                         &[collection.type_id, index.type_id, element],
@@ -4658,6 +4658,13 @@ impl Analyzer<'_> {
             ExpressionKind::Literal(_) | ExpressionKind::Binding(_) | ExpressionKind::Function(_) => {
                 ParameterEffect::Shared
             }
+            ExpressionKind::AddressOf(binding) => {
+                if *binding == parameter {
+                    ParameterEffect::Exclusive
+                } else {
+                    ParameterEffect::Shared
+                }
+            }
             ExpressionKind::Aggregate { fields, .. } => fields.iter().fold(
                 ParameterEffect::Shared,
                 |effect, field| effect.max(self.expression_parameter_effect(field, parameter)),
@@ -5118,6 +5125,15 @@ impl Analyzer<'_> {
                 if matches!(value, AstLiteral::None)
                     && expected.is_some_and(|expected| self.optional_types.contains(&expected))
                 {
+                    if expected.is_some_and(|expected| self.pointer_elements.contains_key(&expected))
+                    {
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: expected.expect("optional pointer expectation is present"),
+                            kind: ExpressionKind::Literal(LiteralValue::None),
+                            span: ast.span,
+                        });
+                    }
                     return self.default_expression(expected.unwrap(), ast.span);
                 }
                 if let AstLiteral::Measured { magnitude, suffix } = value {
@@ -5481,7 +5497,7 @@ impl Analyzer<'_> {
                             Some(index.span),
                         ));
                     }
-                    let suffix = self.list_runtime_suffix(element, ast.span)?;
+                    let suffix = self.pointer_runtime_suffix(element, ast.span)?;
                     return Ok(self.runtime_call(
                         &format!("__sev_pointer_index_{suffix}"),
                         &[object.type_id, index.type_id],
@@ -5809,6 +5825,67 @@ impl Analyzer<'_> {
                                 vec![count],
                                 ast.span,
                             ));
+                        }
+                        if name == "__pointer_cast" {
+                            if self.unsafe_depth == 0 {
+                                return Err(Diagnostic::new(
+                                    "E000219",
+                                    "raw pointer casts require an `unsafe` scope",
+                                    Some(ast.span),
+                                ));
+                            }
+                            let ([target], [argument]) =
+                                (type_arguments.as_slice(), arguments.as_slice())
+                            else {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    "a pointer cast expects one pointer type and one value",
+                                    Some(ast.span),
+                                ));
+                            };
+                            if argument.name.is_some() || argument.spread {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    "the pointer cast value must be positional",
+                                    Some(argument.span),
+                                ));
+                            }
+                            let target = self.resolve_source_type(target)?;
+                            if !self.pointer_elements.contains_key(&target) {
+                                return Err(Diagnostic::new(
+                                    "E000204",
+                                    "a pointer cast target must be a raw pointer type",
+                                    Some(callee.span),
+                                ));
+                            }
+                            let operand = self.expression(&argument.value, None)?;
+                            if !self.pointer_elements.contains_key(&operand.type_id) {
+                                return Err(Diagnostic::new(
+                                    "E000211",
+                                    "a raw pointer cast requires a raw pointer value",
+                                    Some(argument.value.span),
+                                ));
+                            }
+                            if expected.is_some_and(|expected| expected != target) {
+                                return Err(semantic_error(
+                                    "pointer cast does not satisfy the expected type".into(),
+                                    ast.span,
+                                ));
+                            }
+                            let from = operand.type_id;
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: target,
+                                kind: ExpressionKind::Convert {
+                                    operand: Box::new(operand),
+                                    conversion: severian_universal::Conversion {
+                                        from,
+                                        to: target,
+                                        kind: severian_universal::ConversionKind::Identity,
+                                    },
+                                },
+                                span: ast.span,
+                            });
                         }
                         if matches!(name.as_str(), "bytes" | "alignment" | "offset") {
                             let [queried] = type_arguments.as_slice() else {
@@ -6936,10 +7013,32 @@ impl Analyzer<'_> {
                             Some(ast.span),
                         ));
                     }
+                    if let AstExpressionKind::Name(name) = &operand.kind {
+                        let Some((binding, _, element)) = self.names.get(name).copied() else {
+                            return Err(Diagnostic::new(
+                                "E000201",
+                                format!("unknown binding `{name}`"),
+                                Some(operand.span),
+                            ));
+                        };
+                        let pointer = self.instantiate_pointer_type(element);
+                        if expected.is_some_and(|expected| expected != pointer) {
+                            return Err(semantic_error(
+                                "raw address does not satisfy the expected pointer type".into(),
+                                ast.span,
+                            ));
+                        }
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: pointer,
+                            kind: ExpressionKind::AddressOf(binding),
+                            span: ast.span,
+                        });
+                    }
                     let AstExpressionKind::Index { object, index } = &operand.kind else {
                         return Err(Diagnostic::new(
                             "E000211",
-                            "raw address-of currently requires an indexed list element",
+                            "raw address-of requires a binding or indexed list element",
                             Some(operand.span),
                         ));
                     };
@@ -7268,6 +7367,38 @@ impl Analyzer<'_> {
                         ast.span,
                     ));
                 }
+                if matches!(operator, AstBinaryOperator::Add | AstBinaryOperator::Subtract) {
+                    let resolved_left = self.expression(left, None)?;
+                    if let Some(element) = self.pointer_elements.get(&resolved_left.type_id).copied()
+                    {
+                        if self.unsafe_depth == 0 {
+                            return Err(Diagnostic::new(
+                                "E000219",
+                                "raw pointer arithmetic requires an `unsafe` scope",
+                                Some(ast.span),
+                            ));
+                        }
+                        let integer = self
+                            .types
+                            .resolve_name("int")
+                            .expect("bootstrap defines int");
+                        let resolved_right = self.expression(right, Some(integer))?;
+                        let suffix = self.pointer_runtime_suffix(element, ast.span)?;
+                        let operation = if *operator == AstBinaryOperator::Add {
+                            "add"
+                        } else {
+                            "subtract"
+                        };
+                        let pointer = resolved_left.type_id;
+                        return Ok(self.runtime_call(
+                            &format!("__sev_pointer_{operation}_{suffix}"),
+                            &[pointer, integer],
+                            pointer,
+                            vec![resolved_left, resolved_right],
+                            ast.span,
+                        ));
+                    }
+                }
                 if *operator == AstBinaryOperator::Power {
                     let left = self.expression(left, None)?;
                     let name = self
@@ -7396,6 +7527,33 @@ impl Analyzer<'_> {
                                 });
                             }
                             return Ok(successful_equal);
+                        }
+                        if self.pointer_elements.contains_key(&resolved_left.type_id) {
+                            let pointer = resolved_left.type_id;
+                            let resolved_right = self.expression(right, Some(pointer))?;
+                            let boolean = self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool");
+                            let comparison = self.runtime_call(
+                                "__sev_pointer_equal",
+                                &[pointer, pointer],
+                                boolean,
+                                vec![resolved_left, resolved_right],
+                                ast.span,
+                            );
+                            if *operator == AstBinaryOperator::NotEqual {
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Unary {
+                                        operator: UnaryOperator::Not,
+                                        operand: Box::new(comparison),
+                                    },
+                                    span: ast.span,
+                                });
+                            }
+                            return Ok(comparison);
                         }
                         if let Some(elements) =
                             self.tuple_elements.get(&resolved_left.type_id).cloned()
@@ -9872,6 +10030,27 @@ impl Analyzer<'_> {
             _ => Err(Diagnostic::new(
                 "E000211",
                 "native list lowering does not yet support this element representation",
+                Some(span),
+            )),
+        }
+    }
+
+    fn pointer_runtime_suffix(
+        &self,
+        element: TypeId,
+        span: severian_source::Span,
+    ) -> Result<&'static str, Diagnostic> {
+        let name = self
+            .types
+            .definition(element)
+            .map(|definition| definition.name.as_str());
+        match name {
+            Some("int") | Some("i64") | Some("usize") => Ok("i64"),
+            Some("u32") => Ok("u32"),
+            Some("u8") => Ok("u8"),
+            _ => Err(Diagnostic::new(
+                "E000211",
+                "raw pointer operations do not yet support this element representation",
                 Some(span),
             )),
         }
@@ -15081,7 +15260,9 @@ fn expression_is_binding(expression: &Expression, binding: BindingId) -> bool {
 
 fn expression_contains_binding(expression: &Expression, binding: BindingId) -> bool {
     match &expression.kind {
-        ExpressionKind::Binding(candidate) => *candidate == binding,
+        ExpressionKind::Binding(candidate) | ExpressionKind::AddressOf(candidate) => {
+            *candidate == binding
+        }
         ExpressionKind::Literal(_) | ExpressionKind::Function(_) => false,
         ExpressionKind::Aggregate { fields, .. } => fields
             .iter()
@@ -15923,6 +16104,14 @@ mod tests {
         let error = analyze(&ast, &context.types).unwrap_err();
         assert_eq!(error.code, "E000219");
         assert!(error.message.contains("raw allocation"));
+    }
+
+    #[test]
+    fn raw_pointer_bindings_arithmetic_casts_and_nulls_reach_mir() {
+        let (program, _) = analyze_source(
+            "def main():\n    value: u32 := 42\n    unsafe:\n        pointer: *[u32] := &value\n        bytes: *[u8] := [*[u8]](pointer)\n        assert(bytes[] == 42)\n        nullable: *[u32] | None := None\n        assert(nullable == None)\n        memory := allocate[int](2)\n        memory[0] = 1\n        memory[1] = 2\n        assert((memory + 1)[] == 2)\n        free(memory)\n",
+        );
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]
