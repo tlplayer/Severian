@@ -1,0 +1,7 @@
+def positive(value: int) -> bool:
+    return value > 0
+
+
+test:
+    assert(positive(10))
+    assert(!positive(0))

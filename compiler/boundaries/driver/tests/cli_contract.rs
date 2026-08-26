@@ -26,6 +26,190 @@ fn repository_root() -> PathBuf {
         .unwrap()
 }
 
+fn mutation_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/mutation")
+        .join(name)
+}
+
+#[test]
+fn mutation_testing_kills_a_file_mutant_and_leaves_normal_tests_unchanged() {
+    let root = temporary("mutation-killed-file");
+    let source = root.join("killed.sev");
+    let program = "def enabled() -> bool:\n    return true\n\ntest:\n    assert(enabled())\n";
+    fs::write(&source, program).unwrap();
+
+    let mutation = sev()
+        .args(["test"])
+        .arg(&source)
+        .arg("--mutate")
+        .output()
+        .unwrap();
+    assert!(
+        mutation.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&mutation.stdout),
+        String::from_utf8_lossy(&mutation.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&mutation.stdout);
+    assert!(stdout.contains("M001 KILLED"), "{stdout}");
+    assert!(stdout.contains("true -> false"), "{stdout}");
+    assert!(stdout.contains("mutation score: 100.0%"), "{stdout}");
+    assert_eq!(fs::read_to_string(&source).unwrap(), program);
+
+    let normal = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(normal.status.success());
+    assert!(!String::from_utf8_lossy(&normal.stdout).contains("mutation testing"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn surviving_mutants_fail_and_have_deterministic_ids() {
+    let source = mutation_fixture("positive_survives.sev");
+
+    let first = sev()
+        .args(["test"])
+        .arg(&source)
+        .arg("--mutate")
+        .output()
+        .unwrap();
+    let second = sev()
+        .args(["test", "--mutate"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(!first.status.success());
+    assert!(!second.status.success());
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(first_stdout.contains("M001 SURVIVED"), "{first_stdout}");
+    assert!(first_stdout.contains("> -> >="), "{first_stdout}");
+    assert!(String::from_utf8_lossy(&first.stderr).contains("1 mutation survived"));
+    let first_line = first_stdout
+        .lines()
+        .find(|line| line.starts_with('M'))
+        .unwrap();
+    let second_line = second_stdout
+        .lines()
+        .find(|line| line.starts_with('M'))
+        .unwrap();
+    assert_eq!(first_line, second_line);
+
+    let killed = sev()
+        .args(["test", "--mutate"])
+        .arg(mutation_fixture("positive_killed.sev"))
+        .output()
+        .unwrap();
+    assert!(
+        killed.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&killed.stdout),
+        String::from_utf8_lossy(&killed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&killed.stdout).contains("M001 KILLED"));
+}
+
+#[test]
+fn baseline_failure_aborts_mutation_execution() {
+    let root = temporary("mutation-baseline-failure");
+    let source = root.join("failing.sev");
+    fs::write(&source, "test:\n    assert(false)\n").unwrap();
+    let output = sev()
+        .args(["test", "--mutate"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("mutation testing"));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("baseline tests failed; mutation testing was not run"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn mutation_testing_supports_package_and_default_targets() {
+    let package = temporary("mutation-package");
+    fs::create_dir(package.join("src")).unwrap();
+    fs::write(
+        package.join("package.toml"),
+        "[package]\nname = \"mutation-package\"\n\n[[bin]]\nname = \"mutation-package\"\npath = \"src/main.sev\"\n",
+    )
+    .unwrap();
+    fs::write(
+        package.join("src/main.sev"),
+        "def enabled() -> bool:\n    return true\n\ntest:\n    assert(enabled())\n",
+    )
+    .unwrap();
+
+    let explicit = sev()
+        .args(["test"])
+        .arg(&package)
+        .arg("--mutate")
+        .output()
+        .unwrap();
+    assert!(
+        explicit.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&explicit.stdout),
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+    let default = sev()
+        .current_dir(&package)
+        .args(["test", "--mutate"])
+        .output()
+        .unwrap();
+    assert!(
+        default.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&default.stdout),
+        String::from_utf8_lossy(&default.stderr)
+    );
+    fs::remove_dir_all(package).unwrap();
+}
+
+#[test]
+fn mutation_testing_preserves_compile_and_timeout_classifications() {
+    let root = temporary("mutation-classification");
+    let compile_killed = root.join("compile-killed.sev");
+    fs::write(
+        &compile_killed,
+        "def text() -> string:\n    return \"a\" + \"b\"\n\ntest:\n    assert(text() == \"ab\")\n",
+    )
+    .unwrap();
+    let compile = sev()
+        .args(["test", "--mutate"])
+        .arg(&compile_killed)
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    assert!(String::from_utf8_lossy(&compile.stdout).contains("M001 COMPILE"));
+
+    let timeout_killed = root.join("timeout-killed.sev");
+    fs::write(
+        &timeout_killed,
+        "def completes() -> bool:\n    value := 0\n    while value < 1:\n        value = 1\n    return true\n\ntest with timeout(20ms):\n    assert(completes())\n",
+    )
+    .unwrap();
+    let timeout = sev()
+        .args(["test", "--mutate"])
+        .arg(&timeout_killed)
+        .output()
+        .unwrap();
+    assert!(
+        timeout.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&timeout.stdout),
+        String::from_utf8_lossy(&timeout.stderr)
+    );
+    assert!(String::from_utf8_lossy(&timeout.stdout).contains("M001 TIMEOUT"));
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn core_compile_resolves_through_its_library_target() {
     let package = repository_root().join("library/core/compile");

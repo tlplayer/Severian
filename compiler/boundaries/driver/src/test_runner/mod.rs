@@ -1,5 +1,6 @@
 use severian_driver::{Compiler, TestExecution};
 use severian_mir::{DurationComparison, TestExpectation, TestMode, TestStream};
+use severian_modules::ModuleGraph;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
@@ -80,24 +81,88 @@ pub(crate) fn run_with_coverage(
     output_root: &Path,
     coverage_file: Option<&Path>,
 ) -> Result<(), String> {
+    let summary = evaluate(compiler, sources, output_root, coverage_file, None, true)?;
+    if summary.failed == 0 {
+        Ok(())
+    } else {
+        Err(format!("{} test(s) failed", summary.failed))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct RunSummary {
+    pub passed: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub compile_failures: usize,
+    pub timeout_failures: usize,
+}
+
+pub(crate) fn run_graph(
+    compiler: &Compiler,
+    source: &Path,
+    graph: ModuleGraph,
+    output_root: &Path,
+) -> Result<RunSummary, String> {
+    let source = source.to_owned();
+    evaluate(
+        compiler,
+        std::slice::from_ref(&source),
+        output_root,
+        None,
+        Some(graph),
+        false,
+    )
+}
+
+fn evaluate(
+    compiler: &Compiler,
+    sources: &[PathBuf],
+    output_root: &Path,
+    coverage_file: Option<&Path>,
+    mut graph: Option<ModuleGraph>,
+    verbose: bool,
+) -> Result<RunSummary, String> {
+    macro_rules! output {
+        ($($argument:tt)*) => {
+            if verbose {
+                println!($($argument)*);
+            }
+        };
+    }
+    macro_rules! error {
+        ($($argument:tt)*) => {
+            if verbose {
+                eprintln!($($argument)*);
+            }
+        };
+    }
     let mut passed = 0usize;
     let mut failed = 0usize;
     let mut skipped = 0usize;
+    let mut compile_failures = 0usize;
+    let mut timeout_failures = 0usize;
     for (source_index, source) in sources.iter().enumerate() {
         let directory = output_root.join(format!("source-{source_index}"));
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
-        let tests = match compiler.compile_tests_file(source, &directory) {
+        let compiled = if let Some(graph) = graph.take() {
+            compiler.compile_tests_graph(graph, &directory)
+        } else {
+            compiler.compile_tests_file(source, &directory)
+        };
+        let tests = match compiled {
             Ok(tests) => tests,
             Err(error) => {
-                println!("test {} ... FAILED (compile)", source.display());
-                eprintln!("{error}");
+                output!("test {} ... FAILED (compile)", source.display());
+                error!("{error}");
                 failed += 1;
+                compile_failures += 1;
                 continue;
             }
         };
         if tests.is_empty() {
-            println!("test {} ... ok (compile)", source.display());
+            output!("test {} ... ok (compile)", source.display());
             passed += 1;
         }
         for test in tests {
@@ -110,11 +175,11 @@ pub(crate) fn run_with_coverage(
             let artifact = match &test.execution {
                 TestExecution::Compiler { failure } => {
                     if let Some(message) = failure {
-                        println!("test {} ... FAILED", test.name);
-                        eprintln!("{message}");
+                        output!("test {} ... FAILED", test.name);
+                        error!("{message}");
                         failed += 1;
                     } else {
-                        println!("test {} ... ok", test.name);
+                        output!("test {} ... ok", test.name);
                         passed += 1;
                     }
                     continue;
@@ -126,14 +191,12 @@ pub(crate) fn run_with_coverage(
                 .iter()
                 .any(|mode| matches!(mode, TestMode::Model | TestMode::Differential))
             {
-                println!(
+                output!(
                     "test {} ... skipped ({} runner is not configured)",
                     test.name,
                     test.modes
                         .iter()
-                        .find(|mode| {
-                            matches!(mode, TestMode::Model | TestMode::Differential)
-                        })
+                        .find(|mode| { matches!(mode, TestMode::Model | TestMode::Differential) })
                         .map(|mode| mode.name())
                         .unwrap_or("generated")
                 );
@@ -151,8 +214,8 @@ pub(crate) fn run_with_coverage(
                         TestExpectation::Panics { function, binding } => {
                             Some((function.as_str(), binding.as_str()))
                         }
-                    _ => None,
-                });
+                        _ => None,
+                    });
                 let expectation_failure = test.expectations.iter().find_map(|expectation| {
                     let (actual, expected, relation) = match expectation {
                         TestExpectation::Contains { stream, value } => {
@@ -178,8 +241,9 @@ pub(crate) fn run_with_coverage(
                         | TestExpectation::ProfileMemory { .. } => return None,
                     };
                     let matches = match expectation {
-                        TestExpectation::Contains { .. }
-                        | TestExpectation::PanicMessage { .. } => actual.contains(expected),
+                        TestExpectation::Contains { .. } | TestExpectation::PanicMessage { .. } => {
+                            actual.contains(expected)
+                        }
                         TestExpectation::Excludes { .. } => !actual.contains(expected),
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
                         TestExpectation::Panics { .. }
@@ -199,14 +263,17 @@ pub(crate) fn run_with_coverage(
                     && expectation_failure.is_none()
                     && !has_soft_expectation_failures(&result)
                 {
-                    println!("test {} ... ok", test.name);
+                    output!("test {} ... ok", test.name);
                     passed += 1;
                 } else {
-                    println!("test {} ... FAILED", test.name);
+                    output!("test {} ... FAILED", test.name);
                     if let Some(message) = expectation_failure {
-                        eprintln!("{message}");
+                        error!("{message}");
                     }
-                    report_captured_output(&result);
+                    if verbose {
+                        report_captured_output(&result);
+                    }
+                    timeout_failures += usize::from(is_timeout(&result));
                     failed += 1;
                 }
                 continue;
@@ -216,8 +283,11 @@ pub(crate) fn run_with_coverage(
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
                 if !warmup.status.success() || has_soft_expectation_failures(&warmup) {
-                    println!("test {} ... FAILED", test.name);
-                    report_captured_output(&warmup);
+                    output!("test {} ... FAILED", test.name);
+                    if verbose {
+                        report_captured_output(&warmup);
+                    }
+                    timeout_failures += usize::from(is_timeout(&warmup));
                     failed += 1;
                     continue;
                 }
@@ -225,20 +295,24 @@ pub(crate) fn run_with_coverage(
                 let started = Instant::now();
                 let mut failure = None;
                 for _ in 0..iterations {
-                    let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
-                        format!("could not run {}: {error}", artifact.path.display())
-                    })?;
+                    let result =
+                        execute(&artifact.path, coverage_file, timeout).map_err(|error| {
+                            format!("could not run {}: {error}", artifact.path.display())
+                        })?;
                     if !result.status.success() || has_soft_expectation_failures(&result) {
                         failure = Some(result);
                         break;
                     }
                 }
                 if let Some(output) = failure {
-                    println!("test {} ... FAILED", test.name);
-                    report_captured_output(&output);
+                    output!("test {} ... FAILED", test.name);
+                    if verbose {
+                        report_captured_output(&output);
+                    }
+                    timeout_failures += usize::from(is_timeout(&output));
                     failed += 1;
                 } else {
-                    println!(
+                    output!(
                         "test {} ... bench ({})",
                         test.name,
                         duration(started.elapsed() / iterations)
@@ -259,7 +333,13 @@ pub(crate) fn run_with_coverage(
                             comparison,
                             threshold_nanos,
                             message,
-                        } => (comparison, measured.as_nanos(), threshold_nanos, message, "ns"),
+                        } => (
+                            comparison,
+                            measured.as_nanos(),
+                            threshold_nanos,
+                            message,
+                            "ns",
+                        ),
                         TestExpectation::ProfileMemory {
                             comparison,
                             threshold_bytes,
@@ -281,34 +361,33 @@ pub(crate) fn run_with_coverage(
                     && !has_soft_expectation_failures(&result)
                     && timing_failure.is_none()
                 {
-                    println!("test {} ... profile ({})", test.name, elapsed(measured));
+                    output!("test {} ... profile ({})", test.name, elapsed(measured));
                     passed += 1;
                 } else {
-                    println!("test {} ... FAILED", test.name);
+                    output!("test {} ... FAILED", test.name);
                     if let Some(message) = timing_failure {
-                        eprintln!("{message}");
+                        error!("{message}");
                     }
-                    report_captured_output(&result);
+                    if verbose {
+                        report_captured_output(&result);
+                    }
+                    timeout_failures += usize::from(is_timeout(&result));
                     failed += 1;
                 }
                 continue;
             }
-            if test
-                .modes
-                .iter()
-                .any(|mode| {
-                    !matches!(
-                        mode,
-                        TestMode::Timeout(_)
-                            | TestMode::Property
-                            | TestMode::Fuzz
-                            | TestMode::Cases
-                            | TestMode::Model
-                            | TestMode::Differential
-                    )
-                })
-            {
-                println!(
+            if test.modes.iter().any(|mode| {
+                !matches!(
+                    mode,
+                    TestMode::Timeout(_)
+                        | TestMode::Property
+                        | TestMode::Fuzz
+                        | TestMode::Cases
+                        | TestMode::Model
+                        | TestMode::Differential
+                )
+            }) {
+                output!(
                     "test {} ... FAILED (unsupported runner: {})",
                     test.name,
                     test.modes
@@ -323,37 +402,42 @@ pub(crate) fn run_with_coverage(
             let result = execute(&artifact.path, coverage_file, timeout)
                 .map_err(|error| format!("could not run {}: {error}", artifact.path.display()))?;
             if result.status.success() && !has_soft_expectation_failures(&result) {
-                if test
-                    .modes
-                    .iter()
-                    .any(|mode| {
-                        matches!(
-                            mode,
-                            TestMode::Property
-                                | TestMode::Fuzz
-                                | TestMode::Model
-                                | TestMode::Differential
-                        )
-                    })
-                {
-                    println!("test {} ... ok (seed 0)", test.name);
+                if test.modes.iter().any(|mode| {
+                    matches!(
+                        mode,
+                        TestMode::Property
+                            | TestMode::Fuzz
+                            | TestMode::Model
+                            | TestMode::Differential
+                    )
+                }) {
+                    output!("test {} ... ok (seed 0)", test.name);
                 } else {
-                    println!("test {} ... ok", test.name);
+                    output!("test {} ... ok", test.name);
                 }
                 passed += 1;
             } else {
-                println!("test {} ... FAILED", test.name);
-                report_captured_output(&result);
+                output!("test {} ... FAILED", test.name);
+                if verbose {
+                    report_captured_output(&result);
+                }
+                timeout_failures += usize::from(is_timeout(&result));
                 failed += 1;
             }
         }
     }
-    println!("\ntest result: {passed} passed; {failed} failed; {skipped} skipped");
-    if failed == 0 {
-        Ok(())
-    } else {
-        Err(format!("{failed} test(s) failed"))
-    }
+    output!("\ntest result: {passed} passed; {failed} failed; {skipped} skipped");
+    Ok(RunSummary {
+        passed,
+        failed,
+        skipped,
+        compile_failures,
+        timeout_failures,
+    })
+}
+
+fn is_timeout(output: &Output) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("test timed out after ")
 }
 
 fn has_soft_expectation_failures(output: &Output) -> bool {
@@ -372,7 +456,10 @@ fn execute(
     let Some(timeout) = timeout else {
         return command.output();
     };
-    let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     let started = Instant::now();
     loop {
         if child.try_wait()?.is_some() {

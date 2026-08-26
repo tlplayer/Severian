@@ -414,8 +414,29 @@ impl Compiler {
         source: &Path,
         output_directory: &Path,
     ) -> Result<Vec<CompiledTest>, CompileError> {
-        let mir = self.check_file_to_mir(source, CompileMode::Test)?;
-        let compiler_results = self.compiler_test_results(source)?;
+        let graph = self.resolve_modules(source)?;
+        self.compile_tests_graph(graph, output_directory)
+    }
+
+    /// Resolves a source root to the same parsed module graph used by the
+    /// ordinary test pipeline. Mutation tooling clones this graph and changes
+    /// one AST node without ever rewriting a source file.
+    pub fn resolve_test_graph(
+        &self,
+        source: &Path,
+    ) -> Result<severian_modules::ModuleGraph, CompileError> {
+        self.resolve_modules(source)
+    }
+
+    /// Compiles tests from an already-resolved module graph through the normal
+    /// semantic, MIR, lowering, and backend pipeline.
+    pub fn compile_tests_graph(
+        &self,
+        graph: severian_modules::ModuleGraph,
+        output_directory: &Path,
+    ) -> Result<Vec<CompiledTest>, CompileError> {
+        let compiler_results = self.compiler_test_results(&graph)?;
+        let mir = self.check_graph_to_mir(graph, CompileMode::Test)?;
         let mut compiler_results = compiler_results.into_iter();
         mir.tests
             .iter()
@@ -470,8 +491,10 @@ impl Compiler {
             .collect()
     }
 
-    fn compiler_test_results(&self, source: &Path) -> Result<Vec<Option<String>>, CompileError> {
-        let graph = self.resolve_modules(source)?;
+    fn compiler_test_results(
+        &self,
+        graph: &severian_modules::ModuleGraph,
+    ) -> Result<Vec<Option<String>>, CompileError> {
         let root_package = graph
             .modules
             .last()
@@ -546,7 +569,15 @@ impl Compiler {
         source: &Path,
         mode: CompileMode,
     ) -> Result<(severian_hir::Program, Vec<SourceFile>), CompileError> {
-        let mut graph = self.resolve_modules(source)?;
+        let graph = self.resolve_modules(source)?;
+        self.check_graph_to_hir(graph, mode)
+    }
+
+    fn check_graph_to_hir(
+        &self,
+        mut graph: severian_modules::ModuleGraph,
+        mode: CompileMode,
+    ) -> Result<(severian_hir::Program, Vec<SourceFile>), CompileError> {
         let root_package = graph
             .modules
             .last()
@@ -605,6 +636,23 @@ impl Compiler {
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
         let (hir, sources) = self.check_file_to_hir(source, mode)?;
+        self.check_hir_to_mir(hir, sources)
+    }
+
+    fn check_graph_to_mir(
+        &self,
+        graph: severian_modules::ModuleGraph,
+        mode: CompileMode,
+    ) -> Result<MirModule, CompileError> {
+        let (hir, sources) = self.check_graph_to_hir(graph, mode)?;
+        self.check_hir_to_mir(hir, sources)
+    }
+
+    fn check_hir_to_mir(
+        &self,
+        hir: severian_hir::Program,
+        sources: Vec<SourceFile>,
+    ) -> Result<MirModule, CompileError> {
         let mut merged = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
         severian_mir::run_required_pipeline(&mut merged, &self.context)
             .map_err(CompileError::MirPass)?;

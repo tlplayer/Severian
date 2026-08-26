@@ -1,4 +1,5 @@
 mod example_validation;
+mod mutation;
 mod test_runner;
 
 use severian_driver::config::{BinaryTarget, Catalog, DeclaredTarget, LibraryTarget, Manifest};
@@ -67,7 +68,10 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
                 run_program(options, &catalog)
             }
         }
-        "test" => test(parse_common(arguments)?, &catalog),
+        "test" => {
+            let (options, mutate) = parse_test(arguments)?;
+            test(options, &catalog, mutate)
+        }
         "config" => config(arguments, &catalog),
         "new" => create_project(arguments, &catalog, true),
         "init" => create_project(arguments, &catalog, false),
@@ -161,6 +165,28 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
         cursor += 1;
     }
     Ok(options)
+}
+
+fn parse_test(mut arguments: Vec<String>) -> Result<(CommonOptions, bool), String> {
+    let option_end = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(arguments.len());
+    let positions = arguments[..option_end]
+        .iter()
+        .enumerate()
+        .filter_map(|(index, argument)| (argument == "--mutate").then_some(index))
+        .collect::<Vec<_>>();
+    if positions.len() > 1 {
+        return Err("`--mutate` may only be supplied once".into());
+    }
+    let mutate = if let Some(index) = positions.first().copied() {
+        arguments.remove(index);
+        true
+    } else {
+        false
+    };
+    Ok((parse_common(arguments)?, mutate))
 }
 
 fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
@@ -432,7 +458,7 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     }
 }
 
-fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), String> {
     if options.emit.is_some() {
         return Err("`sev test` does not support `--emit`; emit a selected source directly".into());
     }
@@ -507,6 +533,10 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     fs::create_dir_all(&output_root)
         .map_err(|error| format!("could not create {}: {error}", output_root.display()))?;
 
+    if mutate && validation.is_some() {
+        return Err("`sev test --mutate` does not support example-validation packages".into());
+    }
+
     if let (Some(manifest), Some(validation)) = (manifest.as_ref(), validation.as_ref()) {
         example_validation::run(
             &compiler,
@@ -520,6 +550,8 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
             catalog,
             &options,
         )
+    } else if mutate {
+        mutation::run(&compiler, &sources, &output_root)
     } else {
         test_runner::run(&compiler, &sources, &output_root)
     }
@@ -846,7 +878,7 @@ build options:\n",
         ));
     }
     output.push_str(
-        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir; do not execute.\n  -o PATH     Write the selected artifact or emitted IR to PATH.\n",
+        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir; do not execute.\n  -o PATH     Write the selected artifact or emitted IR to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
     );
     output
 }
@@ -880,5 +912,20 @@ mod tests {
 
         let equals = parse_common(vec!["hello.sev".into(), "--emit=mlir".into()]).unwrap();
         assert_eq!(equals.emit, Some(EmitStage::Mlir));
+    }
+
+    #[test]
+    fn mutate_is_a_test_only_flag_in_any_option_position() {
+        let (options, mutate) = parse_test(vec![
+            "--mutate".into(),
+            "fixture.sev".into(),
+            "--profile".into(),
+            "debug".into(),
+        ])
+        .unwrap();
+        assert!(mutate);
+        assert_eq!(options.path.as_deref(), Some(Path::new("fixture.sev")));
+        assert_eq!(options.profile.as_deref(), Some("debug"));
+        assert!(parse_common(vec!["--mutate".into()]).is_err());
     }
 }
