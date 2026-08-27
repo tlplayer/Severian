@@ -26,3 +26,25 @@ test "bf16 storage can return to f64":
     restored = tensor.f64(compact)
 
     assert(tensor.values(restored) == [1.0, 2.0])
+
+
+test "every integer and floating tensor storage type executes a round trip":
+    original = tensor([1.0, 2.0], [2])
+
+    assert(tensor.values(tensor.f64(tensor.i8(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.i16(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.i32(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.i64(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.i128(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.u8(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.u16(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.u32(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.u64(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.u128(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f8e4m3fn(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f8e5m2(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f16(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.bf16(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f32(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f64(original))) == [1.0, 2.0])
+    assert(tensor.values(tensor.f64(tensor.f128(original))) == [1.0, 2.0])

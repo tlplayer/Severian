@@ -17,7 +17,7 @@ def multiply[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 def divide[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 def sum[T](value: Tensor[T]) -> Tensor[T]
 def matmul[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
-def transpose(value: Tensor[f64]) -> Tensor[f64]
+def transpose[T](value: Tensor[T]) -> Tensor[T]
 
 def f8e4m3fn[T](value: Tensor[T]) -> Tensor[f8e4m3fn]
 def f8e5m2[T](value: Tensor[T]) -> Tensor[f8e5m2]

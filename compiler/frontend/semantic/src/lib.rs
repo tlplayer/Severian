@@ -11371,6 +11371,93 @@ impl Analyzer<'_> {
         };
         let name = path.rsplit('.').next().unwrap_or(&path);
 
+        if name == "safetensor_shape" && arguments.len() == 2 {
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let handle = self.expression(&arguments[0].value, Some(integer))?;
+            let tensor_name = self.expression(&arguments[1].value, Some(string))?;
+            let storage = self.runtime_call(
+                "__sev_safetensor_shape",
+                &[integer, string],
+                string,
+                vec![handle, tensor_name],
+                span,
+            );
+            let result = self.instantiate_list_type(integer);
+            if expected.is_some_and(|expected| expected != result) {
+                return Err(semantic_error(
+                    "SafeTensor shape does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+
+        let mapped_element = match name {
+            "mapped_i8" => Some(("i8", "__sev_safetensor_i8_view")),
+            "mapped_i16" => Some(("i16", "__sev_safetensor_i16_view")),
+            "mapped_i32" => Some(("i32", "__sev_safetensor_i32_view")),
+            "mapped_i64" => Some(("i64", "__sev_safetensor_i64_view")),
+            "mapped_i128" => Some(("i128", "__sev_safetensor_i128_view")),
+            "mapped_u8" => Some(("u8", "__sev_safetensor_u8_view")),
+            "mapped_u16" => Some(("u16", "__sev_safetensor_u16_view")),
+            "mapped_u32" => Some(("u32", "__sev_safetensor_u32_view")),
+            "mapped_u64" => Some(("u64", "__sev_safetensor_u64_view")),
+            "mapped_u128" => Some(("u128", "__sev_safetensor_u128_view")),
+            "mapped_f8e4m3fn" => Some(("f8e4m3fn", "__sev_safetensor_f8e4m3fn_view")),
+            "mapped_f8e5m2" => Some(("f8e5m2", "__sev_safetensor_f8e5m2_view")),
+            "mapped_f16" => Some(("f16", "__sev_safetensor_f16_view")),
+            "mapped_bf16" => Some(("bf16", "__sev_safetensor_bf16_view")),
+            "mapped_f32" => Some(("f32", "__sev_safetensor_f32_view")),
+            "mapped_f64" => Some(("f64", "__sev_safetensor_f64_view")),
+            "mapped_f128" => Some(("f128", "__sev_safetensor_f128_view")),
+            _ => None,
+        };
+        if let (Some((element_name, symbol)), [handle, tensor_name]) = (mapped_element, arguments) {
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let element = self
+                .types
+                .resolve_name(element_name)
+                .expect("universal defines every tensor storage dtype");
+            let result = self.tensor_type(element, span)?;
+            if expected.is_some_and(|expected| expected != result) {
+                return Err(semantic_error(
+                    "mapped SafeTensor does not satisfy the expected tensor type".into(),
+                    span,
+                ));
+            }
+            let handle = self.expression(&handle.value, Some(integer))?;
+            let tensor_name = self.expression(&tensor_name.value, Some(string))?;
+            return Ok(Some(self.runtime_call(
+                symbol,
+                &[integer, string],
+                result,
+                vec![handle, tensor_name],
+                span,
+            )));
+        }
+
         if let AstExpressionKind::Member { object, name } = &callee.kind {
             let object_path = callable_path(object);
             let package_namespace = object_path.as_ref().is_some_and(|namespace| {

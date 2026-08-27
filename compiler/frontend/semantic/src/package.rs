@@ -224,6 +224,7 @@ pub fn analyze_package_with_context(
                     specialize_signature(original, &binding.substitution)
                 };
                 let substitution = universal_substitution(
+                    &definition.name,
                     original,
                     &binding.substitution,
                     &universal.types,
@@ -1388,6 +1389,7 @@ fn stable_instance_function_id(
 }
 
 fn universal_substitution(
+    function_name: &str,
     function: &FunctionDecl,
     substitution: &GenericSubstitution,
     types: &severian_universal::TypeContext,
@@ -1421,7 +1423,15 @@ fn universal_substitution(
                         .map(|class| class.ty)
                 })
                 .map(|ty| (parameter, ty))
-                .ok_or_else(|| Diagnostic::new("E000204", format!("unknown type `{name}`"), None))
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000204",
+                        format!(
+                            "cannot specialize `{function_name}` because inferred type `{name}` is unresolved"
+                        ),
+                        None,
+                    )
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(severian_universal::Substitution::new(arguments))

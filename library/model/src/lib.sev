@@ -1,6 +1,7 @@
 import os
 import path
 import process
+import tensor
 
 class ModelError: Error
     message: string
@@ -172,6 +173,22 @@ def load(selected: Reference, root: string = "") -> LoadedModel:
 def load(locator: string, root: string = "") -> LoadedModel:
     return load(reference(locator), root)
 
+def tensors(loaded: LoadedModel) -> tensor.SafeTensorStore:
+    assert(ready(loaded), "model weights are not ready")
+    return tensor.open_safetensors(loaded.artifact.weights)
+
+def weight(store: tensor.SafeTensorStore, name: string) -> tensor.SafeTensorEntry:
+    return tensor.entry(store, name)
+
+# Linear algebra is generic over the tensor's declared storage dtype. The
+# tensor compiler chooses the wider accumulation dtype and restores T only at
+# the result boundary; model architectures never branch on i8/f8/bf16/etc.
+def linear[T](input: tensor.Tensor[T], weights: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    assert(size(tensor.shape(input)) == 2, "linear input must be rank two")
+    assert(size(tensor.shape(weights)) == 2, "linear weights must be rank two")
+    assert(tensor.shape(input)[1] == tensor.shape(weights)[1], "linear dimensions do not match")
+    return tensor.matmul(input, tensor.transpose(weights))
+
 test "model references are generic and cache paths are deterministic":
     selected = reference("hf://owner/model", "immutable-revision")
     assert(hugging_face_repository(selected.locator) == "owner/model")
@@ -181,3 +198,33 @@ test "local artifacts do not require a model-specific provider":
     selected = artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
     assert(selected.identifier == "custom/model")
     assert(not ready(selected))
+
+test "downloaded model exposes real mapped SafeTensor metadata and BF16 values":
+    root = "target/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
+    if valid_artifact(root):
+        loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
+        store = tensors(loaded)
+        norm = weight(store, "model.layers.0.input_layernorm.weight")
+        assert(norm.dtype == "BF16")
+        assert(norm.shape == [576])
+        values = tensor.values(tensor.load_bf16(norm))
+        assert(size(values) == 576)
+        assert(values[0] > 0.0)
+        assert(tensor.close_safetensors(store))
+
+test "generic linear lowering executes a real SmolLM2 projection":
+    root = "target/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
+    if valid_artifact(root):
+        loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
+        store = tensors(loaded)
+        q_projection = tensor.load_bf16(weight(store, "model.layers.0.self_attn.q_proj.weight"))
+        zeros: list[float] := []
+        for _index in range(0, 576):
+            zeros.append(0.0)
+        hidden = tensor.bf16(tensor.tensor(zeros, [1, 576]))
+        projected = linear(hidden, q_projection)
+        assert(tensor.shape(projected) == [1, 576])
+        projected_values = tensor.values(projected)
+        assert(size(projected_values) == 576)
+        assert(projected_values[0] == 0.0)
+        assert(tensor.close_safetensors(store))

@@ -1808,13 +1808,21 @@ fn infer_substitution(
     let Some((actual_name, actual_arguments)) = type_application_parts(actual) else {
         return Ok(());
     };
-    if name != actual_name || arguments.len() != actual_arguments.len() {
+    if !same_type_constructor(name, actual_name) || arguments.len() != actual_arguments.len() {
         return Ok(());
     }
     for (pattern, actual) in arguments.iter().zip(actual_arguments) {
         infer_substitution(pattern, actual, parameters, substitution)?;
     }
     Ok(())
+}
+
+fn same_type_constructor(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .rsplit('.')
+            .next()
+            .is_some_and(|left| right.rsplit('.').next().is_some_and(|right| left == right))
 }
 
 fn default_numeric_matches(default: &str, concrete: &str) -> bool {
@@ -1916,12 +1924,39 @@ fn expression_type_name(
             }
             .to_owned(),
         ),
-        severian_ast::ExpressionKind::Call { callee, .. } => {
+        severian_ast::ExpressionKind::Call { callee, arguments } => {
             let path = ast_callable_path(callee)?;
             resolve_path(module, &path, index)
                 .into_iter()
                 .find_map(|definition| match &index.definitions[&definition].kind {
-                    DefKind::Function(function) => type_annotation_name(&function.result),
+                    DefKind::Function(function) if function.type_parameters.is_empty() => {
+                        type_annotation_name(&function.result)
+                    }
+                    DefKind::Function(function) => {
+                        let mut substitution = Substitution::new();
+                        for (parameter, argument) in function.parameters.iter().zip(arguments) {
+                            let actual =
+                                expression_type_name(module, &argument.value, names, index)?;
+                            infer_substitution(
+                                parameter,
+                                &actual,
+                                &function.type_parameters,
+                                &mut substitution,
+                            )
+                            .ok()?;
+                        }
+                        function
+                            .type_parameters
+                            .iter()
+                            .all(|parameter| substitution.contains_key(parameter))
+                            .then(|| {
+                                type_annotation_name(&specialize_annotation(
+                                    &function.result,
+                                    &substitution,
+                                ))
+                            })
+                            .flatten()
+                    }
                     DefKind::Type => Some(index.definitions[&definition].name.clone()),
                     _ => None,
                 })
@@ -1987,13 +2022,7 @@ fn specialized_type_name(
     annotation: &TypeAnnotation,
     substitution: &Substitution,
 ) -> Option<String> {
-    let name = annotation.simple_name()?;
-    Some(
-        substitution
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_owned()),
-    )
+    type_annotation_name(&specialize_annotation(annotation, substitution))
 }
 
 pub(super) fn specialize_function(

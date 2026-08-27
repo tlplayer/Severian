@@ -1,7 +1,7 @@
 use crate::{
-    AttributeId, Attrs, CompilerId, Conversion, EffectSet, IrContext, LoweringCapability, OpId,
-    OperationDiagnostic, OperationInterface, OperationRegistry, RegisteredOperation, TyId,
-    TypeContext, TypeId,
+    AttributeId, Attrs, CompilerId, Conversion, EffectSet, FloatFormat, IntegerWidth, IrContext,
+    LoweringCapability, OpId, OperationDiagnostic, OperationInterface, OperationRegistry,
+    PrimitiveRepresentation, RegisteredOperation, TyId, TypeContext, TypeId,
 };
 use std::fmt;
 
@@ -27,15 +27,112 @@ pub fn compiler_id() -> CompilerId {
     CompilerId::from_path("tensor.compiler.TensorCompiler")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TensorElementKind {
+    SignedInteger(u16),
+    UnsignedInteger(u16),
+    Float8E4M3Fn,
+    Float8E5M2,
+    IeeeFloat(u16),
+    BrainFloat16,
+}
+
+impl TensorElementKind {
+    pub const ALL: [Self; 17] = [
+        Self::SignedInteger(8),
+        Self::SignedInteger(16),
+        Self::SignedInteger(32),
+        Self::SignedInteger(64),
+        Self::SignedInteger(128),
+        Self::UnsignedInteger(8),
+        Self::UnsignedInteger(16),
+        Self::UnsignedInteger(32),
+        Self::UnsignedInteger(64),
+        Self::UnsignedInteger(128),
+        Self::Float8E4M3Fn,
+        Self::Float8E5M2,
+        Self::IeeeFloat(16),
+        Self::BrainFloat16,
+        Self::IeeeFloat(32),
+        Self::IeeeFloat(64),
+        Self::IeeeFloat(128),
+    ];
+
+    pub fn from_type(types: &TypeContext, element: TypeId) -> Option<Self> {
+        match types.primitive(element)?.representation {
+            PrimitiveRepresentation::Integer {
+                bits: IntegerWidth::Fixed(bits),
+                signed: true,
+            } if matches!(bits, 8 | 16 | 32 | 64 | 128) => Some(Self::SignedInteger(bits)),
+            PrimitiveRepresentation::Integer {
+                bits: IntegerWidth::Fixed(bits),
+                signed: false,
+            } if matches!(bits, 8 | 16 | 32 | 64 | 128) => Some(Self::UnsignedInteger(bits)),
+            PrimitiveRepresentation::Float {
+                format: FloatFormat::Float8E4M3Fn,
+            } => Some(Self::Float8E4M3Fn),
+            PrimitiveRepresentation::Float {
+                format: FloatFormat::Float8E5M2,
+            } => Some(Self::Float8E5M2),
+            PrimitiveRepresentation::Float {
+                format: FloatFormat::Ieee(bits),
+            } if matches!(bits, 16 | 32 | 64 | 128) => Some(Self::IeeeFloat(bits)),
+            PrimitiveRepresentation::Float {
+                format: FloatFormat::BrainFloat16,
+            } => Some(Self::BrainFloat16),
+            _ => None,
+        }
+    }
+
+    pub fn storage_tag(self) -> u8 {
+        match self {
+            Self::SignedInteger(8) => 0,
+            Self::SignedInteger(16) => 1,
+            Self::SignedInteger(32) => 2,
+            Self::SignedInteger(64) => 3,
+            Self::SignedInteger(128) => 4,
+            Self::UnsignedInteger(8) => 5,
+            Self::UnsignedInteger(16) => 6,
+            Self::UnsignedInteger(32) => 7,
+            Self::UnsignedInteger(64) => 8,
+            Self::UnsignedInteger(128) => 9,
+            Self::Float8E4M3Fn => 10,
+            Self::Float8E5M2 => 11,
+            Self::IeeeFloat(16) => 12,
+            Self::BrainFloat16 => 13,
+            Self::IeeeFloat(32) => 14,
+            Self::IeeeFloat(64) => 15,
+            Self::IeeeFloat(128) => 16,
+            _ => unreachable!("tensor element widths are validated at construction"),
+        }
+    }
+
+    pub const fn bits(self) -> u16 {
+        match self {
+            Self::SignedInteger(bits) | Self::UnsignedInteger(bits) | Self::IeeeFloat(bits) => bits,
+            Self::Float8E4M3Fn | Self::Float8E5M2 => 8,
+            Self::BrainFloat16 => 16,
+        }
+    }
+
+    pub const fn byte_width(self) -> u8 {
+        (self.bits() / 8) as u8
+    }
+
+    pub const fn accumulation(self) -> Self {
+        match self {
+            Self::SignedInteger(8 | 16 | 32) => Self::SignedInteger(64),
+            Self::UnsignedInteger(8 | 16 | 32) => Self::UnsignedInteger(64),
+            Self::Float8E4M3Fn | Self::Float8E5M2 | Self::IeeeFloat(16) | Self::BrainFloat16 => {
+                Self::IeeeFloat(32)
+            }
+            other => other,
+        }
+    }
+}
+
 pub fn element_storage_tag(types: &TypeContext, element: TypeId) -> Option<u8> {
-    let name = &types.definition(element)?.name;
-    [
-        "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f8e4m3fn", "f8e5m2",
-        "f16", "bf16", "f32", "f64", "f128",
-    ]
-    .into_iter()
-    .position(|known| known == name)
-    .map(|index| index as u8)
+    TensorElementKind::from_type(types, element).map(TensorElementKind::storage_tag)
 }
 
 #[derive(Clone)]
@@ -346,6 +443,34 @@ mod tests {
             .tensor_conversion(&promoted.target, types.resolve_name("i8").unwrap())
             .unwrap();
         assert_eq!(narrowed.element.kind, ConversionKind::Lossy);
+    }
+
+    #[test]
+    fn every_required_tensor_dtype_has_storage_and_accumulation_semantics() {
+        let types = types();
+        let names = [
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f8e4m3fn",
+            "f8e5m2", "f16", "bf16", "f32", "f64", "f128",
+        ];
+        for (tag, (name, kind)) in names.into_iter().zip(TensorElementKind::ALL).enumerate() {
+            let element = types.resolve_name(name).unwrap();
+            assert_eq!(TensorElementKind::from_type(&types, element), Some(kind));
+            assert_eq!(element_storage_tag(&types, element), Some(tag as u8));
+            assert!(kind.byte_width().is_power_of_two());
+            assert!(TensorElementKind::ALL.contains(&kind.accumulation()));
+        }
+        assert_eq!(
+            TensorElementKind::Float8E4M3Fn.accumulation(),
+            TensorElementKind::IeeeFloat(32)
+        );
+        assert_eq!(
+            TensorElementKind::SignedInteger(128).accumulation(),
+            TensorElementKind::SignedInteger(128)
+        );
+        assert_eq!(
+            TensorElementKind::IeeeFloat(128).accumulation(),
+            TensorElementKind::IeeeFloat(128)
+        );
     }
 
     #[test]
