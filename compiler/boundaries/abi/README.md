@@ -53,7 +53,7 @@ Adding a library/runtime concept should normally add an ABI schema, not an `AbiT
 Good:
 
 ```text
-library/tensor defines DenseTensor[T, Space]
+library/compute/tensor defines DenseTensor[T, Space]
 library/data defines ColumnView[T]
 library/xla defines BufferHandle
 ```

@@ -15,7 +15,7 @@ test -x "$RELEASE/bin/sev"
 test -x "$RELEASE/lib/severian/bin/clang"
 test -x "$RELEASE/lib/severian/bin/ld.lld"
 test -f "$RELEASE/lib/severian/lib/libLLVM.so.21.1"
-test -f "$RELEASE/share/severian/library/tensor/package.toml"
+test -f "$RELEASE/share/severian/library/compute/tensor/package.toml"
 test "$(cat "$RELEASE/VERSION")" = "$VERSION"
 test -f "$RELEASE.tar.zst"
 

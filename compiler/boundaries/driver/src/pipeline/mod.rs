@@ -944,7 +944,7 @@ impl Compiler {
             ("path", library.join("system/path")),
             ("platform", library.join("system/platform")),
             ("process", library.join("system/process")),
-            ("tensor", library.join("tensor")),
+            ("tensor", library.join("compute/tensor")),
             ("yaml", library.join("data/yaml")),
         ];
         let mut next = packages
@@ -964,11 +964,7 @@ impl Compiler {
                 standard_ids.insert(name.to_owned(), existing.id);
                 continue;
             }
-            let library = if name == "tensor" {
-                root.join("src/compiler.sev")
-            } else {
-                root.join("src/lib.sev")
-            };
+            let library = root.join("src/lib.sev");
             if !library.is_file() {
                 return Err(CompileError::Diagnostic(Diagnostic::new(
                     "C001001",

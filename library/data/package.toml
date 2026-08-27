@@ -8,7 +8,7 @@ description = "Format-independent tabular data and relational operations"
 path = "src/lib.sev"
 
 [dependencies]
-tensor = { path = "../tensor", version = "0.1.0" }
+tensor = { path = "../compute/tensor", version = "0.1.0" }
 
 [package.metadata.library]
 category = "data"

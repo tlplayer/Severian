@@ -22,7 +22,7 @@ APPLICATION_ROOT="$TEST_ROOT/matrix-application"
 export SEVERIAN_REGISTRY="$REGISTRY_ROOT"
 
 echo "publishing tensor"
-"$SEVERIAN_BIN" publish "$REPOSITORY_ROOT/library/tensor"
+"$SEVERIAN_BIN" publish "$REPOSITORY_ROOT/library/compute/tensor"
 
 echo "creating matrix package"
 "$SEVERIAN_BIN" new "$MATRIX_ROOT"

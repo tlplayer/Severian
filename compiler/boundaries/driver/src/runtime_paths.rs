@@ -63,6 +63,8 @@ mod tests {
 
     #[test]
     fn development_runtime_contains_the_standard_library() {
-        assert!(library_root().join("tensor/package.toml").is_file());
+        assert!(library_root()
+            .join("compute/tensor/package.toml")
+            .is_file());
     }
 }

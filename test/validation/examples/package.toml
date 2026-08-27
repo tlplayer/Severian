@@ -12,4 +12,4 @@ core = { path = "../../../library/core" }
 testing = { path = "../../../library/testing" }
 compute = { path = "../../../library/compute" }
 system = { path = "../../../library/system" }
-tensor = { path = "../../../library/tensor" }
+tensor = { path = "../../../library/compute/tensor" }
