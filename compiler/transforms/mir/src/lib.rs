@@ -105,6 +105,7 @@ pub enum CoverageKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CoveragePoint {
+    pub source: severian_source::SourceId,
     pub span_start: u32,
     pub kind: CoverageKind,
     pub ordinal: u32,

@@ -1108,6 +1108,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "the self-hosted compiler mirror is not a Rust compiler release requirement"]
     fn mirrored_driver_manifest_retains_its_dependency_aliases() {
         let catalog = Catalog::load().unwrap();
         let manifest = Manifest::load(

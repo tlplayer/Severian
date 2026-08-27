@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -10,6 +11,10 @@ extern const char *__sev_string_from_int(int64_t value);
 extern const char *__sev_string_from_float(double value);
 extern const char *__sev_string_from_bool(_Bool value);
 extern const char *__sev_string_from_char(uint32_t value);
+extern const char *__sev_string_from_uint(uint64_t value);
+extern const char *__sev_string_from_i128(__int128 value);
+extern const char *__sev_string_from_u128(unsigned __int128 value);
+extern const char *__sev_string_from_f128(__float128 value);
 
 sev_any __sev_any_from_string(const char *value) {
     sev_any result = {0, (int64_t)(intptr_t)value};
@@ -38,6 +43,35 @@ sev_any __sev_any_from_char(uint32_t value) {
     return result;
 }
 
+sev_any __sev_any_from_uint(uint64_t value) {
+    sev_any result = {5, (int64_t)value};
+    return result;
+}
+
+sev_any __sev_any_from_i128(__int128 value) {
+    __int128 *payload = malloc(sizeof(value));
+    if (payload == NULL) abort();
+    *payload = value;
+    sev_any result = {6, (int64_t)(intptr_t)payload};
+    return result;
+}
+
+sev_any __sev_any_from_u128(unsigned __int128 value) {
+    unsigned __int128 *payload = malloc(sizeof(value));
+    if (payload == NULL) abort();
+    *payload = value;
+    sev_any result = {7, (int64_t)(intptr_t)payload};
+    return result;
+}
+
+sev_any __sev_any_from_f128(__float128 value) {
+    __float128 *payload = malloc(sizeof(value));
+    if (payload == NULL) abort();
+    *payload = value;
+    sev_any result = {8, (int64_t)(intptr_t)payload};
+    return result;
+}
+
 const char *__sev_any_string(sev_any value) {
     switch (value.tag) {
         case 0:
@@ -53,6 +87,14 @@ const char *__sev_any_string(sev_any value) {
             return __sev_string_from_bool((_Bool)value.payload);
         case 4:
             return __sev_string_from_char((uint32_t)value.payload);
+        case 5:
+            return __sev_string_from_uint((uint64_t)value.payload);
+        case 6:
+            return __sev_string_from_i128(*(__int128 *)(intptr_t)value.payload);
+        case 7:
+            return __sev_string_from_u128(*(unsigned __int128 *)(intptr_t)value.payload);
+        case 8:
+            return __sev_string_from_f128(*(__float128 *)(intptr_t)value.payload);
         default:
             return "";
     }
@@ -70,6 +112,13 @@ const char *__sev_any_kind(sev_any value) {
             return "boolean";
         case 4:
             return "character";
+        case 5:
+        case 7:
+            return "unsigned integer";
+        case 6:
+            return "integer";
+        case 8:
+            return "float";
         default:
             return "null";
     }
@@ -102,6 +151,26 @@ static int sev_any_compare(sev_any left, sev_any right) {
     if (left.tag == 0) {
         return strcmp((const char *)(intptr_t)left.payload,
                       (const char *)(intptr_t)right.payload);
+    }
+    if (left.tag == 5) {
+        uint64_t left_value = (uint64_t)left.payload;
+        uint64_t right_value = (uint64_t)right.payload;
+        return left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
+    }
+    if (left.tag == 6) {
+        __int128 left_value = *(__int128 *)(intptr_t)left.payload;
+        __int128 right_value = *(__int128 *)(intptr_t)right.payload;
+        return left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
+    }
+    if (left.tag == 7) {
+        unsigned __int128 left_value = *(unsigned __int128 *)(intptr_t)left.payload;
+        unsigned __int128 right_value = *(unsigned __int128 *)(intptr_t)right.payload;
+        return left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
+    }
+    if (left.tag == 8) {
+        __float128 left_value = *(__float128 *)(intptr_t)left.payload;
+        __float128 right_value = *(__float128 *)(intptr_t)right.payload;
+        return left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
     }
     return left.payload < right.payload ? -1 : left.payload > right.payload ? 1 : 0;
 }

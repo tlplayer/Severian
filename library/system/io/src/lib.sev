@@ -69,11 +69,27 @@ def print(value: usize) -> i32
 @c(symbol = "__sev_print_f32")
 def print(value: f32) -> i32
 
+@c(symbol = "__sev_print_f64")
+def print(value: f64) -> i32
+
+@c(symbol = "__sev_print_f128")
+def print(value: f128) -> i32
+
 @c(symbol = "__sev_print_bool")
 def print(value: bool) -> i32
 
 @c(symbol = "__sev_print_char")
 def print(value: char) -> i32
+
+def print(values: Any...) -> i32:
+    first := true
+    rendered := ""
+    for value in values:
+        if not first:
+            rendered += " "
+        rendered += string(value)
+        first = false
+    return print(rendered)
 
 # Panic is a hosted diagnostic boundary. Unlike `throw`, it terminates the
 # process immediately and does not participate in structured error unwinding.

@@ -250,6 +250,14 @@ void __sev_list_push_pair_i64(void *storage, sev_pair_i64 value) {
     (void)__sev_list_append_pair_i64(storage, value);
 }
 
+void *__sev_list_append_any(void *storage, sev_pair_i64 value) {
+    return __sev_list_append_pair_i64(storage, value);
+}
+
+void __sev_list_push_any(void *storage, sev_pair_i64 value) {
+    __sev_list_push_pair_i64(storage, value);
+}
+
 void *__sev_list_append_list(void *storage, sev_list_value value) {
     __sev_list_push_ptr(storage, (const char *)value.storage);
     return storage;
@@ -411,6 +419,10 @@ const char *__sev_list_string_pair_i64(void *storage) {
     result[offset++] = ']';
     result[offset] = '\0';
     return result;
+}
+
+const char *__sev_list_string_any(void *storage) {
+    return __sev_list_string_pair_i64(storage);
 }
 
 int64_t __sev_list_minimum_i64(void *storage) {
@@ -644,6 +656,10 @@ sev_pair_i64 __sev_list_pop_pair_i64(void *storage) {
     return result;
 }
 
+sev_pair_i64 __sev_list_pop_any(void *storage) {
+    return __sev_list_pop_pair_i64(storage);
+}
+
 sev_list_value __sev_list_pop_list(void *storage) {
     sev_list_value result = {(void *)__sev_list_pop_ptr(storage)};
     return result;
@@ -802,6 +818,10 @@ sev_pair_i64 __sev_list_get_pair_i64(void *storage, int64_t index) {
     return value == NULL ? empty : *value;
 }
 
+sev_pair_i64 __sev_list_get_any(void *storage, int64_t index) {
+    return __sev_list_get_pair_i64(storage, index);
+}
+
 sev_list_value __sev_list_get_list(void *storage, int64_t index) {
     sev_list_value result = {(void *)__sev_list_get_ptr(storage, index)};
     return result;
@@ -809,6 +829,10 @@ sev_list_value __sev_list_get_list(void *storage, int64_t index) {
 
 sev_pair_i64 __sev_list_index_pair_i64(void *storage, int64_t index) {
     return __sev_list_get_pair_i64(storage, index);
+}
+
+sev_pair_i64 __sev_list_index_any(void *storage, int64_t index) {
+    return __sev_list_index_pair_i64(storage, index);
 }
 
 sev_list_value __sev_list_index_list(void *storage, int64_t index) {
@@ -1325,6 +1349,15 @@ sev_pair_i64 __sev_map_get_default_ptr_pair_i64(
     return fallback;
 }
 
+sev_pair_i64 __sev_map_get_default_ptr_any(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_pair_i64 fallback
+) {
+    return __sev_map_get_default_ptr_pair_i64(keys_storage, values_storage, key, fallback);
+}
+
 sev_list_value __sev_map_get_default_ptr_list(
     void *keys_storage,
     void *values_storage,
@@ -1380,6 +1413,10 @@ void __sev_set_add_pair_i64(void *storage, sev_pair_i64 value) {
     __sev_list_push_pair_i64(storage, value);
 }
 
+void __sev_set_add_any(void *storage, sev_pair_i64 value) {
+    __sev_set_add_pair_i64(storage, value);
+}
+
 _Bool __sev_set_contains_pair_i64(void *storage, sev_pair_i64 value) {
     sev_list *set = storage;
     for (size_t index = 0; index < set->length; ++index) {
@@ -1387,4 +1424,8 @@ _Bool __sev_set_contains_pair_i64(void *storage, sev_pair_i64 value) {
         if (known->first == value.first && known->second == value.second) return 1;
     }
     return 0;
+}
+
+_Bool __sev_set_contains_any(void *storage, sev_pair_i64 value) {
+    return __sev_set_contains_pair_i64(storage, value);
 }

@@ -509,6 +509,7 @@ impl BodyBuilder {
         self.current_span = span;
         if let Some(span) = span {
             self.push(Statement::Coverage(CoveragePoint {
+                source: span.source,
                 span_start: span.start,
                 kind: CoverageKind::Line,
                 ordinal: 0,
@@ -714,6 +715,7 @@ impl BodyBuilder {
                 then_block,
                 else_block,
             } => {
+                let condition_source = condition.span.source;
                 let condition_span = condition.span.start;
                 let condition = Operand::Copy(self.expression(condition));
                 let then_id = self.block();
@@ -727,6 +729,7 @@ impl BodyBuilder {
                 let bindings = self.bindings.clone();
                 self.current = then_id;
                 self.push(Statement::Coverage(CoveragePoint {
+                    source: condition_source,
                     span_start: condition_span,
                     kind: CoverageKind::Branch,
                     ordinal: 0,
@@ -743,6 +746,7 @@ impl BodyBuilder {
                 self.bindings.clone_from(&bindings);
                 self.current = else_id;
                 self.push(Statement::Coverage(CoveragePoint {
+                    source: condition_source,
                     span_start: condition_span,
                     kind: CoverageKind::Branch,
                     ordinal: 1,

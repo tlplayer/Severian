@@ -1038,6 +1038,25 @@ fn owned_string_results_execute_through_the_runtime_boundary() {
 }
 
 #[test]
+fn variadic_print_preserves_wide_integers_and_unicode() {
+    let root = temporary("variadic-print");
+    let source = root.join("variadic.sev");
+    fs::write(
+        &source,
+        "test with integ:\n    maximum: i128 = 170141183460469231731687303715884105727\n    unsigned_maximum: u128 = 340282366920938463463374607431768211455\n    half: f16 = 1.5\n    brain: bf16 = 1.5\n    single: f32 = 1.5\n    double: f64 = 1.5\n    wide_float: f128 = 1.5\n    letter: char = 'λ'\n    print(maximum, unsigned_maximum, half, brain, single, double, wide_float, letter)\n    assert(stdout == \"170141183460469231731687303715884105727 340282366920938463463374607431768211455 1.5 1.5 1.5 1.5 0x1.8000000000000000000000000000p+0 λ\\n\")\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn compound_assignment_executes_and_rejects_invalid_updates() {
     let root = temporary("compound-assignment");
     let source = root.join("updates.sev");

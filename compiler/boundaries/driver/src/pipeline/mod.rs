@@ -2,7 +2,7 @@ use severian_backend::{Artifact, BackendError};
 use severian_compile::{CompileContext, CompileHandler, CompilePlan, CompilerRegistry};
 use severian_diagnostics::Diagnostic;
 use severian_mir::{CfgStatement, Module as MirModule};
-use severian_source::SourceFile;
+use severian_source::{SourceFile, SourceId};
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
 use std::collections::{BTreeMap, BTreeSet};
@@ -983,7 +983,15 @@ fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {
 
 fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &SourceFile) {
     for block in &mut body.blocks {
-        for statement in &mut block.statements {
+        let mut index = 0;
+        while index < block.statements.len() {
+            if matches!(&block.statements[index], CfgStatement::Coverage(point) if point.source != source.id)
+            {
+                block.statements.remove(index);
+                block.statement_spans.remove(index);
+                continue;
+            }
+            let statement = &mut block.statements[index];
             match statement {
                 CfgStatement::Coverage(point) => {
                     let before = source
@@ -1010,6 +1018,7 @@ fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &S
                 }
                 _ => {}
             }
+            index += 1;
         }
     }
 }
@@ -1489,10 +1498,11 @@ fn with_core_prelude(
     // Package import resolution will eventually load this dependency from the
     // prelude's `import print from io`. Until then, bootstrap the same source
     // module explicitly instead of duplicating its foreign declaration in core.
-    let io = SourceFile::virtual_source(
+    let mut io = SourceFile::virtual_source(
         "system/io/src/lib.sev",
         include_str!("../../../../../library/system/io/src/lib.sev"),
     );
+    io.id = SourceId(u32::MAX);
     let tokens = severian_lexer::scan(&io).map_err(CompileError::Diagnostic)?;
     let mut module = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     module.items.retain(|item| match item {
@@ -1506,13 +1516,25 @@ fn with_core_prelude(
                 .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
                 && boundary_type_is_available(&function.result, types)
         }
+        severian_ast::Item::Function(function) => {
+            function.name == "print"
+                && types.resolve_name("usize").is_some()
+                && types.resolve_name("bool").is_some()
+                && (!function.type_parameters.is_empty()
+                    || (function
+                        .parameters
+                        .iter()
+                        .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
+                        && boundary_type_is_available(&function.result, types)))
+        }
         _ => false,
     });
 
-    let size = SourceFile::virtual_source(
+    let mut size = SourceFile::virtual_source(
         "core/size/src/lib.sev",
         include_str!("../../../../../library/core/size/src/lib.sev"),
     );
+    size.id = SourceId(u32::MAX - 1);
     let tokens = severian_lexer::scan(&size).map_err(CompileError::Diagnostic)?;
     let mut size = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     size.items.retain(|item| match item {
@@ -1527,10 +1549,11 @@ fn with_core_prelude(
     });
     module.items.extend(size.items);
 
-    let text = SourceFile::virtual_source(
+    let mut text = SourceFile::virtual_source(
         "core/text/src/lib.sev",
         include_str!("../../../../../library/core/text/src/lib.sev"),
     );
+    text.id = SourceId(u32::MAX - 2);
     let tokens = severian_lexer::scan(&text).map_err(CompileError::Diagnostic)?;
     let mut text = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     text.items.retain(|item| match item {
@@ -1545,10 +1568,11 @@ fn with_core_prelude(
     });
     module.items.extend(text.items);
 
-    let prelude = SourceFile::virtual_source(
+    let mut prelude = SourceFile::virtual_source(
         "core/prelude.sev",
         include_str!("../../../../../library/core/prelude.sev"),
     );
+    prelude.id = SourceId(u32::MAX - 3);
     let tokens = severian_lexer::scan(&prelude).map_err(CompileError::Diagnostic)?;
     let prelude = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     module.items.extend(prelude.items);
@@ -1563,7 +1587,7 @@ fn boundary_type_is_available(
     let Some((name, arguments)) = annotation.named_parts() else {
         return false;
     };
-    types.resolve_name(name).is_some()
+    (name == "Any" || types.resolve_name(name).is_some())
         && arguments
             .iter()
             .all(|argument| boundary_type_is_available(argument, types))

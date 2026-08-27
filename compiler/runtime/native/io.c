@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+extern const char *__sev_string_from_i128(__int128 value);
+extern const char *__sev_string_from_u128(unsigned __int128 value);
+extern const char *__sev_string_from_char(uint32_t value);
+extern const char *__sev_string_from_f128(__float128 value);
+
 void __sev_assert(_Bool condition, const char *message) {
     if (condition) return;
     fputs(message, stderr);
@@ -19,22 +24,6 @@ void __sev_expect(_Bool condition, const char *message) {
 
 int32_t __sev_print_string(const char *value) {
     return puts(value);
-}
-
-static int32_t __sev_print_u128_digits(unsigned __int128 value) {
-    char digits[39];
-    size_t length = 0;
-    do {
-        digits[length++] = (char)('0' + value % 10);
-        value /= 10;
-    } while (value != 0);
-    for (size_t left = 0, right = length - 1; left < right; ++left, --right) {
-        char swap = digits[left];
-        digits[left] = digits[right];
-        digits[right] = swap;
-    }
-    if (fwrite(digits, 1, length, stdout) != length) return -1;
-    return putchar('\n');
 }
 
 int32_t __sev_print_int(int64_t value) {
@@ -62,10 +51,7 @@ int32_t __sev_print_i64(int64_t value) {
 }
 
 int32_t __sev_print_i128(__int128 value) {
-    if (value >= 0) return __sev_print_u128_digits((unsigned __int128)value);
-    if (putchar('-') == EOF) return -1;
-    unsigned __int128 magnitude = (unsigned __int128)(-(value + 1)) + 1;
-    return __sev_print_u128_digits(magnitude);
+    return puts(__sev_string_from_i128(value));
 }
 
 int32_t __sev_print_isize(intptr_t value) {
@@ -89,7 +75,7 @@ int32_t __sev_print_u64(uint64_t value) {
 }
 
 int32_t __sev_print_u128(unsigned __int128 value) {
-    return __sev_print_u128_digits(value);
+    return puts(__sev_string_from_u128(value));
 }
 
 int32_t __sev_print_usize(uintptr_t value) {
@@ -104,32 +90,14 @@ int32_t __sev_print_f64(double value) {
     return printf("%.15g\n", value);
 }
 
+int32_t __sev_print_f128(__float128 value) {
+    return puts(__sev_string_from_f128(value));
+}
+
 int32_t __sev_print_bool(_Bool value) {
     return puts(value ? "true" : "false");
 }
 
 int32_t __sev_print_char(uint32_t value) {
-    unsigned char encoded[4];
-    size_t length;
-    if (value <= 0x7f) {
-        encoded[0] = value;
-        length = 1;
-    } else if (value <= 0x7ff) {
-        encoded[0] = 0xc0 | (value >> 6);
-        encoded[1] = 0x80 | (value & 0x3f);
-        length = 2;
-    } else if (value <= 0xffff) {
-        encoded[0] = 0xe0 | (value >> 12);
-        encoded[1] = 0x80 | ((value >> 6) & 0x3f);
-        encoded[2] = 0x80 | (value & 0x3f);
-        length = 3;
-    } else {
-        encoded[0] = 0xf0 | (value >> 18);
-        encoded[1] = 0x80 | ((value >> 12) & 0x3f);
-        encoded[2] = 0x80 | ((value >> 6) & 0x3f);
-        encoded[3] = 0x80 | (value & 0x3f);
-        length = 4;
-    }
-    if (fwrite(encoded, 1, length, stdout) != length) return -1;
-    return putchar('\n');
+    return puts(__sev_string_from_char(value));
 }

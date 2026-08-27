@@ -7057,75 +7057,15 @@ impl Analyzer<'_> {
                         ));
                     }
                 }
+                // Package-aware compilation supplies `print` from system/io,
+                // including its Severian variadic overload. Keep this fallback
+                // only for isolated semantic analysis that has no prelude.
                 if callable_path(callee).as_deref() == Some("print")
+                    && !self.functions.contains_key("print")
                     && !arguments.is_empty()
                     && arguments.iter().all(|argument| argument.name.is_none())
-                    && arguments.len() > 1
                 {
-                    let values = arguments
-                        .iter()
-                        .map(|argument| self.expression(&argument.value, None))
-                        .collect::<Result<Vec<_>, Diagnostic>>()?;
-                    let string = self
-                        .types
-                        .resolve_name("string")
-                        .expect("bootstrap defines string");
-                    let mut values = values.into_iter();
-                    let first = values.next().expect("print has multiple arguments");
-                    let mut rendered = self.display_string(first, ast.span)?;
-                    for value in values {
-                        let space = Expression {
-                            id: self.next_id(),
-                            type_id: string,
-                            kind: ExpressionKind::Literal(LiteralValue::String(" ".into())),
-                            span: ast.span,
-                        };
-                        rendered = self.runtime_call(
-                            "__sev_string_concat",
-                            &[string, string],
-                            string,
-                            vec![rendered, space],
-                            ast.span,
-                        );
-                        let value = self.display_string(value, ast.span)?;
-                        rendered = self.runtime_call(
-                            "__sev_string_concat",
-                            &[string, string],
-                            string,
-                            vec![rendered, value],
-                            ast.span,
-                        );
-                    }
-                    let result = self
-                        .types
-                        .resolve_name("i32")
-                        .expect("bootstrap defines i32");
-                    return Ok(self.runtime_call(
-                        "__sev_print_string",
-                        &[string],
-                        result,
-                        vec![rendered],
-                        ast.span,
-                    ));
-                }
-                if callable_path(callee).as_deref() == Some("print")
-                    && arguments.len() == 1
-                    && arguments[0].name.is_none()
-                {
-                    let value = self.expression(&arguments[0].value, None)?;
-                    let rendered = self.display_string(value, ast.span)?;
-                    let string = rendered.type_id;
-                    let result = self
-                        .types
-                        .resolve_name("i32")
-                        .expect("bootstrap defines i32");
-                    return Ok(self.runtime_call(
-                        "__sev_print_string",
-                        &[string],
-                        result,
-                        vec![rendered],
-                        ast.span,
-                    ));
+                    return self.render_print(arguments, ast.span);
                 }
                 if let Some(call) =
                     self.trait_namespace_call(callee, arguments, expected, ast.span)?
@@ -7216,6 +7156,12 @@ impl Analyzer<'_> {
                     .filter(|candidate| Some(candidate.1) == specificity)
                     .collect::<Vec<_>>();
                 if best.is_empty() {
+                    if name == "print"
+                        && !arguments.is_empty()
+                        && arguments.iter().all(|argument| argument.name.is_none())
+                    {
+                        return self.render_print(arguments, ast.span);
+                    }
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("no declaration of `{name}` accepts these argument types"),
@@ -9979,6 +9925,58 @@ impl Analyzer<'_> {
         ))
     }
 
+    fn render_print(
+        &mut self,
+        arguments: &[severian_ast::CallArgument],
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let values = arguments
+            .iter()
+            .map(|argument| self.expression(&argument.value, None))
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let mut values = values.into_iter();
+        let first = values.next().expect("print has arguments");
+        let mut rendered = self.display_string(first, span)?;
+        for value in values {
+            let space = Expression {
+                id: self.next_id(),
+                type_id: string,
+                kind: ExpressionKind::Literal(LiteralValue::String(" ".into())),
+                span,
+            };
+            rendered = self.runtime_call(
+                "__sev_string_concat",
+                &[string, string],
+                string,
+                vec![rendered, space],
+                span,
+            );
+            let value = self.display_string(value, span)?;
+            rendered = self.runtime_call(
+                "__sev_string_concat",
+                &[string, string],
+                string,
+                vec![rendered, value],
+                span,
+            );
+        }
+        let result = self
+            .types
+            .resolve_name("i32")
+            .expect("bootstrap defines i32");
+        Ok(self.runtime_call(
+            "__sev_print_string",
+            &[string],
+            result,
+            vec![rendered],
+            span,
+        ))
+    }
+
     fn display_string(
         &mut self,
         value: Expression,
@@ -10072,19 +10070,45 @@ impl Analyzer<'_> {
             .types
             .definition(value.type_id)
             .map(|definition| definition.name.as_str());
-        if self.integer_primitive(value.type_id) && name != Some("usize") {
-            let integer = self
+        if self.integer_primitive(value.type_id) {
+            let representation = self
                 .types
-                .resolve_name("int")
-                .expect("bootstrap defines int");
-            let value = self.coerce(value, integer, true)?;
-            return Ok(self.runtime_call(
-                "__sev_string_from_int",
-                &[integer],
-                string,
-                vec![value],
-                span,
-            ));
+                .primitive(value.type_id)
+                .map(|primitive| primitive.representation);
+            let (symbol, parameter) = match representation {
+                Some(severian_universal::PrimitiveRepresentation::Integer {
+                    bits: severian_universal::IntegerWidth::Fixed(128),
+                    signed: true,
+                }) => ("__sev_string_from_i128", value.type_id),
+                Some(severian_universal::PrimitiveRepresentation::Integer {
+                    bits: severian_universal::IntegerWidth::Fixed(128),
+                    signed: false,
+                }) => ("__sev_string_from_u128", value.type_id),
+                Some(severian_universal::PrimitiveRepresentation::Integer {
+                    signed: false,
+                    ..
+                })
+                | Some(severian_universal::PrimitiveRepresentation::PointerInteger {
+                    signed: false,
+                }) => (
+                    "__sev_string_from_uint",
+                    self.types
+                        .resolve_name("u64")
+                        .expect("bootstrap defines u64"),
+                ),
+                _ => (
+                    "__sev_string_from_int",
+                    self.types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int"),
+                ),
+            };
+            let value = if value.type_id == parameter {
+                value
+            } else {
+                self.coerce(value, parameter, true)?
+            };
+            return Ok(self.runtime_call(symbol, &[parameter], string, vec![value], span));
         }
         if self
             .types
@@ -10097,28 +10121,34 @@ impl Analyzer<'_> {
                 )
             })
         {
-            let float = self
+            let representation = self
                 .types
-                .resolve_name("float")
-                .expect("bootstrap defines float");
-            let value = self.coerce(value, float, true)?;
-            return Ok(self.runtime_call(
-                "__sev_string_from_float",
-                &[float],
-                string,
-                vec![value],
-                span,
-            ));
+                .primitive(value.type_id)
+                .map(|primitive| primitive.representation);
+            let (symbol, parameter) = if matches!(
+                representation,
+                Some(severian_universal::PrimitiveRepresentation::Float {
+                    format: severian_universal::FloatFormat::Ieee(128),
+                })
+            ) {
+                ("__sev_string_from_f128", value.type_id)
+            } else {
+                (
+                    "__sev_string_from_float",
+                    self.types
+                        .resolve_name("f64")
+                        .expect("bootstrap defines f64"),
+                )
+            };
+            let value = if value.type_id == parameter {
+                value
+            } else {
+                self.coerce(value, parameter, true)?
+            };
+            return Ok(self.runtime_call(symbol, &[parameter], string, vec![value], span));
         }
         match name {
             Some("string") => Ok(value),
-            Some("usize") => Ok(self.runtime_call(
-                "__sev_string_from_usize",
-                &[value.type_id],
-                string,
-                vec![value],
-                span,
-            )),
             Some("bool") => Ok(self.runtime_call(
                 "__sev_string_from_bool",
                 &[value.type_id],
@@ -10682,7 +10712,7 @@ impl Analyzer<'_> {
             .definition(element)
             .map(|definition| definition.name.as_str());
         match name {
-            _ if self.any_type == Some(element) => Ok("pair_i64"),
+            _ if self.any_type == Some(element) => Ok("any"),
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
             Some("float") => Ok("float"),
             Some("f64") => Ok("f64"),
@@ -12379,17 +12409,49 @@ impl Analyzer<'_> {
             .types
             .definition(value.type_id)
             .map(|definition| definition.name.as_str());
+        let representation = self
+            .types
+            .primitive(value.type_id)
+            .map(|primitive| primitive.representation);
         let (symbol, parameter, value) = match name {
             Some("string") => ("__sev_any_from_string", value.type_id, value),
             Some("bool") => ("__sev_any_from_bool", value.type_id, value),
             Some("char") => ("__sev_any_from_char", value.type_id, value),
             _ if self.integer_primitive(value.type_id) => {
-                let integer = self
-                    .types
-                    .resolve_name("int")
-                    .expect("bootstrap defines int");
-                let value = self.coerce(value, integer, true)?;
-                ("__sev_any_from_int", integer, value)
+                let (symbol, parameter) = match representation {
+                    Some(severian_universal::PrimitiveRepresentation::Integer {
+                        bits: severian_universal::IntegerWidth::Fixed(128),
+                        signed: true,
+                    }) => ("__sev_any_from_i128", value.type_id),
+                    Some(severian_universal::PrimitiveRepresentation::Integer {
+                        bits: severian_universal::IntegerWidth::Fixed(128),
+                        signed: false,
+                    }) => ("__sev_any_from_u128", value.type_id),
+                    Some(severian_universal::PrimitiveRepresentation::Integer {
+                        signed: false,
+                        ..
+                    })
+                    | Some(severian_universal::PrimitiveRepresentation::PointerInteger {
+                        signed: false,
+                    }) => (
+                        "__sev_any_from_uint",
+                        self.types
+                            .resolve_name("u64")
+                            .expect("bootstrap defines u64"),
+                    ),
+                    _ => (
+                        "__sev_any_from_int",
+                        self.types
+                            .resolve_name("int")
+                            .expect("bootstrap defines int"),
+                    ),
+                };
+                let value = if value.type_id == parameter {
+                    value
+                } else {
+                    self.coerce(value, parameter, true)?
+                };
+                (symbol, parameter, value)
             }
             _ if self
                 .types
@@ -12402,12 +12464,27 @@ impl Analyzer<'_> {
                     )
                 }) =>
             {
-                let float = self
-                    .types
-                    .resolve_name("float")
-                    .expect("bootstrap defines float");
-                let value = self.coerce(value, float, true)?;
-                ("__sev_any_from_float", float, value)
+                let (symbol, parameter) = if matches!(
+                    representation,
+                    Some(severian_universal::PrimitiveRepresentation::Float {
+                        format: severian_universal::FloatFormat::Ieee(128),
+                    })
+                ) {
+                    ("__sev_any_from_f128", value.type_id)
+                } else {
+                    (
+                        "__sev_any_from_float",
+                        self.types
+                            .resolve_name("f64")
+                            .expect("bootstrap defines f64"),
+                    )
+                };
+                let value = if value.type_id == parameter {
+                    value
+                } else {
+                    self.coerce(value, parameter, true)?
+                };
+                (symbol, parameter, value)
             }
             _ => {
                 return Err(Diagnostic::new(
@@ -17424,17 +17501,19 @@ mod tests {
     }
 
     #[test]
-    fn single_argument_primitive_prints_use_display_string() {
+    fn isolated_print_fallback_preserves_wide_integer_and_character_representations() {
         let (program, _) = analyze_source(
-            "def main():\n    count: i32 = 10\n    large: i64 = 1_000_000\n    ratio: f64 = 0.5\n    print(count)\n    print(large)\n    print(ratio)\n",
+            "def main():\n    signed: i128 = 170141183460469231731687303715884105727\n    unsigned: u128 = 340282366920938463463374607431768211455\n    letter: char = 'λ'\n    print(signed, unsigned, letter)\n",
         );
         let names = program.modules[0]
             .functions
             .iter()
             .map(|function| function.name.as_str())
             .collect::<BTreeSet<_>>();
-        assert!(names.contains("__sev_string_from_int"));
-        assert!(names.contains("__sev_string_from_float"));
+        assert!(names.contains("__sev_string_from_i128"));
+        assert!(names.contains("__sev_string_from_u128"));
+        assert!(names.contains("__sev_string_from_char"));
+        assert!(!names.contains("__sev_string_from_int"));
         assert!(names.contains("__sev_print_string"));
         severian_mir::build(&program).unwrap();
     }
@@ -18276,7 +18355,7 @@ mod tests {
         assert!(symbols.contains(&"__sev_any_from_int"));
         assert!(symbols.contains(&"__sev_any_from_bool"));
         assert!(symbols.contains(&"__sev_any_string"));
-        assert!(symbols.contains(&"__sev_list_append_pair_i64"));
+        assert!(symbols.contains(&"__sev_list_append_any"));
         severian_mir::build(&program).unwrap();
     }
 
