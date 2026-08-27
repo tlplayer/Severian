@@ -9,18 +9,18 @@ class Connection:
     provider: string
     locator: string
     options: map[string, string]
-    tables: map[string, data.Data]
+    tables: map[string, data.Table]
 
-    def data(resource: string) -> data.Data:
-        return tables.get(resource, data.Data([], []))
+    def data(resource: string) -> data.Table:
+        return tables.get(resource, data.Table([], []))
 
 trait Storage:
     @storage
-    def read(locator: string, resource: string) -> data.Data with { (locator, resource) -> bool }
+    def read(locator: string, resource: string) -> data.Table with { (locator, resource) -> bool }
 
 class MemoryStorage: Storage
-    def read(locator: string, resource: string) -> data.Data with { locator == "memory" or locator.starts_with("memory://") }:
-        return data.Data([], [])
+    def read(locator: string, resource: string) -> data.Table with { locator == "memory" or locator.starts_with("memory://") }:
+        return data.Table([], [])
 
 def connect(locator: string, options: map[string, string] = {}) -> Connection:
     provider = locator.split("://")[0] if "://" in locator else locator
@@ -29,10 +29,10 @@ def connect(locator: string, options: map[string, string] = {}) -> Connection:
 def memory() -> Connection:
     return Connection("memory", "memory://", {}, {})
 
-def memory(tables: map[string, data.Data]) -> Connection:
+def memory(tables: map[string, data.Table]) -> Connection:
     return Connection("memory", "memory://", {}, tables)
 
-def put(connection: Connection, resource: string, value: data.Data) -> Connection:
+def put(connection: Connection, resource: string, value: data.Table) -> Connection:
     connection.tables[resource] = value
     return connection
 
@@ -76,8 +76,8 @@ def transaction(plans: list[StoragePlan]) -> list[string]:
     operations.append("commit")
     return operations
 
-test "memory storage returns the universal Data type":
-    people = data.Data(["name", "role"], [["Ada", "compiler"], ["Grace", "runtime"]])
+test "memory storage returns the in-memory Table type":
+    people = data.Table(["name", "role"], [["Ada", "compiler"], ["Grace", "runtime"]])
     connection = memory({"people": people})
     selected = connection.data("people")
     assert(selected.columns_data == ["name", "role"])

@@ -189,6 +189,7 @@ impl TypeAnnotation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorSyntax {
+    Index,
     Pipe,
     BitwiseAnd,
     BitwiseXor,

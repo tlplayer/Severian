@@ -170,7 +170,7 @@ pub fn analyze_package_with_context(
         .iter()
         .filter(|module| {
             module.ast.items.iter().any(|item| {
-                matches!(item, Item::Class(class) if class.name == "Data" || class.traits.iter().any(|implemented| {
+                matches!(item, Item::Class(class) if class.traits.iter().any(|implemented| {
                     implemented
                         .simple_name()
                         .is_some_and(|name| registry_traits.contains(name))

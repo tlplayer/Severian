@@ -1,60 +1,130 @@
-import data
 from data import Data
+from data import Row
+from data import Schema
+from data import Table
 import file
 import tensor
 import os
 
 class CsvFile: File
-    def read(path: string) -> Data with { path.ends_with(".csv") }:
-        return csv_data_from_text(file.read_text(path))
+    def read(path: string) -> Csv with { path.ends_with(".csv") }:
+        return decode(file.read_text(path))
 
-class Document: data.DataSource
-    source: string
-    columns_data: list[string]
-    rows_data: list[list[Any]]
+class Csv: Data
+    source_text: string
+    content: Table
+
+    operator [](column: string) -> list[Any]:
+        return content.get(column)
+    operator [](row: int) -> Row:
+        return content.rows()[row]
+    operator [](row: int, column: string) -> Any:
+        return content.rows()[row].get(column)
+    operator [](row: int, column: int) -> Any:
+        return content.values()[row][column]
 
     def text() -> string:
-        return source
-
+        return source_text
+    def data() -> Table:
+        return content.collect()
+    def schema() -> Schema:
+        return content.schema()
     def columns() -> list[string]:
-        return columns_data
-
+        return content.columns()
+    def rows() -> list[Row]:
+        return content.rows()
     def values() -> list[list[Any]]:
-        return rows_data
+        return content.values()
+    def records() -> list[list[Any]]:
+        return content.records()
+    def row_count() -> int:
+        return content.row_count()
+    def has_column(column: string) -> bool:
+        return content.has_column(column)
+    def get(column: string) -> list[Any]:
+        return content.get(column)
+    def column(column: string) -> list[Any]:
+        return content.column(column)
+    def select(columns: list[string]) -> Table:
+        return content.select(columns)
+    def drop(columns: list[string]) -> Table:
+        return content.drop(columns)
+    def rename(source: string, destination: string) -> Table:
+        return content.rename(source, destination)
+    def require_columns(required: list[string]) -> Table:
+        return content.require_columns(required)
+    def lower(column: string) -> Table:
+        return content.lower(column)
+    def transform(column: string, operation: (Any) -> Any) -> Table:
+        return content.transform(column, operation)
+    def strip(columns: list[string]) -> Table:
+        return content.strip(columns)
+    def where_not_empty(column: string) -> Table:
+        return content.where_not_empty(column)
+    def filter(predicate: (Row) -> bool) -> Table:
+        return content.filter(predicate)
+    def sort(column: string) -> Table:
+        return content.sort(column)
+    def sort_descending(column: string) -> Table:
+        return content.sort_descending(column)
+    def unique(columns: list[string]) -> Table:
+        return content.unique(columns)
+    def unique_normalized(columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Table:
+        return content.unique_normalized(columns, lowercase_columns, trim_strings)
+    def unique_by(columns: list[string], normalize: (string, Any) -> Any) -> Table:
+        return content.unique_by(columns, normalize)
+    def index(columns: list[string]) -> map[string, bool]:
+        return content.index(columns)
+    def index_by(columns: list[string], normalize: (string, Any) -> Any) -> map[string, bool]:
+        return content.index_by(columns, normalize)
+    def group(columns: list[string]) -> list[Table]:
+        return content.group(columns)
+    def collapse_text(match_column: string, match_values: list[string], group_columns: list[string], text_column: string) -> Table:
+        return content.collapse_text(match_column, match_values, group_columns, text_column)
+    def group_merge(predicate: (Row) -> bool, columns: list[string], merge: (Table) -> Row) -> Table:
+        return content.group_merge(predicate, columns, merge)
+    def limit(count: int) -> Table:
+        return content.limit(count)
+    def collect() -> Table:
+        return content.collect()
+    def explain() -> string:
+        return content.explain()
+    def sql(statement: string) -> Table:
+        return content.sql(statement)
+    def as_map() -> map[string, Any]:
+        return content.as_map()
+    def tensor(columns: list[string] = []) -> tensor.Tensor[f64]:
+        return content.tensor(columns)
 
 def csv_columns_native(source: string) -> list[string]
 
 def csv_rows_native(source: string) -> list[list[Any]]
 
-def decode(source: string) -> Document:
-    return Document(source, csv_columns_native(source), csv_rows_native(source))
+def decode(source: string) -> Csv:
+    return Csv(source, Table(csv_columns_native(source), csv_rows_native(source)))
 
-def encode(document: Document) -> string:
-    return document.text()
+def encode(value: Csv) -> string:
+    return value.text()
 
-def csv_data_from_text(source: string) -> Data:
-    document = decode(source)
-    return Data(document.columns(), document.values())
+def read(path: string) -> Csv:
+    return decode(file.read_text(path))
 
-def read(path: string) -> Data:
-    return csv_data_from_text(file.read_text(path))
-
-test "CSV documents retain their source representation":
-    document = decode("name,value,note\nseverian,1,\"hello, world\"\ncompiler,2,\"two \"\"quotes\"\"\"")
-    assert(document.text().starts_with("name,value,note"))
-    assert(document.columns() == ["name", "value", "note"])
-    assert(size(document.values()) == 2)
-    assert(document.values()[0][0] == "severian")
-    assert(document.values()[0][2] == "hello, world")
-    assert(document.values()[1][2] == "two \"quotes\"")
+test "CSV values implement Data directly":
+    value: Csv = decode("name,value,note\nseverian,1,\"hello, world\"\ncompiler,2,\"two \"\"quotes\"\"\"")
+    assert(value.text().starts_with("name,value,note"))
+    assert(value.columns() == ["name", "value", "note"])
+    assert(size(value.values()) == 2)
+    assert(value["name"] == ["severian", "compiler"])
+    assert(value.values()[0][2] == "hello, world")
+    assert(value.values()[1][2] == "two \"quotes\"")
 
 test with integ "CSV file dispatch exposes dataframe and tensor operations":
     path = "/tmp/severian-data-dispatch.csv"
     file.write(path, "id,level,name\n1,10,Ada\n2,20,Grace\n")
-    table = file.read(path)
-    assert(table.columns() == ["id", "level", "name"])
-    assert(table.where_not_empty("name").row_count() == 2)
-    values = table.tensor(["id", "level"])
+    value = file.read(path)
+    assert(value.columns() == ["id", "level", "name"])
+    assert(value.where_not_empty("name").row_count() == 2)
+    values = value.tensor(["id", "level"])
     assert(tensor.shape(values) == [2, 2])
     assert(tensor.values(values) == [1.0, 10.0, 2.0, 20.0])
     os.remove(path)

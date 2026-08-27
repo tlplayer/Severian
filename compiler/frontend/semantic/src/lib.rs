@@ -169,6 +169,14 @@ pub(crate) fn analyze_with_package_functions(
         allow_qualified_function_suffix: false,
         active_function_name: None,
         signatures: BTreeMap::new(),
+        trait_names: registry_ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Trait(declaration) => Some(declaration.name.clone()),
+                _ => None,
+            })
+            .collect(),
         classes: ast
             .items
             .iter()
@@ -1054,6 +1062,7 @@ struct Analyzer<'a> {
     allow_qualified_function_suffix: bool,
     active_function_name: Option<String>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
+    trait_names: BTreeSet<String>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
     enum_variants: BTreeMap<String, (String, usize)>,
@@ -1143,6 +1152,7 @@ struct ClassInstance {
     source_fields: Vec<severian_ast::PropertyDeclaration>,
     constructors: Vec<severian_ast::FunctionDeclaration>,
     methods: Vec<severian_ast::FunctionDeclaration>,
+    operators: Vec<severian_ast::OperatorImplementation>,
 }
 
 #[derive(Debug, Clone)]
@@ -1378,6 +1388,7 @@ impl Analyzer<'_> {
                 source_fields: Vec::new(),
                 constructors: Vec::new(),
                 methods: Vec::new(),
+                operators: Vec::new(),
             };
             self.class_instances
                 .insert((declaration.name.clone(), Vec::new()), placeholder.clone());
@@ -1425,6 +1436,7 @@ impl Analyzer<'_> {
                     source_fields: Vec::new(),
                     constructors: Vec::new(),
                     methods: Vec::new(),
+                    operators: Vec::new(),
                 },
             );
             self.class_instances_by_type.insert(
@@ -1436,6 +1448,7 @@ impl Analyzer<'_> {
                     source_fields: Vec::new(),
                     constructors: Vec::new(),
                     methods: Vec::new(),
+                    operators: Vec::new(),
                 },
             );
             self.lowered_classes.retain(|class| class.id != ty);
@@ -1586,6 +1599,7 @@ impl Analyzer<'_> {
                 source_fields: package_class.declaration.fields.clone(),
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
+                operators: package_class.declaration.operators.clone(),
             };
             self.class_instances_by_type
                 .insert(package_class.ty, placeholder.clone());
@@ -1594,10 +1608,6 @@ impl Analyzer<'_> {
                     (package_class.declaration.name.clone(), Vec::new()),
                     placeholder.clone(),
                 );
-            }
-            if package_class.declaration.name == "Data" {
-                self.class_instances
-                    .insert(("Data".into(), Vec::new()), placeholder.clone());
             }
             if let Some(source_module) = source_module {
                 for lookup in package_class
@@ -1617,7 +1627,6 @@ impl Analyzer<'_> {
         for package_class in classes {
             if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
                 && package_class.declaration.name != "Tensor"
-                && package_class.declaration.name != "Data"
             {
                 continue;
             }
@@ -1676,6 +1685,7 @@ impl Analyzer<'_> {
                 source_fields: package_class.declaration.fields.clone(),
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
+                operators: package_class.declaration.operators.clone(),
             };
             self.class_instances = resolved_visible_instances;
             self.class_instances_by_type
@@ -1685,10 +1695,6 @@ impl Analyzer<'_> {
                     (package_class.declaration.name.clone(), Vec::new()),
                     instance.clone(),
                 );
-            }
-            if package_class.declaration.name == "Data" {
-                self.class_instances
-                    .insert(("Data".into(), Vec::new()), instance.clone());
             }
             if let Some(source_module) = source_module {
                 for lookup in package_class
@@ -1725,6 +1731,13 @@ impl Analyzer<'_> {
             return self.resolve_source_type(inner);
         }
         if annotation.simple_name() == Some("Any") {
+            return Ok(self.ensure_any_type());
+        }
+        if annotation.simple_name().is_some_and(|name| {
+            self.trait_names
+                .iter()
+                .any(|known| known.rsplit('.').next() == Some(name))
+        }) {
             return Ok(self.ensure_any_type());
         }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
@@ -5639,7 +5652,16 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Index { object, index } => {
-                let object = self.expression(object, None)?;
+                let object_value = self.expression(object, None)?;
+                if let Some(indexed) = self.class_index_operator(
+                    object_value.clone(),
+                    index,
+                    expected,
+                    ast.span,
+                )? {
+                    return Ok(indexed);
+                }
+                let object = object_value;
                 if let Some(element) = self.pointer_elements.get(&object.type_id).copied() {
                     if self.unsafe_depth == 0 {
                         return Err(Diagnostic::new(
@@ -8727,6 +8749,7 @@ impl Analyzer<'_> {
             source_fields: declaration.fields.clone(),
             constructors: declaration.constructors.clone(),
             methods: declaration.methods.clone(),
+            operators: declaration.operators.clone(),
         };
         self.class_instances.insert(key, instance.clone());
         self.class_instances_by_type.insert(ty, instance.clone());
@@ -14617,6 +14640,112 @@ impl Analyzer<'_> {
         }))
     }
 
+    fn class_index_operator(
+        &mut self,
+        object: Expression,
+        index: &AstExpression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
+            return Ok(None);
+        };
+        let indices = match &index.kind {
+            AstExpressionKind::Tuple(indices) => indices.as_slice(),
+            _ => std::slice::from_ref(index),
+        };
+        let candidates = instance
+            .operators
+            .iter()
+            .filter(|operator| {
+                operator.operator == severian_ast::OperatorSyntax::Index
+                    && operator.parameters.len() == indices.len()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let mut applicable = Vec::new();
+        for operator in candidates {
+            let result_type = match self.resolve_source_type(&operator.result) {
+                Ok(result) => result,
+                Err(_) => continue,
+            };
+            if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+                continue;
+            }
+            let previous = self.value_substitutions.clone();
+            let previous_callables = self.callable_substitutions.clone();
+            let previous_suffix_resolution = self.allow_qualified_function_suffix;
+            self.allow_qualified_function_suffix = true;
+            let resolved = (|| {
+                for (field, declaration) in instance.fields.iter().enumerate() {
+                    let id = self.next_id();
+                    self.value_substitutions.insert(
+                        declaration.name.clone(),
+                        Expression {
+                            id,
+                            type_id: declaration.ty,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(object.clone()),
+                                index: field as u32,
+                            },
+                            span,
+                        },
+                    );
+                }
+                for (parameter, argument) in operator.parameters.iter().zip(indices) {
+                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                    let value = self.expression(argument, Some(parameter_type))?;
+                    self.value_substitutions
+                        .insert(parameter.name.clone(), value);
+                }
+                let return_value = operator
+                    .body
+                    .iter()
+                    .find_map(|statement| match statement {
+                        AstStatement::Return {
+                            value: Some(value), ..
+                        } => Some(value),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000211",
+                            "index operator must return a value",
+                            Some(operator.span),
+                        )
+                    })?;
+                self.expression(return_value, Some(result_type))
+            })();
+            self.value_substitutions = previous;
+            self.callable_substitutions = previous_callables;
+            self.allow_qualified_function_suffix = previous_suffix_resolution;
+            if let Ok(value) = resolved {
+                applicable.push(value);
+            }
+        }
+        match applicable.len() {
+            0 => Err(Diagnostic::new(
+                "E000211",
+                format!(
+                    "class `{}` has no `[]` overload matching {} index value(s)",
+                    instance.name,
+                    indices.len()
+                ),
+                Some(span),
+            )),
+            1 => Ok(applicable.pop()),
+            _ => Err(Diagnostic::new(
+                "E000210",
+                format!("index operator is ambiguous for class `{}`", instance.name),
+                Some(span),
+            )),
+        }
+    }
+
     fn class_method_update(
         &mut self,
         expression: &AstExpression,
@@ -15541,7 +15670,13 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         },
                     );
                 if !same_parameters
-                    || !implementation_result_satisfies(&required.result, &provided.result)
+                    || !(implementation_result_satisfies(&required.result, &provided.result)
+                        || implementation_result_implements_trait(
+                            &required.result,
+                            &provided.result,
+                            &traits,
+                            ast,
+                        ))
                 {
                     return Err(Diagnostic::new(
                         "E000218",
@@ -15580,6 +15715,9 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         Some(class.span),
                     ));
                 };
+                if required.operator == severian_ast::OperatorSyntax::Index {
+                    continue;
+                }
                 let same_parameters = required.parameters.len() == provided.parameters.len()
                     && required.parameters.iter().zip(&provided.parameters).all(
                         |(required, provided)| {
@@ -15744,6 +15882,45 @@ fn implementation_result_satisfies(required: &TypeAnnotation, provided: &TypeAnn
     members
         .iter()
         .any(|member| same_type_annotation(member, provided))
+}
+
+fn implementation_result_implements_trait(
+    required: &TypeAnnotation,
+    provided: &TypeAnnotation,
+    traits: &BTreeMap<&str, &severian_ast::TraitDeclaration>,
+    ast: &severian_ast::Module,
+) -> bool {
+    let Some(provided_name) = provided.simple_name() else {
+        return false;
+    };
+    let provided_name = provided_name.rsplit('.').next().unwrap_or(provided_name);
+    let implemented_traits = ast.items.iter().find_map(|item| match item {
+        severian_ast::Item::Class(class)
+            if class.name.rsplit('.').next().unwrap_or(&class.name) == provided_name =>
+        {
+            Some(&class.traits)
+        }
+        _ => None,
+    });
+    let Some(implemented_traits) = implemented_traits else {
+        return false;
+    };
+    let required_members = match &required.kind {
+        severian_ast::TypeAnnotationKind::Union(members) => members.as_slice(),
+        _ => std::slice::from_ref(required),
+    };
+    required_members.iter().any(|member| {
+        let Some(required_name) = member.simple_name() else {
+            return false;
+        };
+        let required_name = required_name.rsplit('.').next().unwrap_or(required_name);
+        traits.contains_key(required_name)
+            && implemented_traits.iter().any(|implemented| {
+                implemented
+                    .named_parts()
+                    .is_some_and(|(name, _)| name.rsplit('.').next() == Some(required_name))
+            })
+    })
 }
 
 fn callable_path(expression: &AstExpression) -> Option<String> {
@@ -16216,6 +16393,7 @@ fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
 fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str {
     use severian_ast::OperatorSyntax as Operator;
     match operator {
+        Operator::Index => "[]",
         Operator::Pipe => "|",
         Operator::BitwiseAnd => "&",
         Operator::BitwiseXor => "^",

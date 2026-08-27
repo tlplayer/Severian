@@ -1,194 +1,109 @@
 from data import Data
+from data import Row
+from data import Schema
+from data import Table
 import file
+import tensor
 
-class JsonFile: File + Data
-    def read(path: string) -> string with { path.ends_with(".json") }:
-        return file.raw(path)
+class JsonFile: File
+    def read(path: string) -> Json with { path.ends_with(".json") }:
+        return decode(file.raw(path))
 
-class Document: data_format.Data
-    source: string
-    columns_data: list[string]
-    rows_data: list[list[Any]]
+class Json: Data
+    source_text: string
+    content: Table
+
+    operator [](column: string) -> list[Any]:
+        return content.get(column)
+    operator [](row: int) -> Row:
+        return content.rows()[row]
+    operator [](row: int, column: string) -> Any:
+        return content.rows()[row].get(column)
+    operator [](row: int, column: int) -> Any:
+        return content.values()[row][column]
 
     def text() -> string:
-        return source
-
+        return source_text
+    def data() -> Table:
+        return content.collect()
+    def schema() -> Schema:
+        return content.schema()
     def columns() -> list[string]:
-        return columns_data
-
+        return content.columns()
+    def rows() -> list[Row]:
+        return content.rows()
     def values() -> list[list[Any]]:
-        return rows_data
+        return content.values()
+    def records() -> list[list[Any]]:
+        return content.records()
+    def row_count() -> int:
+        return content.row_count()
+    def has_column(column: string) -> bool:
+        return content.has_column(column)
+    def get(column: string) -> list[Any]:
+        return content.get(column)
+    def column(column: string) -> list[Any]:
+        return content.column(column)
+    def select(columns: list[string]) -> Table:
+        return content.select(columns)
+    def drop(columns: list[string]) -> Table:
+        return content.drop(columns)
+    def rename(source: string, destination: string) -> Table:
+        return content.rename(source, destination)
+    def require_columns(required: list[string]) -> Table:
+        return content.require_columns(required)
+    def lower(column: string) -> Table:
+        return content.lower(column)
+    def transform(column: string, operation: (Any) -> Any) -> Table:
+        return content.transform(column, operation)
+    def strip(columns: list[string]) -> Table:
+        return content.strip(columns)
+    def where_not_empty(column: string) -> Table:
+        return content.where_not_empty(column)
+    def filter(predicate: (Row) -> bool) -> Table:
+        return content.filter(predicate)
+    def sort(column: string) -> Table:
+        return content.sort(column)
+    def sort_descending(column: string) -> Table:
+        return content.sort_descending(column)
+    def unique(columns: list[string]) -> Table:
+        return content.unique(columns)
+    def unique_normalized(columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Table:
+        return content.unique_normalized(columns, lowercase_columns, trim_strings)
+    def unique_by(columns: list[string], normalize: (string, Any) -> Any) -> Table:
+        return content.unique_by(columns, normalize)
+    def index(columns: list[string]) -> map[string, bool]:
+        return content.index(columns)
+    def index_by(columns: list[string], normalize: (string, Any) -> Any) -> map[string, bool]:
+        return content.index_by(columns, normalize)
+    def group(columns: list[string]) -> list[Table]:
+        return content.group(columns)
+    def collapse_text(match_column: string, match_values: list[string], group_columns: list[string], text_column: string) -> Table:
+        return content.collapse_text(match_column, match_values, group_columns, text_column)
+    def group_merge(predicate: (Row) -> bool, columns: list[string], merge: (Table) -> Row) -> Table:
+        return content.group_merge(predicate, columns, merge)
+    def limit(count: int) -> Table:
+        return content.limit(count)
+    def collect() -> Table:
+        return content.collect()
+    def explain() -> string:
+        return content.explain()
+    def sql(statement: string) -> Table:
+        return content.sql(statement)
+    def as_map() -> map[string, Any]:
+        return content.as_map()
+    def tensor(columns: list[string] = []) -> tensor.Tensor[f64]:
+        return content.tensor(columns)
 
-def tokens(source: string) -> list[string]:
-    result: list[string] := []
-    token := ""
-    quoted := false
-    escaped := false
-    cursor := 0
-    while cursor < size(source):
-        character = source[cursor:cursor + 1]
-        if quoted:
-            if escaped:
-                token += "\n" if character == "n" else character
-                escaped = false
-            else:
-                if character == "\\":
-                    escaped = true
-                else:
-                    if character == "\"":
-                        result.append(token)
-                        token = ""
-                        quoted = false
-                    else:
-                        token += character
-            cursor += 1
-            continue
-        if character == "\"":
-            if size(token.strip()) > 0:
-                result.append(token.strip())
-                token = ""
-            quoted = true
-            cursor += 1
-            continue
-        if character in ["{", "}", "[", "]", ":", ","]:
-            if size(token.strip()) > 0:
-                result.append(token.strip())
-                token = ""
-            result.append(character)
-            cursor += 1
-            continue
-        if character == " " or character == "\n" or character == "\r" or character == "\t":
-            if size(token.strip()) > 0:
-                result.append(token.strip())
-                token = ""
-            cursor += 1
-            continue
-        token += character
-        cursor += 1
-    if size(token.strip()) > 0:
-        result.append(token.strip())
-    return result
+def json_columns_native(source: string) -> list[string]
 
-def property_key(line: string) -> string:
-    stripped = line.strip()
-    separator = stripped.find("\":")
-    if not stripped.starts_with("\"") or separator < 1:
-        return ""
-    return stripped[1:separator]
+def json_rows_native(source: string) -> list[list[Any]]
 
-def property_value(line: string) -> Any:
-    stripped = line.strip()
-    separator = stripped.find("\":")
-    if separator < 0:
-        return ""
-    value := stripped[separator + 2:].strip()
-    if value.ends_with(","):
-        value = value[0:-1].strip()
-    if value == "null":
-        return ""
-    if size(value) >= 2 and value.starts_with("\"") and value.ends_with("\""):
-        return value[1:-1].replace("\\\"", "\"").replace("\\n", "\n")
-    return value
+def decode(source: string) -> Json:
+    return Json(source, Table(json_columns_native(source), json_rows_native(source)))
 
-def tabular_lines(source: string) -> Document:
-    lines = source.split("\n")
-    columns: list[string] := []
-    for line in lines:
-        key = property_key(line)
-        if key != "" and key not in columns:
-            columns.append(key)
-    rows: list[list[Any]] := []
-    values: list[Any] := []
-    populated := false
-    for line in lines:
-        stripped = line.strip()
-        if stripped == "{" or stripped.ends_with("{"):
-            values = []
-            for column in columns:
-                values.append("")
-            populated = false
-            continue
-        if stripped.starts_with("}"):
-            if populated:
-                rows.append(values)
-            populated = false
-            continue
-        key = property_key(line)
-        if key == "":
-            continue
-        position := 0
-        while position < size(columns):
-            if columns[position] == key:
-                values[position] = property_value(line)
-                populated = true
-            position += 1
-    return Document(source, columns, rows)
-
-def tabular(source: string) -> Document:
-    if source.contains("\n"):
-        return tabular_lines(source)
-    stream = tokens(source)
-    columns: list[string] := []
-    cursor := 0
-    while cursor < size(stream):
-        if stream[cursor] != "{":
-            cursor += 1
-            continue
-        cursor += 1
-        while cursor < size(stream) and stream[cursor] != "}":
-            if stream[cursor] == ",":
-                cursor += 1
-                continue
-            key = stream[cursor]
-            if cursor + 1 < size(stream) and stream[cursor + 1] == ":" and key not in columns:
-                columns.append(key)
-            cursor += 3
-        cursor += 1
-    rows: list[list[Any]] := []
-    cursor = 0
-    while cursor < size(stream):
-        if stream[cursor] != "{":
-            cursor += 1
-            continue
-        cursor += 1
-        values: list[Any] := []
-        for column in columns:
-            values.append("")
-        populated := false
-        while cursor < size(stream) and stream[cursor] != "}":
-            if stream[cursor] == ",":
-                cursor += 1
-                continue
-            key = stream[cursor]
-            cursor += 1
-            if cursor >= size(stream) or stream[cursor] != ":":
-                continue
-            cursor += 1
-            if cursor >= size(stream):
-                break
-            value: Any := "" if stream[cursor] == "null" else stream[cursor]
-            position := 0
-            while position < size(columns):
-                if columns[position] == key:
-                    values[position] = value
-                    populated = true
-                position += 1
-            cursor += 1
-        if populated:
-            rows.append(values)
-        cursor += 1
-    return Document(source, columns, rows)
-
-def decode(source: string) -> Document:
-    normalized = source.strip()
-    if size(normalized) == 0:
-        return Document("", [], [])
-    if not normalized.starts_with("{") and not normalized.starts_with("["):
-        return Document("", [], [])
-    return tabular(source)
-
-def encode(document: Document) -> string:
-    return document.source
+def encode(value: Json) -> string:
+    return value.text()
 
 def kind(value: Any) -> string
 
@@ -197,13 +112,14 @@ def is_null(value: Any) -> bool
 def encode(values: list[Any]) -> string:
     return string(values)
 
-def read(path: string) -> Document:
+def read(path: string) -> Json:
     return decode(file.raw(path))
 
-test "JSON file adapter preserves a document":
-    document = decode("[{\"name\": \"Ada\", \"age\": 36}, {\"name\": \"Grace\", \"active\": true}]")
-    assert(document.text().starts_with("["))
-    assert(document.columns() == ["name", "age", "active"])
-    assert(size(document.values()) == 2)
-    assert(document.values()[0][0] == "Ada")
-    assert(document.values()[1][2] == "true")
+test "JSON values implement Data directly":
+    value = decode("[{\"name\": \"Ada\", \"age\": 36}, {\"name\": \"Grace\", \"active\": true}]")
+    assert(value.text().starts_with("["))
+    assert(value.columns() == ["name", "age", "active"])
+    assert(size(value.values()) == 2)
+    assert(value[0].get("name") == "Ada")
+    assert(value["name"] == ["Ada", "Grace"])
+    assert(value[1, "active"] == "true")

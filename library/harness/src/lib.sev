@@ -10,7 +10,7 @@ class Options:
 
 class Request:
     prompt: string
-    context: data.Data
+    context: data.Table
     options: Options
 
 class Generation:
@@ -33,14 +33,14 @@ trait Runtime:
 
 class Harness:
     loaded: model.LoadedModel
-    context: data.Data
+    context: data.Table
     system: string
     template: string
 
     def ready() -> bool:
         return model.ready(loaded)
 
-    def with_data(value: data.Data) -> Harness:
+    def with_data(value: data.Table) -> Harness:
         return Harness(loaded, value, system, template)
 
     def request(prompt: string, options: Options) -> Request:
@@ -59,12 +59,12 @@ def plan(value: Harness, prompt: string, selected: Options) -> InferencePlan:
     return value.plan(prompt, selected)
 
 def wrap(loaded: model.LoadedModel, system: string = "", template: string = "{{ prompt }}") -> Harness:
-    return Harness(loaded, data.Data([], []), system, template)
+    return Harness(loaded, data.Table([], []), system, template)
 
 def wrap(locator: string, system: string = "", template: string = "{{ prompt }}") -> Harness:
     return wrap(model.load(locator), system, template)
 
-def with_data(value: Harness, context: data.Data) -> Harness:
+def with_data(value: Harness, context: data.Table) -> Harness:
     return Harness(value.loaded, context, value.system, value.template)
 
 def with_storage(
@@ -83,10 +83,10 @@ def on(plan: InferencePlan, placement: string) -> InferencePlan:
 def using(plan: InferencePlan, backend: string) -> InferencePlan:
     return InferencePlan(plan.loaded, plan.request, plan.placement, backend)
 
-test "harness plans preserve Data context without choosing a backend flag":
+test "harness plans preserve Table context without choosing a backend flag":
     artifact = model.artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
     loaded = model.LoadedModel(artifact, "auto", 0, "auto")
-    context = data.Data(["name", "role"], [["Ada", "compiler"]])
+    context = data.Table(["name", "role"], [["Ada", "compiler"]])
     configured = with_data(wrap(loaded), context)
     plan = plan(configured, "Who works on the compiler?")
     assert(size(plan.request.context.columns_data) == 2)

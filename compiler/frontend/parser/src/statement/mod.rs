@@ -2310,13 +2310,18 @@ impl Parser<'_> {
     ) -> Result<(Span, OperatorSyntax, Vec<OperatorParameter>, TypeAnnotation), Diagnostic> {
         let start = self.next().span;
         let operator_token = self.next();
-        let operator = operator_syntax(&operator_token.kind).ok_or_else(|| {
-            Diagnostic::new(
-                "E000117",
-                "expected an operator name",
-                Some(operator_token.span),
-            )
-        })?;
+        let operator = if operator_token.kind == TokenKind::LeftBracket {
+            self.expect(&TokenKind::RightBracket, "expected `]` after `operator [`")?;
+            OperatorSyntax::Index
+        } else {
+            operator_syntax(&operator_token.kind).ok_or_else(|| {
+                Diagnostic::new(
+                    "E000117",
+                    "expected an operator name",
+                    Some(operator_token.span),
+                )
+            })?
+        };
         self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
@@ -3115,7 +3120,27 @@ impl Parser<'_> {
                 } else if self.at(&TokenKind::Colon) {
                     None
                 } else {
-                    Some(Box::new(self.expression(0)?))
+                    let first = self.expression(0)?;
+                    if self.take(&TokenKind::Comma).is_some() {
+                        let mut indices = vec![first];
+                        while !self.at(&TokenKind::RightBracket) {
+                            indices.push(self.expression(0)?);
+                            if self.take(&TokenKind::Comma).is_none() {
+                                break;
+                            }
+                        }
+                        let span = Span::new(
+                            indices[0].span.source,
+                            indices[0].span.start,
+                            indices.last().expect("an index tuple is non-empty").span.end,
+                        );
+                        Some(Box::new(Expression {
+                            kind: ExpressionKind::Tuple(indices),
+                            span,
+                        }))
+                    } else {
+                        Some(Box::new(first))
+                    }
                 };
                 if self.take(&TokenKind::Colon).is_some() {
                     expression = self.slice_postfix(expression, start, false)?;
@@ -4096,6 +4121,7 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
 
 fn operator_spelling(operator: OperatorSyntax) -> &'static str {
     match operator {
+        OperatorSyntax::Index => "[]",
         OperatorSyntax::Pipe => "|",
         OperatorSyntax::BitwiseAnd => "&",
         OperatorSyntax::BitwiseXor => "^",
@@ -4123,6 +4149,7 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
         return Some(BinaryOperator::Identity);
     }
     Some(match operator_syntax(kind)? {
+        OperatorSyntax::Index => return None,
         OperatorSyntax::Pipe => BinaryOperator::Pipe,
         OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
         OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,

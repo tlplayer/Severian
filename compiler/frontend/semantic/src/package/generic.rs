@@ -526,6 +526,7 @@ fn ast_binary_syntax(
 ) -> Option<severian_universal::BinaryOperator> {
     use severian_ast::OperatorSyntax as Ast;
     Some(ast_binary(match operator {
+        Ast::Index => return None,
         Ast::Pipe => severian_ast::BinaryOperator::Pipe,
         Ast::BitwiseAnd => severian_ast::BinaryOperator::BitwiseAnd,
         Ast::BitwiseXor => severian_ast::BinaryOperator::BitwiseXor,
@@ -764,7 +765,7 @@ fn source_class_satisfies_bound(
             let Item::Class(class) = item else {
                 return false;
             };
-            class.name == actual_name
+            class.name.rsplit('.').next() == actual_name.rsplit('.').next()
                 && class.traits.iter().any(|implemented| {
                     implemented.named_parts().is_some_and(|(name, arguments)| {
                         arguments.is_empty()
@@ -851,6 +852,7 @@ fn trait_is_structurally_satisfied(
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
             (syntax, _) => {
                 let operator = match syntax {
+                    Syntax::Index => return false,
                     Syntax::Pipe => Binary::BitwiseOr,
                     Syntax::BitwiseAnd => Binary::BitwiseAnd,
                     Syntax::BitwiseXor => Binary::BitwiseXor,

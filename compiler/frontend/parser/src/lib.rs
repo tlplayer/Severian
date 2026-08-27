@@ -475,6 +475,34 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_overloaded_index_operators_and_multi_index_expressions() {
+        let source = SourceFile::virtual_source(
+            "data-index.sev",
+            "trait Data:\n    @data\n\n    operator [](key: Any) -> Any\nclass Grid: Data\n    operator [](row: int, column: string) -> Any:\n        return column\ntest:\n    grid = Grid()\n    cell = grid[1, \"name\"]\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(data) = &module.items[0] else {
+            panic!("expected Data trait")
+        };
+        assert_eq!(data.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        let severian_ast::Item::Class(grid) = &module.items[1] else {
+            panic!("expected Grid class")
+        };
+        assert_eq!(grid.operators[0].parameters.len(), 2);
+        let severian_ast::Item::Test(test) = &module.items[2] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Binding(cell) = &test.body[1] else {
+            panic!("expected indexed binding")
+        };
+        assert!(matches!(
+            &cell.value.kind,
+            severian_ast::ExpressionKind::Index { index, .. }
+                if matches!(&index.kind, severian_ast::ExpressionKind::Tuple(values) if values.len() == 2)
+        ));
+    }
+
+    #[test]
     fn parses_canonical_trait_methods_and_composed_traits() {
         let source = SourceFile::virtual_source(
             "drawable.sev",
