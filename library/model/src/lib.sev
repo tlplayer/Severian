@@ -225,25 +225,14 @@ class Embedding[T]:
 
 class RmsNorm[T]: Module[T]
     weights: tensor.Tensor[T]
-    epsilon: f32
+    epsilon: float
 
-    def RmsNorm(initial_weights: tensor.Tensor[T], initial_epsilon: f32 = f32(0.000001)):
+    def RmsNorm(initial_weights: tensor.Tensor[T], initial_epsilon: float = 0.000001):
         weights := initial_weights
         epsilon := initial_epsilon
 
     def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]:
-        return tensor.multiply(
-            tensor.multiply(
-                copy input,
-                tensor.rsqrt(
-                    tensor.add_scalar(
-                        tensor.mean_last(tensor.multiply(copy input, copy input)),
-                        epsilon,
-                    )
-                ),
-            ),
-            weights,
-        )
+        return tensor.rms_norm(input, weights, epsilon)
 
 def state_name(prefix: string, local_name: string) -> string:
     if copy prefix == "":
@@ -292,11 +281,11 @@ class Qwen3Config:
     attention_heads: int
     key_value_heads: int
     head_dimension: int
-    rms_epsilon: f32
+    rms_epsilon: float
     rope_theta: float
 
 def qwen3_06b() -> Qwen3Config:
-    return Qwen3Config(1024, 3072, 28, 16, 8, 128, f32(0.000001), 1000000.0)
+    return Qwen3Config(1024, 3072, 28, 16, 8, 128, 0.000001, 1000000.0)
 
 class OmniVoiceConfig:
     transformer: Qwen3Config
@@ -359,7 +348,7 @@ def linear[T](parameters: borrow StateDict, name: string, input: tensor.Tensor[T
     weights = parameter_like(borrow parameters, name + ".weight", copy input)
     return tensor.matmul(input, tensor.transpose(weights))
 
-def rms_norm[T](parameters: borrow StateDict, name: string, epsilon: f32, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
+def rms_norm[T](parameters: borrow StateDict, name: string, epsilon: float, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
     weights = parameter_like(borrow parameters, name + ".weight", copy input)
     return RmsNorm(weights, epsilon).forward(input)
 

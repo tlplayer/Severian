@@ -230,6 +230,9 @@ def mean_last[T](value: Tensor[T]) -> Tensor[T]
 def add_scalar[T](value: Tensor[T], scalar: f32) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
+def rms_norm[T](value: Tensor[T], weights: Tensor[T], epsilon: float) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
 def broadcast_like[T](value: Tensor[T], target: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
@@ -405,6 +408,12 @@ test "last-axis reductions and rotary embeddings support model composition":
     assert(values(mean_last(value)) == [2.0, 3.0])
     rotated = rope(ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 4]), ranked([1000000.0, 0.0], [2]))
     assert(values(rotated) == [1.0, 2.0, 3.0, 4.0])
+
+test "RMSNorm preserves its generic tensor element and applies learned weights":
+    input = ranked([2.0, 2.0, -3.0, -3.0], [2, 2])
+    weights = ranked([2.0, 3.0], [2])
+    normalized = rms_norm(input, weights, 0.0)
+    assert(values(normalized) == [2.0, 3.0, -2.0, -3.0])
 
 test "ranked transpose swaps tensor axes":
     value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])

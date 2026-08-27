@@ -100,6 +100,12 @@ fn operation_declarations(
                 .into(),
         );
     }
+    if matches!(operation, tensor::CONVERT | tensor::RMS_NORM) {
+        return Ok(
+            "  func.func private @__sev_f8e4m3fn_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e4m3fn(f32) -> i8\n  func.func private @__sev_f8e5m2_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e5m2(f32) -> i8\n"
+                .into(),
+        );
+    }
     let _ = outputs;
     Ok(String::new())
 }
@@ -230,6 +236,18 @@ fn lower_operation(
         return Err(invalid("tensor operations currently produce one result"));
     };
     let result_element = tensor_element(result_type)?;
+    if operation == tensor::CONVERT {
+        return lower_tensor_conversion(inputs, result_type, input_spellings, output);
+    }
+    if operation == tensor::RMS_NORM {
+        return lower_rms_norm(
+            inputs,
+            result_type,
+            input_spellings,
+            output,
+            result_element,
+        );
+    }
     let binary = if operation == tensor::ADD {
         Some(if is_float(result_element) {
             "arith.addf"
@@ -448,6 +466,410 @@ fn lower_operation(
     Err(invalid(format!(
         "generic MLIR tensor lowering is not implemented for operation {operation:?}"
     )))
+}
+
+fn lower_tensor_conversion(
+    inputs: &[LoweredType],
+    result_type: &LoweredType,
+    input_spellings: &[String],
+    output: &str,
+) -> Result<String, CompileError> {
+    let [LoweredType::Tensor {
+        element: source_element,
+        shape: LoweredTensorShape::Ranked(source_shape),
+    }] = inputs
+    else {
+        return Err(invalid("tensor conversion requires one ranked operand"));
+    };
+    let LoweredType::Tensor {
+        element: target_element,
+        shape: LoweredTensorShape::Ranked(target_shape),
+    } = result_type
+    else {
+        return Err(invalid("tensor conversion requires a ranked result"));
+    };
+    if source_shape != target_shape {
+        return Err(invalid("tensor conversion must preserve shape"));
+    }
+    let source_scalar = tensor_element_spelling(*source_element)?;
+    let target_scalar = tensor_element_spelling(*target_element)?;
+    let conversion = lower_scalar_conversion(
+        "%value",
+        *source_element,
+        *target_element,
+        &source_scalar,
+        &target_scalar,
+        "%converted",
+    )?;
+    let rank = source_shape.len();
+    let loops = (0..rank)
+        .map(|axis| format!("d{axis}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let iterators = vec!["\"parallel\""; rank].join(", ");
+    let input = input_spellings
+        .first()
+        .ok_or_else(|| invalid("tensor conversion input type is missing"))?;
+    Ok(format!(
+        "    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%empty : {output}) {{\n    ^bb0(%value: {source_scalar}, %unused: {target_scalar}):\n{conversion}      linalg.yield %converted : {target_scalar}\n    }} -> {output}\n    return %result : {output}\n"
+    ))
+}
+
+fn lower_rms_norm(
+    inputs: &[LoweredType],
+    result_type: &LoweredType,
+    input_spellings: &[String],
+    output: &str,
+    result_element: LoweredTensorElement,
+) -> Result<String, CompileError> {
+    let [
+        LoweredType::Tensor {
+            element: input_element,
+            shape: LoweredTensorShape::Ranked(input_shape),
+        },
+        LoweredType::Tensor {
+            element: weight_element,
+            shape: LoweredTensorShape::Ranked(weight_shape),
+        },
+        LoweredType::Float {
+            format: epsilon_format,
+        },
+    ] = inputs
+    else {
+        return Err(invalid(
+            "RMSNorm requires a ranked input, ranked weights, and floating epsilon",
+        ));
+    };
+    let LoweredType::Tensor {
+        element: output_element,
+        shape: LoweredTensorShape::Ranked(output_shape),
+    } = result_type
+    else {
+        return Err(invalid("RMSNorm requires a ranked tensor result"));
+    };
+    if input_element != weight_element
+        || input_element != output_element
+        || input_element != &result_element
+    {
+        return Err(invalid(
+            "RMSNorm input, weights, and result must have one element type",
+        ));
+    }
+    if input_shape.is_empty() || output_shape != input_shape {
+        return Err(invalid(
+            "RMSNorm must preserve a non-scalar input shape",
+        ));
+    }
+    if weight_shape.len() != 1 || weight_shape[0] != input_shape[input_shape.len() - 1] {
+        return Err(invalid(
+            "RMSNorm weights must match the input's last dimension",
+        ));
+    }
+    let dimensions = static_dimensions(&LoweredTensorShape::Ranked(input_shape.clone()))
+        .map_err(|error| invalid(format!("RMSNorm: {error}")))?;
+    let width = *dimensions
+        .last()
+        .ok_or_else(|| invalid("RMSNorm input must have a last dimension"))?;
+    if width == 0 {
+        return Err(invalid("RMSNorm last dimension must not be empty"));
+    }
+    let storage_scalar = tensor_element_spelling(result_element)?;
+    if matches!(result_element, LoweredTensorElement::Boolean) {
+        return Err(invalid("RMSNorm requires a numeric tensor element type"));
+    }
+    let accumulation_element = rms_accumulation_element(result_element);
+    let accumulation_scalar = tensor_element_spelling(accumulation_element)?;
+    let outer_shape = LoweredTensorShape::Ranked(
+        input_shape[..input_shape.len() - 1].to_vec(),
+    );
+    let outer_type = type_spelling(&LoweredType::Tensor {
+        element: accumulation_element,
+        shape: outer_shape,
+    })
+    .map_err(|error| invalid(error.to_string()))?;
+    let rank = input_shape.len();
+    let loops = (0..rank)
+        .map(|axis| format!("d{axis}"))
+        .collect::<Vec<_>>();
+    let outer = loops[..rank - 1].join(", ");
+    let identity = loops.join(", ");
+    let iterators = (0..rank)
+        .map(|axis| {
+            if axis + 1 == rank {
+                "\"reduction\""
+            } else {
+                "\"parallel\""
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let epsilon_source = input_spellings
+        .get(2)
+        .ok_or_else(|| invalid("RMSNorm epsilon type is missing"))?;
+    let epsilon = lower_scalar_conversion(
+        "%arg2",
+        LoweredTensorElement::Float {
+            format: *epsilon_format,
+        },
+        accumulation_element,
+        epsilon_source,
+        &accumulation_scalar,
+        "%epsilon",
+    )?;
+    let value_to_accumulation = lower_scalar_conversion(
+        "%value",
+        result_element,
+        accumulation_element,
+        &storage_scalar,
+        &accumulation_scalar,
+        "%value_compute",
+    )?;
+    let weight_to_accumulation = lower_scalar_conversion(
+        "%weight",
+        result_element,
+        accumulation_element,
+        &storage_scalar,
+        &accumulation_scalar,
+        "%weight_compute",
+    )?;
+    let output_from_accumulation = lower_scalar_conversion(
+        "%weighted",
+        accumulation_element,
+        result_element,
+        &accumulation_scalar,
+        &storage_scalar,
+        "%weighted_output",
+    )?;
+    let input_type = &input_spellings[0];
+    let weight_type = &input_spellings[1];
+    Ok(format!(
+        "    %sum_empty = tensor.empty() : {outer_type}\n    %zero = arith.constant 0.0 : {accumulation_scalar}\n    %sum_initial = linalg.fill ins(%zero : {accumulation_scalar}) outs(%sum_empty : {outer_type}) -> {outer_type}\n    %sum = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>], iterator_types = [{iterators}]}} ins(%arg0 : {input_type}) outs(%sum_initial : {outer_type}) {{\n    ^bb0(%value: {storage_scalar}, %accumulator: {accumulation_scalar}):\n{value_to_accumulation}      %square = arith.mulf %value_compute, %value_compute : {accumulation_scalar}\n      %next = arith.addf %accumulator, %square : {accumulation_scalar}\n      linalg.yield %next : {accumulation_scalar}\n    }} -> {outer_type}\n{epsilon}    %inverse_empty = tensor.empty() : {outer_type}\n    %width = arith.constant {width}.0 : {accumulation_scalar}\n    %inverse = linalg.generic {{indexing_maps = [affine_map<({outer}) -> ({outer})>, affine_map<({outer}) -> ({outer})>], iterator_types = [{outer_iterators}]}} ins(%sum : {outer_type}) outs(%inverse_empty : {outer_type}) {{\n    ^bb0(%total: {accumulation_scalar}, %unused: {accumulation_scalar}):\n      %mean = arith.divf %total, %width : {accumulation_scalar}\n      %stabilized = arith.addf %mean, %epsilon : {accumulation_scalar}\n      %factor = math.rsqrt %stabilized : {accumulation_scalar}\n      linalg.yield %factor : {accumulation_scalar}\n    }} -> {outer_type}\n    %output_empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>, affine_map<({identity}) -> (d{last})>, affine_map<({identity}) -> ({identity})>], iterator_types = [{output_iterators}]}} ins(%arg0, %inverse, %arg1 : {input_type}, {outer_type}, {weight_type}) outs(%output_empty : {output}) {{\n    ^bb0(%value: {storage_scalar}, %factor: {accumulation_scalar}, %weight: {storage_scalar}, %unused: {storage_scalar}):\n{value_to_accumulation}{weight_to_accumulation}      %normalized = arith.mulf %value_compute, %factor : {accumulation_scalar}\n      %weighted = arith.mulf %normalized, %weight_compute : {accumulation_scalar}\n{output_from_accumulation}      linalg.yield %weighted_output : {storage_scalar}\n    }} -> {output}\n    return %result : {output}\n",
+        outer_iterators = vec!["\"parallel\""; rank - 1].join(", "),
+        output_iterators = vec!["\"parallel\""; rank].join(", "),
+        last = rank - 1,
+    ))
+}
+
+const fn rms_accumulation_element(element: LoweredTensorElement) -> LoweredTensorElement {
+    match element {
+        LoweredTensorElement::Float {
+            format:
+                LoweredFloatFormat::Float8E4M3Fn
+                | LoweredFloatFormat::Float8E5M2
+                | LoweredFloatFormat::Ieee(16)
+                | LoweredFloatFormat::BrainFloat16,
+        } => LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(32),
+        },
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(80 | 128),
+        } => LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        },
+        LoweredTensorElement::Integer { .. } => LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        },
+        other => other,
+    }
+}
+
+fn lower_scalar_conversion(
+    value: &str,
+    source: LoweredTensorElement,
+    target: LoweredTensorElement,
+    source_type: &str,
+    target_type: &str,
+    result: &str,
+) -> Result<String, CompileError> {
+    if is_fp8(source) || is_fp8(target) {
+        return lower_fp8_conversion(
+            value,
+            source,
+            target,
+            source_type,
+            target_type,
+            result,
+        );
+    }
+    if source == target {
+        let (zero, add) = if is_float(source) {
+            ("0.0", "arith.addf")
+        } else {
+            ("0", "arith.addi")
+        };
+        return Ok(format!(
+            "    {result}_zero = arith.constant {zero} : {source_type}\n    {result} = {add} {value}, {result}_zero : {source_type}\n"
+        ));
+    }
+    let conversion = match (source, target) {
+        (
+            LoweredTensorElement::Float { format: source },
+            LoweredTensorElement::Float { format: target },
+        ) if float_format_bits(source) == float_format_bits(target) => {
+            let intermediate = if float_format_bits(source) < 16 { "f16" } else { "f32" };
+            return Ok(format!(
+                "    {result}_wide = arith.extf {value} : {source_type} to {intermediate}\n    {result} = arith.truncf {result}_wide : {intermediate} to {target_type}\n"
+            ));
+        }
+        (
+            LoweredTensorElement::Float { format: source },
+            LoweredTensorElement::Float { format: target },
+        ) => {
+            if float_format_bits(source) < float_format_bits(target) {
+                "arith.extf"
+            } else {
+                "arith.truncf"
+            }
+        }
+        (
+            LoweredTensorElement::Integer {
+                bits: source,
+                signed,
+            },
+            LoweredTensorElement::Integer { bits: target, .. },
+        ) => {
+            if source < target {
+                if signed { "arith.extsi" } else { "arith.extui" }
+            } else if source > target {
+                "arith.trunci"
+            } else {
+                let zero = "0";
+                return Ok(format!(
+                    "    {result}_zero = arith.constant {zero} : {source_type}\n    {result} = arith.addi {value}, {result}_zero : {source_type}\n"
+                ));
+            }
+        }
+        (LoweredTensorElement::Integer { signed: true, .. }, LoweredTensorElement::Float { .. }) => {
+            "arith.sitofp"
+        }
+        (LoweredTensorElement::Integer { signed: false, .. }, LoweredTensorElement::Float { .. }) => {
+            "arith.uitofp"
+        }
+        (LoweredTensorElement::Float { .. }, LoweredTensorElement::Integer { signed: true, .. }) => {
+            "arith.fptosi"
+        }
+        (LoweredTensorElement::Float { .. }, LoweredTensorElement::Integer { signed: false, .. }) => {
+            "arith.fptoui"
+        }
+        _ => return Err(invalid("unsupported scalar tensor conversion")),
+    };
+    Ok(format!(
+        "    {result} = {conversion} {value} : {source_type} to {target_type}\n"
+    ))
+}
+
+fn lower_fp8_conversion(
+    value: &str,
+    source: LoweredTensorElement,
+    target: LoweredTensorElement,
+    source_type: &str,
+    target_type: &str,
+    result: &str,
+) -> Result<String, CompileError> {
+    let mut body = String::new();
+    let f32_value = if let Some(symbol) = fp8_decode_symbol(source) {
+        body.push_str(&format!(
+            "    {result}_source_bits = arith.bitcast {value} : {source_type} to i8\n    {result}_f32 = func.call @{symbol}({result}_source_bits) : (i8) -> f32\n"
+        ));
+        format!("{}_f32", result.trim_start_matches('%'))
+    } else {
+        let operation = match source {
+            LoweredTensorElement::Float { format } => {
+                if float_format_bits(format) < 32 {
+                    "arith.extf"
+                } else if float_format_bits(format) > 32 {
+                    "arith.truncf"
+                } else {
+                    body.push_str(&format!(
+                        "    {result}_f32_zero = arith.constant 0.0 : f32\n    {result}_f32 = arith.addf {value}, {result}_f32_zero : f32\n"
+                    ));
+                    ""
+                }
+            }
+            LoweredTensorElement::Integer { signed: true, .. } => "arith.sitofp",
+            LoweredTensorElement::Integer { signed: false, .. } => "arith.uitofp",
+            LoweredTensorElement::Boolean => {
+                return Err(invalid("boolean cannot be converted through FP8"))
+            }
+        };
+        if !operation.is_empty() {
+            body.push_str(&format!(
+                "    {result}_f32 = {operation} {value} : {source_type} to f32\n"
+            ));
+        }
+        format!("{}_f32", result.trim_start_matches('%'))
+    };
+
+    if let Some(symbol) = fp8_encode_symbol(target) {
+        body.push_str(&format!(
+            "    {result}_target_bits = func.call @{symbol}(%{f32_value}) : (f32) -> i8\n    {result} = arith.bitcast {result}_target_bits : i8 to {target_type}\n"
+        ));
+        return Ok(body);
+    }
+    let conversion = match target {
+        LoweredTensorElement::Float { format } => {
+            if float_format_bits(format) > 32 {
+                "arith.extf"
+            } else if float_format_bits(format) < 32 {
+                "arith.truncf"
+            } else {
+                body.push_str(&format!(
+                    "    {result}_zero = arith.constant 0.0 : f32\n    {result} = arith.addf %{f32_value}, {result}_zero : f32\n"
+                ));
+                return Ok(body);
+            }
+        }
+        LoweredTensorElement::Integer { signed: true, .. } => "arith.fptosi",
+        LoweredTensorElement::Integer { signed: false, .. } => "arith.fptoui",
+        LoweredTensorElement::Boolean => {
+            return Err(invalid("FP8 cannot be converted to boolean"))
+        }
+    };
+    body.push_str(&format!(
+        "    {result} = {conversion} %{f32_value} : f32 to {target_type}\n"
+    ));
+    Ok(body)
+}
+
+const fn is_fp8(element: LoweredTensorElement) -> bool {
+    matches!(
+        element,
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn | LoweredFloatFormat::Float8E5M2
+        }
+    )
+}
+
+const fn fp8_decode_symbol(element: LoweredTensorElement) -> Option<&'static str> {
+    match element {
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn,
+        } => Some("__sev_f8e4m3fn_to_f32"),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E5M2,
+        } => Some("__sev_f8e5m2_to_f32"),
+        _ => None,
+    }
+}
+
+const fn fp8_encode_symbol(element: LoweredTensorElement) -> Option<&'static str> {
+    match element {
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn,
+        } => Some("__sev_f32_to_f8e4m3fn"),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E5M2,
+        } => Some("__sev_f32_to_f8e5m2"),
+        _ => None,
+    }
+}
+
+const fn float_format_bits(format: LoweredFloatFormat) -> u16 {
+    match format {
+        LoweredFloatFormat::Float8E4M3Fn | LoweredFloatFormat::Float8E5M2 => 8,
+        LoweredFloatFormat::Ieee(bits) => bits,
+        LoweredFloatFormat::BrainFloat16 => 16,
+    }
 }
 
 fn effective_shape(shape: &LoweredTensorShape, attributes: &Attrs) -> LoweredTensorShape {
@@ -854,5 +1276,39 @@ mod tests {
             &TargetSpec::host(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rms_norm_lowers_end_to_end_for_every_numeric_element_type() {
+        let (mut types, constructor) = types();
+        let epsilon = types.resolve_name("float").unwrap();
+        for name in ELEMENTS {
+            let element = types.resolve_name(name).unwrap();
+            let input = types
+                .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+                .unwrap();
+            let weights = types
+                .instantiate_tensor(constructor, element, TensorShape::ranked([4]))
+                .unwrap();
+            let mut operation = region(input, tensor::RMS_NORM, 3);
+            operation.compile_operations[0].operands = vec![input, weights, epsilon];
+            let artifact = TensorCompiler
+                .compile(
+                    &operation,
+                    &CompileContext {
+                        types: &types,
+                        target: &TargetSpec::host(),
+                    },
+                )
+                .unwrap_or_else(|error| panic!("RMSNorm[{name}] did not lower: {error}"));
+            assert!(artifact.module.contains("linalg.generic"));
+            assert!(artifact.module.contains("math.rsqrt"));
+            severian_mlir::verify_artifact(
+                ArtifactId::for_region(CompiledRegionId::new(0)),
+                artifact,
+                &TargetSpec::host(),
+            )
+            .unwrap_or_else(|error| panic!("RMSNorm[{name}] emitted invalid MLIR: {error}"));
+        }
     }
 }

@@ -574,6 +574,22 @@ static uint8_t sev_float_to_fp8(__float128 value, int32_t dtype) {
     return selected;
 }
 
+float __sev_f8e4m3fn_to_f32(uint8_t value) {
+    return (float)sev_decode_fp8(value, 10);
+}
+
+uint8_t __sev_f32_to_f8e4m3fn(float value) {
+    return sev_float_to_fp8((__float128)value, 10);
+}
+
+float __sev_f8e5m2_to_f32(uint8_t value) {
+    return (float)sev_decode_fp8(value, 11);
+}
+
+uint8_t __sev_f32_to_f8e5m2(float value) {
+    return sev_float_to_fp8((__float128)value, 11);
+}
+
 static sev_tensor_cell sev_tensor_from_signed(__int128 value, int32_t dtype) {
     return (sev_tensor_cell){(unsigned __int128)value & sev_tensor_mask(sev_tensor_dtype_bits(dtype))};
 }

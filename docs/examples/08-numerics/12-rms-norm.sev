@@ -1,0 +1,41 @@
+from tensor import rms_norm
+
+
+def matches_expected(values: list[float], expected: list[float]) -> bool:
+    if size(values) != size(expected):
+        return false
+    index := 0
+    for value in values:
+        if not approximate(value, expected[index], atol=1e-6, rtol=1e-6):
+            return false
+        index += 1
+    return true
+
+
+test "generic RMS normalization executes for every numeric tensor type":
+    input = tensor(
+        [2.0, 2.0,
+         4.0, 4.0],
+        [2, 2],
+    )
+    weights = tensor([2.0, 3.0], [2])
+    expected = [2.0, 3.0, 2.0, 3.0]
+
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.i8(input), tensor.i8(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.i16(input), tensor.i16(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.i32(input), tensor.i32(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.i64(input), tensor.i64(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.i128(input), tensor.i128(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.u8(input), tensor.u8(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.u16(input), tensor.u16(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.u32(input), tensor.u32(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.u64(input), tensor.u64(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.u128(input), tensor.u128(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f8e4m3fn(input), tensor.f8e4m3fn(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f8e5m2(input), tensor.f8e5m2(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f16(input), tensor.f16(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.bf16(input), tensor.bf16(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f32(input), tensor.f32(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f64(input), tensor.f64(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f80(input), tensor.f80(weights), 0.0))), expected))
+    assert(matches_expected(tensor.values(tensor.f64(rms_norm(tensor.f128(input), tensor.f128(weights), 0.0))), expected))

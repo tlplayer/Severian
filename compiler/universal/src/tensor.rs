@@ -43,6 +43,7 @@ pub const BACKWARD_MSE: OpId = OpId::named("tensor", "backward_mse");
 pub const GRADIENT: OpId = OpId::named("tensor", "gradient");
 pub const SGD: OpId = OpId::named("tensor", "sgd");
 pub const ADD_SCALAR: OpId = OpId::named("tensor", "add_scalar");
+pub const RMS_NORM: OpId = OpId::named("tensor", "rms_norm");
 pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_type");
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
@@ -84,6 +85,7 @@ pub const TYPE_PRESERVING_OPERATIONS: &[OpId] = &[
     GRADIENT,
     SGD,
     ADD_SCALAR,
+    RMS_NORM,
 ];
 
 pub fn compiler_id() -> CompilerId {
@@ -277,6 +279,7 @@ pub fn install_operations(registry: &mut OperationRegistry) -> Result<(), Operat
         (GRADIENT, 1),
         (SGD, 2),
         (ADD_SCALAR, 2),
+        (RMS_NORM, 3),
     ] {
         registry.register(
             id,

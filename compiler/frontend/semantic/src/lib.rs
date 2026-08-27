@@ -12260,6 +12260,33 @@ impl Analyzer<'_> {
             return Ok(None);
         }
 
+        if name == "rms_norm" && arguments.len() == 3 {
+            let input = self.expression(&arguments[0].value, None)?;
+            if let Some(input_element) = self.resolve_tensor_element_type(input.type_id, span) {
+                let weights = self.expression(&arguments[1].value, None)?;
+                if self.resolve_tensor_element_type(weights.type_id, span) != Some(input_element) {
+                    return Err(semantic_error(
+                        "RMSNorm input and weights must have the same element type".into(),
+                        weights.span,
+                    ));
+                }
+                let float = self
+                    .types
+                    .resolve_name("float")
+                    .expect("bootstrap defines float");
+                let epsilon = self.expression(&arguments[2].value, Some(float))?;
+                return self
+                    .tensor_operation(
+                        severian_universal::tensor::RMS_NORM,
+                        vec![input, weights, epsilon],
+                        expected,
+                        span,
+                    )
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
         let operation = match name {
             "add" => Some(severian_universal::tensor::ADD),
             "subtract" => Some(severian_universal::tensor::SUBTRACT),
@@ -12342,7 +12369,7 @@ impl Analyzer<'_> {
             let Some(source_element) = self.resolve_tensor_element_type(value.type_id, span) else {
                 return Ok(None);
             };
-            let result = self.tensor_type(target_element, span)?;
+            let mut result = self.tensor_type(target_element, span)?;
             if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
                 return Err(semantic_error(
                     "tensor conversion does not satisfy the expected type".into(),
@@ -12358,6 +12385,18 @@ impl Analyzer<'_> {
                 severian_universal::tensor::TARGET_ELEMENT_TYPE,
                 severian_universal::AttrValue::Type(target_element),
             );
+            if let Some(source) = self.types.tensor(value.type_id) {
+                result = self
+                    .types
+                    .refine_tensor_shape(result, source.shape.clone())
+                    .map_err(|error| {
+                        Diagnostic::new("E000204", error.to_string(), Some(span))
+                    })?;
+                attributes.insert(
+                    severian_universal::tensor::RESULT_SHAPE,
+                    severian_universal::AttrValue::TensorShape(source.shape),
+                );
+            }
             return Ok(Some(self.tensor_intrinsic(
                 severian_universal::tensor::CONVERT,
                 vec![value],
