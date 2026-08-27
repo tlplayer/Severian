@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
 use severian_compile::{CompileContext, CompileError, CompileHandler, CompileRegion};
-use severian_mlir::{LoweredType, MlirArtifact};
+use severian_mlir::{LoweredFloatFormat, LoweredType, MlirArtifact};
 use severian_target::ExecutionBackend;
-use severian_universal::{tensor, AttrValue, ExecutionPlacement, OpId};
+use severian_universal::{
+    tensor, AttrValue, ExecutionPlacement, FloatFormat, IntegerWidth, OpId,
+    PrimitiveRepresentation, TypeContext, TypeId,
+};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TensorCompiler;
@@ -52,15 +55,26 @@ impl CompileHandler for TensorCompiler {
                     .unwrap_or("unspecified")
             )));
         }
-        let parameters = (0..operation.operands.len())
-            .map(|index| format!("%arg{index}: !llvm.ptr"))
+        let lowered_inputs = operation
+            .operands
+            .iter()
+            .map(|operand| lower_operand(*operand, context.types, context.target))
+            .collect::<Vec<_>>();
+        let input_types = lowered_inputs
+            .iter()
+            .map(|(_, mlir)| mlir.as_str())
+            .collect::<Vec<_>>();
+        let parameters = input_types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| format!("%arg{index}: {ty}"))
             .collect::<Vec<_>>()
             .join(", ");
         let arguments = (0..operation.operands.len())
             .map(|index| format!("%arg{index}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let argument_types = vec!["!llvm.ptr"; operation.operands.len()].join(", ");
+        let argument_types = input_types.join(", ");
         let (runtime_parameters, call_arguments, call_types, setup) =
             if operation.id == tensor::CONVERT {
                 let Some(AttrValue::Type(target)) =
@@ -116,9 +130,59 @@ impl CompileHandler for TensorCompiler {
         );
         Ok(MlirArtifact {
             module,
-            inputs: vec![LoweredType::Bytes; operation.operands.len()],
+            inputs: lowered_inputs
+                .into_iter()
+                .map(|(lowered, _)| lowered)
+                .collect(),
             outputs: vec![LoweredType::Bytes; operation.results.len()],
         })
+    }
+}
+
+fn lower_operand(
+    operand: TypeId,
+    types: &TypeContext,
+    target: &severian_target::TargetSpec,
+) -> (LoweredType, String) {
+    let Some(primitive) = types.primitive(operand) else {
+        return (LoweredType::Bytes, "!llvm.ptr".into());
+    };
+    match primitive.representation {
+        PrimitiveRepresentation::Integer { bits, signed } => {
+            let bits = match bits {
+                IntegerWidth::Fixed(bits) => bits,
+                IntegerWidth::Machine => target.machine_integer_bits(),
+            };
+            (LoweredType::Integer { bits, signed }, format!("i{bits}"))
+        }
+        PrimitiveRepresentation::PointerInteger { signed } => {
+            let bits = target.pointer_bits();
+            (LoweredType::Integer { bits, signed }, format!("i{bits}"))
+        }
+        PrimitiveRepresentation::Float { format } => {
+            let (lowered, mlir) = match format {
+                FloatFormat::Float8E4M3Fn => (LoweredFloatFormat::Float8E4M3Fn, "f8E4M3FN".into()),
+                FloatFormat::Float8E5M2 => (LoweredFloatFormat::Float8E5M2, "f8E5M2".into()),
+                FloatFormat::Ieee(bits) => (LoweredFloatFormat::Ieee(bits), format!("f{bits}")),
+                FloatFormat::BrainFloat16 => (LoweredFloatFormat::BrainFloat16, "bf16".into()),
+                FloatFormat::Machine => {
+                    let bits = target.machine_float_bits();
+                    (LoweredFloatFormat::Ieee(bits), format!("f{bits}"))
+                }
+            };
+            (LoweredType::Float { format: lowered }, mlir)
+        }
+        PrimitiveRepresentation::Boolean => (LoweredType::Boolean, "i1".into()),
+        PrimitiveRepresentation::Character => (
+            LoweredType::Integer {
+                bits: 32,
+                signed: false,
+            },
+            "i32".into(),
+        ),
+        PrimitiveRepresentation::String => (LoweredType::String, "!llvm.ptr".into()),
+        PrimitiveRepresentation::Bytes => (LoweredType::Bytes, "!llvm.ptr".into()),
+        _ => (LoweredType::Bytes, "!llvm.ptr".into()),
     }
 }
 
@@ -131,6 +195,7 @@ fn runtime_symbol(operation: OpId) -> Option<&'static str> {
         (tensor::MULTIPLY, "__sev_tensor_multiply"),
         (tensor::DIVIDE, "__sev_tensor_divide"),
         (tensor::REDUCE_SUM, "__sev_tensor_sum"),
+        (tensor::REDUCE_SUM_AXIS, "__sev_tensor_sum_axis"),
         (tensor::MATMUL, "__sev_tensor_matmul"),
         (tensor::TRANSPOSE, "__sev_tensor_transpose"),
         (tensor::SLICE, "__sev_tensor_slice"),
@@ -138,6 +203,32 @@ fn runtime_symbol(operation: OpId) -> Option<&'static str> {
         (tensor::SHAPE, "__sev_tensor_shape"),
         (tensor::STRIDES, "__sev_tensor_strides"),
         (tensor::VALUES, "__sev_tensor_values"),
+        (tensor::RESHAPE, "__sev_tensor_reshape"),
+        (tensor::PERMUTE, "__sev_tensor_permute"),
+        (tensor::MEAN_LAST, "__sev_tensor_mean_last"),
+        (tensor::RSQRT, "__sev_tensor_rsqrt"),
+        (tensor::EXP, "__sev_tensor_exp"),
+        (tensor::LOG, "__sev_tensor_log"),
+        (tensor::TANH, "__sev_tensor_tanh"),
+        (tensor::SILU, "__sev_tensor_silu"),
+        (tensor::SOFTMAX_LAST, "__sev_tensor_softmax_last"),
+        (tensor::GATHER, "__sev_tensor_gather"),
+        (tensor::CONCATENATE, "__sev_tensor_concatenate"),
+        (tensor::REPEAT, "__sev_tensor_repeat"),
+        (tensor::ROPE, "__sev_tensor_rope"),
+        (tensor::RELU, "__sev_tensor_relu"),
+        (tensor::SCALE, "__sev_tensor_scale"),
+        (tensor::LAYER_NORM, "__sev_tensor_layer_norm"),
+        (tensor::RELU_BACKWARD, "__sev_tensor_relu_backward"),
+        (tensor::SOFTMAX_BACKWARD, "__sev_tensor_softmax_backward"),
+        (
+            tensor::LAYER_NORM_BACKWARD,
+            "__sev_tensor_layer_norm_backward",
+        ),
+        (tensor::BACKWARD_MSE, "__sev_tensor_backward_mse"),
+        (tensor::GRADIENT, "__sev_tensor_gradient"),
+        (tensor::SGD, "__sev_tensor_sgd"),
+        (tensor::ADD_SCALAR, "__sev_tensor_add_scalar"),
     ]
     .into_iter()
     .find_map(|(known, symbol)| (operation == known).then_some(symbol))

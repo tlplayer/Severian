@@ -158,9 +158,7 @@ def load_f128(value: SafeTensorEntry) -> Tensor[f128]:
     return mapped_f128(value.store_handle, value.name)
 
 # Backend handle construction and lifetime live at the tensor boundary.
-# Consumers use these typed APIs and never redeclare XLA symbols.
-@compile(mlir, stablehlo, xla)
-def release[T](value: Tensor[T])
+# Consumers use these typed APIs and never redeclare backend symbols.
 
 @compile(mlir, stablehlo, xla)
 def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
@@ -182,6 +180,9 @@ def materialize[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
 def sum[T](value: Tensor[T]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
+def sum_axis[T](value: Tensor[T], axis: int) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
 def relu[T](value: Tensor[T]) -> Tensor[T]
@@ -217,6 +218,9 @@ def softmax_rows[T](value: Tensor[T]) -> Tensor[T]
 def exp[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
+def log[T](value: Tensor[T]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
 def rsqrt[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
@@ -242,6 +246,18 @@ def tanh[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
 def gather[T, index](value: Tensor[T], indices: Tensor[index]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
+def concatenate[T](left: Tensor[T], right: Tensor[T], axis: list[int]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
+def repeat[T](value: Tensor[T], specification: list[int]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
+def rope[T](value: Tensor[T], configuration: Tensor[f64]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
+def softmax_last[T](value: Tensor[T]) -> Tensor[T]
 
 # Storage and compute dtype changes are explicit. Model code can keep FP8
 # weights while promoting arithmetic to f16/f32 accumulation.
@@ -276,7 +292,7 @@ def softmax_backward[T](output: Tensor[T], upstream: Tensor[T]) -> Tensor[T]
 def layer_norm_backward[T](input: Tensor[T], upstream: Tensor[T], epsilon: float = 0.00001) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
-def backward_mse(output: Tensor[f64])
+def backward_mse(output: Tensor[f64]) -> Tensor[f64]
 
 @compile(mlir, stablehlo, xla)
 def gradient[T](value: Tensor[T]) -> Tensor[T]
@@ -420,10 +436,47 @@ test "ranked sum lowers as a reduction":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     assert(values(sum(value)) == [10.0])
 
+test "axis reduction preserves every non-reduced dimension":
+    value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 2, 2])
+    reduced = sum_axis(value, 1)
+    assert(shape(reduced) == [2, 2])
+    assert(values(reduced) == [4.0, 6.0, 12.0, 14.0])
+
 test "rank-two contraction executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     right = ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
     assert(values(matmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
+
+test "batched contraction broadcasts leading dimensions":
+    left = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 2, 2])
+    right = ranked([1.0, 0.0, 0.0, 1.0], [1, 2, 2])
+    product = matmul(left, right)
+    assert(shape(product) == [2, 2, 2])
+    assert(values(product) == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+
+test "reshape and permute are typed tensor views":
+    value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    reshaped = reshape(value, [1, 2, 3])
+    assert(shape(reshaped) == [1, 2, 3])
+    transposed = permute(reshaped, [0, 2, 1])
+    assert(shape(transposed) == [1, 3, 2])
+    assert(values(transposed) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
+
+test "concatenation and repeat carry explicit axis specifications":
+    left = ranked([1.0, 2.0], [1, 2])
+    right = ranked([3.0, 4.0], [1, 2])
+    joined = concatenate(left, right, [0])
+    assert(shape(joined) == [2, 2])
+    assert(values(joined) == [1.0, 2.0, 3.0, 4.0])
+    repeated = repeat(joined, [0, 2])
+    assert(shape(repeated) == [4, 2])
+    assert(values(repeated) == [1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0])
+
+test "last-axis reductions and rotary embeddings support model composition":
+    value = ranked([1.0, 3.0, 2.0, 4.0], [2, 2])
+    assert(values(mean_last(value)) == [2.0, 3.0])
+    rotated = rope(ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 4]), ranked([1000000.0, 0.0], [2]))
+    assert(values(rotated) == [1.0, 2.0, 3.0, 4.0])
 
 test "ranked transpose swaps tensor axes":
     value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])

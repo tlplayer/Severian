@@ -5653,12 +5653,9 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Index { object, index } => {
                 let object_value = self.expression(object, None)?;
-                if let Some(indexed) = self.class_index_operator(
-                    object_value.clone(),
-                    index,
-                    expected,
-                    ast.span,
-                )? {
+                if let Some(indexed) =
+                    self.class_index_operator(object_value.clone(), index, expected, ast.span)?
+                {
                     return Ok(indexed);
                 }
                 let object = object_value;
@@ -11792,7 +11789,11 @@ impl Analyzer<'_> {
             }
         }
 
-        if matches!(path.as_str(), "tensor" | "tensor.tensor") && arguments.len() == 2 {
+        if matches!(
+            path.as_str(),
+            "tensor" | "tensor.tensor" | "ranked" | "tensor.ranked"
+        ) && arguments.len() == 2
+        {
             let float = self
                 .types
                 .resolve_name("float")
@@ -11876,6 +11877,197 @@ impl Analyzer<'_> {
             return Ok(None);
         }
 
+        let list_spec_operation = match name {
+            "reshape" => Some(severian_universal::tensor::RESHAPE),
+            "permute" => Some(severian_universal::tensor::PERMUTE),
+            "repeat" => Some(severian_universal::tensor::REPEAT),
+            _ => None,
+        };
+        if let (Some(operation), [value, specification]) = (list_spec_operation, arguments) {
+            let value = self.expression(&value.value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let list = self.instantiate_list_type(integer);
+                let specification = self.expression(&specification.value, Some(list))?;
+                let specification = self.list_storage_expression(specification, span);
+                return self
+                    .tensor_operation(operation, vec![value, specification], expected, span)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        if name == "concatenate" && arguments.len() == 3 {
+            let left = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(left.type_id, span)
+                .is_some()
+            {
+                let right = self.expression(&arguments[1].value, Some(left.type_id))?;
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let list = self.instantiate_list_type(integer);
+                let axis = self.expression(&arguments[2].value, Some(list))?;
+                let axis = self.list_storage_expression(axis, span);
+                return self
+                    .tensor_operation(
+                        severian_universal::tensor::CONCATENATE,
+                        vec![left, right, axis],
+                        expected,
+                        span,
+                    )
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        if name == "gather" && arguments.len() == 2 {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let indices = self.expression(&arguments[1].value, None)?;
+                if self
+                    .resolve_tensor_element_type(indices.type_id, span)
+                    .is_some()
+                {
+                    return self
+                        .tensor_operation(
+                            severian_universal::tensor::GATHER,
+                            vec![value, indices],
+                            expected,
+                            span,
+                        )
+                        .map(Some);
+                }
+            }
+            return Ok(None);
+        }
+
+        if name == "rope" && arguments.len() == 2 {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let configuration = self.expression(&arguments[1].value, None)?;
+                if self
+                    .resolve_tensor_element_type(configuration.type_id, span)
+                    .is_some()
+                {
+                    return self
+                        .tensor_operation(
+                            severian_universal::tensor::ROPE,
+                            vec![value, configuration],
+                            expected,
+                            span,
+                        )
+                        .map(Some);
+                }
+            }
+            return Ok(None);
+        }
+
+        if name == "sum_axis" && arguments.len() == 2 {
+            let value = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let axis = self.expression(&arguments[1].value, Some(integer))?;
+                return self
+                    .tensor_operation(
+                        severian_universal::tensor::REDUCE_SUM_AXIS,
+                        vec![value, axis],
+                        expected,
+                        span,
+                    )
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        let scalar_operation = match name {
+            "scale" => Some(severian_universal::tensor::SCALE),
+            "layer_norm" => Some(severian_universal::tensor::LAYER_NORM),
+            "sgd" => Some(severian_universal::tensor::SGD),
+            "add_scalar" => Some(severian_universal::tensor::ADD_SCALAR),
+            _ => None,
+        };
+        if let (Some(operation), [value, scalar]) = (scalar_operation, arguments) {
+            let value = self.expression(&value.value, None)?;
+            if self
+                .resolve_tensor_element_type(value.type_id, span)
+                .is_some()
+            {
+                let float = self
+                    .types
+                    .resolve_name(if name == "add_scalar" { "f32" } else { "float" })
+                    .expect("bootstrap defines the tensor scalar type");
+                let scalar = self.expression(&scalar.value, Some(float))?;
+                return self
+                    .tensor_operation(operation, vec![value, scalar], expected, span)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        let tensor_pair_operation = match name {
+            "relu_backward" => Some(severian_universal::tensor::RELU_BACKWARD),
+            "softmax_backward" => Some(severian_universal::tensor::SOFTMAX_BACKWARD),
+            _ => None,
+        };
+        if let (Some(operation), [left, right]) = (tensor_pair_operation, arguments) {
+            let left = self.expression(&left.value, None)?;
+            if self
+                .resolve_tensor_element_type(left.type_id, span)
+                .is_some()
+            {
+                let right = self.expression(&right.value, Some(left.type_id))?;
+                return self
+                    .tensor_operation(operation, vec![left, right], expected, span)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
+        if name == "layer_norm_backward" && arguments.len() == 3 {
+            let input = self.expression(&arguments[0].value, None)?;
+            if self
+                .resolve_tensor_element_type(input.type_id, span)
+                .is_some()
+            {
+                let upstream = self.expression(&arguments[1].value, Some(input.type_id))?;
+                let float = self
+                    .types
+                    .resolve_name("float")
+                    .expect("bootstrap defines float");
+                let epsilon = self.expression(&arguments[2].value, Some(float))?;
+                return self
+                    .tensor_operation(
+                        severian_universal::tensor::LAYER_NORM_BACKWARD,
+                        vec![input, upstream, epsilon],
+                        expected,
+                        span,
+                    )
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+
         let operation = match name {
             "add" => Some(severian_universal::tensor::ADD),
             "subtract" => Some(severian_universal::tensor::SUBTRACT),
@@ -11885,6 +12077,18 @@ impl Analyzer<'_> {
             "matmul" => Some(severian_universal::tensor::MATMUL),
             "transpose" => Some(severian_universal::tensor::TRANSPOSE),
             "materialize" => Some(severian_universal::tensor::MATERIALIZE),
+            "mean_last" => Some(severian_universal::tensor::MEAN_LAST),
+            "rsqrt" => Some(severian_universal::tensor::RSQRT),
+            "exp" => Some(severian_universal::tensor::EXP),
+            "log" => Some(severian_universal::tensor::LOG),
+            "tanh" => Some(severian_universal::tensor::TANH),
+            "silu" => Some(severian_universal::tensor::SILU),
+            "softmax" | "softmax_rows" | "softmax_last" => {
+                Some(severian_universal::tensor::SOFTMAX_LAST)
+            }
+            "relu" => Some(severian_universal::tensor::RELU),
+            "backward_mse" => Some(severian_universal::tensor::BACKWARD_MSE),
+            "gradient" => Some(severian_universal::tensor::GRADIENT),
             _ => None,
         };
         if let Some(operation) = operation {
@@ -11922,6 +12126,13 @@ impl Analyzer<'_> {
             | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
                 self.types.resolve_name(name)
             }
+            "to_f8_e4_m3_fn" => self.types.resolve_name("f8e4m3fn"),
+            "to_f8_e5_m2" => self.types.resolve_name("f8e5m2"),
+            "to_f_16" => self.types.resolve_name("f16"),
+            "to_bf_16" => self.types.resolve_name("bf16"),
+            "to_f_32" => self.types.resolve_name("f32"),
+            "to_f_64" => self.types.resolve_name("f64"),
+            "to_i_64" => self.types.resolve_name("i64"),
             _ => None,
         };
         if let (Some(target_element), [argument]) = (target_element, arguments) {

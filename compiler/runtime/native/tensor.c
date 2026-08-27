@@ -19,14 +19,20 @@ typedef struct {
     unsigned __int128 bits;
 } sev_tensor_cell;
 
-typedef struct {
+typedef struct sev_tensor {
     size_t rank;
     size_t count;
     int32_t dtype;
     sev_tensor_cell *values;
+    const uint8_t *mapped_values;
+    size_t mapped_byte_width;
     int64_t *shape;
     int64_t *strides;
     int64_t offset;
+    _Bool owns_values;
+    sev_tensor_cell *gradient;
+    struct sev_tensor *parent;
+    char operation;
 } sev_tensor;
 
 typedef struct {
@@ -380,9 +386,11 @@ static void *sev_safetensor_view(int64_t handle, const char *name, int32_t reque
                     : 1;
     sev_tensor_abort_if(relative_end - relative_start != tensor->count * byte_width);
     const uint8_t *data = store->bytes + data_start + relative_start;
-    for (size_t index = 0; index < tensor->count; ++index) {
-        tensor->values[index].bits = sev_read_u128(data + index * byte_width, byte_width);
-    }
+    free(tensor->values);
+    tensor->values = NULL;
+    tensor->owns_values = 0;
+    tensor->mapped_values = data;
+    tensor->mapped_byte_width = byte_width;
     return sev_tensor_wrap(tensor);
 }
 
@@ -670,6 +678,7 @@ static sev_tensor *sev_tensor_new(size_t rank, const int64_t *shape, int32_t dty
     tensor->count = sev_tensor_element_count(rank, shape);
     tensor->values = calloc(tensor->count == 0 ? 1 : tensor->count, sizeof(*tensor->values));
     sev_tensor_abort_if(tensor->values == NULL);
+    tensor->owns_values = 1;
     return tensor;
 }
 
@@ -692,6 +701,18 @@ static size_t sev_tensor_physical_index(const sev_tensor *tensor, size_t logical
     }
     sev_tensor_abort_if(physical < 0);
     return (size_t)physical;
+}
+
+static sev_tensor_cell sev_tensor_value(const sev_tensor *tensor, size_t physical) {
+    if (tensor->mapped_values != NULL) {
+        return (sev_tensor_cell){
+            sev_read_u128(
+                tensor->mapped_values + physical * tensor->mapped_byte_width,
+                tensor->mapped_byte_width
+            )
+        };
+    }
+    return tensor->values[physical];
 }
 
 void *__sev_tensor_from_elements(void *values_storage, void *shape_storage) {
@@ -737,7 +758,7 @@ void *__sev_tensor_values(void *value) {
     sev_list *result = sev_tensor_list();
     for (size_t index = 0; index < tensor->count; ++index) {
         double element = sev_tensor_as_f64(
-            tensor->values[sev_tensor_physical_index(tensor, index)],
+            sev_tensor_value(tensor, sev_tensor_physical_index(tensor, index)),
             tensor->dtype
         );
         sev_tensor_list_push(result, sev_tensor_f64_bits(element));
@@ -749,7 +770,10 @@ void *__sev_tensor_materialize(void *value) {
     sev_tensor *source = sev_tensor_get(value);
     sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
     for (size_t index = 0; index < source->count; ++index) {
-        result->values[index] = source->values[sev_tensor_physical_index(source, index)];
+        result->values[index] = sev_tensor_value(
+            source,
+            sev_tensor_physical_index(source, index)
+        );
     }
     return sev_tensor_wrap(result);
 }
@@ -859,12 +883,14 @@ static void *sev_tensor_binary(
     sev_tensor *result = sev_tensor_new(rank, shape, left->dtype);
     free(shape);
     for (size_t index = 0; index < result->count; ++index) {
-        sev_tensor_cell l = left->values[
+        sev_tensor_cell l = sev_tensor_value(
+            left,
             sev_tensor_broadcast_index(left, rank, result->shape, index)
-        ];
-        sev_tensor_cell r = right->values[
+        );
+        sev_tensor_cell r = sev_tensor_value(
+            right,
             sev_tensor_broadcast_index(right, rank, result->shape, index)
-        ];
+        );
         result->values[index] = sev_tensor_binary_cell(l, r, result->dtype, operation);
     }
     return sev_tensor_wrap(result);
@@ -894,7 +920,7 @@ void *__sev_tensor_sum(void *value) {
     sev_tensor_cell total = {0};
     for (size_t index = 0; index < source->count; ++index) {
         sev_tensor_cell element = sev_tensor_convert_cell(
-            source->values[sev_tensor_physical_index(source, index)],
+            sev_tensor_value(source, sev_tensor_physical_index(source, index)),
             source->dtype,
             accumulation_dtype
         );
@@ -909,25 +935,133 @@ void *__sev_tensor_sum(void *value) {
     return sev_tensor_wrap(result);
 }
 
+void *__sev_tensor_sum_axis(void *value, int64_t requested_axis) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(source->rank == 0);
+    int64_t normalized_axis = requested_axis < 0
+        ? requested_axis + (int64_t)source->rank
+        : requested_axis;
+    sev_tensor_abort_if(normalized_axis < 0 || normalized_axis >= (int64_t)source->rank);
+    size_t axis = (size_t)normalized_axis;
+    size_t rank = source->rank - 1;
+    int64_t *shape = calloc(rank == 0 ? 1 : rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    for (size_t source_axis = 0, result_axis = 0; source_axis < source->rank; ++source_axis) {
+        if (source_axis != axis) shape[result_axis++] = source->shape[source_axis];
+    }
+    sev_tensor *result = sev_tensor_new(rank, shape, source->dtype);
+    free(shape);
+    int32_t accumulation_dtype = sev_tensor_accumulation_dtype(source->dtype);
+    for (size_t output = 0; output < result->count; ++output) {
+        size_t coordinates = output;
+        int64_t base = source->offset;
+        for (size_t result_axis = rank; result_axis > 0; --result_axis) {
+            size_t current = result_axis - 1;
+            size_t dimension = (size_t)result->shape[current];
+            size_t coordinate = dimension == 0 ? 0 : coordinates % dimension;
+            coordinates = dimension == 0 ? 0 : coordinates / dimension;
+            size_t source_axis = current < axis ? current : current + 1;
+            base += (int64_t)coordinate * source->strides[source_axis];
+        }
+        sev_tensor_cell total = {0};
+        for (int64_t coordinate = 0; coordinate < source->shape[axis]; ++coordinate) {
+            int64_t physical = base + coordinate * source->strides[axis];
+            sev_tensor_abort_if(physical < 0);
+            sev_tensor_cell element = sev_tensor_convert_cell(
+                sev_tensor_value(source, (size_t)physical),
+                source->dtype,
+                accumulation_dtype
+            );
+            total = sev_tensor_binary_cell(total, element, accumulation_dtype, '+');
+        }
+        result->values[output] = sev_tensor_convert_cell(
+            total,
+            accumulation_dtype,
+            source->dtype
+        );
+    }
+    return sev_tensor_wrap(result);
+}
+
 void *__sev_tensor_matmul(void *left_value, void *right_value) {
     sev_tensor *left = sev_tensor_get(left_value);
     sev_tensor *right = sev_tensor_get(right_value);
-    sev_tensor_abort_if(left->rank != 2 || right->rank != 2);
-    sev_tensor_abort_if(left->shape[1] != right->shape[0] || left->dtype != right->dtype);
-    int64_t shape[2] = {left->shape[0], right->shape[1]};
-    sev_tensor *result = sev_tensor_new(2, shape, left->dtype);
+    sev_tensor_abort_if(left->rank < 2 || right->rank < 2);
+    sev_tensor_abort_if(
+        left->shape[left->rank - 1] != right->shape[right->rank - 2]
+        || left->dtype != right->dtype
+    );
+    size_t batch_rank = (left->rank - 2) > (right->rank - 2)
+        ? left->rank - 2
+        : right->rank - 2;
+    size_t rank = batch_rank + 2;
+    int64_t *shape = calloc(rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    for (size_t offset = 0; offset < batch_rank; ++offset) {
+        int64_t l = offset < left->rank - 2
+            ? left->shape[left->rank - 3 - offset]
+            : 1;
+        int64_t r = offset < right->rank - 2
+            ? right->shape[right->rank - 3 - offset]
+            : 1;
+        sev_tensor_abort_if(l != r && l != 1 && r != 1);
+        shape[batch_rank - 1 - offset] = l > r ? l : r;
+    }
+    shape[rank - 2] = left->shape[left->rank - 2];
+    shape[rank - 1] = right->shape[right->rank - 1];
+    sev_tensor *result = sev_tensor_new(rank, shape, left->dtype);
+    free(shape);
     int32_t accumulation_dtype = sev_tensor_accumulation_dtype(left->dtype);
-    for (int64_t row = 0; row < shape[0]; ++row) {
-        for (int64_t column = 0; column < shape[1]; ++column) {
+    size_t batch_count = 1;
+    for (size_t axis = 0; axis < batch_rank; ++axis) {
+        batch_count *= (size_t)result->shape[axis];
+    }
+    int64_t rows = result->shape[rank - 2];
+    int64_t columns = result->shape[rank - 1];
+    int64_t inner_size = left->shape[left->rank - 1];
+    for (size_t batch = 0; batch < batch_count; ++batch) {
+        int64_t left_base = left->offset;
+        int64_t right_base = right->offset;
+        size_t remaining = batch;
+        for (size_t axis = batch_rank; axis > 0; --axis) {
+            size_t result_axis = axis - 1;
+            size_t dimension = (size_t)result->shape[result_axis];
+            size_t coordinate = dimension == 0 ? 0 : remaining % dimension;
+            remaining = dimension == 0 ? 0 : remaining / dimension;
+            if (result_axis + 2 >= batch_rank + 2 - left->rank
+                && left->rank > 2) {
+                size_t source_axis = result_axis + (left->rank - 2) - batch_rank;
+                if (source_axis < left->rank - 2 && left->shape[source_axis] != 1) {
+                    left_base += (int64_t)coordinate * left->strides[source_axis];
+                }
+            }
+            if (result_axis + 2 >= batch_rank + 2 - right->rank
+                && right->rank > 2) {
+                size_t source_axis = result_axis + (right->rank - 2) - batch_rank;
+                if (source_axis < right->rank - 2 && right->shape[source_axis] != 1) {
+                    right_base += (int64_t)coordinate * right->strides[source_axis];
+                }
+            }
+        }
+        for (int64_t row = 0; row < rows; ++row) {
+            for (int64_t column = 0; column < columns; ++column) {
             sev_tensor_cell total = {0};
-            for (int64_t inner = 0; inner < left->shape[1]; ++inner) {
-                size_t l = (size_t)(left->offset + row * left->strides[0] + inner * left->strides[1]);
-                size_t r = (size_t)(right->offset + inner * right->strides[0] + column * right->strides[1]);
+            for (int64_t inner = 0; inner < inner_size; ++inner) {
+                size_t l = (size_t)(
+                    left_base
+                    + row * left->strides[left->rank - 2]
+                    + inner * left->strides[left->rank - 1]
+                );
+                size_t r = (size_t)(
+                    right_base
+                    + inner * right->strides[right->rank - 2]
+                    + column * right->strides[right->rank - 1]
+                );
                 sev_tensor_cell left_element = sev_tensor_convert_cell(
-                    left->values[l], left->dtype, accumulation_dtype
+                    sev_tensor_value(left, l), left->dtype, accumulation_dtype
                 );
                 sev_tensor_cell right_element = sev_tensor_convert_cell(
-                    right->values[r], right->dtype, accumulation_dtype
+                    sev_tensor_value(right, r), right->dtype, accumulation_dtype
                 );
                 sev_tensor_cell product = sev_tensor_binary_cell(
                     left_element,
@@ -937,9 +1071,12 @@ void *__sev_tensor_matmul(void *left_value, void *right_value) {
                 );
                 total = sev_tensor_binary_cell(total, product, accumulation_dtype, '+');
             }
-            result->values[(size_t)(row * shape[1] + column)] = sev_tensor_convert_cell(
+            size_t output = (batch * (size_t)rows + (size_t)row) * (size_t)columns
+                + (size_t)column;
+            result->values[output] = sev_tensor_convert_cell(
                 total, accumulation_dtype, result->dtype
             );
+            }
         }
     }
     return sev_tensor_wrap(result);
@@ -958,6 +1095,8 @@ void *__sev_tensor_transpose(void *value) {
     result->shape[1] = source->shape[0];
     result->strides[0] = source->strides[1];
     result->strides[1] = source->strides[0];
+    result->owns_values = 0;
+    result->gradient = NULL;
     return sev_tensor_wrap(result);
 }
 
@@ -980,6 +1119,8 @@ void *__sev_tensor_slice(
     result->strides = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
     sev_tensor_abort_if(result->shape == NULL || result->strides == NULL);
     result->count = 1;
+    result->owns_values = 0;
+    result->gradient = NULL;
     for (size_t axis = 0; axis < source->rank; ++axis) {
         int64_t start = (int64_t)starts->values[axis];
         int64_t end = (int64_t)ends->values[axis];
@@ -991,4 +1132,631 @@ void *__sev_tensor_slice(
         result->count *= (size_t)result->shape[axis];
     }
     return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_reshape(void *value, void *shape_storage) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_list *shape = shape_storage;
+    int64_t *dimensions = calloc(shape->length == 0 ? 1 : shape->length, sizeof(*dimensions));
+    sev_tensor_abort_if(dimensions == NULL);
+    int64_t inferred_axis = -1;
+    size_t known = 1;
+    for (size_t axis = 0; axis < shape->length; ++axis) {
+        int64_t dimension = (int64_t)shape->values[axis];
+        if (dimension == -1) {
+            sev_tensor_abort_if(inferred_axis >= 0);
+            inferred_axis = (int64_t)axis;
+            dimensions[axis] = 1;
+        } else {
+            sev_tensor_abort_if(dimension < 0);
+            dimensions[axis] = dimension;
+            sev_tensor_abort_if(dimension != 0 && known > SIZE_MAX / (size_t)dimension);
+            known *= (size_t)dimension;
+        }
+    }
+    if (inferred_axis >= 0) {
+        sev_tensor_abort_if(known == 0 || source->count % known != 0);
+        dimensions[inferred_axis] = (int64_t)(source->count / known);
+    }
+    sev_tensor_abort_if(sev_tensor_element_count(shape->length, dimensions) != source->count);
+    sev_tensor *materialized = source;
+    _Bool contiguous = source->offset == 0;
+    int64_t expected = 1;
+    for (size_t axis = source->rank; axis > 0; --axis) {
+        if (source->strides[axis - 1] != expected) contiguous = 0;
+        expected *= source->shape[axis - 1];
+    }
+    if (!contiguous) {
+        materialized = sev_tensor_get(__sev_tensor_materialize(source));
+        free(materialized->shape);
+        free(materialized->strides);
+        materialized->rank = shape->length;
+        materialized->shape = dimensions;
+        materialized->strides = sev_tensor_contiguous_strides(
+            materialized->rank, materialized->shape
+        );
+        materialized->offset = 0;
+        return sev_tensor_wrap(materialized);
+    }
+    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor_abort_if(result == NULL);
+    *result = *source;
+    result->rank = shape->length;
+    result->shape = dimensions;
+    result->strides = sev_tensor_contiguous_strides(result->rank, result->shape);
+    result->offset = 0;
+    result->owns_values = 0;
+    result->gradient = NULL;
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_permute(void *value, void *axes_storage) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_list *axes = axes_storage;
+    sev_tensor_abort_if(axes->length != source->rank);
+    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor_abort_if(result == NULL);
+    *result = *source;
+    result->shape = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->shape));
+    result->strides = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
+    _Bool *seen = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*seen));
+    sev_tensor_abort_if(result->shape == NULL || result->strides == NULL || seen == NULL);
+    for (size_t axis = 0; axis < source->rank; ++axis) {
+        size_t selected = (size_t)axes->values[axis];
+        sev_tensor_abort_if(selected >= source->rank || seen[selected]);
+        seen[selected] = 1;
+        result->shape[axis] = source->shape[selected];
+        result->strides[axis] = source->strides[selected];
+    }
+    free(seen);
+    result->owns_values = 0;
+    result->gradient = NULL;
+    return sev_tensor_wrap(result);
+}
+
+static void *sev_tensor_unary_float(void *value, char operation) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(sev_tensor_dtype_signed(source->dtype) || sev_tensor_dtype_unsigned(source->dtype));
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    for (size_t index = 0; index < source->count; ++index) {
+        __float128 input = sev_tensor_float(
+            sev_tensor_value(source, sev_tensor_physical_index(source, index)), source->dtype
+        );
+        long double narrowed = (long double)input;
+        __float128 output = operation == 'r' ? (__float128)(1.0L / sqrtl(narrowed))
+            : operation == 'e' ? (__float128)expl(narrowed)
+            : operation == 'l' ? (__float128)logl(narrowed)
+            : operation == 't' ? (__float128)tanhl(narrowed)
+            : input / (1.0Q + (__float128)expl(-narrowed));
+        result->values[index] = sev_tensor_from_float(output, source->dtype);
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_rsqrt(void *value) { return sev_tensor_unary_float(value, 'r'); }
+void *__sev_tensor_exp(void *value) { return sev_tensor_unary_float(value, 'e'); }
+void *__sev_tensor_log(void *value) { return sev_tensor_unary_float(value, 'l'); }
+void *__sev_tensor_tanh(void *value) { return sev_tensor_unary_float(value, 't'); }
+void *__sev_tensor_silu(void *value) { return sev_tensor_unary_float(value, 's'); }
+
+void *__sev_tensor_relu(void *value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    for (size_t index = 0; index < source->count; ++index) {
+        sev_tensor_cell current = sev_tensor_value(
+            source,
+            sev_tensor_physical_index(source, index)
+        );
+        _Bool positive = sev_tensor_dtype_signed(source->dtype)
+            ? sev_tensor_signed(current, source->dtype) > 0
+            : sev_tensor_dtype_unsigned(source->dtype)
+                ? sev_tensor_unsigned(current, source->dtype) > 0
+                : sev_tensor_float(current, source->dtype) > 0.0Q;
+        result->values[index] = positive ? current : (sev_tensor_cell){0};
+    }
+    result->parent = source;
+    result->operation = 'r';
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_scale(void *value, double scale) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    for (size_t index = 0; index < source->count; ++index) {
+        sev_tensor_cell current = sev_tensor_value(
+            source,
+            sev_tensor_physical_index(source, index)
+        );
+        if (sev_tensor_dtype_signed(source->dtype)) {
+            result->values[index] = sev_tensor_from_signed(
+                (__int128)((double)sev_tensor_signed(current, source->dtype) * scale),
+                source->dtype
+            );
+        } else if (sev_tensor_dtype_unsigned(source->dtype)) {
+            result->values[index] = sev_tensor_from_unsigned(
+                (unsigned __int128)((double)sev_tensor_unsigned(current, source->dtype) * scale),
+                source->dtype
+            );
+        } else {
+            result->values[index] = sev_tensor_from_float(
+                sev_tensor_float(current, source->dtype) * (__float128)scale,
+                source->dtype
+            );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_add_scalar(void *value, float scalar) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(sev_tensor_dtype_signed(source->dtype) || sev_tensor_dtype_unsigned(source->dtype));
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    for (size_t index = 0; index < source->count; ++index) {
+        __float128 current = sev_tensor_float(
+            sev_tensor_value(source, sev_tensor_physical_index(source, index)), source->dtype
+        );
+        result->values[index] = sev_tensor_from_float(
+            current + (__float128)scalar, source->dtype
+        );
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_layer_norm(void *value, double epsilon) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(source->rank == 0 || sev_tensor_dtype_signed(source->dtype)
+        || sev_tensor_dtype_unsigned(source->dtype));
+    int64_t width = source->shape[source->rank - 1];
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    size_t rows = width == 0 ? 0 : source->count / (size_t)width;
+    for (size_t row = 0; row < rows; ++row) {
+        __float128 mean = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            mean += sev_tensor_float(
+                sev_tensor_value(
+                    source,
+                    sev_tensor_physical_index(source, row * (size_t)width + (size_t)column)
+                ),
+                source->dtype
+            );
+        }
+        mean /= (__float128)width;
+        __float128 variance = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            __float128 current = sev_tensor_float(
+                sev_tensor_value(
+                    source,
+                    sev_tensor_physical_index(source, row * (size_t)width + (size_t)column)
+                ),
+                source->dtype
+            );
+            __float128 centered = current - mean;
+            variance += centered * centered;
+        }
+        variance /= (__float128)width;
+        __float128 inverse = (__float128)(1.0L / sqrtl((long double)(variance + epsilon)));
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 current = sev_tensor_float(
+                sev_tensor_value(source, sev_tensor_physical_index(source, logical)), source->dtype
+            );
+            result->values[logical] = sev_tensor_from_float(
+                (current - mean) * inverse, source->dtype
+            );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_relu_backward(void *input_value, void *upstream_value) {
+    sev_tensor *input = sev_tensor_get(input_value);
+    sev_tensor *upstream = sev_tensor_get(upstream_value);
+    sev_tensor_abort_if(input->count != upstream->count || input->dtype != upstream->dtype);
+    sev_tensor *result = sev_tensor_new(input->rank, input->shape, input->dtype);
+    for (size_t index = 0; index < input->count; ++index) {
+        sev_tensor_cell current = sev_tensor_value(
+            input,
+            sev_tensor_physical_index(input, index)
+        );
+        _Bool positive = sev_tensor_dtype_signed(input->dtype)
+            ? sev_tensor_signed(current, input->dtype) > 0
+            : sev_tensor_dtype_unsigned(input->dtype)
+                ? sev_tensor_unsigned(current, input->dtype) > 0
+                : sev_tensor_float(current, input->dtype) > 0.0Q;
+        result->values[index] = positive
+            ? sev_tensor_value(upstream, sev_tensor_physical_index(upstream, index))
+            : (sev_tensor_cell){0};
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_softmax_backward(void *output_value, void *upstream_value) {
+    sev_tensor *output = sev_tensor_get(output_value);
+    sev_tensor *upstream = sev_tensor_get(upstream_value);
+    sev_tensor_abort_if(output->rank == 0 || output->count != upstream->count
+        || output->dtype != upstream->dtype);
+    int64_t width = output->shape[output->rank - 1];
+    sev_tensor *result = sev_tensor_new(output->rank, output->shape, output->dtype);
+    size_t rows = width == 0 ? 0 : output->count / (size_t)width;
+    for (size_t row = 0; row < rows; ++row) {
+        __float128 dot = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            dot += sev_tensor_float(
+                sev_tensor_value(output, sev_tensor_physical_index(output, logical)), output->dtype
+            ) * sev_tensor_float(
+                sev_tensor_value(upstream, sev_tensor_physical_index(upstream, logical)), upstream->dtype
+            );
+        }
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 probability = sev_tensor_float(
+                sev_tensor_value(output, sev_tensor_physical_index(output, logical)), output->dtype
+            );
+            __float128 gradient = sev_tensor_float(
+                sev_tensor_value(upstream, sev_tensor_physical_index(upstream, logical)), upstream->dtype
+            );
+            result->values[logical] = sev_tensor_from_float(
+                probability * (gradient - dot), output->dtype
+            );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_layer_norm_backward(
+    void *input_value,
+    void *upstream_value,
+    double epsilon
+) {
+    sev_tensor *input = sev_tensor_get(input_value);
+    sev_tensor *upstream = sev_tensor_get(upstream_value);
+    sev_tensor_abort_if(input->rank == 0 || input->count != upstream->count
+        || input->dtype != upstream->dtype);
+    int64_t width = input->shape[input->rank - 1];
+    sev_tensor *result = sev_tensor_new(input->rank, input->shape, input->dtype);
+    size_t rows = width == 0 ? 0 : input->count / (size_t)width;
+    for (size_t row = 0; row < rows; ++row) {
+        __float128 mean = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            mean += sev_tensor_float(
+                sev_tensor_value(
+                    input,
+                    sev_tensor_physical_index(input, row * (size_t)width + (size_t)column)
+                ),
+                input->dtype
+            );
+        }
+        mean /= (__float128)width;
+        __float128 variance = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            __float128 centered = sev_tensor_float(
+                sev_tensor_value(
+                    input,
+                    sev_tensor_physical_index(input, row * (size_t)width + (size_t)column)
+                ),
+                input->dtype
+            ) - mean;
+            variance += centered * centered;
+        }
+        variance /= (__float128)width;
+        __float128 inverse = (__float128)(1.0L / sqrtl((long double)(variance + epsilon)));
+        __float128 sum_gradient = 0.0Q;
+        __float128 sum_gradient_normalized = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 gradient = sev_tensor_float(
+                sev_tensor_value(upstream, sev_tensor_physical_index(upstream, logical)), upstream->dtype
+            );
+            __float128 normalized = (
+                sev_tensor_float(
+                    sev_tensor_value(input, sev_tensor_physical_index(input, logical)), input->dtype
+                ) - mean
+            ) * inverse;
+            sum_gradient += gradient;
+            sum_gradient_normalized += gradient * normalized;
+        }
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 gradient = sev_tensor_float(
+                sev_tensor_value(upstream, sev_tensor_physical_index(upstream, logical)), upstream->dtype
+            );
+            __float128 normalized = (
+                sev_tensor_float(
+                    sev_tensor_value(input, sev_tensor_physical_index(input, logical)), input->dtype
+                ) - mean
+            ) * inverse;
+            result->values[logical] = sev_tensor_from_float(
+                inverse * (
+                    (__float128)width * gradient - sum_gradient
+                    - normalized * sum_gradient_normalized
+                ) / (__float128)width,
+                input->dtype
+            );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_backward_mse(void *output_value) {
+    sev_tensor *output = sev_tensor_get(output_value);
+    free(output->gradient);
+    output->gradient = calloc(output->count == 0 ? 1 : output->count, sizeof(*output->gradient));
+    sev_tensor_abort_if(output->gradient == NULL);
+    for (size_t index = 0; index < output->count; ++index) {
+        output->gradient[index] = sev_tensor_value(
+            output,
+            sev_tensor_physical_index(output, index)
+        );
+    }
+    if (output->parent != NULL && output->operation == 'r') {
+        sev_tensor *parent = output->parent;
+        free(parent->gradient);
+        parent->gradient = calloc(parent->count == 0 ? 1 : parent->count, sizeof(*parent->gradient));
+        sev_tensor_abort_if(parent->gradient == NULL);
+        for (size_t index = 0; index < parent->count; ++index) {
+            sev_tensor_cell input = sev_tensor_value(
+                parent,
+                sev_tensor_physical_index(parent, index)
+            );
+            _Bool positive = sev_tensor_dtype_signed(parent->dtype)
+                ? sev_tensor_signed(input, parent->dtype) > 0
+                : sev_tensor_dtype_unsigned(parent->dtype)
+                    ? sev_tensor_unsigned(input, parent->dtype) > 0
+                    : sev_tensor_float(input, parent->dtype) > 0.0Q;
+            parent->gradient[index] = positive ? output->gradient[index] : (sev_tensor_cell){0};
+        }
+    }
+    return output_value;
+}
+
+void *__sev_tensor_gradient(void *value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    if (source->gradient != NULL) {
+        memcpy(result->values, source->gradient, source->count * sizeof(*source->gradient));
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_sgd(void *value, double learning_rate) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    for (size_t index = 0; index < source->count; ++index) {
+        __float128 current = sev_tensor_float(
+            sev_tensor_value(source, sev_tensor_physical_index(source, index)), source->dtype
+        );
+        __float128 gradient = source->gradient == NULL
+            ? 0.0Q
+            : sev_tensor_float(source->gradient[index], source->dtype);
+        result->values[index] = sev_tensor_from_float(
+            current - (__float128)learning_rate * gradient, source->dtype
+        );
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_mean_last(void *value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(source->rank == 0);
+    int64_t *shape = calloc(source->rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    memcpy(shape, source->shape, source->rank * sizeof(*shape));
+    int64_t width = shape[source->rank - 1];
+    shape[source->rank - 1] = 1;
+    sev_tensor *result = sev_tensor_new(source->rank, shape, source->dtype);
+    free(shape);
+    for (size_t outer = 0; outer < result->count; ++outer) {
+        __float128 total = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = outer * (size_t)width + (size_t)column;
+            total += sev_tensor_float(
+                sev_tensor_value(source, sev_tensor_physical_index(source, logical)), source->dtype
+            );
+        }
+        result->values[outer] = sev_tensor_from_float(total / (__float128)width, source->dtype);
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_softmax_last(void *value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor_abort_if(source->rank == 0);
+    int64_t width = source->shape[source->rank - 1];
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    size_t rows = width == 0 ? 0 : source->count / (size_t)width;
+    for (size_t row = 0; row < rows; ++row) {
+        __float128 maximum = -(__float128)HUGE_VALL;
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 current = sev_tensor_float(
+                sev_tensor_value(source, sev_tensor_physical_index(source, logical)), source->dtype
+            );
+            if (current > maximum) maximum = current;
+        }
+        __float128 total = 0.0Q;
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 current = sev_tensor_float(
+                sev_tensor_value(source, sev_tensor_physical_index(source, logical)), source->dtype
+            );
+            __float128 exponent = (__float128)expl((long double)(current - maximum));
+            result->values[logical] = sev_tensor_from_float(exponent, source->dtype);
+            total += exponent;
+        }
+        for (int64_t column = 0; column < width; ++column) {
+            size_t logical = row * (size_t)width + (size_t)column;
+            __float128 exponent = sev_tensor_float(
+                sev_tensor_value(result, logical),
+                source->dtype
+            );
+            result->values[logical] = sev_tensor_from_float(exponent / total, source->dtype);
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_gather(void *value, void *indices_value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *indices = sev_tensor_get(indices_value);
+    sev_tensor_abort_if(source->rank == 0);
+    size_t rank = indices->rank + source->rank - 1;
+    int64_t *shape = calloc(rank == 0 ? 1 : rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    memcpy(shape, indices->shape, indices->rank * sizeof(*shape));
+    memcpy(shape + indices->rank, source->shape + 1, (source->rank - 1) * sizeof(*shape));
+    sev_tensor *result = sev_tensor_new(rank, shape, source->dtype);
+    free(shape);
+    size_t row_width = source->shape[0] == 0 ? 0 : source->count / (size_t)source->shape[0];
+    for (size_t index = 0; index < indices->count; ++index) {
+        sev_tensor_cell cell = sev_tensor_value(
+            indices,
+            sev_tensor_physical_index(indices, index)
+        );
+        int64_t selected = sev_tensor_dtype_signed(indices->dtype)
+            ? (int64_t)sev_tensor_signed(cell, indices->dtype)
+            : (int64_t)sev_tensor_unsigned(cell, indices->dtype);
+        sev_tensor_abort_if(selected < 0 || selected >= source->shape[0]);
+        for (size_t column = 0; column < row_width; ++column) {
+            size_t source_logical = (size_t)selected * row_width + column;
+            result->values[index * row_width + column] = sev_tensor_value(
+                source,
+                sev_tensor_physical_index(source, source_logical)
+            );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_concatenate(void *left_value, void *right_value, void *axis_storage) {
+    sev_tensor *left = sev_tensor_get(left_value);
+    sev_tensor *right = sev_tensor_get(right_value);
+    sev_list *axis_list = axis_storage;
+    sev_tensor_abort_if(axis_list->length != 1 || left->rank != right->rank || left->dtype != right->dtype);
+    size_t axis = (size_t)axis_list->values[0];
+    sev_tensor_abort_if(axis >= left->rank);
+    int64_t *shape = calloc(left->rank == 0 ? 1 : left->rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    memcpy(shape, left->shape, left->rank * sizeof(*shape));
+    for (size_t current = 0; current < left->rank; ++current) {
+        if (current != axis) sev_tensor_abort_if(left->shape[current] != right->shape[current]);
+    }
+    shape[axis] += right->shape[axis];
+    sev_tensor *result = sev_tensor_new(left->rank, shape, left->dtype);
+    free(shape);
+    size_t inner = 1;
+    for (size_t current = axis + 1; current < left->rank; ++current) inner *= (size_t)left->shape[current];
+    size_t outer = left->count / ((size_t)left->shape[axis] * inner);
+    size_t left_block = (size_t)left->shape[axis] * inner;
+    size_t right_block = (size_t)right->shape[axis] * inner;
+    for (size_t block = 0; block < outer; ++block) {
+        for (size_t item = 0; item < left_block; ++item) {
+            result->values[block * (left_block + right_block) + item] = sev_tensor_value(
+                left,
+                sev_tensor_physical_index(left, block * left_block + item)
+            );
+        }
+        for (size_t item = 0; item < right_block; ++item) {
+            result->values[block * (left_block + right_block) + left_block + item] =
+                sev_tensor_value(
+                    right,
+                    sev_tensor_physical_index(right, block * right_block + item)
+                );
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_repeat(void *value, void *spec_storage) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_list *spec = spec_storage;
+    sev_tensor_abort_if(spec->length != 2);
+    size_t axis = (size_t)spec->values[0];
+    size_t repeats = (size_t)spec->values[1];
+    sev_tensor_abort_if(axis >= source->rank || repeats == 0);
+    int64_t *shape = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*shape));
+    sev_tensor_abort_if(shape == NULL);
+    memcpy(shape, source->shape, source->rank * sizeof(*shape));
+    shape[axis] *= (int64_t)repeats;
+    sev_tensor *result = sev_tensor_new(source->rank, shape, source->dtype);
+    free(shape);
+    size_t inner = 1;
+    for (size_t current = axis + 1; current < source->rank; ++current) inner *= (size_t)source->shape[current];
+    size_t axis_width = (size_t)source->shape[axis];
+    size_t outer = source->count / (axis_width * inner);
+    for (size_t block = 0; block < outer; ++block) {
+        for (size_t selected = 0; selected < axis_width; ++selected) {
+            for (size_t copy = 0; copy < repeats; ++copy) {
+                for (size_t item = 0; item < inner; ++item) {
+                    size_t input = (block * axis_width + selected) * inner + item;
+                    size_t output = ((block * axis_width + selected) * repeats + copy) * inner + item;
+                    result->values[output] = sev_tensor_value(
+                        source,
+                        sev_tensor_physical_index(source, input)
+                    );
+                }
+            }
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+void *__sev_tensor_rope(void *value, void *configuration_value) {
+    sev_tensor *source = sev_tensor_get(value);
+    sev_tensor *configuration = sev_tensor_get(configuration_value);
+    sev_tensor_abort_if(source->rank < 2 || configuration->count < 2);
+    int64_t sequence = source->shape[source->rank - 2];
+    int64_t width = source->shape[source->rank - 1];
+    sev_tensor_abort_if(width % 2 != 0);
+    double theta = sev_tensor_as_f64(sev_tensor_value(configuration, 0), configuration->dtype);
+    double offset = sev_tensor_as_f64(sev_tensor_value(configuration, 1), configuration->dtype);
+    sev_tensor *result = sev_tensor_new(source->rank, source->shape, source->dtype);
+    size_t matrices = source->count / ((size_t)sequence * (size_t)width);
+    int64_t half = width / 2;
+    for (size_t matrix = 0; matrix < matrices; ++matrix) {
+        for (int64_t position = 0; position < sequence; ++position) {
+            for (int64_t column = 0; column < half; ++column) {
+                double frequency = pow(theta, -(double)column / (double)half);
+                double angle = ((double)position + offset) * frequency;
+                size_t base = (matrix * (size_t)sequence + (size_t)position) * (size_t)width;
+                __float128 left = sev_tensor_float(
+                    sev_tensor_value(
+                        source,
+                        sev_tensor_physical_index(source, base + (size_t)column)
+                    ),
+                    source->dtype
+                );
+                __float128 right = sev_tensor_float(
+                    sev_tensor_value(
+                        source,
+                        sev_tensor_physical_index(
+                            source,
+                            base + (size_t)(column + half)
+                        )
+                    ),
+                    source->dtype
+                );
+                __float128 cosine = (__float128)cosl((long double)angle);
+                __float128 sine = (__float128)sinl((long double)angle);
+                result->values[base + (size_t)column] = sev_tensor_from_float(
+                    left * cosine - right * sine, source->dtype
+                );
+                result->values[base + (size_t)(column + half)] = sev_tensor_from_float(
+                    right * cosine + left * sine, source->dtype
+                );
+            }
+        }
+    }
+    return sev_tensor_wrap(result);
+}
+
+int32_t __sev_tensor_release(void *value) {
+    sev_tensor *tensor = value;
+    if (tensor == NULL) return -1;
+    if (tensor->owns_values) free(tensor->values);
+    free(tensor->gradient);
+    free(tensor->shape);
+    free(tensor->strides);
+    free(tensor);
+    return 0;
 }

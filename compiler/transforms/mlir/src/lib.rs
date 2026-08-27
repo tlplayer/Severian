@@ -5,5 +5,5 @@ mod ffi;
 mod verify;
 
 pub use emit::{render, MlirArtifact, MlirError};
-pub use severian_lir::LoweredType;
+pub use severian_lir::{LoweredFloatFormat, LoweredType};
 pub use verify::{compose, verify_artifact, VerifiedMlirArtifact};

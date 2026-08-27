@@ -132,10 +132,22 @@ impl PassManager {
             match metadata.kind {
                 PassKind::Module => pass.run_module(module, context, &mut analyses)?,
                 PassKind::Function | PassKind::Region | PassKind::Operation => {
-                    pass.run_function(&mut module.initializer, context, &mut analyses)?;
+                    pass.run_function(&mut module.initializer, context, &mut analyses)
+                        .map_err(|mut error| {
+                            error.message = format!("in module initializer: {}", error.message);
+                            error
+                        })?;
                     for function in &mut module.functions {
                         if let Some(body) = &mut function.body {
-                            pass.run_function(body, context, &mut analyses)?;
+                            pass.run_function(body, context, &mut analyses).map_err(
+                                |mut error| {
+                                    error.message = format!(
+                                        "in function `{}`: {}",
+                                        function.name, error.message
+                                    );
+                                    error
+                                },
+                            )?;
                         }
                     }
                 }

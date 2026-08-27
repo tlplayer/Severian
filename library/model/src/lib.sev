@@ -189,6 +189,444 @@ def linear[T](input: tensor.Tensor[T], weights: tensor.Tensor[T]) -> tensor.Tens
     assert(tensor.shape(input)[1] == tensor.shape(weights)[1], "linear dimensions do not match")
     return tensor.matmul(input, tensor.transpose(weights))
 
+# A model module owns composition and parameter semantics. Tensor owns only
+# typed values, shapes, devices, and compiler-lowered numeric operations.
+trait F32Module:
+    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]
+
+class Linear: F32Module
+    weights: tensor.Tensor[f32]
+
+    def Linear(initial_weights: tensor.Tensor[f32]):
+        weights := initial_weights
+
+    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+        return tensor.matmul(input, tensor.transpose(weights))
+
+class Affine: F32Module
+    weights: tensor.Tensor[f32]
+    bias: tensor.Tensor[f32]
+
+    def Affine(initial_weights: tensor.Tensor[f32], initial_bias: tensor.Tensor[f32]):
+        weights := initial_weights
+        bias := initial_bias
+
+    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+        return tensor.add(tensor.matmul(input, tensor.transpose(weights)), bias)
+
+class Embedding:
+    weights: tensor.Tensor[f32]
+
+    def Embedding(initial_weights: tensor.Tensor[f32]):
+        weights := initial_weights
+
+    def forward(indices: tensor.Tensor[i64]) -> tensor.Tensor[f32]:
+        return tensor.gather(weights, indices)
+
+class RmsNorm: F32Module
+    weights: tensor.Tensor[f32]
+    epsilon: f32
+
+    def RmsNorm(initial_weights: tensor.Tensor[f32], initial_epsilon: f32 = f32(0.000001)):
+        weights := initial_weights
+        epsilon := initial_epsilon
+
+    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+        return tensor.multiply(
+            tensor.multiply(
+                copy input,
+                tensor.rsqrt(
+                    tensor.add_scalar(
+                        tensor.mean_last(tensor.multiply(copy input, copy input)),
+                        epsilon,
+                    )
+                ),
+            ),
+            weights,
+        )
+
+def state_name(prefix: string, local_name: string) -> string:
+    if copy prefix == "":
+        return local_name
+    if copy local_name == "":
+        return prefix
+    return prefix + "." + local_name
+
+class StateDict:
+    store_handle: int
+    prefix: string
+
+    def StateDict(initial_handle: int, initial_prefix: string = ""):
+        store_handle := initial_handle
+        prefix := initial_prefix
+
+    def contains(local_name: string) -> bool:
+        return tensor.safetensor_dtype(store_handle, state_name(prefix, local_name)) != ""
+
+    def entry(local_name: string) -> tensor.SafeTensorEntry:
+        return tensor.entry(
+            tensor.SafeTensorStore("", store_handle),
+            state_name(prefix, local_name),
+        )
+
+    def f32(local_name: string) -> tensor.Tensor[f32]:
+        return tensor.mapped_f32(store_handle, state_name(prefix, local_name))
+
+    def close() -> bool:
+        return tensor.safetensor_close(store_handle) == 0
+
+def state(loaded: LoadedModel) -> StateDict:
+    store = tensors(loaded)
+    return StateDict(store.handle, "")
+
+def scoped(parameters: borrow StateDict, local_name: string) -> StateDict:
+    return StateDict(
+        parameters.store_handle,
+        state_name(copy parameters.prefix, local_name),
+    )
+
+class Qwen3Config:
+    hidden_size: int
+    intermediate_size: int
+    layers: int
+    attention_heads: int
+    key_value_heads: int
+    head_dimension: int
+    rms_epsilon: f32
+    rope_theta: float
+
+def qwen3_06b() -> Qwen3Config:
+    return Qwen3Config(1024, 3072, 28, 16, 8, 128, f32(0.000001), 1000000.0)
+
+class OmniVoiceConfig:
+    transformer: Qwen3Config
+    audio_codebooks: int
+    audio_vocabulary: int
+    audio_mask: int
+    sample_rate: int
+
+def omnivoice_config() -> OmniVoiceConfig:
+    return OmniVoiceConfig(qwen3_06b(), 8, 1025, 1024, 24000)
+
+class OmniVoiceGenerationConfig:
+    steps: int
+    guidance_scale: f32
+    time_shift: f32
+    layer_penalty: f32
+    position_temperature: f32
+    class_temperature: f32
+
+def omnivoice_generation_config() -> OmniVoiceGenerationConfig:
+    return OmniVoiceGenerationConfig(32, f32(2.0), f32(0.1), f32(5.0), f32(5.0), f32(0.0))
+
+def omnivoice_timesteps(configuration: borrow OmniVoiceGenerationConfig) -> list[float]:
+    assert(configuration.steps > 0)
+    shifted: list[float] := []
+    shift = float(configuration.time_shift)
+    for step in range(0, configuration.steps + 1):
+        time = float(step) / float(configuration.steps)
+        shifted.append(shift * time / (1.0 + (shift - 1.0) * time))
+    return shifted
+
+def omnivoice_unmask_schedule(
+    target_tokens: int,
+    architecture: borrow OmniVoiceConfig,
+    generation: borrow OmniVoiceGenerationConfig,
+) -> list[int]:
+    assert(target_tokens > 0)
+    timesteps = omnivoice_timesteps(generation)
+    total = target_tokens * architecture.audio_codebooks
+    remaining := total
+    schedule: list[int] := []
+    for step in range(0, generation.steps):
+        count := remaining
+        if step != generation.steps - 1:
+            exact = float(total) * (timesteps[step + 1] - timesteps[step])
+            count = int(exact)
+            if float(count) < exact:
+                count += 1
+            if count > remaining:
+                count = remaining
+        schedule.append(count)
+        remaining -= count
+    assert(remaining == 0)
+    return schedule
+
+def linear_f32(parameters: borrow StateDict, name: string, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    weights: tensor.Tensor[f32] = parameters.f32(name + ".weight")
+    return tensor.matmul(input, tensor.transpose(weights))
+
+def rms_norm_f32(parameters: borrow StateDict, name: string, epsilon: f32, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    return RmsNorm(parameters.f32(name + ".weight"), epsilon).forward(input)
+
+def text_embeddings_f32(
+    parameters: borrow StateDict,
+    text_ids: tensor.Tensor[i64],
+) -> tensor.Tensor[f32]:
+    llm_parameters = scoped(borrow parameters, "llm")
+    return Embedding(llm_parameters.f32("embed_tokens.weight")).forward(text_ids)
+
+def audio_embeddings_f32(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+    audio_ids: tensor.Tensor[i64],
+) -> tensor.Tensor[f32]:
+    offsets: list[float] := []
+    for codebook in range(0, configuration.audio_codebooks):
+        offsets.append(float(codebook * configuration.audio_vocabulary))
+    offset_tensor = tensor.i64(tensor.ranked(offsets, [1, configuration.audio_codebooks, 1]))
+    shifted_ids = tensor.add(audio_ids, offset_tensor)
+    embedded = Embedding(parameters.f32("audio_embeddings.weight")).forward(shifted_ids)
+    return tensor.sum_axis(embedded, 1)
+
+def omnivoice_embeddings_f32(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+    text_ids: tensor.Tensor[i64],
+    audio_ids: tensor.Tensor[i64],
+    audio_mask: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    text = text_embeddings_f32(borrow parameters, text_ids)
+    audio = audio_embeddings_f32(borrow parameters, configuration, audio_ids)
+    inverse_mask = tensor.add_scalar(tensor.scale(copy audio_mask, -1.0), f32(1.0))
+    return tensor.add(
+        tensor.multiply(text, inverse_mask),
+        tensor.multiply(audio, audio_mask),
+    )
+
+def attention_f32(
+    query: tensor.Tensor[f32],
+    key: tensor.Tensor[f32],
+    value: tensor.Tensor[f32],
+    head_dimension: int,
+) -> tensor.Tensor[f32]:
+    key_transposed = tensor.permute(key, [0, 2, 1])
+    scores = tensor.scale(tensor.matmul(query, key_transposed), 1.0 / (float(head_dimension) ** 0.5))
+    probabilities = tensor.softmax_last(scores)
+    return tensor.matmul(probabilities, value)
+
+def batched_attention_f32(
+    query: tensor.Tensor[f32],
+    key: tensor.Tensor[f32],
+    value: tensor.Tensor[f32],
+    head_dimension: int,
+) -> tensor.Tensor[f32]:
+    key_transposed = tensor.permute(key, [0, 1, 3, 2])
+    scores = tensor.scale(tensor.matmul(query, key_transposed), 1.0 / (float(head_dimension) ** 0.5))
+    probabilities = tensor.softmax_last(scores)
+    return tensor.matmul(probabilities, value)
+
+def qwen3_attention_f32(
+    parameters: borrow StateDict,
+    configuration: borrow Qwen3Config,
+    input: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    input_shape = tensor.shape(input)
+    assert(size(input_shape) == 3, "Qwen3 attention expects [batch, sequence, hidden]")
+    assert(input_shape[2] == configuration.hidden_size, "Qwen3 hidden dimension does not match configuration")
+    batch = input_shape[0]
+    sequence = input_shape[1]
+    query := linear_f32(borrow parameters, "q_proj", copy input)
+    key := linear_f32(borrow parameters, "k_proj", copy input)
+    value := linear_f32(borrow parameters, "v_proj", input)
+
+    query = tensor.permute(
+        tensor.reshape(query, [batch, sequence, configuration.attention_heads, configuration.head_dimension]),
+        [0, 2, 1, 3],
+    )
+    key = tensor.permute(
+        tensor.reshape(key, [batch, sequence, configuration.key_value_heads, configuration.head_dimension]),
+        [0, 2, 1, 3],
+    )
+    value = tensor.permute(
+        tensor.reshape(value, [batch, sequence, configuration.key_value_heads, configuration.head_dimension]),
+        [0, 2, 1, 3],
+    )
+
+    query = RmsNorm((borrow parameters).f32("q_norm.weight"), configuration.rms_epsilon).forward(query)
+    key = RmsNorm((borrow parameters).f32("k_norm.weight"), configuration.rms_epsilon).forward(key)
+    rope_configuration = tensor.ranked([configuration.rope_theta, 0.0], [2])
+    query = tensor.rope(query, rope_configuration)
+    key = tensor.rope(key, rope_configuration)
+
+    repeats = int(configuration.attention_heads / configuration.key_value_heads)
+    key = tensor.repeat(key, [1, repeats])
+    value = tensor.repeat(value, [1, repeats])
+    attended = batched_attention_f32(query, key, value, configuration.head_dimension)
+    merged = tensor.reshape(
+        tensor.permute(attended, [0, 2, 1, 3]),
+        [batch, sequence, configuration.attention_heads * configuration.head_dimension],
+    )
+    return linear_f32(borrow parameters, "o_proj", merged)
+
+def qwen3_mlp_f32(parameters: borrow StateDict, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    gate = tensor.silu(linear_f32(borrow parameters, "gate_proj", copy input))
+    up = linear_f32(borrow parameters, "up_proj", input)
+    return linear_f32(borrow parameters, "down_proj", tensor.multiply(gate, up))
+
+def qwen3_layer_f32(
+    parameters: borrow StateDict,
+    configuration: borrow Qwen3Config,
+    input: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    normalized = rms_norm_f32(borrow parameters, "input_layernorm", configuration.rms_epsilon, copy input)
+    attention_parameters = scoped(borrow parameters, "self_attn")
+    attended = qwen3_attention_f32(borrow attention_parameters, configuration, normalized)
+    residual = tensor.add(input, attended)
+    post_normalized = rms_norm_f32(
+        borrow parameters,
+        "post_attention_layernorm",
+        configuration.rms_epsilon,
+        copy residual,
+    )
+    mlp_parameters = scoped(borrow parameters, "mlp")
+    return tensor.add(residual, qwen3_mlp_f32(borrow mlp_parameters, post_normalized))
+
+def qwen3_forward_f32(
+    parameters: borrow StateDict,
+    configuration: borrow Qwen3Config,
+    embeddings: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    hidden := embeddings
+    for layer in range(0, configuration.layers):
+        layer_parameters = scoped(borrow parameters, "layers." + string(layer))
+        hidden = qwen3_layer_f32(
+            borrow layer_parameters,
+            configuration,
+            hidden,
+        )
+    return rms_norm_f32(parameters, "norm", configuration.rms_epsilon, hidden)
+
+def omnivoice_logits_f32(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+    embeddings: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    llm_parameters = scoped(borrow parameters, "llm")
+    hidden = qwen3_forward_f32(borrow llm_parameters, borrow configuration.transformer, embeddings)
+    flat = linear_f32(parameters, "audio_heads", hidden)
+    hidden_shape = tensor.shape(hidden)
+    batch = hidden_shape[0]
+    sequence = hidden_shape[1]
+    return tensor.permute(
+        tensor.reshape(flat, [batch, sequence, configuration.audio_codebooks, configuration.audio_vocabulary]),
+        [0, 2, 1, 3],
+    )
+
+def validate_omnivoice_state(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+) -> bool:
+    embedding_rows = configuration.audio_codebooks * configuration.audio_vocabulary
+    assert(parameters.entry("audio_embeddings.weight").shape == [embedding_rows, configuration.transformer.hidden_size])
+    assert(parameters.entry("audio_heads.weight").shape == [embedding_rows, configuration.transformer.hidden_size])
+    assert(parameters.entry("llm.embed_tokens.weight").shape == [151676, configuration.transformer.hidden_size])
+    assert(parameters.entry("llm.norm.weight").shape == [configuration.transformer.hidden_size])
+
+    for layer in range(0, configuration.transformer.layers):
+        current = scoped(borrow parameters, "llm.layers." + string(layer))
+        attention = scoped(borrow current, "self_attn")
+        mlp = scoped(borrow current, "mlp")
+        query_width = configuration.transformer.attention_heads * configuration.transformer.head_dimension
+        key_value_width = configuration.transformer.key_value_heads * configuration.transformer.head_dimension
+        assert(attention.entry("q_proj.weight").shape == [query_width, configuration.transformer.hidden_size])
+        assert(attention.entry("k_proj.weight").shape == [key_value_width, configuration.transformer.hidden_size])
+        assert(attention.entry("v_proj.weight").shape == [key_value_width, configuration.transformer.hidden_size])
+        assert(attention.entry("o_proj.weight").shape == [configuration.transformer.hidden_size, query_width])
+        assert(attention.entry("q_norm.weight").shape == [configuration.transformer.head_dimension])
+        assert(attention.entry("k_norm.weight").shape == [configuration.transformer.head_dimension])
+        assert(mlp.entry("gate_proj.weight").shape == [configuration.transformer.intermediate_size, configuration.transformer.hidden_size])
+        assert(mlp.entry("up_proj.weight").shape == [configuration.transformer.intermediate_size, configuration.transformer.hidden_size])
+        assert(mlp.entry("down_proj.weight").shape == [configuration.transformer.hidden_size, configuration.transformer.intermediate_size])
+        assert(current.entry("input_layernorm.weight").shape == [configuration.transformer.hidden_size])
+        assert(current.entry("post_attention_layernorm.weight").shape == [configuration.transformer.hidden_size])
+    return true
+
+class OmniVoice: F32Module
+    parameters: StateDict
+    configuration: OmniVoiceConfig
+
+    def OmniVoice(loaded: LoadedModel):
+        parameters := state(loaded)
+        configuration := omnivoice_config()
+        assert(validate_omnivoice_state(borrow parameters, borrow configuration))
+
+    def forward(embeddings: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+        return omnivoice_logits_f32(
+            borrow parameters,
+            borrow configuration,
+            embeddings,
+        )
+
+    def forward_ids(
+        text_ids: tensor.Tensor[i64],
+        audio_ids: tensor.Tensor[i64],
+        audio_mask: tensor.Tensor[f32],
+    ) -> tensor.Tensor[f32]:
+        embeddings = omnivoice_embeddings_f32(
+            borrow parameters,
+            borrow configuration,
+            text_ids,
+            audio_ids,
+            audio_mask,
+        )
+        return forward(embeddings)
+
+    def close() -> bool:
+        return parameters.close()
+
+def load_omnivoice(locator: string, root: string = "") -> OmniVoice:
+    return OmniVoice(load(reference(locator), root))
+
+test "typed modules compose without a framework runtime":
+    weights = tensor.f32(tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2]))
+    input = tensor.f32(tensor.ranked([3.0, 4.0], [1, 2]))
+    projection = Linear(weights)
+    assert(tensor.values(projection.forward(input)) == [3.0, 4.0])
+
+test "RMS normalization is composed from compiler-lowered typed operations":
+    weights = tensor.f32(tensor.ranked([1.0, 1.0], [2]))
+    input = tensor.f32(tensor.ranked([2.0, 2.0], [1, 2]))
+    output = RmsNorm(weights, f32(0.000001)).forward(input)
+    values = tensor.values(output)
+    assert(values[0] > 0.999 and values[0] < 1.001)
+    assert(values[1] > 0.999 and values[1] < 1.001)
+
+test "scaled dot-product attention executes as batched MLIR tensor operations":
+    query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
+    key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
+    value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 2, 2]))
+    output = attention_f32(query, key, value, 2)
+    assert(tensor.shape(output) == [1, 2, 2])
+    assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0])
+
+test "attention preserves model batch and head axes":
+    query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
+    key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
+    value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 1, 2, 2]))
+    output = batched_attention_f32(query, key, value, 2)
+    assert(tensor.shape(output) == [2, 1, 2, 2])
+    assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0, 6.0, 7.0, 6.0, 7.0])
+
+test "OmniVoice configuration names the exact cached checkpoint architecture":
+    configuration = omnivoice_config()
+    assert(configuration.transformer.layers == 28)
+    assert(configuration.transformer.hidden_size == 1024)
+    assert(configuration.transformer.attention_heads == 16)
+    assert(configuration.transformer.key_value_heads == 8)
+    assert(configuration.audio_codebooks == 8)
+    assert(configuration.audio_vocabulary == 1025)
+    generation = omnivoice_generation_config()
+    assert(generation.steps == 32)
+    assert(generation.guidance_scale == f32(2.0))
+    schedule = omnivoice_unmask_schedule(25, borrow configuration, borrow generation)
+    scheduled := 0
+    for count in schedule:
+        scheduled += count
+    assert(size(schedule) == 32)
+    assert(scheduled == 200)
+    assert(configuration.sample_rate == 24000)
+
 test "model references are generic and cache paths are deterministic":
     selected = reference("hf://owner/model", "immutable-revision")
     assert(hugging_face_repository(selected.locator) == "owner/model")

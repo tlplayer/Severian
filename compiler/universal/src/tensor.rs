@@ -12,6 +12,7 @@ pub const SUBTRACT: OpId = OpId::named("tensor", "subtract");
 pub const MULTIPLY: OpId = OpId::named("tensor", "multiply");
 pub const DIVIDE: OpId = OpId::named("tensor", "divide");
 pub const REDUCE_SUM: OpId = OpId::named("tensor", "reduce_sum");
+pub const REDUCE_SUM_AXIS: OpId = OpId::named("tensor", "reduce_sum_axis");
 pub const MATMUL: OpId = OpId::named("tensor", "matmul");
 pub const TRANSPOSE: OpId = OpId::named("tensor", "transpose");
 pub const SLICE: OpId = OpId::named("tensor", "slice");
@@ -19,6 +20,29 @@ pub const MATERIALIZE: OpId = OpId::named("tensor", "materialize");
 pub const SHAPE: OpId = OpId::named("tensor", "shape");
 pub const STRIDES: OpId = OpId::named("tensor", "strides");
 pub const VALUES: OpId = OpId::named("tensor", "values");
+pub const RESHAPE: OpId = OpId::named("tensor", "reshape");
+pub const PERMUTE: OpId = OpId::named("tensor", "permute");
+pub const MEAN_LAST: OpId = OpId::named("tensor", "mean_last");
+pub const RSQRT: OpId = OpId::named("tensor", "rsqrt");
+pub const EXP: OpId = OpId::named("tensor", "exp");
+pub const LOG: OpId = OpId::named("tensor", "log");
+pub const TANH: OpId = OpId::named("tensor", "tanh");
+pub const SILU: OpId = OpId::named("tensor", "silu");
+pub const SOFTMAX_LAST: OpId = OpId::named("tensor", "softmax_last");
+pub const GATHER: OpId = OpId::named("tensor", "gather");
+pub const CONCATENATE: OpId = OpId::named("tensor", "concatenate");
+pub const REPEAT: OpId = OpId::named("tensor", "repeat");
+pub const ROPE: OpId = OpId::named("tensor", "rope");
+pub const RELU: OpId = OpId::named("tensor", "relu");
+pub const SCALE: OpId = OpId::named("tensor", "scale");
+pub const LAYER_NORM: OpId = OpId::named("tensor", "layer_norm");
+pub const RELU_BACKWARD: OpId = OpId::named("tensor", "relu_backward");
+pub const SOFTMAX_BACKWARD: OpId = OpId::named("tensor", "softmax_backward");
+pub const LAYER_NORM_BACKWARD: OpId = OpId::named("tensor", "layer_norm_backward");
+pub const BACKWARD_MSE: OpId = OpId::named("tensor", "backward_mse");
+pub const GRADIENT: OpId = OpId::named("tensor", "gradient");
+pub const SGD: OpId = OpId::named("tensor", "sgd");
+pub const ADD_SCALAR: OpId = OpId::named("tensor", "add_scalar");
 pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_type");
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
@@ -194,6 +218,7 @@ pub fn install_operations(registry: &mut OperationRegistry) -> Result<(), Operat
         (MULTIPLY, 2),
         (DIVIDE, 2),
         (REDUCE_SUM, 1),
+        (REDUCE_SUM_AXIS, 2),
         (MATMUL, 2),
         (TRANSPOSE, 1),
         (SLICE, 4),
@@ -201,6 +226,29 @@ pub fn install_operations(registry: &mut OperationRegistry) -> Result<(), Operat
         (SHAPE, 1),
         (STRIDES, 1),
         (VALUES, 1),
+        (RESHAPE, 2),
+        (PERMUTE, 2),
+        (MEAN_LAST, 1),
+        (RSQRT, 1),
+        (EXP, 1),
+        (LOG, 1),
+        (TANH, 1),
+        (SILU, 1),
+        (SOFTMAX_LAST, 1),
+        (GATHER, 2),
+        (CONCATENATE, 3),
+        (REPEAT, 2),
+        (ROPE, 2),
+        (RELU, 1),
+        (SCALE, 2),
+        (LAYER_NORM, 2),
+        (RELU_BACKWARD, 2),
+        (SOFTMAX_BACKWARD, 2),
+        (LAYER_NORM_BACKWARD, 3),
+        (BACKWARD_MSE, 1),
+        (GRADIENT, 1),
+        (SGD, 2),
+        (ADD_SCALAR, 2),
     ] {
         registry.register(
             id,
