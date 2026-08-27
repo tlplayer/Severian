@@ -4,14 +4,17 @@ def escape_json(value: string) -> string:
     return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
 def info_json(loaded: model.LoadedModel, replica: string, accelerator: string) -> string:
-    rendered := "{\"model\":\"" + loaded.artifact.identifier
-    rendered += "\",\"architecture\":\"" + loaded.architecture
-    rendered += "\",\"parameters\":" + string(loaded.parameters)
-    rendered += ",\"dtype\":\"" + loaded.dtype
-    rendered += "\",\"revision\":\"" + loaded.artifact.revision
-    rendered += "\",\"replica\":\"" + escape_json(replica)
-    rendered += "\",\"accelerator\":\"" + escape_json(accelerator) + "\"}"
-    return rendered
+    return f"""
+        {{
+            "model": "{loaded.artifact.identifier}",
+            "architecture": "{loaded.architecture}",
+            "parameters": {loaded.parameters},
+            "dtype": "{loaded.dtype}",
+            "revision": "{loaded.artifact.revision}",
+            "replica": "{escape_json(replica)}",
+            "accelerator": "{escape_json(accelerator)}"
+        }}
+        """
 
 def control_response(request: string, ready: bool, loaded: model.LoadedModel, replica: string, accelerator: string, requests: int) -> string:
     command = request.strip()
@@ -38,4 +41,7 @@ test "model info reports the immutable artifact revision":
     loaded = model.LoadedModel(selected, "LlamaForCausalLM", 134515008, "bf16")
     rendered = info_json(loaded, "tiny-llm-0", "gfx1101")
     assert(model.SmolLm2Revision in rendered)
+    assert("\"parameters\": 134515008" in rendered)
+    assert("\"replica\": \"tiny-llm-0\"" in rendered)
+    assert("\"accelerator\": \"gfx1101\"" in rendered)
     assert(rendered.contains("golden-smoke") == false)
