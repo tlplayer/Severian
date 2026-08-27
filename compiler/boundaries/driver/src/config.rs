@@ -288,6 +288,7 @@ enum DependencyDeclaration {
 
 #[derive(Debug, Clone, Deserialize)]
 struct DependencyDetail {
+    package: Option<String>,
     path: Option<PathBuf>,
     version: Option<String>,
     git: Option<String>,
@@ -554,7 +555,11 @@ fn dependency_path(alias: &str, declaration: &DependencyDeclaration) -> Result<P
             let version = detail.version.as_deref().ok_or_else(|| {
                 format!("registry dependency `{alias}` requires an exact version")
             })?;
-            registry_package(alias, version, detail.registry.as_deref())
+            registry_package(
+                detail.package.as_deref().unwrap_or(alias),
+                version,
+                detail.registry.as_deref(),
+            )
         }
         DependencyDeclaration::Version(version) => registry_package(alias, version, None),
     }

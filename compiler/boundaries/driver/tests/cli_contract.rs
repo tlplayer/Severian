@@ -772,6 +772,27 @@ fn new_creates_a_lockfile() {
     fs::remove_dir_all(parent).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn registry_publish_consume_golden_path() {
+    let script = repository_root().join("test/validation/packages/registry_publish_consume.sh");
+    let output = Command::new("bash")
+        .arg(script)
+        .env("SEVERIAN_BIN", env!("CARGO_BIN_EXE_sev"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("registry publish/consume golden path passed")
+    );
+}
+
 #[test]
 fn run_executes_a_relative_output_path_without_searching_path() {
     let root = temporary("relative-output");

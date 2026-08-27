@@ -103,7 +103,7 @@ transport, Git dependencies, ranges, and authentication remain explicit
 errors; the resolver never silently selects unrelated source.
 
 The black-box golden path is
-[`registry_publish_consume.sh`](../../../test/validation/packages/registry_publish_consume.sh).
+[`registry_publish_consume.sh`](../../test/validation/packages/registry_publish_consume.sh).
 It creates a library with `sev new`, publishes it to an isolated registry,
 creates an unrelated application with `sev new`, consumes the library using
 only registry package declarations, and builds and runs the application. The

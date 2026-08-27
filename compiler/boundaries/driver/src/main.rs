@@ -445,11 +445,11 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         .map(String::as_str)
         .unwrap_or("default");
     let registry = registry_root(Some(selected_registry))?;
-    let release = registry_release_path(&registry, &library.name, &library.version)?;
+    let release = registry_release_path(&registry, &manifest.name, &library.version)?;
     if release.exists() {
         return Err(format!(
             "{} version {} is already published in {}",
-            library.name,
+            manifest.name,
             library.version,
             registry.display()
         ));
@@ -502,14 +502,14 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         source_output.join("package.toml"),
         format!(
             "[package]\nname = {:?}\nversion = {:?}\npublish = false\n\n[lib]\nname = {:?}\npath = {:?}\n",
-            library.name,
+            manifest.name,
             library.version,
             library.name,
             library_relative.to_string_lossy()
         ),
     )
     .map_err(|error| format!("could not write published source manifest: {error}"))?;
-    let artifact = staging.join(format!("{}-{}.pkg", library.name, library.version));
+    let artifact = staging.join(format!("{}-{}.pkg", manifest.name, library.version));
     emit_library_package(library, &compiler, &artifact)?;
     if let Some(parent) = release.parent() {
         fs::create_dir_all(parent)
@@ -518,13 +518,13 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     fs::rename(&staging, &release).map_err(|error| {
         format!(
             "could not publish {} to {}: {error}",
-            library.name,
+            manifest.name,
             release.display()
         )
     })?;
     println!(
         "published {} {} to {}",
-        library.name,
+        manifest.name,
         library.version,
         registry.display()
     );
