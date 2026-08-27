@@ -386,9 +386,13 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
                 .collect::<BTreeSet<_>>();
             for ordinal in 0..function.parameters.len() {
                 let bound = function.parameters[ordinal].annotation.clone();
-                let Some(bound_name) = bound.simple_name() else {
+                let Some((declared_bound, arguments)) = bound.named_parts() else {
                     continue;
                 };
+                if !arguments.is_empty() {
+                    continue;
+                }
+                let bound_name = declared_bound.rsplit('.').next().unwrap_or(declared_bound);
                 if !trait_names.contains(bound_name) {
                     continue;
                 }
@@ -407,7 +411,7 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
                 function.type_parameters.push(parameter.clone());
                 function.constraints.push(GenericConstraint::Parameter {
                     parameter,
-                    bound,
+                    bound: TypeAnnotation::named(bound_name, Vec::new(), bound.span),
                     span: function.parameters[ordinal].span,
                 });
             }

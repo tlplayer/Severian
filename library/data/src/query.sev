@@ -8,16 +8,19 @@ class Step:
     descending: bool
 
     def describe() -> string:
-        if operation == "filter":
-            return "Filter " + predicate.describe()
-        if operation == "project":
-            return "Project " + columns.join(", ")
-        if operation == "sort":
-            direction = " descending" if descending else " ascending"
-            return "Sort " + columns[0] + direction
-        if operation == "limit":
-            return "Limit " + string(count)
         return operation
+
+def describe_step(operation: string, columns: list[string], predicate: expression.Expression, count: int, descending: bool) -> string:
+    if operation == "filter":
+        return "Filter " + expression.describe_expression(predicate.operation, predicate.column_name, predicate.literal_value, predicate.operands)
+    if operation == "project":
+        return "Project " + columns.join(", ")
+    if operation == "sort":
+        direction = " descending" if descending else " ascending"
+        return "Sort " + columns[0] + direction
+    if operation == "limit":
+        return "Limit " + string(count)
+    return operation
 
 def filter(predicate: expression.Expression) -> Step:
     return Step("filter", [], predicate, 0, false)
@@ -40,5 +43,5 @@ def copied(steps: list[Step]) -> list[Step]:
 def explain(source: string, columns: list[string], steps: list[Step]) -> string:
     output := "DataQuery\n  Scan " + source + " [" + columns.join(", ") + "]"
     for step in steps:
-        output += "\n  -> " + step.describe()
+        output += "\n  -> " + describe_step(step.operation, step.columns, step.predicate, step.count, step.descending)
     return output

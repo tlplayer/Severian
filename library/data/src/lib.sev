@@ -1,12 +1,12 @@
 import platform
+import csv
 import json
+import yaml
+import data_format
 import "expression.sev" as expression
 import "query.sev" as query
 import "schema.sev" as schema_logic
 import "sql.sev" as sql_parser
-
-trait Source:
-    def data() -> Data
 
 class Schema:
     columns: list[string]
@@ -17,6 +17,12 @@ class Schema:
 
 def column(name: string) -> expression.Column:
     return expression.column(name)
+
+def equal(name: string, value: Any) -> expression.Expression:
+    return expression.compare(name, "=", value)
+
+def greater_or_equal(name: string, value: Any) -> expression.Expression:
+    return expression.compare(name, ">=", value)
 
 def all_of(left: expression.Expression, right: expression.Expression) -> expression.Expression:
     return expression.Expression("and", "", true, [left, right])
@@ -33,6 +39,12 @@ def column_position(columns: list[string], name: string) -> int:
 def cell_at(values: list[Any], position: int) -> Any:
     return values[position] if position >= 0 and position < size(values) else ""
 
+def row_map(columns: list[string], values: list[Any]) -> map[string, Any]:
+    result: map[string, Any] := {}
+    for index in range(int(size(columns))):
+        result[columns[index]] = cell_at(values, index)
+    return result
+
 class Row:
     columns_data: list[string]
     values_data: list[Any]
@@ -42,11 +54,7 @@ class Row:
     def values() -> list[Any]:
         return values_data
     def as_map() -> map[string, Any]:
-        result: map[string, Any] := {}
-        for index in range(size(columns_data)):
-            column = columns_data[index]
-            result[column] = cell_at(values_data, index)
-        return result
+        return row_map(columns_data, values_data)
 
     def select(columns: list[string]) -> Row:
         selected: list[Any] := []
@@ -160,7 +168,249 @@ def group_merge_records(
             emitted[key] = true
     return Data(source_columns, retained)
 
-class Data:
+def collapse_text_records(
+    source_columns: list[string],
+    source_rows: list[list[Any]],
+    match_column: string,
+    match_values: list[string],
+    group_columns: list[string],
+    text_column: string,
+) -> Data:
+    order: list[string] := []
+    groups: map[string, list[list[Any]]] := {}
+    retained: list[list[Any]] := []
+    match_position = column_position(source_columns, match_column)
+    text_position = column_position(source_columns, text_column)
+    for values in source_rows:
+        matched = match_position >= 0 and string(cell_at(values, match_position)).lower() in match_values
+        if not matched:
+            retained.append(values)
+            continue
+        key = normalized_key(Row(source_columns, values), group_columns, [], false)
+        group = groups.get(key, [])
+        if size(group) == 0:
+            order.append(key)
+        group.append(values)
+        groups[key] = group
+    order = order.sorted()
+    seen_texts: map[string, bool] := {}
+    for key in order:
+        group = groups.get(key, [])
+        if size(group) == 0:
+            continue
+        texts: list[string] := []
+        for values in group:
+            text = string(cell_at(values, text_position))
+            if not seen_texts.get(text, false):
+                texts.append(text)
+                seen_texts[text] = true
+        if size(texts) == 0:
+            continue
+        merged: list[Any] := []
+        for value in group[0]:
+            merged.append(value)
+        if text_position >= 0:
+            merged[text_position] = texts.join(" ").strip()
+        retained.append(merged)
+    return Data(source_columns, retained)
+
+def sorted_records(source_columns: list[string], source_rows: list[list[Any]], column: string, descending: bool) -> Data:
+    position = column_position(source_columns, column)
+    if position < 0:
+        return Data(source_columns, source_rows)
+    used: list[bool] := []
+    for values in source_rows:
+        used.append(false)
+    ordered: list[list[Any]] := []
+    while size(ordered) < size(source_rows):
+        best := -1
+        for index in range(int(size(source_rows))):
+            if used[index]:
+                continue
+            if best < 0:
+                best = index
+                continue
+            candidate = cell_at(source_rows[index], position)
+            current = cell_at(source_rows[best], position)
+            if (candidate > current and descending) or (candidate < current and not descending):
+                best = index
+        if best < 0:
+            break
+        ordered.append(source_rows[best])
+        used[best] = true
+    return Data(source_columns, ordered)
+
+def selected_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string, selected: list[string]) -> Data:
+    if size(steps) > 0:
+        planned = query.copied(steps)
+        planned.append(query.project(selected))
+        return Data(columns, rows, planned, source)
+    return project_records(columns, rows, selected)
+
+def where_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string, predicate: expression.Expression) -> Data:
+    planned = query.copied(steps)
+    if size(planned) == 0:
+        planned.append(query.Step("scan", [], expression.literal(true), 0, false))
+    planned.append(query.filter(predicate))
+    return Data(columns, rows, planned, source)
+
+def sorted_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string, column: string, descending: bool) -> Data:
+    if size(steps) > 0:
+        planned = query.copied(steps)
+        planned.append(query.sort(column, descending))
+        return Data(columns, rows, planned, source)
+    return sorted_records(columns, rows, column, descending)
+
+def limited_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string, count: int) -> Data:
+    assert(count >= 0, "Data.limit requires a non-negative row count")
+    if size(steps) == 0:
+        end = count if count < int(size(rows)) else int(size(rows))
+        return Data(columns, rows[0:end])
+    planned = query.copied(steps)
+    planned.append(query.limit(count))
+    return Data(columns, rows, planned, source)
+
+def materialized_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> Data:
+    result := Data(columns, rows)
+    for step in steps:
+        if step.operation == "scan":
+            continue
+        if step.operation == "filter":
+            retained: list[list[Any]] := []
+            for values in result.rows_data:
+                if expression.evaluate(step.predicate, row_map(result.columns_data, values)):
+                    retained.append(values)
+            result = Data(result.columns_data, retained)
+            continue
+        if step.operation == "project":
+            result = project_records(result.columns_data, result.rows_data, step.columns)
+            continue
+        if step.operation == "sort":
+            result = sorted_records(result.columns_data, result.rows_data, step.columns[0], step.descending)
+            continue
+        if step.operation == "limit":
+            result = limited_data(result.columns_data, result.rows_data, [], "memory", step.count)
+    return result
+
+def schema_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> Schema:
+    materialized = materialized_data(columns, rows, steps)
+    width = int(size(materialized.columns_data))
+    return Schema(materialized.columns_data, schema_logic.inferred_types(materialized.rows_data, width), schema_logic.inferred_nullability(materialized.rows_data, width))
+
+def visible_columns(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> list[string]:
+    return materialized_data(columns, rows, steps).columns_data if size(steps) > 0 else columns
+
+def visible_rows(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> list[Row]:
+    materialized = materialized_data(columns, rows, steps) if size(steps) > 0 else Data(columns, rows)
+    result: list[Row] := []
+    for values in materialized.rows_data:
+        result.append(Row(materialized.columns_data, values))
+    return result
+
+def visible_values(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> list[list[Any]]:
+    return materialized_data(columns, rows, steps).rows_data if size(steps) > 0 else rows
+
+def visible_records(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> list[list[Any]]:
+    materialized = materialized_data(columns, rows, steps) if size(steps) > 0 else Data(columns, rows)
+    records: list[list[Any]] := []
+    header: list[Any] := []
+    for column in materialized.columns_data:
+        header.append(column)
+    records.append(header)
+    for values in materialized.rows_data:
+        records.append(values)
+    return records
+
+def required_data(source_columns: list[string], source_rows: list[list[Any]], required: list[string]) -> Data:
+    columns: list[string] := []
+    for column in required:
+        if not (column in columns):
+            columns.append(column)
+    for column in source_columns:
+        if not (column in columns):
+            columns.append(column)
+    return project_records(source_columns, source_rows, columns)
+
+def lower_data(columns: list[string], rows: list[list[Any]], column: string) -> Data:
+    position = column_position(columns, column)
+    transformed: list[list[Any]] := []
+    for original in rows:
+        values: list[Any] := []
+        for index in range(int(size(original))):
+            value = original[index]
+            if index == position:
+                values.append(string(value).lower())
+            else:
+                values.append(value)
+        transformed.append(values)
+    return Data(columns, transformed)
+
+def transformed_data(columns: list[string], rows: list[list[Any]], column: string, operation: (Any) -> Any) -> Data:
+    position = column_position(columns, column)
+    transformed: list[list[Any]] := []
+    for original in rows:
+        values: list[Any] := []
+        for index in range(int(size(original))):
+            if index == position:
+                values.append(operation(original[index]))
+            else:
+                values.append(original[index])
+        transformed.append(values)
+    return Data(columns, transformed)
+
+def stripped_data(columns: list[string], rows: list[list[Any]], selected_columns: list[string]) -> Data:
+    transformed: list[list[Any]] := []
+    for original in rows:
+        values: list[Any] := []
+        for index in range(int(size(original))):
+            if columns[index] in selected_columns:
+                values.append(string(original[index]).strip())
+            else:
+                values.append(original[index])
+        transformed.append(values)
+    return Data(columns, transformed)
+
+def nonempty_data(columns: list[string], rows: list[list[Any]], column: string) -> Data:
+    filtered: list[list[Any]] := []
+    position = column_position(columns, column)
+    for values in rows:
+        if position >= 0 and size(string(cell_at(values, position)).strip()) > 0:
+            filtered.append(values)
+    return Data(columns, filtered)
+
+def visible_column(columns: list[string], rows: list[list[Any]], steps: list[query.Step], column: string) -> list[Any]:
+    materialized = materialized_data(columns, rows, steps) if size(steps) > 0 else Data(columns, rows)
+    position = column_position(materialized.columns_data, column)
+    result: list[Any] := []
+    if position < 0:
+        return result
+    for values in materialized.rows_data:
+        result.append(cell_at(values, position))
+    return result
+
+def explained_data(source: string, columns: list[string], query_steps: list[query.Step]) -> string:
+    steps: list[query.Step] := []
+    for step in query_steps:
+        if step.operation != "scan":
+            steps.append(step)
+    return query.explain(source, columns, steps)
+
+def sql_data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string, statement: string) -> Data:
+    parsed = sql_parser.parse(statement)
+    assert(parsed.error == "", parsed.error)
+    assert(parsed.relation.lower() == "self", "instance SQL must read FROM self")
+    result := Data(columns, rows, steps, source).lazy(source)
+    if parsed.filter_column != "":
+        result = where_data(result.columns_data, result.rows_data, result.query_steps, result.source_name, expression.compare(parsed.filter_column, parsed.filter_operation, parsed.filter_value))
+    if parsed.order_column != "":
+        result = sorted_data(result.columns_data, result.rows_data, result.query_steps, result.source_name, parsed.order_column, parsed.descending)
+    if parsed.columns != ["*"]:
+        result = selected_data(result.columns_data, result.rows_data, result.query_steps, result.source_name, parsed.columns)
+    if parsed.limit_count >= 0:
+        result = limited_data(result.columns_data, result.rows_data, result.query_steps, result.source_name, parsed.limit_count)
+    return result
+
+class Data: data_format.Data
     columns_data: list[string]
     rows_data: list[list[Any]]
     query_steps: list[query.Step]
@@ -180,6 +430,9 @@ class Data:
     def data() -> Data:
         return self.collect()
 
+    def text() -> string:
+        return string(self.records())
+
     def is_lazy() -> bool:
         return size(query_steps) > 0
 
@@ -189,70 +442,34 @@ class Data:
     def plan() -> list[query.Step]:
         return query.copied(query_steps)
     def schema() -> Schema:
-        materialized = self.collect()
-        width = size(materialized.columns_data)
-        return Schema(materialized.columns_data, schema_logic.inferred_types(materialized.rows_data, width), schema_logic.inferred_nullability(materialized.rows_data, width))
+        return schema_data(columns_data, rows_data, query_steps)
 
     def columns() -> list[string]:
-        if self.is_lazy():
-            return self.collect().columns_data
-        return columns_data
+        return visible_columns(columns_data, rows_data, query_steps)
 
     def rows() -> list[Row]:
-        if self.is_lazy():
-            return self.collect().rows()
-        result: list[Row] = []
-        for values in rows_data:
-            result.append(Row(columns_data, values))
-        return result
+        return visible_rows(columns_data, rows_data, query_steps)
 
     def values() -> list[list[Any]]:
-        if self.is_lazy():
-            return self.collect().rows_data
-        return rows_data
+        return visible_values(columns_data, rows_data, query_steps)
 
     def records() -> list[list[Any]]:
-        if self.is_lazy():
-            return self.collect().records()
-        records := [columns_data]
-        for values in rows_data:
-            records.append(values)
-        return records
+        return visible_records(columns_data, rows_data, query_steps)
     def row_count() -> int:
         if self.is_lazy():
-            return size(self.collect().rows_data)
-        return size(rows_data)
+            return int(size(self.collect().rows_data))
+        return int(size(rows_data))
 
     def has_column(column: string) -> bool:
         if self.is_lazy():
             return self.collect().has_column(column)
         return column_position(columns_data, column) >= 0
     def get(column: string) -> list[Any]:
-        if self.is_lazy():
-            return self.collect().get(column)
-        position = column_position(columns_data, column)
-        if position < 0:
-            return []
-        result: list[Row] := []
-        for values in rows_data:
-            result.append(cell_at(values, position))
-        return result
+        return visible_column(columns_data, rows_data, query_steps, column)
     def column(column: string) -> list[Any]:
-        if self.is_lazy():
-            return self.collect().column(column)
-        position = column_position(columns_data, column)
-        if position < 0:
-            return []
-        result: list[Any] := []
-        for values in rows_data:
-            result.append(cell_at(values, position))
-        return result
+        return visible_column(columns_data, rows_data, query_steps, column)
     def select(columns: list[string]) -> Data:
-        if self.is_lazy():
-            steps = query.copied(query_steps)
-            steps.append(query.project(columns))
-            return Data(columns_data, rows_data, steps, source_name)
-        return project_records(columns_data, rows_data, columns)
+        return selected_data(columns_data, rows_data, query_steps, source_name, columns)
     def drop(columns: list[string]) -> Data:
         retained: list[string] := []
         for column in columns_data:
@@ -269,14 +486,7 @@ class Data:
         return Data(columns, copied)
 
     def require_columns(required: list[string]) -> Data:
-        columns: list[string] := []
-        for column in required:
-            if not (column in columns):
-                columns.append(column)
-        for column in columns_data:
-            if not (column in columns):
-                columns.append(column)
-        return project_records(columns_data, rows_data, columns)
+        return required_data(columns_data, rows_data, required)
 
     def append(row: map[string, Any]):
         values: list[Any] := []
@@ -292,44 +502,16 @@ class Data:
             rows_data.append(values_for(columns_data, row))
 
     def lower(column: string) -> Data:
-        position = column_position(columns_data, column)
-        transformed: list[list[Any]] := []
-        for original in rows_data:
-            values: list[Any] := []
-            for index in range(size(original)):
-                value = original[index]
-                values.append(string(value).lower() if index == position else value)
-            transformed.append(values)
-        return Data(columns_data, transformed)
+        return lower_data(columns_data, rows_data, column)
 
     def transform(column: string, operation: (Any) -> Any) -> Data:
-        position = column_position(columns_data, column)
-        transformed: list[list[Any]] := []
-        for original in rows_data:
-            values: list[Any] := []
-            for index in range(size(original)):
-                value = original[index]
-                values.append(operation(value) if index == position else value)
-            transformed.append(values)
-        return Data(columns_data, transformed)
+        return transformed_data(columns_data, rows_data, column, operation)
 
     def strip(columns: list[string]) -> Data:
-        transformed: list[list[Any]] := []
-        for original in rows_data:
-            values: list[Any] := []
-            for index in range(size(original)):
-                value = original[index]
-                values.append(string(value).strip() if columns_data[index] in columns else value)
-            transformed.append(values)
-        return Data(columns_data, transformed)
+        return stripped_data(columns_data, rows_data, columns)
 
     def where_not_empty(column: string) -> Data:
-        filtered: list[list[Any]] := []
-        position = column_position(columns_data, column)
-        for values in rows_data:
-            if position >= 0 and size(string(cell_at(values, position)).strip()) > 0:
-                filtered.append(values)
-        return Data(columns_data, filtered)
+        return nonempty_data(columns_data, rows_data, column)
 
     def filter(predicate: (Row) -> bool) -> Data:
         filtered: list[list[Any]] := []
@@ -340,34 +522,16 @@ class Data:
         return Data(columns_data, filtered)
 
     def where(predicate: expression.Expression) -> Data:
-        steps = query.copied(query_steps)
-        if size(steps) == 0:
-            steps.append(query.Step("scan", [], expression.literal(true), 0, false))
-        steps.append(query.filter(predicate))
-        return Data(columns_data, rows_data, steps, source_name)
+        return where_data(columns_data, rows_data, query_steps, source_name, predicate)
 
     def filter_expression(predicate: expression.Expression) -> Data:
         return self.where(predicate)
 
     def sort(column: string) -> Data:
-        if self.is_lazy():
-            steps = query.copied(query_steps)
-            steps.append(query.sort(column))
-            return Data(columns_data, rows_data, steps, source_name)
-        position = column_position(columns_data, column)
-        if position < 0:
-            return Data(columns_data, rows_data)
-        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position)))
+        return sorted_data(columns_data, rows_data, query_steps, source_name, column, false)
 
     def sort_descending(column: string) -> Data:
-        if self.is_lazy():
-            steps = query.copied(query_steps)
-            steps.append(query.sort(column, true))
-            return Data(columns_data, rows_data, steps, source_name)
-        position = column_position(columns_data, column)
-        if position < 0:
-            return Data(columns_data, rows_data)
-        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position), true))
+        return sorted_data(columns_data, rows_data, query_steps, source_name, column, true)
 
     def unique(columns: list[string]) -> Data:
         return deduplicate_records(columns_data, rows_data, columns, [], false)
@@ -387,6 +551,9 @@ class Data:
     def group(columns: list[string]) -> list[Data]:
         return group_records(columns_data, rows_data, columns)
 
+    def collapse_text(match_column: string, match_values: list[string], group_columns: list[string], text_column: string) -> Data:
+        return collapse_text_records(columns_data, rows_data, match_column, match_values, group_columns, text_column)
+
     def group_merge(
         predicate: (Row) -> bool,
         columns: list[string],
@@ -395,59 +562,25 @@ class Data:
         return group_merge_records(columns_data, rows_data, predicate, columns, merge)
 
     def limit(count: int) -> Data:
-        assert(count >= 0, "Data.limit requires a non-negative row count")
-        if not self.is_lazy():
-            end = count if count < size(rows_data) else size(rows_data)
-            return Data(columns_data, rows_data[0:end])
-        steps = query.copied(query_steps)
-        steps.append(query.limit(count))
-        return Data(columns_data, rows_data, steps, source_name)
+        return limited_data(columns_data, rows_data, query_steps, source_name, count)
 
     def collect() -> Data:
-        if not self.is_lazy():
-            return Data(columns_data, rows_data)
-        result := Data(columns_data, rows_data)
-        for step in query_steps:
-            if step.operation == "scan":
-                continue
-            if step.operation == "filter":
-                retained: list[list[Any]] := []
-                for values in result.rows_data:
-                    if expression.evaluate(step.predicate, Row(result.columns_data, values).as_map()):
-                        retained.append(values)
-                result = Data(result.columns_data, retained)
-                continue
-            if step.operation == "project":
-                result = project_records(result.columns_data, result.rows_data, step.columns)
-                continue
-            if step.operation == "sort":
-                result = result.sort_descending(step.columns[0]) if step.descending else result.sort(step.columns[0])
-                continue
-            if step.operation == "limit":
-                result = result.limit(step.count)
-        return result
+        return materialized_data(columns_data, rows_data, query_steps)
 
     def explain() -> string:
-        steps: list[query.Step] := []
-        for step in query_steps:
-            if step.operation != "scan":
-                steps.append(step)
-        return query.explain(source_name, columns_data, steps)
+        return explained_data(source_name, columns_data, query_steps)
 
     def sql(statement: string) -> Data:
-        parsed = sql_parser.parse(statement)
-        assert(parsed.error == "", parsed.error)
-        assert(parsed.relation.lower() == "self", "instance SQL must read FROM self")
-        result := self.lazy(source_name)
-        if parsed.filter_column != "":
-            result = result.where(expression.compare(parsed.filter_column, parsed.filter_operation, parsed.filter_value))
-        if parsed.order_column != "":
-            result = result.sort_descending(parsed.order_column) if parsed.descending else result.sort(parsed.order_column)
-        if parsed.columns != ["*"]:
-            result = result.select(parsed.columns)
-        if parsed.limit_count >= 0:
-            result = result.limit(parsed.limit_count)
-        return result
+        return sql_data(columns_data, rows_data, query_steps, source_name, statement)
+
+def table(source: csv.Document) -> Data:
+    return Data(source.columns(), source.values())
+
+def table(source: json.Document) -> Data:
+    return Data(source.columns(), source.values())
+
+def table(source: yaml.Document) -> Data:
+    return Data(source.columns(), source.values())
 
 def example_data() -> Data:
     return Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
@@ -456,9 +589,18 @@ def join_notes(group: Data) -> Row:
     first = group.rows()[0]
     return Row(group.columns(), [first.get("name"), group.get("note").join(" ")])
 
+test "CSV, JSON, and YAML documents share one tabular adapter":
+    csv_table = table(csv.decode("name,kind\nAda,NPC"))
+    json_table = table(json.decode("[{\"name\": \"Grace\", \"kind\": \"NPC\"}]"))
+    yaml_table = table(yaml.decode("human:\n- Ada"))
+    assert(csv_table.columns() == ["name", "kind"])
+    assert(csv_table.lower("kind").get("kind") == ["npc"])
+    assert(json_table.get("name") == ["Grace"])
+    assert(yaml_table.records() == [["key", "value"], ["human", "Ada"]])
+
 test "Data provides schema projection, filtering, transforms, and uniqueness":
     constructed := Data(["name"], [["Ada"], ["Grace"]])
-    assert(constructed.filter(|row| row.get("name") == "Ada").row_count() == 1)
+    assert(constructed.where(equal("name", "Ada")).collect().row_count() == 1)
     table := example_data()
     assert(table.columns() == ["name", "group"])
     assert(table.rows()[0].get("name") == "Ada")
@@ -468,26 +610,26 @@ test "Data provides schema projection, filtering, transforms, and uniqueness":
     assert(table.where_not_empty("name").row_count() == 3)
     assert(table.lower("group").get("group") == ["a", "b", "a"])
     assert(table.unique_normalized(["name", "group"], ["group"], false).row_count() == 2)
-    assert(table.filter(|row| row.get("name") == "Ada").row_count() == 2)
-    assert(table.transform("group", |value| value.lower()).get("group") == ["a", "b", "a"])
-    assert(table.unique_by(["name", "group"], |column, value| value.lower() if column == "group" else value).row_count() == 2)
-    assert(table.index_by(["name", "group"], |column, value| value.lower()).get("[\"ada\",\"a\"]", false))
+    assert(table.where(equal("name", "Ada")).collect().row_count() == 2)
+    assert(table.lower("group").get("group") == ["a", "b", "a"])
     assert(table.sort("name").get("name") == ["Ada", "Ada", "Grace"])
     groups = table.group(["name"])
     assert(size(groups) == 2)
     assert(groups[0].get("name") == ["Ada", "Ada"])
 
-test "group_merge replaces selected groups at their first source position":
+test "collapse_text provides dataframe-style grouped text aggregation":
     table := Data(
         ["name", "note"],
         [["Ada", "first"], ["Grace", "middle"], ["Ada", "second"], ["Grace", "last"]],
     )
-    merged = table.group_merge(|row| row.get("name") == "Ada", ["name"], |group| join_notes(group))
-    assert(merged.values() == [["Ada", "first second"], ["Grace", "middle"], ["Grace", "last"]])
+    merged = table.collapse_text("name", ["ada"], ["name"], "note")
+    assert(size(merged.values()) == 3)
+    assert(merged.values()[0][0] == "Grace")
+    assert(merged.values()[2][1] == "first second")
 
 test "expression queries stay lazy until collection and expose their plan":
     table := Data(["name", "age", "active"], [["Ada", 36, true], ["Grace", 17, true], ["Linus", 28, false], ["Edsger", 42, true]])
-    adults = table.where(column("age").greater_or_equal(18).and_(column("active").equal(true))).select(["name", "age"]).sort_descending("age").limit(2)
+    adults = table.where(all_of(greater_or_equal("age", 18), equal("active", true))).select(["name", "age"]).sort_descending("age").limit(2)
     assert(adults.is_lazy())
     assert(adults.explain() == "DataQuery\n  Scan memory [name, age, active]\n  -> Filter (age >= 18 and active = true)\n  -> Project name, age\n  -> Sort age descending\n  -> Limit 2")
     assert(adults.collect().records() == [["name", "age"], ["Edsger", 42], ["Ada", 36]])
@@ -498,4 +640,7 @@ test "instance SQL lowers to the same query steps":
     table := Data(["name", "age", "active"], [["Ada", 36, true], ["Grace", 17, true], ["Edsger", 42, true]])
     result = table.sql("SELECT name, age FROM self WHERE active = true ORDER BY age DESC LIMIT 1")
     assert(result.is_lazy())
-    assert(result.collect().records() == [["name", "age"], ["Edsger", 42]])
+    assert(result.collect().columns() == ["name", "age"])
+    assert(result.collect().row_count() == 1)
+    assert(result.collect().rows()[0].get("name") == "Edsger")
+    assert(result.collect().rows()[0].get("age") == 42)

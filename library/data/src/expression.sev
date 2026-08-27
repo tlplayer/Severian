@@ -16,15 +16,7 @@ class Expression:
         return Expression("not", "", true, [self])
 
     def describe() -> string:
-        if operation == "column":
-            return column_name
-        if operation == "literal":
-            return string(literal_value)
-        if operation == "not":
-            return "not (" + operands[0].describe() + ")"
-        if operation == "and" or operation == "or":
-            return "(" + operands[0].describe() + " " + operation + " " + operands[1].describe() + ")"
-        return operands[0].describe() + " " + operation + " " + operands[1].describe()
+        return operation
 
 class Column:
     name: string
@@ -33,22 +25,22 @@ class Column:
         return Expression("column", name, true, [])
 
     def equal(value: Any) -> Expression:
-        return comparison(self.expression(), "=", literal(value))
+        return compare(name, "=", value)
 
     def not_equal(value: Any) -> Expression:
-        return comparison(self.expression(), "!=", literal(value))
+        return compare(name, "!=", value)
 
     def greater_than(value: Any) -> Expression:
-        return comparison(self.expression(), ">", literal(value))
+        return compare(name, ">", value)
 
     def greater_or_equal(value: Any) -> Expression:
-        return comparison(self.expression(), ">=", literal(value))
+        return compare(name, ">=", value)
 
     def less_than(value: Any) -> Expression:
-        return comparison(self.expression(), "<", literal(value))
+        return compare(name, "<", value)
 
     def less_or_equal(value: Any) -> Expression:
-        return comparison(self.expression(), "<=", literal(value))
+        return compare(name, "<=", value)
 
     def is_null() -> Expression:
         return Expression("is null", "", true, [self.expression()])
@@ -67,6 +59,21 @@ def comparison(left: Expression, operation: string, right: Expression) -> Expres
 
 def compare(column_name: string, operation: string, value: Any) -> Expression:
     return comparison(column(column_name).expression(), operation, literal(value))
+
+def describe_expression(operation: string, column_name: string, literal_value: Any, operands: list[Expression]) -> string:
+    if operation == "column":
+        return column_name
+    if operation == "literal":
+        return string(literal_value)
+    if operation == "not":
+        return "not (" + describe_expression(operands[0].operation, operands[0].column_name, operands[0].literal_value, operands[0].operands) + ")"
+    if operation == "and" or operation == "or":
+        left = describe_expression(operands[0].operation, operands[0].column_name, operands[0].literal_value, operands[0].operands)
+        right = describe_expression(operands[1].operation, operands[1].column_name, operands[1].literal_value, operands[1].operands)
+        return "(" + left + " " + operation + " " + right + ")"
+    left = describe_expression(operands[0].operation, operands[0].column_name, operands[0].literal_value, operands[0].operands)
+    right = describe_expression(operands[1].operation, operands[1].column_name, operands[1].literal_value, operands[1].operands)
+    return left + " " + operation + " " + right
 
 def value(expression: Expression, row: map[string, Any]) -> Any:
     if expression.operation == "literal":

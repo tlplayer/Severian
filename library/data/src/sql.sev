@@ -25,7 +25,11 @@ def literal(text: string) -> Any:
     return text
 
 def parse(statement: string) -> SqlQuery:
-    tokens = statement.replace(",", " , ").replace(";", " ").strip().split(" ")
+    raw_tokens = statement.replace(",", " , ").replace(";", " ").strip().split(" ")
+    tokens: list[string] := []
+    for token in raw_tokens:
+        if token != "":
+            tokens.append(token)
     if size(tokens) < 4 or tokens[0].upper() != "SELECT":
         return invalid("SQL must start with SELECT")
 

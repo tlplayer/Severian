@@ -766,8 +766,14 @@ fn source_class_satisfies_bound(
             };
             class.name == actual_name
                 && class.traits.iter().any(|implemented| {
-                    implemented.simple_name().is_some_and(|name| {
-                        source_trait_extends(name, bound_name, index, &mut BTreeSet::new())
+                    implemented.named_parts().is_some_and(|(name, arguments)| {
+                        arguments.is_empty()
+                            && source_trait_extends(
+                                name.rsplit('.').next().unwrap_or(name),
+                                bound_name.rsplit('.').next().unwrap_or(bound_name),
+                                index,
+                                &mut BTreeSet::new(),
+                            )
                     })
                 })
         })

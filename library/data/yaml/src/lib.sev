@@ -12,27 +12,64 @@ class YamlFile: File
 class Document: data_format.Data
     source: string
     stream: bool
+    columns_data: list[string]
+    rows_data: list[list[Any]]
 
     def text() -> string:
         return source
 
+    def columns() -> list[string]:
+        return columns_data
+
+    def values() -> list[list[Any]]:
+        return rows_data
+
+def unquote(value: string) -> string:
+    stripped = value.strip()
+    if size(stripped) >= 2 and ((stripped.starts_with("\"") and stripped.ends_with("\"")) or (stripped.starts_with("'") and stripped.ends_with("'"))):
+        return stripped[1:-1]
+    return stripped
+
+def tabular(source: string, stream: bool) -> Document:
+    rows: list[list[Any]] := []
+    section := ""
+    for original in source.split("\n"):
+        line = original.strip()
+        if size(line) == 0 or line.starts_with("#") or line == "---":
+            continue
+        if not original.starts_with(" ") and not original.starts_with("-") and line.ends_with(":"):
+            section = line[0:-1].strip()
+            continue
+        if line.starts_with("-"):
+            value: list[Any] := [section, unquote(line[1:].strip())]
+            rows.append(value)
+            continue
+        position = line.find(":")
+        if position >= 0:
+            value: list[Any] := [unquote(line[0:position]), unquote(line[position + 1:])]
+            rows.append(value)
+    return Document(source, stream, ["key", "value"], rows)
+
 def decode(source: string) -> Document:
-    return Document(source, false)
+    return tabular(source, false)
 
 def decode_stream(source: string) -> Document:
-    return Document(source, true)
+    return tabular(source, true)
 
 def encode(document: Document) -> string:
     return document.source
 
-def read(path: string) -> string:
-    return decode(file.raw(path)).text()
+def read(path: string) -> Document:
+    return decode(file.raw(path))
 
-def read_stream(path: string) -> string:
-    return decode_stream(file.raw(path)).text()
+def read_stream(path: string) -> Document:
+    return decode_stream(file.raw(path))
 
 test "YAML adapters retain ordinary and stream documents":
-    ordinary = decode("service: severian")
+    ordinary = decode("human:\n- Ada\n- Grace\nzone: Stormwind")
     stream = decode_stream("---\nservice: one\n---\nservice: two")
-    assert(ordinary.text() == "service: severian")
+    assert(ordinary.text().starts_with("human:"))
     assert(stream.stream)
+    assert(ordinary.columns() == ["key", "value"])
+    assert(ordinary.values()[0][0] == "human")
+    assert(ordinary.values()[1][1] == "Grace")

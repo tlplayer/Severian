@@ -1181,6 +1181,10 @@ struct FunctionType {
 #[derive(Debug, Clone)]
 enum CallableValue {
     Direct(FunctionId),
+    InlineLambda {
+        parameters: Vec<String>,
+        body: AstExpression,
+    },
     Lambda {
         parameters: Vec<String>,
         body: AstExpression,
@@ -11986,7 +11990,19 @@ impl Analyzer<'_> {
         let Some(name) = callable_path(callee) else {
             return false;
         };
-        self.source_functions.get(&name).is_some_and(|functions| {
+        let functions = self.source_functions.get(&name).or_else(|| {
+            if !self.allow_qualified_function_suffix {
+                return None;
+            }
+            let qualified = self
+                .source_functions
+                .iter()
+                .filter(|(candidate, _)| candidate.rsplit('.').next() == Some(name.as_str()))
+                .map(|(_, functions)| functions)
+                .collect::<Vec<_>>();
+            (qualified.len() == 1).then(|| qualified[0])
+        });
+        functions.is_some_and(|functions| {
             functions.iter().any(|function| {
                 function.parameters.len() == arguments.len()
                     && function.parameters.iter().any(|parameter| {
@@ -12020,6 +12036,22 @@ impl Analyzer<'_> {
         ast: &AstExpression,
         signature: &FunctionType,
     ) -> Result<ResolvedCallable, Diagnostic> {
+        if let AstExpressionKind::Lambda { parameters, body } = &ast.kind {
+            if parameters.len() != signature.parameters.len() {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    "lambda parameter count does not match the callable type",
+                    Some(ast.span),
+                ));
+            }
+            return Ok(ResolvedCallable {
+                value: CallableValue::InlineLambda {
+                    parameters: parameters.clone(),
+                    body: body.as_ref().clone(),
+                },
+                signature: signature.clone(),
+            });
+        }
         let AstExpressionKind::Name(name) = &ast.kind else {
             return Err(Diagnostic::new(
                 "E000205",
@@ -12178,6 +12210,15 @@ impl Analyzer<'_> {
                 },
                 span,
             },
+            CallableValue::InlineLambda { parameters, body } => {
+                let previous_values = self.value_substitutions.clone();
+                for (parameter, value) in parameters.into_iter().zip(values) {
+                    self.value_substitutions.insert(parameter, value);
+                }
+                let result = self.expression(&body, Some(callable.signature.result));
+                self.value_substitutions = previous_values;
+                result?
+            }
             CallableValue::Lambda {
                 parameters,
                 body,
@@ -12511,7 +12552,19 @@ impl Analyzer<'_> {
         if self.mock_inline_stack.contains(&name) {
             return Ok(None);
         }
-        let Some(function) = self.source_functions.get(&name).and_then(|functions| {
+        let source_functions = self.source_functions.get(&name).or_else(|| {
+            if !self.allow_qualified_function_suffix {
+                return None;
+            }
+            let qualified = self
+                .source_functions
+                .iter()
+                .filter(|(candidate, _)| candidate.rsplit('.').next() == Some(name.as_str()))
+                .map(|(_, functions)| functions)
+                .collect::<Vec<_>>();
+            (qualified.len() == 1).then(|| qualified[0])
+        });
+        let Some(function) = source_functions.and_then(|functions| {
             let matches = functions
                 .iter()
                 .filter(|function| function.parameters.len() == arguments.len())
@@ -13455,13 +13508,11 @@ impl Analyzer<'_> {
         if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
             return Ok(None);
         }
-        if matches!(name.as_str(), "map" | "filter" | "reduce") {
+        if matches!(name.as_str(), "map" | "filter" | "reduce")
+            && matches!(object.kind, AstExpressionKind::List(_))
+        {
             let AstExpressionKind::List(values) = &object.kind else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("list method `{name}` currently requires a list literal"),
-                    Some(span),
-                ));
+                unreachable!("list literal was checked")
             };
             let Some(AstExpressionKind::Lambda { parameters, body }) =
                 arguments.first().map(|argument| &argument.value.kind)
@@ -14251,6 +14302,9 @@ impl Analyzer<'_> {
                 ));
             }
             let previous = self.value_substitutions.clone();
+            let previous_callables = self.callable_substitutions.clone();
+            let previous_suffix_resolution = self.allow_qualified_function_suffix;
+            self.allow_qualified_function_suffix = true;
             for (field, declaration) in instance.fields.iter().enumerate() {
                 let id = self.next_id();
                 self.value_substitutions.insert(
@@ -14273,10 +14327,16 @@ impl Analyzer<'_> {
                         .map(|argument| &argument.value)
                         .or(parameter.default.as_ref())
                         .expect("method arity validation requires a value or default");
-                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                    let value = self.expression(argument, Some(parameter_type))?;
-                    self.value_substitutions
-                        .insert(parameter.name.clone(), value);
+                    if let Some(signature) = self.function_annotation(&parameter.annotation)? {
+                        let callable = self.resolve_callable_value(argument, &signature)?;
+                        self.callable_substitutions
+                            .insert(parameter.name.clone(), callable);
+                    } else {
+                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                        let value = self.expression(argument, Some(parameter_type))?;
+                        self.value_substitutions
+                            .insert(parameter.name.clone(), value);
+                    }
                 }
                 if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
                     let value = self.expression(return_value, Some(fallible.success))?;
@@ -14291,6 +14351,8 @@ impl Analyzer<'_> {
                 }
             })();
             self.value_substitutions = previous;
+            self.callable_substitutions = previous_callables;
+            self.allow_qualified_function_suffix = previous_suffix_resolution;
             return resolved.map(Some);
         }
         let field_name = body.iter().find_map(|statement| {

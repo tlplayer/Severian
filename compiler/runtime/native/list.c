@@ -27,6 +27,7 @@ typedef struct {
 } sev_aggregate_box;
 
 extern const char *__sev_any_string(sev_pair_i64 value);
+extern _Bool __sev_any_equal(sev_pair_i64 left, sev_pair_i64 right);
 
 static uintptr_t sev_f64_bits(double value) {
     uint64_t bits = 0;
@@ -580,6 +581,36 @@ _Bool __sev_list_equal_u8(void *left_storage, void *right_storage) {
     return __sev_list_equal_i64(left_storage, right_storage);
 }
 
+_Bool __sev_list_equal_any(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    if (left == right) return 1;
+    if (left == NULL || right == NULL || left->length != right->length) return 0;
+    for (size_t index = 0; index < left->length; ++index) {
+        const sev_pair_i64 *left_value = (const sev_pair_i64 *)left->values[index];
+        const sev_pair_i64 *right_value = (const sev_pair_i64 *)right->values[index];
+        if (left_value == NULL || right_value == NULL) {
+            if (left_value != right_value) return 0;
+        } else if (!__sev_any_equal(*left_value, *right_value)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+_Bool __sev_list_equal_list(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    if (left == right) return 1;
+    if (left == NULL || right == NULL || left->length != right->length) return 0;
+    for (size_t index = 0; index < left->length; ++index) {
+        if (!__sev_list_equal_any(
+                (void *)left->values[index],
+                (void *)right->values[index])) return 0;
+    }
+    return 1;
+}
+
 _Bool __sev_list_contains_i64(void *storage, int64_t value) {
     sev_list *list = storage;
     for (size_t index = 0; index < list->length; ++index) {
@@ -914,6 +945,17 @@ void __sev_list_set_aggregate(void *storage, int64_t index, const void *value) {
 
 void __sev_list_set_bool(void *storage, int64_t index, _Bool value) {
     __sev_list_set_i64(storage, index, (int64_t)value);
+}
+
+void __sev_list_set_pair_i64(void *storage, int64_t index, sev_pair_i64 value) {
+    sev_pair_i64 *copy = malloc(sizeof(sev_pair_i64));
+    if (copy == NULL) abort();
+    *copy = value;
+    __sev_list_set_ptr(storage, index, (const char *)copy);
+}
+
+void __sev_list_set_any(void *storage, int64_t index, sev_pair_i64 value) {
+    __sev_list_set_pair_i64(storage, index, value);
 }
 
 static void sev_list_insert_raw(sev_list *list, int64_t index, uintptr_t value) {
@@ -1329,6 +1371,37 @@ void __sev_map_set_ptr_bool(
     _Bool value
 ) {
     __sev_map_set_ptr_i64(keys_storage, values_storage, key, (int64_t)value);
+}
+
+void __sev_map_set_ptr_pair_i64(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_pair_i64 value
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            sev_pair_i64 *copy = malloc(sizeof(sev_pair_i64));
+            if (copy == NULL) abort();
+            *copy = value;
+            values->values[index] = (uintptr_t)copy;
+            return;
+        }
+    }
+    __sev_list_push_ptr(keys, key);
+    __sev_list_push_pair_i64(values, value);
+}
+
+void __sev_map_set_ptr_any(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    sev_pair_i64 value
+) {
+    __sev_map_set_ptr_pair_i64(keys_storage, values_storage, key, value);
 }
 
 sev_pair_i64 __sev_map_get_default_ptr_pair_i64(

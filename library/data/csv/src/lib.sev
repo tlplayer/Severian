@@ -7,12 +7,76 @@ class CsvFile: File
 
 class Document: data_format.Data
     source: string
+    columns_data: list[string]
+    rows_data: list[list[Any]]
 
     def text() -> string:
         return source
 
+    def columns() -> list[string]:
+        return columns_data
+
+    def values() -> list[list[Any]]:
+        return rows_data
+
+def append_record(
+    fields: list[string],
+    columns: list[string],
+    rows: list[list[Any]],
+):
+    if size(columns) == 0:
+        for field in fields:
+            columns.append(field.strip())
+        return
+    values: list[Any] := []
+    for field in fields:
+        values.append(field)
+    while size(values) < size(columns):
+        values.append("")
+    rows.append(values)
+
 def decode(source: string) -> Document:
-    return Document(source)
+    columns: list[string] := []
+    rows: list[list[Any]] := []
+    fields: list[string] := []
+    field := ""
+    quoted := false
+    lines = source.split("\n")
+    for line_index, line in enumerate(lines):
+        cursor := 0
+        while cursor < size(line):
+            character = line[cursor:cursor + 1]
+            if character == "\"":
+                if quoted and cursor + 1 < size(line) and line[cursor + 1:cursor + 2] == "\"":
+                    field += "\""
+                    cursor += 2
+                    continue
+                quoted = not quoted
+                cursor += 1
+                continue
+            if not quoted and character == ",":
+                fields.append(field)
+                field = ""
+                cursor += 1
+                continue
+            if not quoted and character == "\r" and cursor + 1 == int(size(line)):
+                cursor += 1
+                continue
+            field += character
+            cursor += 1
+        if quoted:
+            field += "\n"
+            continue
+        if line_index + 1 == int(size(lines)) and size(field) == 0 and size(fields) == 0:
+            continue
+        fields.append(field)
+        append_record(fields, columns, rows)
+        fields = []
+        field = ""
+    if quoted and (size(field) > 0 or size(fields) > 0):
+        fields.append(field)
+        append_record(fields, columns, rows)
+    return Document(source, columns, rows)
 
 def encode(document: Document) -> string:
     return document.text()
@@ -21,5 +85,10 @@ def read(path: string) -> Document:
     return decode(file.raw(path))
 
 test "CSV documents retain their source representation":
-    document = decode("name,value\nseverian,1")
-    assert(document.text() == "name,value\nseverian,1")
+    document = decode("name,value,note\nseverian,1,\"hello, world\"\ncompiler,2,\"two \"\"quotes\"\"\"")
+    assert(document.text().starts_with("name,value,note"))
+    assert(document.columns() == ["name", "value", "note"])
+    assert(size(document.values()) == 2)
+    assert(document.values()[0][0] == "severian")
+    assert(document.values()[0][2] == "hello, world")
+    assert(document.values()[1][2] == "two \"quotes\"")
