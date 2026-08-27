@@ -11253,6 +11253,10 @@ impl Analyzer<'_> {
             severian_universal::COMPILE_TYPE_ATTRIBUTE,
             severian_universal::AttrValue::Compiler(severian_universal::tensor::compiler_id()),
         );
+        attributes.insert(
+            severian_universal::COMPILE_TARGETS_ATTRIBUTE,
+            severian_universal::AttrValue::String("mlir,stablehlo,xla".into()),
+        );
         if let Some(placement) = self.execution_placement {
             attributes.insert(
                 severian_universal::EXECUTION_PLACEMENT_ATTRIBUTE,

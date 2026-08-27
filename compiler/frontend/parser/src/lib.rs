@@ -695,6 +695,24 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_compiler_policy_declarations_without_ffi_syntax() {
+        let source = SourceFile::virtual_source(
+            "compiler.sev",
+            "@compile(mlir, stablehlo, xla)\ndef matmul(left: i32, right: i32) -> i32\n@mlir\ndef shape(value: i32) -> i32\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(matmul) = &module.items[0] else {
+            unreachable!()
+        };
+        assert!(matmul.decorators[0].is_compile_policy());
+        assert_eq!(matmul.decorators[0].arguments.len(), 3);
+        let severian_ast::Item::Function(shape) = &module.items[1] else {
+            unreachable!()
+        };
+        assert!(shape.decorators[0].is_compile_policy());
+    }
+
+    #[test]
     fn parses_ordered_global_calls_and_an_optional_main_body() {
         let source = SourceFile::virtual_source(
             "entry.sev",

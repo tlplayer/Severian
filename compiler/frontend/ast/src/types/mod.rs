@@ -37,6 +37,17 @@ pub struct Decorator {
     pub span: Span,
 }
 
+impl Decorator {
+    /// Compiler policies select an IR/backend lowering route. They are not
+    /// foreign-language attributes and must never enter ABI resolution.
+    pub fn is_compile_policy(&self) -> bool {
+        matches!(
+            self.name.as_str(),
+            "compile" | "mlir" | "stablehlo" | "xla" | "triton"
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionParameter {
     pub name: String,

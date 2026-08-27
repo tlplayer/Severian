@@ -47,3 +47,8 @@ implements CompileType behavior.
 
 CompileType is orthogonal to external-call boundaries. ABI and FFI are not
 CompileType phases and normal compilation does not run through them.
+
+Source declarations make that separation explicit: `@c`/`@rust` select a
+foreign ABI boundary, while `@mlir`, `@xla`, and
+`@compile(mlir, stablehlo, xla)` select compiler lowering targets. Compile
+policy attributes are carried on CompileOps and are never interpreted by XXI.

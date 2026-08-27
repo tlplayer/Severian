@@ -27,7 +27,7 @@ pub use operation_registry::{
     AttrValue, AttributeId, Attrs, BackendId, CanonicalRewrite, DialectId, EffectSet, IrContext,
     LoweringCapability, OpId, OperationDiagnostic, OperationId, OperationInterface,
     OperationRegistry, ProviderId, RegisteredOperation, RuntimeId, COMPILED_ARTIFACT_ATTRIBUTE,
-    COMPILE_TYPE_ATTRIBUTE,
+    COMPILE_TARGETS_ATTRIBUTE, COMPILE_TYPE_ATTRIBUTE,
 };
 pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
 pub use primitive::{

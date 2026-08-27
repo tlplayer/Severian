@@ -3,5 +3,5 @@
 # them. A library may narrowly permit `native-abi` for this exact source in its
 # `[package.unsafe]` configuration.
 
-unsafe:
-    extern("host_secret") def host_secret() -> int
+@c(symbol = "host_secret")
+def host_secret() -> int

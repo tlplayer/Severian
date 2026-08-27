@@ -97,6 +97,7 @@ pub enum AttrValue {
 }
 
 pub const COMPILE_TYPE_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.type");
+pub const COMPILE_TARGETS_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.targets");
 pub const COMPILED_ARTIFACT_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.artifact");
 
 pub type Attrs = BTreeMap<AttributeId, AttrValue>;

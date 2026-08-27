@@ -101,8 +101,16 @@ impl CompileHandler for TensorCompiler {
                 _ => None,
             })
             .unwrap_or("dynamic");
+        let compile_targets = operation
+            .attributes
+            .get(&severian_universal::COMPILE_TARGETS_ATTRIBUTE)
+            .and_then(|value| match value {
+                AttrValue::String(value) => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or("mlir");
         let module = format!(
-            "module {{\n  func.func private @{symbol}({runtime_parameters}) -> !llvm.ptr\n  func.func @entry({parameters}) -> !llvm.ptr attributes {{severian.execution.backend = \"{}\", severian.execution.placement = \"{}\", severian.tensor.element_type = \"{element}\"}} {{\n{setup}    %result = func.call @{symbol}({call_arguments}) : ({call_types}) -> !llvm.ptr\n    return %result : !llvm.ptr\n  }}\n}}",
+            "module {{\n  func.func private @{symbol}({runtime_parameters}) -> !llvm.ptr\n  func.func @entry({parameters}) -> !llvm.ptr attributes {{severian.compile.targets = \"{compile_targets}\", severian.execution.backend = \"{}\", severian.execution.placement = \"{}\", severian.tensor.element_type = \"{element}\"}} {{\n{setup}    %result = func.call @{symbol}({call_arguments}) : ({call_types}) -> !llvm.ptr\n    return %result : !llvm.ptr\n  }}\n}}",
             backend.as_str(),
             placement.as_str(),
         );
@@ -174,6 +182,10 @@ mod tests {
             severian_universal::EXECUTION_PLACEMENT_ATTRIBUTE,
             AttrValue::String(placement.as_str().into()),
         );
+        attributes.insert(
+            severian_universal::COMPILE_TARGETS_ATTRIBUTE,
+            AttrValue::String("mlir,stablehlo,xla".into()),
+        );
         CompileRegion {
             id: CompiledRegionId::new(0),
             compiler: tensor::compiler_id(),
@@ -206,6 +218,9 @@ mod tests {
         assert!(artifact
             .module
             .contains("severian.execution.backend = \"mlir-vector\""));
+        assert!(artifact
+            .module
+            .contains("severian.compile.targets = \"mlir,stablehlo,xla\""));
     }
 
     #[test]

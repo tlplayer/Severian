@@ -50,6 +50,18 @@ pub fn resolve(
     types: &TypeContext,
     target: &AbiTarget,
 ) -> Result<ResolvedExternalModule, XxiError> {
+    for item in &module.items {
+        let decorators = match item {
+            Item::Function(declaration) => &declaration.decorators,
+            Item::Type(declaration) => &declaration.decorators,
+            _ => continue,
+        };
+        if decorators.iter().any(Attribute::is_compile_policy)
+            && decorators.iter().any(is_external_attribute)
+        {
+            return Err(XxiError::MixedCompilerAndExternalAttributes);
+        }
+    }
     let mut imports = Vec::new();
     for import in module.items.iter().filter_map(|item| match item {
         Item::Import(import) => Some(import),
@@ -68,7 +80,14 @@ pub fn resolve(
     let mut declarations = Vec::new();
     let hook_decorators = semantic_hook_decorators(module);
     for declaration in module.items.iter().filter_map(|item| match item {
-        Item::Type(declaration) if !declaration.decorators.is_empty() => Some(declaration),
+        Item::Type(declaration)
+            if declaration
+                .decorators
+                .iter()
+                .any(|decorator| !decorator.is_compile_policy()) =>
+        {
+            Some(declaration)
+        }
         _ => None,
     }) {
         if foreign
@@ -82,7 +101,10 @@ pub fn resolve(
     }
     for declaration in module.items.iter().filter_map(|item| match item {
         Item::Function(declaration)
-            if !declaration.decorators.is_empty()
+            if declaration
+                .decorators
+                .iter()
+                .any(|decorator| !decorator.is_compile_policy())
                 && !semantic_operator_declaration(declaration)
                 && !declaration
                     .decorators
@@ -159,6 +181,16 @@ fn semantic_operator_declaration(declaration: &ExternalFunctionDeclaration) -> b
                         || value.chars().next().is_some_and(|character| character.is_ascii_uppercase()))
         })
     })
+}
+
+fn is_external_attribute(attribute: &Attribute) -> bool {
+    matches!(attribute.name.as_str(), "c" | "rust" | "system")
+        || attribute.arguments.iter().any(|argument| {
+            matches!(
+                argument.name.as_deref(),
+                Some("abi" | "library" | "provider" | "repr" | "symbol" | "variadic")
+            )
+        })
 }
 
 fn same_parameter_contract(left: &[ForeignParameter], right: &[ForeignParameter]) -> bool {
@@ -339,7 +371,9 @@ fn resolve_type_ref(
 fn language_attribute(
     attributes: &[Attribute],
 ) -> Result<(ExternalLanguage, &Attribute), XxiError> {
-    let mut found = attributes.iter();
+    let mut found = attributes
+        .iter()
+        .filter(|attribute| !attribute.is_compile_policy());
     let attribute = found.next().ok_or(XxiError::MissingLanguageAttribute)?;
     if found.next().is_some() {
         return Err(XxiError::MultipleLanguageAttributes);
@@ -428,6 +462,7 @@ pub enum XxiError {
     InvalidAttributeArgument(String),
     InvalidResultMode(String),
     MissingLanguageAttribute,
+    MixedCompilerAndExternalAttributes,
     MultipleLanguageAttributes,
     Symbol(String),
     UnknownAbi(String),
@@ -557,6 +592,33 @@ mod tests {
         let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert!(resolved.foreign.functions.is_empty());
         assert!(resolved.plans.is_empty());
+    }
+
+    #[test]
+    fn compiler_policy_decorators_never_create_foreign_functions() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "compiler.sev",
+            "@compile(mlir, stablehlo, xla)\ndef add(left: i32, right: i32) -> i32\n@mlir\ndef shape(value: i32) -> i32\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.foreign.functions.is_empty());
+        assert!(resolved.plans.is_empty());
+    }
+
+    #[test]
+    fn compiler_policy_cannot_be_mixed_with_a_foreign_boundary() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "mixed.sev",
+            "@c(symbol = \"add\")\n@compile(mlir)\ndef add(left: i32, right: i32) -> i32\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert_eq!(
+            resolve(&module, &context.types, &target()).unwrap_err(),
+            XxiError::MixedCompilerAndExternalAttributes
+        );
     }
 
     #[test]

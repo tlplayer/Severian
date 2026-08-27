@@ -42,7 +42,9 @@ Packages move through explicit stages:
 Package names use complete words. Acronyms remain acceptable when they are the
 established name of a domain rather than a shortened ordinary word.
 
-Foreign capabilities use typed `extern(\"symbol\") def ...` declarations inside
-explicit `unsafe:` blocks. ABI vocabulary comes from `ffi`; each domain package
-owns its declarations and providers. Package acceptance requires native compilation,
+Foreign capabilities use typed `@c(symbol = "...")` declarations. Compiler
+operations instead use `@mlir`, `@xla`, or a policy such as
+`@compile(mlir, stablehlo, xla)`; those declarations never enter ABI
+resolution. ABI vocabulary comes from `ffi`; each domain package owns its
+declarations and providers. Package acceptance requires native compilation,
 execution, and exact output validation.
