@@ -1595,6 +1595,10 @@ impl Analyzer<'_> {
                     placeholder.clone(),
                 );
             }
+            if package_class.declaration.name == "Data" {
+                self.class_instances
+                    .insert(("Data".into(), Vec::new()), placeholder.clone());
+            }
             if let Some(source_module) = source_module {
                 for lookup in package_class
                     .lookups
@@ -1613,6 +1617,7 @@ impl Analyzer<'_> {
         for package_class in classes {
             if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
                 && package_class.declaration.name != "Tensor"
+                && package_class.declaration.name != "Data"
             {
                 continue;
             }
@@ -1680,6 +1685,10 @@ impl Analyzer<'_> {
                     (package_class.declaration.name.clone(), Vec::new()),
                     instance.clone(),
                 );
+            }
+            if package_class.declaration.name == "Data" {
+                self.class_instances
+                    .insert(("Data".into(), Vec::new()), instance.clone());
             }
             if let Some(source_module) = source_module {
                 for lookup in package_class
@@ -7110,15 +7119,15 @@ impl Analyzer<'_> {
                     .unwrap_or_default();
                 if candidates.is_empty() && self.allow_qualified_function_suffix {
                     let suffix = format!(".{name}");
-                    let qualified = self
+                    let mut qualified = self
                         .functions
                         .iter()
                         .filter(|(candidate, _)| candidate.ends_with(&suffix))
-                        .map(|(_, functions)| functions)
+                        .flat_map(|(_, functions)| functions.iter().copied())
                         .collect::<Vec<_>>();
-                    if let [functions] = qualified.as_slice() {
-                        candidates = (*functions).clone();
-                    }
+                    qualified.sort();
+                    qualified.dedup();
+                    candidates = qualified;
                 }
                 let mut matches = Vec::new();
                 for function in candidates {
@@ -10182,13 +10191,9 @@ impl Analyzer<'_> {
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
         let callable = callable_path(callee);
-        let builtin_file_read = callable.as_deref() == Some("file.read")
-            && self.functions.contains_key("file.read")
-            && (arguments.len() == 2
-                || arguments.first().is_some_and(|argument| {
-                    self.constant_string_value(&argument.value)
-                        .is_some_and(|path| path.ends_with(".json"))
-                }));
+        let builtin_file_read = callable.as_deref() == Some("file.read_bytes")
+            && self.functions.contains_key("file.read_bytes")
+            && arguments.len() == 2;
         if !builtin_file_read
             && callable
                 .as_ref()
@@ -10199,7 +10204,11 @@ impl Analyzer<'_> {
         let positional = arguments
             .iter()
             .all(|argument| argument.name.is_none() && !argument.spread);
-        if callable.as_deref() == Some("json.kind") && arguments.len() == 1 && positional {
+        if callable.as_deref().is_some_and(|name| {
+            name == "json.kind" || name == "any_kind" || name.ends_with(".any_kind")
+        }) && arguments.len() == 1
+            && positional
+        {
             let any = self.ensure_any_type();
             let string = self
                 .types
@@ -10214,7 +10223,11 @@ impl Analyzer<'_> {
                 span,
             )));
         }
-        if callable.as_deref() == Some("json.is_null") && arguments.len() == 1 && positional {
+        if callable.as_deref().is_some_and(|name| {
+            name == "json.is_null" || name == "any_is_null" || name.ends_with(".any_is_null")
+        }) && arguments.len() == 1
+            && positional
+        {
             let any = self.ensure_any_type();
             let boolean = self
                 .types
@@ -10228,6 +10241,118 @@ impl Analyzer<'_> {
                 vec![value],
                 span,
             )));
+        }
+        if callable.as_deref() == Some("file.read_text") && arguments.len() == 1 && positional {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let path = self.expression(&arguments[0].value, Some(string))?;
+            return Ok(Some(self.runtime_call(
+                "__sev_file_read_text",
+                &[string],
+                string,
+                vec![path],
+                span,
+            )));
+        }
+        if callable.as_deref().is_some_and(|name| {
+            name == "csv_columns_native" || name.ends_with(".csv_columns_native")
+        }) && arguments.len() == 1
+            && positional
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let source = self.expression(&arguments[0].value, Some(string))?;
+            let storage =
+                self.runtime_call("__sev_csv_columns", &[string], string, vec![source], span);
+            let result = self.instantiate_list_type(string);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        if callable
+            .as_deref()
+            .is_some_and(|name| name == "csv_rows_native" || name.ends_with(".csv_rows_native"))
+            && arguments.len() == 1
+            && positional
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let source = self.expression(&arguments[0].value, Some(string))?;
+            let storage =
+                self.runtime_call("__sev_csv_rows", &[string], string, vec![source], span);
+            let any = self.ensure_any_type();
+            let row = self.instantiate_list_type(any);
+            let result = self.instantiate_list_type(row);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        if callable.as_deref().is_some_and(|name| {
+            name == "json_columns_native" || name.ends_with(".json_columns_native")
+        }) && arguments.len() == 1
+            && positional
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let source = self.expression(&arguments[0].value, Some(string))?;
+            let storage =
+                self.runtime_call("__sev_json_columns", &[string], string, vec![source], span);
+            let result = self.instantiate_list_type(string);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
+        }
+        if callable
+            .as_deref()
+            .is_some_and(|name| name == "json_rows_native" || name.ends_with(".json_rows_native"))
+            && arguments.len() == 1
+            && positional
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let source = self.expression(&arguments[0].value, Some(string))?;
+            let storage =
+                self.runtime_call("__sev_json_rows", &[string], string, vec![source], span);
+            let any = self.ensure_any_type();
+            let row = self.instantiate_list_type(any);
+            let result = self.instantiate_list_type(row);
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Aggregate {
+                    class: result,
+                    fields: vec![storage],
+                },
+                span,
+            }));
         }
         if callable.as_deref() == Some("file.write") && arguments.len() == 2 && positional {
             let string = self
@@ -10289,53 +10414,16 @@ impl Analyzer<'_> {
                 span,
             )));
         }
-        if callable.as_deref() == Some("file.read") && positional {
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            if let [path] = arguments {
-                let json = self
-                    .constant_string_value(&path.value)
-                    .is_some_and(|path| path.ends_with(".json"));
-                let path = self.expression(&path.value, Some(string))?;
-                if json {
-                    let boolean = self
-                        .types
-                        .resolve_name("bool")
-                        .expect("bootstrap defines bool");
-                    let result = self.instantiate_map_type(string, boolean);
-                    let keys = self.runtime_call(
-                        "__sev_file_read_json_bool_keys",
-                        &[string],
-                        string,
-                        vec![path.clone()],
-                        span,
-                    );
-                    let values = self.runtime_call(
-                        "__sev_file_read_json_bool_values",
-                        &[string],
-                        string,
-                        vec![path],
-                        span,
-                    );
-                    return Ok(Some(Expression {
-                        id: self.next_id(),
-                        type_id: result,
-                        kind: ExpressionKind::Aggregate {
-                            class: result,
-                            fields: vec![keys, values],
-                        },
-                        span,
-                    }));
-                }
-                return Ok(None);
-            }
+        if callable.as_deref() == Some("file.read_bytes") && positional {
             if let [handle, count] = arguments {
                 let integer = self
                     .types
                     .resolve_name("int")
                     .expect("bootstrap defines int");
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
                 let data_size = self
                     .types
                     .resolve_name("data_size")
@@ -10619,6 +10707,131 @@ impl Analyzer<'_> {
         }
     }
 
+    fn static_namespace_implementation(
+        &self,
+        implementations: &[(String, severian_ast::FunctionDeclaration)],
+        arguments: &[AstExpression],
+    ) -> Option<usize> {
+        let mut selected = None;
+        for (index, (_, implementation)) in implementations.iter().enumerate() {
+            let values = implementation
+                .parameters
+                .iter()
+                .zip(arguments)
+                .filter_map(|(parameter, argument)| {
+                    self.constant_string_value(argument)
+                        .map(|value| (parameter.name.clone(), value))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let contracts = implementation
+                .contracts
+                .iter()
+                .filter(|contract| !contract.deferred)
+                .collect::<Vec<_>>();
+            let decision = if contracts.is_empty() {
+                Some(true)
+            } else {
+                contracts.iter().try_fold(true, |accepted, contract| {
+                    self.static_contract_boolean(&contract.condition, &values)
+                        .map(|value| accepted && value)
+                })
+            };
+            let decision = decision?;
+            if decision {
+                if selected.is_some() {
+                    return None;
+                }
+                selected = Some(index);
+            }
+        }
+        selected
+    }
+
+    fn static_contract_boolean(
+        &self,
+        expression: &AstExpression,
+        values: &BTreeMap<String, String>,
+    ) -> Option<bool> {
+        match &expression.kind {
+            AstExpressionKind::Literal(AstLiteral::Boolean(value)) => Some(*value),
+            AstExpressionKind::Unary {
+                operator: AstUnaryOperator::Not,
+                operand,
+            } => self
+                .static_contract_boolean(operand, values)
+                .map(|value| !value),
+            AstExpressionKind::Binary {
+                operator: AstBinaryOperator::And,
+                left,
+                right,
+            } => Some(
+                self.static_contract_boolean(left, values)?
+                    && self.static_contract_boolean(right, values)?,
+            ),
+            AstExpressionKind::Binary {
+                operator: AstBinaryOperator::Or,
+                left,
+                right,
+            } => Some(
+                self.static_contract_boolean(left, values)?
+                    || self.static_contract_boolean(right, values)?,
+            ),
+            AstExpressionKind::Binary {
+                operator: AstBinaryOperator::Equal,
+                left,
+                right,
+            } => Some(
+                self.static_contract_string(left, values)?
+                    == self.static_contract_string(right, values)?,
+            ),
+            AstExpressionKind::Binary {
+                operator: AstBinaryOperator::NotEqual,
+                left,
+                right,
+            } => Some(
+                self.static_contract_string(left, values)?
+                    != self.static_contract_string(right, values)?,
+            ),
+            AstExpressionKind::Binary {
+                operator: AstBinaryOperator::Contains,
+                left,
+                right,
+            } => Some(
+                self.static_contract_string(right, values)?
+                    .contains(&self.static_contract_string(left, values)?),
+            ),
+            AstExpressionKind::Call { callee, arguments } if arguments.len() == 1 => {
+                let AstExpressionKind::Member { object, name } = &callee.kind else {
+                    return None;
+                };
+                let target = self.static_contract_string(object, values)?;
+                let argument = self.static_contract_string(&arguments[0].value, values)?;
+                match name.as_str() {
+                    "ends_with" => Some(target.ends_with(&argument)),
+                    "starts_with" => Some(target.starts_with(&argument)),
+                    "contains" => Some(target.contains(&argument)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn static_contract_string(
+        &self,
+        expression: &AstExpression,
+        values: &BTreeMap<String, String>,
+    ) -> Option<String> {
+        match &expression.kind {
+            AstExpressionKind::Literal(AstLiteral::String(value)) => Some(value.clone()),
+            AstExpressionKind::Name(name) => values
+                .get(name)
+                .cloned()
+                .or_else(|| self.constant_string_value(expression)),
+            _ => self.constant_string_value(expression),
+        }
+    }
+
     fn constant_bound_string(
         &self,
         binding: BindingId,
@@ -10628,16 +10841,7 @@ impl Analyzer<'_> {
             return None;
         }
         let value = self.binding_values.get(&binding)?;
-        match &value.kind {
-            ExpressionKind::Literal(LiteralValue::String(value)) => Some(value.clone()),
-            ExpressionKind::Binding(binding) => self.constant_bound_string(*binding, visiting),
-            ExpressionKind::Borrow { operand, .. }
-            | ExpressionKind::Move(operand)
-            | ExpressionKind::Convert { operand, .. } => {
-                self.constant_expression_string(operand, visiting)
-            }
-            _ => None,
-        }
+        self.constant_expression_string(value, visiting)
     }
 
     fn constant_expression_string(
@@ -10653,6 +10857,15 @@ impl Analyzer<'_> {
             | ExpressionKind::Convert { operand, .. } => {
                 self.constant_expression_string(operand, visiting)
             }
+            ExpressionKind::Binary {
+                operator: BinaryOperator::Add,
+                left,
+                right,
+            } => Some(format!(
+                "{}{}",
+                self.constant_expression_string(left, visiting)?,
+                self.constant_expression_string(right, visiting)?
+            )),
             _ => None,
         }
     }
@@ -12988,14 +13201,6 @@ impl Analyzer<'_> {
         };
 
         let declaration = &namespace_method.declaration;
-        let result = self.resolve_source_type(&declaration.result)?;
-        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
-            return Err(semantic_error(
-                "namespace method result does not satisfy the expected type".into(),
-                span,
-            ));
-        }
-
         let mut ordered = vec![None; declaration.parameters.len()];
         let mut positional = 0usize;
         let mut named = false;
@@ -13040,6 +13245,18 @@ impl Analyzer<'_> {
                     Some(span),
                 )
             })?;
+        let static_implementation =
+            self.static_namespace_implementation(&namespace_method.implementations, &ordered);
+        let result_annotation = static_implementation
+            .map(|index| &namespace_method.implementations[index].1.result)
+            .unwrap_or(&declaration.result);
+        let result = self.resolve_source_type(result_annotation)?;
+        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+            return Err(semantic_error(
+                "namespace method result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
         let mut resolved_arguments = Vec::with_capacity(ordered.len());
         for (argument, parameter) in ordered.iter().zip(&declaration.parameters) {
             let parameter_type = self.resolve_source_type(&parameter.annotation)?;
@@ -13066,7 +13283,10 @@ impl Analyzer<'_> {
             .types
             .resolve_name("bool")
             .expect("bootstrap defines bool");
-        for (class_name, implementation) in namespace_method.implementations.iter().rev() {
+        let implementations = static_implementation
+            .map(|index| &namespace_method.implementations[index..=index])
+            .unwrap_or(namespace_method.implementations.as_slice());
+        for (class_name, implementation) in implementations.iter().rev() {
             let previous = self.value_substitutions.clone();
             let previous_suffix_resolution = self.allow_qualified_function_suffix;
             self.allow_qualified_function_suffix = true;
@@ -15320,7 +15540,9 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                             same_type_annotation(&required.annotation, &provided.annotation)
                         },
                     );
-                if !same_parameters || !same_type_annotation(&required.result, &provided.result) {
+                if !same_parameters
+                    || !implementation_result_satisfies(&required.result, &provided.result)
+                {
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -15510,6 +15732,18 @@ fn same_type_annotation(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
         }
         _ => false,
     }
+}
+
+fn implementation_result_satisfies(required: &TypeAnnotation, provided: &TypeAnnotation) -> bool {
+    if same_type_annotation(required, provided) {
+        return true;
+    }
+    let severian_ast::TypeAnnotationKind::Union(members) = &required.kind else {
+        return false;
+    };
+    members
+        .iter()
+        .any(|member| same_type_annotation(member, provided))
 }
 
 fn callable_path(expression: &AstExpression) -> Option<String> {
@@ -17671,6 +17905,24 @@ mod tests {
                 kind: ExpressionKind::Fallback { .. },
                 ..
             }))]
+        ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn literal_namespace_dispatch_narrows_a_covariant_union_result() {
+        let source = "trait Reader:\n    @reader\n    def read(path: string) -> string | int with { (path) -> bool }\nclass TextReader: Reader\n    def read(path: string) -> string with { path.ends_with(\".txt\") }:\n        return \"text\"\nclass NumberReader: Reader\n    def read(path: string) -> int with { path.ends_with(\".number\") }:\n        return 42\ndef selected() -> int:\n    return reader.read(\"answer.number\")\n";
+        let (program, context) = analyze_source(source);
+        let integer = context.types.resolve_name("int").unwrap();
+        let selected = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "selected")
+            .unwrap();
+        assert!(matches!(
+            selected.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Return(Some(Expression { type_id, .. }))]
+                if *type_id == integer
         ));
         severian_mir::build(&program).unwrap();
     }

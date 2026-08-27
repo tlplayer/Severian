@@ -10,3 +10,6 @@ sources = ["src/lib.sev"]
 
 [lib]
 path = "src/lib.sev"
+
+[dependencies]
+data = { path = "../../data", version = "0.1.0" }

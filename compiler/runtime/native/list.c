@@ -1331,6 +1331,16 @@ int64_t __sev_map_get_default_ptr_i64(
     return fallback;
 }
 
+const char *__sev_map_get_default_ptr_ptr(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    const char *fallback
+) {
+    const char *value = __sev_map_get_ptr_ptr(keys_storage, values_storage, key);
+    return value == NULL ? fallback : value;
+}
+
 int64_t __sev_map_set_default_ptr_i64(
     void *keys_storage,
     void *values_storage,

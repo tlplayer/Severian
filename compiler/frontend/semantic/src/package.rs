@@ -148,6 +148,37 @@ pub fn analyze_package_with_context(
     let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
     let package_classes = collect_package_classes(module_graph, &index);
     let package_lists = collect_package_lists(module_graph, &universal.types);
+    let registry_traits = module_graph
+        .modules
+        .iter()
+        .flat_map(|module| &module.ast.items)
+        .filter_map(|item| match item {
+            Item::Trait(declaration)
+                if !declaration.namespaces.is_empty()
+                    || declaration
+                        .methods
+                        .iter()
+                        .any(|method| !method.decorators.is_empty()) =>
+            {
+                Some(declaration.name.clone())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let registry_modules = module_graph
+        .modules
+        .iter()
+        .filter(|module| {
+            module.ast.items.iter().any(|item| {
+                matches!(item, Item::Class(class) if class.name == "Data" || class.traits.iter().any(|implemented| {
+                    implemented
+                        .simple_name()
+                        .is_some_and(|name| registry_traits.contains(name))
+                }))
+            })
+        })
+        .map(|module| module.id)
+        .collect::<BTreeSet<_>>();
     // Trait namespaces are extension registries. Their declarations and
     // implementations intentionally cross module/package boundaries, while
     // ordinary declarations remain scoped through the package index.
@@ -201,6 +232,11 @@ pub fn analyze_package_with_context(
             }
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
+        visible.extend(registry_function_bindings(
+            &registry_modules,
+            &index,
+            &specializations,
+        ));
         let package_constants = imported_constant_bindings(source_module.id, module_graph, &index);
         visible.extend(
             own_instances
@@ -890,6 +926,35 @@ fn imported_function_bindings(
         )
     });
     stubs
+}
+
+fn registry_function_bindings(
+    modules: &BTreeSet<ModuleId>,
+    index: &ProgramIndex,
+    specializations: &Specializations,
+) -> Vec<FunctionBinding> {
+    let mut bindings = Vec::new();
+    for module in modules {
+        let Some(scope) = index.modules.get(module) else {
+            continue;
+        };
+        for definition in &scope.items {
+            let Some(item) = index.definitions.get(definition) else {
+                continue;
+            };
+            let DefKind::Function(_) = &item.kind else {
+                continue;
+            };
+            for substitution in function_instances(*definition, index, specializations) {
+                bindings.push(FunctionBinding {
+                    lookup: format!("__sev_registry_{:032x}.{}", module.0, item.name),
+                    definition: *definition,
+                    substitution,
+                });
+            }
+        }
+    }
+    bindings
 }
 
 fn imported_constant_bindings(

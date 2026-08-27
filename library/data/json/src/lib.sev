@@ -1,7 +1,7 @@
-import data_format
+from data import Data
 import file
 
-class JsonFile: File
+class JsonFile: File + Data
     def read(path: string) -> string with { path.ends_with(".json") }:
         return file.raw(path)
 

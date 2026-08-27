@@ -85,8 +85,38 @@ pub fn resolve_with_packages_and_max_errors(
     packages: &PackageGraph,
     max_errors: usize,
 ) -> Result<ModuleGraph, Diagnostic> {
+    resolve_with_packages_and_additional_roots(root, packages, &[], max_errors)
+}
+
+/// Resolves the root program plus compiler-provided registry packages whose
+/// trait implementations must participate even when applications do not
+/// import their ordinary symbols.
+pub fn resolve_with_packages_and_additional_roots(
+    root: &Path,
+    packages: &PackageGraph,
+    additional_roots: &[(PathBuf, PackageId)],
+    max_errors: usize,
+) -> Result<ModuleGraph, Diagnostic> {
     let mut resolver = Resolver::new(packages, max_errors);
+    for (path, package) in additional_roots {
+        resolver.visit(path, *package)?;
+    }
     resolver.visit(root, packages.root)?;
+    let canonical_root = std::fs::canonicalize(root).map_err(|error| {
+        Diagnostic::new(
+            "E000001",
+            format!("could not read {}: {error}", root.display()),
+            None,
+        )
+    })?;
+    if let Some(position) = resolver
+        .order
+        .iter()
+        .position(|module| module.path == canonical_root)
+    {
+        let root = resolver.order.remove(position);
+        resolver.order.push(root);
+    }
     Ok(ModuleGraph {
         modules: resolver.order,
     })

@@ -21,6 +21,324 @@ void __sev_list_push_u8(void *storage, uint8_t value);
 uintptr_t __sev_list_len(void *storage);
 uint8_t __sev_list_index_u8(void *storage, int64_t index);
 
+typedef struct sev_csv_any {
+    int64_t tag;
+    int64_t payload;
+} sev_csv_any;
+
+typedef struct sev_csv_list {
+    void *storage;
+} sev_csv_list;
+
+void __sev_list_push_any(void *storage, sev_csv_any value);
+void __sev_list_push_list(void *storage, sev_csv_list value);
+void __sev_list_set_any(void *storage, int64_t index, sev_csv_any value);
+
+extern sev_csv_any __sev_any_from_string(const char *value);
+
+typedef struct {
+    char *bytes;
+    size_t length;
+    size_t capacity;
+} sev_csv_field;
+
+static void sev_csv_field_push(sev_csv_field *field, char value) {
+    if (field->length == field->capacity) {
+        size_t capacity = field->capacity == 0 ? 64 : field->capacity * 2;
+        if (capacity < field->capacity) abort();
+        char *bytes = realloc(field->bytes, capacity);
+        if (bytes == NULL) abort();
+        field->bytes = bytes;
+        field->capacity = capacity;
+    }
+    field->bytes[field->length++] = value;
+}
+
+static char *sev_csv_field_copy(const sev_csv_field *field, _Bool trim) {
+    size_t start = 0;
+    size_t end = field->length;
+    if (trim) {
+        while (start < end && (field->bytes[start] == ' ' || field->bytes[start] == '\t')) ++start;
+        while (end > start && (field->bytes[end - 1] == ' ' || field->bytes[end - 1] == '\t')) --end;
+    }
+    char *value = malloc(end - start + 1);
+    if (value == NULL) abort();
+    memcpy(value, field->bytes + start, end - start);
+    value[end - start] = '\0';
+    return value;
+}
+
+static void sev_csv_finish_field(
+    void *columns,
+    void *row,
+    sev_csv_field *field,
+    size_t record,
+    size_t *field_count
+) {
+    char *value = sev_csv_field_copy(field, record == 0);
+    if (record == 0) {
+        if (columns != NULL) __sev_list_push_ptr(columns, value);
+        else free(value);
+    } else {
+        __sev_list_push_any(row, __sev_any_from_string(value));
+    }
+    field->length = 0;
+    *field_count += 1;
+}
+
+static void *sev_csv_parse(const char *source, _Bool columns_only) {
+    void *result = __sev_list_create();
+    void *row = NULL;
+    sev_csv_field field = {0};
+    size_t record = 0;
+    size_t width = 0;
+    size_t field_count = 0;
+    _Bool quoted = 0;
+    _Bool record_started = 0;
+    const char *cursor = source == NULL ? "" : source;
+    for (;;) {
+        char character = *cursor;
+        if (character == '"') {
+            record_started = 1;
+            if (quoted && cursor[1] == '"') {
+                sev_csv_field_push(&field, '"');
+                cursor += 2;
+                continue;
+            }
+            quoted = !quoted;
+            ++cursor;
+            continue;
+        }
+        if (character == '\0' || (!quoted && (character == ',' || character == '\n'))) {
+            if (character == ',' || record_started || field.length > 0 || field_count > 0) {
+                if (record > 0 && row == NULL) row = __sev_list_create();
+                sev_csv_finish_field(
+                    columns_only ? result : NULL,
+                    row,
+                    &field,
+                    record,
+                    &field_count
+                );
+            }
+            if (character == ',') {
+                record_started = 1;
+                ++cursor;
+                continue;
+            }
+            if (field_count > 0) {
+                if (record == 0) {
+                    width = field_count;
+                    if (columns_only) {
+                        free(field.bytes);
+                        return result;
+                    }
+                } else {
+                    while (field_count < width) {
+                        __sev_list_push_any(row, __sev_any_from_string(strdup("")));
+                        ++field_count;
+                    }
+                    sev_csv_list list = {row};
+                    __sev_list_push_list(result, list);
+                }
+                ++record;
+            }
+            row = NULL;
+            field_count = 0;
+            record_started = 0;
+            if (character == '\0') break;
+            ++cursor;
+            continue;
+        }
+        if (!quoted && character == '\r' && cursor[1] == '\n') {
+            ++cursor;
+            continue;
+        }
+        record_started = 1;
+        sev_csv_field_push(&field, character);
+        ++cursor;
+    }
+    free(field.bytes);
+    return result;
+}
+
+void *__sev_csv_columns(const char *source) {
+    return sev_csv_parse(source, 1);
+}
+
+void *__sev_csv_rows(const char *source) {
+    return sev_csv_parse(source, 0);
+}
+
+typedef struct {
+    char **values;
+    size_t length;
+    size_t capacity;
+} sev_json_columns;
+
+static const char *sev_json_space(const char *cursor) {
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') ++cursor;
+    return cursor;
+}
+
+static char *sev_json_string(const char **position) {
+    const char *cursor = *position;
+    if (*cursor != '"') return strdup("");
+    ++cursor;
+    sev_csv_field field = {0};
+    while (*cursor != '\0' && *cursor != '"') {
+        char value = *cursor++;
+        if (value == '\\' && *cursor != '\0') {
+            char escaped = *cursor++;
+            switch (escaped) {
+                case 'n': value = '\n'; break;
+                case 'r': value = '\r'; break;
+                case 't': value = '\t'; break;
+                case 'b': value = '\b'; break;
+                case 'f': value = '\f'; break;
+                case '"': value = '"'; break;
+                case '\\': value = '\\'; break;
+                case '/': value = '/'; break;
+                default: value = escaped; break;
+            }
+        }
+        sev_csv_field_push(&field, value);
+    }
+    if (*cursor == '"') ++cursor;
+    *position = cursor;
+    char *result = sev_csv_field_copy(&field, 0);
+    free(field.bytes);
+    return result;
+}
+
+static char *sev_json_value(const char **position) {
+    const char *cursor = sev_json_space(*position);
+    if (*cursor == '"') {
+        char *value = sev_json_string(&cursor);
+        *position = cursor;
+        return value;
+    }
+    const char *start = cursor;
+    int depth = 0;
+    _Bool quoted = 0;
+    while (*cursor != '\0') {
+        if (*cursor == '"' && (cursor == start || cursor[-1] != '\\')) quoted = !quoted;
+        if (!quoted) {
+            if (*cursor == '{' || *cursor == '[') ++depth;
+            if (*cursor == '}' || *cursor == ']') {
+                if (depth == 0) break;
+                --depth;
+            }
+            if (depth == 0 && *cursor == ',') break;
+        }
+        ++cursor;
+    }
+    const char *end = cursor;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) --end;
+    char *value;
+    if ((size_t)(end - start) == 4 && memcmp(start, "null", 4) == 0) {
+        value = strdup("");
+    } else {
+        value = malloc((size_t)(end - start) + 1);
+        if (value == NULL) abort();
+        memcpy(value, start, (size_t)(end - start));
+        value[end - start] = '\0';
+    }
+    *position = cursor;
+    return value;
+}
+
+static size_t sev_json_column(sev_json_columns *columns, const char *key, _Bool insert) {
+    for (size_t index = 0; index < columns->length; ++index) {
+        if (strcmp(columns->values[index], key) == 0) return index;
+    }
+    if (!insert) return SIZE_MAX;
+    if (columns->length == columns->capacity) {
+        size_t capacity = columns->capacity == 0 ? 16 : columns->capacity * 2;
+        char **values = realloc(columns->values, capacity * sizeof(char *));
+        if (values == NULL) abort();
+        columns->values = values;
+        columns->capacity = capacity;
+    }
+    columns->values[columns->length] = strdup(key);
+    if (columns->values[columns->length] == NULL) abort();
+    return columns->length++;
+}
+
+static const char *sev_json_object(
+    const char *cursor,
+    sev_json_columns *columns,
+    void *row,
+    _Bool collect_columns
+) {
+    if (*cursor != '{') return cursor;
+    ++cursor;
+    for (;;) {
+        cursor = sev_json_space(cursor);
+        if (*cursor == '}' || *cursor == '\0') return *cursor == '}' ? cursor + 1 : cursor;
+        if (*cursor != '"') {
+            ++cursor;
+            continue;
+        }
+        char *key = sev_json_string(&cursor);
+        cursor = sev_json_space(cursor);
+        if (*cursor == ':') ++cursor;
+        char *value = sev_json_value(&cursor);
+        size_t column = sev_json_column(columns, key, collect_columns);
+        if (row != NULL && column != SIZE_MAX) {
+            __sev_list_set_any(row, (int64_t)column, __sev_any_from_string(value));
+        } else {
+            free(value);
+        }
+        free(key);
+        cursor = sev_json_space(cursor);
+        if (*cursor == ',') ++cursor;
+    }
+}
+
+static sev_json_columns sev_json_schema(const char *source) {
+    sev_json_columns columns = {0};
+    const char *cursor = source == NULL ? "" : source;
+    while (*cursor != '\0') {
+        cursor = sev_json_space(cursor);
+        if (*cursor == '{') cursor = sev_json_object(cursor, &columns, NULL, 1);
+        else ++cursor;
+    }
+    return columns;
+}
+
+void *__sev_json_columns(const char *source) {
+    sev_json_columns columns = sev_json_schema(source);
+    void *result = __sev_list_create();
+    for (size_t index = 0; index < columns.length; ++index) {
+        __sev_list_push_ptr(result, columns.values[index]);
+    }
+    free(columns.values);
+    return result;
+}
+
+void *__sev_json_rows(const char *source) {
+    sev_json_columns columns = sev_json_schema(source);
+    void *result = __sev_list_create();
+    const char *cursor = source == NULL ? "" : source;
+    while (*cursor != '\0') {
+        cursor = sev_json_space(cursor);
+        if (*cursor != '{') {
+            ++cursor;
+            continue;
+        }
+        void *row = __sev_list_create();
+        for (size_t index = 0; index < columns.length; ++index) {
+            __sev_list_push_any(row, __sev_any_from_string(strdup("")));
+        }
+        cursor = sev_json_object(cursor, &columns, row, 0);
+        sev_csv_list list = {row};
+        __sev_list_push_list(result, list);
+    }
+    for (size_t index = 0; index < columns.length; ++index) free(columns.values[index]);
+    free(columns.values);
+    return result;
+}
+
 static const char *sev_copy_text(char *output, const char *start, size_t length) {
     if (length >= SEV_PATH_CAPACITY) length = SEV_PATH_CAPACITY - 1;
     memcpy(output, start, length);

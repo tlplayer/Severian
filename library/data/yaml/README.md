@@ -1,4 +1,4 @@
 # YAML
 
-`yaml` owns YAML documents. `file.read("data.yaml")` delegates through a reader
-adapter and returns this package's `YAML` type.
+`yaml` owns YAML documents. `file.read("data.yaml")` delegates through its
+reader adapter and returns the shared `data.Data` table.

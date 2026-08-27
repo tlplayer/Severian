@@ -1,14 +1,13 @@
 # Data
 
 `data` is Severian's format-independent table layer. CSV, JSON, and YAML
-documents implement the shared `data_format.Data` contract (`text`, `columns`,
-and `values`) and can be adapted to the same relational table API:
+documents implement `data.DataSource` (`text`, `columns`, and `values`). Path
+reads return the common `data.Data` table directly:
 
 ```sev
-import data
-import csv
+import file
 
-dialogs := data.table(csv.read("dialogs.csv"))
+dialogs := file.read("dialogs.csv")
     .where_not_empty("text")
     .unique(["npc_name", "text"])
     .lower("dialog_type")
@@ -34,11 +33,17 @@ merged = table.group_merge(
 The merge callback receives the complete `Data` group and returns one `Row`,
 so aggregation policy remains application-defined.
 
-The source document continues to own parsing, quoting, encoding, paths, and
-writes. `Data` owns rows, columns, schema inference, projection,
+The source document continues to own parsing, quoting, and encoding. `Data`
+owns rows, columns, schema inference, projection,
 transformation, filtering, ordering, grouping, deduplication, lazy plans, and
-SQL-style queries. New formats implement `data_format.Data` to expose the same
-tabular contract.
+SQL-style queries. New formats implement `data.DataSource` and adapt path reads
+to `data.Data`; the core never imports a codec.
+
+Numeric columns can move directly into model code:
+
+```sev
+features = file.read("npcs.csv").tensor(["id", "level"])
+```
 
 ## Query expressions
 

@@ -1,22 +1,18 @@
-import csv
-import json
-import yaml
+from data import Data
 
 trait File:
     @file
-    def read(path: string) -> string with { (path) -> bool }
+    def read(path: string) -> string | Data with { (path) -> bool }
 
 class TextFile: File
     def read(path: string) -> string with { path.ends_with(".txt") }:
-        return file.raw(path)
+        return file.read_text(path)
 
 @c(symbol = "__sev_file_write_text")
 def write(path: string, contents: string) -> i32
 
 def write(path: string, contents: list[u8]) -> i32
 
-@c(symbol = "__sev_file_read_text")
-def read(path: string) -> string
 
 # The untyped storage boundary used by format packages and File dispatch
 # implementations. Applications should normally call `file.read`.

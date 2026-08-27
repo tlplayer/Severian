@@ -1,11 +1,14 @@
-import data_format
+import data
+from data import Data
 import file
+import tensor
+import os
 
 class CsvFile: File
-    def read(path: string) -> string with { path.ends_with(".csv") }:
-        return file.raw(path)
+    def read(path: string) -> Data with { path.ends_with(".csv") }:
+        return csv_data_from_text(file.read_text(path))
 
-class Document: data_format.Data
+class Document: data.DataSource
     source: string
     columns_data: list[string]
     rows_data: list[list[Any]]
@@ -19,70 +22,22 @@ class Document: data_format.Data
     def values() -> list[list[Any]]:
         return rows_data
 
-def append_record(
-    fields: list[string],
-    columns: list[string],
-    rows: list[list[Any]],
-):
-    if size(columns) == 0:
-        for field in fields:
-            columns.append(field.strip())
-        return
-    values: list[Any] := []
-    for field in fields:
-        values.append(field)
-    while size(values) < size(columns):
-        values.append("")
-    rows.append(values)
+def csv_columns_native(source: string) -> list[string]
+
+def csv_rows_native(source: string) -> list[list[Any]]
 
 def decode(source: string) -> Document:
-    columns: list[string] := []
-    rows: list[list[Any]] := []
-    fields: list[string] := []
-    field := ""
-    quoted := false
-    lines = source.split("\n")
-    for line_index, line in enumerate(lines):
-        cursor := 0
-        while cursor < size(line):
-            character = line[cursor:cursor + 1]
-            if character == "\"":
-                if quoted and cursor + 1 < size(line) and line[cursor + 1:cursor + 2] == "\"":
-                    field += "\""
-                    cursor += 2
-                    continue
-                quoted = not quoted
-                cursor += 1
-                continue
-            if not quoted and character == ",":
-                fields.append(field)
-                field = ""
-                cursor += 1
-                continue
-            if not quoted and character == "\r" and cursor + 1 == int(size(line)):
-                cursor += 1
-                continue
-            field += character
-            cursor += 1
-        if quoted:
-            field += "\n"
-            continue
-        if line_index + 1 == int(size(lines)) and size(field) == 0 and size(fields) == 0:
-            continue
-        fields.append(field)
-        append_record(fields, columns, rows)
-        fields = []
-        field = ""
-    if quoted and (size(field) > 0 or size(fields) > 0):
-        fields.append(field)
-        append_record(fields, columns, rows)
-    return Document(source, columns, rows)
+    return Document(source, csv_columns_native(source), csv_rows_native(source))
 
 def encode(document: Document) -> string:
     return document.text()
 
-def read(path: string) -> Document:
-    return decode(file.raw(path))
+def csv_data_from_text(source: string) -> Data:
+    document = decode(source)
+    return Data(document.columns(), document.values())
+
+def read(path: string) -> Data:
+    return csv_data_from_text(file.read_text(path))
 
 test "CSV documents retain their source representation":
     document = decode("name,value,note\nseverian,1,\"hello, world\"\ncompiler,2,\"two \"\"quotes\"\"\"")
@@ -92,3 +47,14 @@ test "CSV documents retain their source representation":
     assert(document.values()[0][0] == "severian")
     assert(document.values()[0][2] == "hello, world")
     assert(document.values()[1][2] == "two \"quotes\"")
+
+test with integ "CSV file dispatch exposes dataframe and tensor operations":
+    path = "/tmp/severian-data-dispatch.csv"
+    file.write(path, "id,level,name\n1,10,Ada\n2,20,Grace\n")
+    table = file.read(path)
+    assert(table.columns() == ["id", "level", "name"])
+    assert(table.where_not_empty("name").row_count() == 2)
+    values = table.tensor(["id", "level"])
+    assert(tensor.shape(values) == [2, 2])
+    assert(tensor.values(values) == [1.0, 10.0, 2.0, 20.0])
+    os.remove(path)

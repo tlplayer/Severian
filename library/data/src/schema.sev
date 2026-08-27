@@ -1,11 +1,11 @@
-import json
+def any_kind(value: Any) -> string
 
 def inferred_types(rows: list[list[Any]], width: int) -> list[string]:
     result: list[string] := []
     for position in range(width):
         kind := "null"
         for values in rows:
-            value_kind = json.kind(values[position]) if position < size(values) else "null"
+            value_kind = any_kind(values[position]) if position < size(values) else "null"
             if value_kind != "null":
                 if kind == "null":
                     kind = value_kind
@@ -20,7 +20,7 @@ def inferred_nullability(rows: list[list[Any]], width: int) -> list[bool]:
     for position in range(width):
         nullable := false
         for values in rows:
-            if position >= size(values) or json.kind(values[position]) == "null":
+            if position >= size(values) or any_kind(values[position]) == "null":
                 nullable = true
         result.append(nullable)
     return result

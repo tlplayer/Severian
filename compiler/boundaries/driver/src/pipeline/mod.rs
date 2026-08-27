@@ -832,8 +832,51 @@ impl Compiler {
         source: &Path,
     ) -> Result<severian_modules::ModuleGraph, CompileError> {
         let packages = self.standard_package_graph(source)?;
-        severian_modules::resolve_with_packages_and_max_errors(source, &packages, self.max_errors)
-            .map_err(CompileError::Diagnostic)
+        let initial = severian_modules::resolve_with_packages_and_max_errors(
+            source,
+            &packages,
+            self.max_errors,
+        )
+        .map_err(CompileError::Diagnostic)?;
+        let imports_file = initial.modules.iter().any(|module| {
+            module.ast.items.iter().any(|item| {
+                let severian_ast::Item::Import(import) = item else {
+                    return false;
+                };
+                import.source.as_deref() == Some("file")
+                    || (import.source.is_none()
+                        && matches!(&import.subject, severian_ast::ImportSubject::Name(name) if name == "file"))
+            })
+        });
+        if !imports_file {
+            return Ok(initial);
+        }
+        let root = packages
+            .packages
+            .get(&packages.root)
+            .expect("a package graph contains its root");
+        let registry_roots = if ["data", "file", "csv", "json", "yaml"]
+            .iter()
+            .all(|name| root.dependencies.contains_key(*name))
+        {
+            ["csv", "json", "yaml"]
+                .iter()
+                .filter_map(|name| root.dependencies.get(*name))
+                .map(|id| {
+                    let package = &packages.packages[id];
+                    (package.library.clone(), package.id)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        severian_modules::resolve_with_packages_and_additional_roots(
+            source,
+            &packages,
+            &registry_roots,
+            self.max_errors,
+        )
+        .map_err(CompileError::Diagnostic)
     }
 
     fn standard_package_graph(
@@ -860,7 +903,7 @@ impl Compiler {
             ("abi", library.join("interop/abi")),
             ("cli", library.join("system/cli")),
             ("csv", library.join("data/csv")),
-            ("data_format", library.join("data/format")),
+            ("data", library.join("data")),
             ("device", library.join("system/device")),
             ("driver", library.join("system/driver")),
             ("environment", library.join("system/environment")),
@@ -1794,6 +1837,7 @@ mod tests {
         let graph = compiler.standard_package_graph(&source).unwrap();
         let dependencies = &graph.packages[&graph.root].dependencies;
         for package in [
+            "data",
             "environment",
             "file",
             "io",

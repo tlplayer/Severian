@@ -1,4 +1,0 @@
-trait Data:
-    def text() -> string
-    def columns() -> list[string]
-    def values() -> list[list[Any]]

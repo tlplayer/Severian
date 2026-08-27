@@ -1,8 +1,5 @@
 import platform
-import csv
-import json
-import yaml
-import data_format
+import tensor
 import "expression.sev" as expression
 import "query.sev" as query
 import "schema.sev" as schema_logic
@@ -69,21 +66,21 @@ def values_for(columns: list[string], row: Row) -> list[Any]:
     return values
 
 def normalized_key(row: Row, columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> string:
-    values: list[Any] := []
+    values: list[string] := []
     for column in columns:
         value := row.get(column)
         if trim_strings:
             value = string(value).strip()
         if column in lowercase_columns:
             value = string(value).lower()
-        values.append(value)
-    return json.encode(values)
+        values.append(string(value).replace("\\", "\\\\").replace("|", "\\|"))
+    return values.join("|")
 
 def callback_key(row: Row, columns: list[string], normalize: (string, Any) -> Any) -> string:
-    values: list[Any] := []
+    values: list[string] := []
     for column in columns:
-        values.append(normalize(column, row.get(column)))
-    return json.encode(values)
+        values.append(string(normalize(column, row.get(column))).replace("\\", "\\\\").replace("|", "\\|"))
+    return values.join("|")
 
 def project_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> Data:
     selected: list[list[Any]] := []
@@ -321,6 +318,25 @@ def visible_records(columns: list[string], rows: list[list[Any]], steps: list[qu
         records.append(values)
     return records
 
+def first_row_map(columns: list[string], rows: list[list[Any]], steps: list[query.Step]) -> map[string, Any]:
+    visible = visible_rows(columns, rows, steps)
+    return visible[0].as_map() if size(visible) > 0 else {}
+
+def tensor_data(
+    columns: list[string],
+    rows: list[list[Any]],
+    steps: list[query.Step],
+    selected_columns: list[string],
+) -> tensor.Tensor[f64]:
+    selected = selected_columns if size(selected_columns) > 0 else visible_columns(columns, rows, steps)
+    assert(size(selected) > 0, "Data.tensor requires at least one column")
+    materialized = project_records(columns, visible_values(columns, rows, steps), selected)
+    flattened: list[float] := []
+    for row in materialized.rows():
+        for column in selected:
+            flattened.append(float(string(row.get(column))))
+    return tensor.tensor(flattened, [materialized.row_count(), int(size(selected))])
+
 def required_data(source_columns: list[string], source_rows: list[list[Any]], required: list[string]) -> Data:
     columns: list[string] := []
     for column in required:
@@ -410,7 +426,12 @@ def sql_data(columns: list[string], rows: list[list[Any]], steps: list[query.Ste
         result = limited_data(result.columns_data, result.rows_data, result.query_steps, result.source_name, parsed.limit_count)
     return result
 
-class Data: data_format.Data
+trait DataSource:
+    def text() -> string
+    def columns() -> list[string]
+    def values() -> list[list[Any]]
+
+class Data: DataSource
     columns_data: list[string]
     rows_data: list[list[Any]]
     query_steps: list[query.Step]
@@ -573,30 +594,17 @@ class Data: data_format.Data
     def sql(statement: string) -> Data:
         return sql_data(columns_data, rows_data, query_steps, source_name, statement)
 
-def table(source: csv.Document) -> Data:
-    return Data(source.columns(), source.values())
+    def as_map() -> map[string, Any]:
+        return first_row_map(columns_data, rows_data, query_steps)
 
-def table(source: json.Document) -> Data:
-    return Data(source.columns(), source.values())
+    def tensor(columns: list[string] = []) -> tensor.Tensor[f64]:
+        return tensor_data(columns_data, rows_data, query_steps, columns)
 
-def table(source: yaml.Document) -> Data:
-    return Data(source.columns(), source.values())
+def table(source: Data) -> Data:
+    return source
 
 def example_data() -> Data:
     return Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
-
-def join_notes(group: Data) -> Row:
-    first = group.rows()[0]
-    return Row(group.columns(), [first.get("name"), group.get("note").join(" ")])
-
-test "CSV, JSON, and YAML documents share one tabular adapter":
-    csv_table = table(csv.decode("name,kind\nAda,NPC"))
-    json_table = table(json.decode("[{\"name\": \"Grace\", \"kind\": \"NPC\"}]"))
-    yaml_table = table(yaml.decode("human:\n- Ada"))
-    assert(csv_table.columns() == ["name", "kind"])
-    assert(csv_table.lower("kind").get("kind") == ["npc"])
-    assert(json_table.get("name") == ["Grace"])
-    assert(yaml_table.records() == [["key", "value"], ["human", "Ada"]])
 
 test "Data provides schema projection, filtering, transforms, and uniqueness":
     constructed := Data(["name"], [["Ada"], ["Grace"]])

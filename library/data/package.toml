@@ -8,11 +8,8 @@ description = "Format-independent tabular data and relational operations"
 path = "src/lib.sev"
 
 [dependencies]
-data_format = { path = "format", version = "0.1.0" }
-csv = { path = "csv", version = "0.1.0" }
-json = { path = "json", version = "0.1.0" }
-yaml = { path = "yaml", version = "0.1.0" }
 platform = { path = "../system/platform", version = "0.1.0" }
+tensor = { path = "../tensor", version = "0.1.0" }
 
 [package.metadata.library]
 category = "data"
