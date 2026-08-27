@@ -48,12 +48,18 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
                                     severian_hir::TraitType::Concrete(ty) => {
                                         crate::TraitType::Concrete(*ty)
                                     }
+                                    severian_hir::TraitType::Symbolic(name) => {
+                                        crate::TraitType::Symbolic(name.clone())
+                                    }
                                 })
                                 .collect(),
-                            result: match method.result {
+                            result: match &method.result {
                                 severian_hir::TraitType::SelfType => crate::TraitType::SelfType,
                                 severian_hir::TraitType::Concrete(ty) => {
-                                    crate::TraitType::Concrete(ty)
+                                    crate::TraitType::Concrete(*ty)
+                                }
+                                severian_hir::TraitType::Symbolic(name) => {
+                                    crate::TraitType::Symbolic(name.clone())
                                 }
                             },
                         })

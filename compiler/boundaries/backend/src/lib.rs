@@ -99,7 +99,7 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
             .map(|result| value_type(module, result))
             .transpose()?;
         if let Some(known) =
-            runtime_signatures.insert(symbol.clone(), (inputs.clone(), output_type))
+            runtime_signatures.insert(symbol.clone(), (inputs.clone(), output_type.clone()))
         {
             if known != (inputs, output_type) {
                 return Err(BackendError::UnsupportedOperation(format!(
@@ -151,7 +151,7 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
         };
         output.push_str(&format!(
             "{prefix}{} {name}({});\n",
-            c_return_type(function.result)?,
+            c_return_type(function.result.clone())?,
             if parameters.is_empty() {
                 "void"
             } else {
@@ -182,7 +182,7 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
             .join(", ");
         output.push_str(&format!(
             "static {} {}({}) {{\n",
-            c_return_type(function.result)?,
+            c_return_type(function.result.clone())?,
             function_name(function),
             if parameters.is_empty() {
                 "void"
@@ -497,7 +497,7 @@ fn value_type(module: &LoweredModule, id: ValueId) -> Result<LoweredType, Backen
         .values
         .get(id.0 as usize)
         .filter(|value| value.id == id)
-        .map(|value| value.ty)
+        .map(|value| value.ty.clone())
         .ok_or(BackendError::InvalidValue(id))
 }
 
@@ -559,7 +559,7 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
 }
 
 fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> {
-    match (value, ty) {
+    match (value, ty.clone()) {
         (Constant::Integer(spelling), LoweredType::Integer { bits, signed }) => {
             c_integer_literal(spelling, bits, signed)
         }
@@ -719,15 +719,21 @@ pub fn emit_mlir_executable_with_linker_arguments(
         ]);
     }
     lowering_arguments.extend([
+        "--one-shot-bufferize=bufferize-function-boundaries".to_owned(),
+        "--convert-linalg-to-loops".to_owned(),
+        "--lower-affine".to_owned(),
+        "--expand-strided-metadata".to_owned(),
         "--async-to-async-runtime".to_owned(),
         "--async-runtime-ref-counting".to_owned(),
         "--async-runtime-ref-counting-opt".to_owned(),
         "--convert-async-to-llvm".to_owned(),
         "--convert-scf-to-cf".to_owned(),
+        "--convert-index-to-llvm".to_owned(),
         "--convert-math-to-llvm".to_owned(),
         "--convert-arith-to-llvm".to_owned(),
         "--convert-cf-to-llvm".to_owned(),
         "--convert-func-to-llvm".to_owned(),
+        "--finalize-memref-to-llvm".to_owned(),
         "--reconcile-unrealized-casts".to_owned(),
     ]);
     let lowering_arguments = lowering_arguments

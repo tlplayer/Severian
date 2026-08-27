@@ -2414,7 +2414,7 @@ impl Parser<'_> {
                         span: annotation.span,
                     },
                     Some(
-                        "float" | "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128",
+                        "float" | "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128",
                     ) => Expression {
                         kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
                         span: annotation.span,

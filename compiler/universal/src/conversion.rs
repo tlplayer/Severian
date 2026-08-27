@@ -361,7 +361,9 @@ mod tests {
             .map(|definition| definition.id)
             .collect::<Vec<_>>();
 
-        assert_eq!(numeric.len(), 21);
+        // Includes f80: adding a primitive width must extend the shared
+        // scalar conversion matrix without requiring tensor-specific logic.
+        assert_eq!(numeric.len(), 22);
         for source in &numeric {
             for target in &numeric {
                 assert!(

@@ -2,14 +2,15 @@
 
 use severian_lir::{
     BinaryOperation, Block as LirBlock, Constant, Function as LirFunction, FunctionId,
-    FunctionLinkage, LoweredFloatFormat, LoweredType, Module as LirModule,
-    Operation as LirOperation, UnaryOperation, Value, ValueId,
+    FunctionLinkage, LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement,
+    LoweredTensorShape, LoweredType, Module as LirModule, Operation as LirOperation,
+    UnaryOperation, Value, ValueId,
 };
 use severian_mir::Module as MirModule;
 use severian_target::TargetSpec;
 use severian_universal::{
-    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TypeContext,
-    TypeId, UnaryOperator,
+    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation,
+    TensorDimension, TensorShape, TypeContext, TypeId, UnaryOperator,
 };
 use std::{collections::BTreeSet, fmt};
 
@@ -119,16 +120,22 @@ mod cfg_lowering_entry {
                                         severian_mir::TraitType::Concrete(ty) => context
                                             .lower_mir_type(*ty)
                                             .map(severian_lir::TraitType::Concrete),
+                                        severian_mir::TraitType::Symbolic(name) => Ok(
+                                            severian_lir::TraitType::Symbolic(name.clone()),
+                                        ),
                                     })
                                     .collect::<Result<Vec<_>, LoweringError>>()?,
-                                result: match method.result {
+                                result: match &method.result {
                                     severian_mir::TraitType::SelfType => {
                                         severian_lir::TraitType::SelfType
                                     }
                                     severian_mir::TraitType::Concrete(ty) => {
                                         severian_lir::TraitType::Concrete(
-                                            context.lower_mir_type(ty)?,
+                                            context.lower_mir_type(*ty)?,
                                         )
+                                    }
+                                    severian_mir::TraitType::Symbolic(name) => {
+                                        severian_lir::TraitType::Symbolic(name.clone())
                                     }
                                 },
                             })
@@ -460,7 +467,7 @@ impl CfgLowering<'_> {
                         | BinaryOperator::Greater
                         | BinaryOperator::GreaterEqual => {
                             let comparison_type = self.lower_type_named("i32")?;
-                            let comparison = self.new_value(comparison_type);
+                            let comparison = self.new_value(comparison_type.clone());
                             let zero = self.new_value(comparison_type);
                             operations.push(LirOperation::RuntimeCall {
                                 symbol: "__sev_string_compare".into(),
@@ -880,13 +887,8 @@ impl CfgLowering<'_> {
         if severian_universal::is_raw_pointer_type(type_id) {
             return Ok(LoweredType::Bytes);
         }
-        if self
-            .mir
-            .classes
-            .iter()
-            .any(|class| class.id == type_id && class.name.starts_with("Tensor["))
-        {
-            return Ok(LoweredType::Bytes);
+        if let Some(tensor) = self.types.tensor(type_id) {
+            return lower_tensor_type(&tensor, self.types, self.target);
         }
         if let Some(id) = self
             .mir
@@ -915,7 +917,7 @@ impl CfgLowering<'_> {
     }
 
     fn value_type(&self, value: ValueId) -> LoweredType {
-        self.values[value.0 as usize].ty
+        self.values[value.0 as usize].ty.clone()
     }
 }
 
@@ -1277,6 +1279,33 @@ fn lower_type(
     })
 }
 
+fn lower_tensor_type(
+    tensor: &severian_universal::TensorType,
+    types: &TypeContext,
+    target: &TargetSpec,
+) -> Result<LoweredType, LoweringError> {
+    let scalar = lower_type(tensor.element, types, target)?;
+    let element = match scalar {
+        LoweredType::Integer { bits, signed } => LoweredTensorElement::Integer { bits, signed },
+        LoweredType::Float { format } => LoweredTensorElement::Float { format },
+        LoweredType::Boolean => LoweredTensorElement::Boolean,
+        _ => return Err(LoweringError::NotPrimitive(tensor.element)),
+    };
+    let shape = match &tensor.shape {
+        TensorShape::Unranked => LoweredTensorShape::Unranked,
+        TensorShape::Ranked(dimensions) => LoweredTensorShape::Ranked(
+            dimensions
+                .iter()
+                .map(|dimension| match dimension {
+                    TensorDimension::Dynamic => LoweredTensorDimension::Dynamic,
+                    TensorDimension::Known(value) => LoweredTensorDimension::Known(*value),
+                })
+                .collect(),
+        ),
+    };
+    Ok(LoweredType::Tensor { element, shape })
+}
+
 #[cfg(test)]
 mod cfg_tests {
     use super::*;
@@ -1517,16 +1546,22 @@ mod legacy_structured_lowering {
                                                 lower_type(*ty, types, target)
                                                     .map(severian_lir::TraitType::Concrete)
                                             }
+                                            severian_mir::TraitType::Symbolic(name) => Ok(
+                                                severian_lir::TraitType::Symbolic(name.clone()),
+                                            ),
                                         })
                                         .collect::<Result<Vec<_>, _>>()?,
-                                    result: match method.result {
+                                    result: match &method.result {
                                         severian_mir::TraitType::SelfType => {
                                             severian_lir::TraitType::SelfType
                                         }
                                         severian_mir::TraitType::Concrete(ty) => {
                                             severian_lir::TraitType::Concrete(lower_type(
-                                                ty, types, target,
+                                                *ty, types, target,
                                             )?)
+                                        }
+                                        severian_mir::TraitType::Symbolic(name) => {
+                                            severian_lir::TraitType::Symbolic(name.clone())
                                         }
                                     },
                                 })
@@ -1846,12 +1881,8 @@ mod legacy_structured_lowering {
         types: &TypeContext,
         target: &TargetSpec,
     ) -> Result<LoweredType, LoweringError> {
-        if module
-            .classes
-            .iter()
-            .any(|class| class.id == type_id && class.name.starts_with("Tensor["))
-        {
-            Ok(LoweredType::Bytes)
+        if let Some(tensor) = types.tensor(type_id) {
+            lower_tensor_type(&tensor, types, target)
         } else if let Some(id) = module.classes.iter().position(|class| class.id == type_id) {
             Ok(LoweredType::Aggregate(id as u32))
         } else {

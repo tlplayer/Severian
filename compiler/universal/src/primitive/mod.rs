@@ -239,6 +239,12 @@ pub const PRIMITIVES: &[PrimitiveSpec] = &[
         default_literal: false,
     },
     PrimitiveSpec {
+        name: "f80",
+        category: PrimitiveCategory::Float,
+        representation: ieee_float(80),
+        default_literal: false,
+    },
+    PrimitiveSpec {
         name: "f128",
         category: PrimitiveCategory::Float,
         representation: ieee_float(128),

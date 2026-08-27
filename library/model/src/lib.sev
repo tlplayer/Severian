@@ -191,47 +191,47 @@ def linear[T](input: tensor.Tensor[T], weights: tensor.Tensor[T]) -> tensor.Tens
 
 # A model module owns composition and parameter semantics. Tensor owns only
 # typed values, shapes, devices, and compiler-lowered numeric operations.
-trait F32Module:
-    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]
+trait Module[T]:
+    def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]
 
-class Linear: F32Module
-    weights: tensor.Tensor[f32]
+class Linear[T]: Module[T]
+    weights: tensor.Tensor[T]
 
-    def Linear(initial_weights: tensor.Tensor[f32]):
+    def Linear(initial_weights: tensor.Tensor[T]):
         weights := initial_weights
 
-    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]:
         return tensor.matmul(input, tensor.transpose(weights))
 
-class Affine: F32Module
-    weights: tensor.Tensor[f32]
-    bias: tensor.Tensor[f32]
+class Affine[T]: Module[T]
+    weights: tensor.Tensor[T]
+    bias: tensor.Tensor[T]
 
-    def Affine(initial_weights: tensor.Tensor[f32], initial_bias: tensor.Tensor[f32]):
+    def Affine(initial_weights: tensor.Tensor[T], initial_bias: tensor.Tensor[T]):
         weights := initial_weights
         bias := initial_bias
 
-    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]:
         return tensor.add(tensor.matmul(input, tensor.transpose(weights)), bias)
 
-class Embedding:
-    weights: tensor.Tensor[f32]
+class Embedding[T]:
+    weights: tensor.Tensor[T]
 
-    def Embedding(initial_weights: tensor.Tensor[f32]):
+    def Embedding(initial_weights: tensor.Tensor[T]):
         weights := initial_weights
 
-    def forward(indices: tensor.Tensor[i64]) -> tensor.Tensor[f32]:
+    def forward(indices: tensor.Tensor[i64]) -> tensor.Tensor[T]:
         return tensor.gather(weights, indices)
 
-class RmsNorm: F32Module
-    weights: tensor.Tensor[f32]
+class RmsNorm[T]: Module[T]
+    weights: tensor.Tensor[T]
     epsilon: f32
 
-    def RmsNorm(initial_weights: tensor.Tensor[f32], initial_epsilon: f32 = f32(0.000001)):
+    def RmsNorm(initial_weights: tensor.Tensor[T], initial_epsilon: f32 = f32(0.000001)):
         weights := initial_weights
         epsilon := initial_epsilon
 
-    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
+    def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]:
         return tensor.multiply(
             tensor.multiply(
                 copy input,
@@ -352,21 +352,25 @@ def omnivoice_unmask_schedule(
     assert(remaining == 0)
     return schedule
 
-def linear_f32(parameters: borrow StateDict, name: string, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
-    weights: tensor.Tensor[f32] = parameters.f32(name + ".weight")
+def parameter_like[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    return tensor.convert_like(parameters.f32(name), like)
+
+def linear[T](parameters: borrow StateDict, name: string, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    weights = parameter_like(borrow parameters, name + ".weight", copy input)
     return tensor.matmul(input, tensor.transpose(weights))
 
-def rms_norm_f32(parameters: borrow StateDict, name: string, epsilon: f32, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
-    return RmsNorm(parameters.f32(name + ".weight"), epsilon).forward(input)
+def rms_norm[T](parameters: borrow StateDict, name: string, epsilon: f32, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    weights = parameter_like(borrow parameters, name + ".weight", copy input)
+    return RmsNorm(weights, epsilon).forward(input)
 
-def text_embeddings_f32(
+def text_embeddings(
     parameters: borrow StateDict,
     text_ids: tensor.Tensor[i64],
 ) -> tensor.Tensor[f32]:
     llm_parameters = scoped(borrow parameters, "llm")
     return Embedding(llm_parameters.f32("embed_tokens.weight")).forward(text_ids)
 
-def audio_embeddings_f32(
+def audio_embeddings(
     parameters: borrow StateDict,
     configuration: borrow OmniVoiceConfig,
     audio_ids: tensor.Tensor[i64],
@@ -379,56 +383,56 @@ def audio_embeddings_f32(
     embedded = Embedding(parameters.f32("audio_embeddings.weight")).forward(shifted_ids)
     return tensor.sum_axis(embedded, 1)
 
-def omnivoice_embeddings_f32(
+def omnivoice_embeddings(
     parameters: borrow StateDict,
     configuration: borrow OmniVoiceConfig,
     text_ids: tensor.Tensor[i64],
     audio_ids: tensor.Tensor[i64],
     audio_mask: tensor.Tensor[f32],
 ) -> tensor.Tensor[f32]:
-    text = text_embeddings_f32(borrow parameters, text_ids)
-    audio = audio_embeddings_f32(borrow parameters, configuration, audio_ids)
+    text = text_embeddings(borrow parameters, text_ids)
+    audio = audio_embeddings(borrow parameters, configuration, audio_ids)
     inverse_mask = tensor.add_scalar(tensor.scale(copy audio_mask, -1.0), f32(1.0))
     return tensor.add(
         tensor.multiply(text, inverse_mask),
         tensor.multiply(audio, audio_mask),
     )
 
-def attention_f32(
-    query: tensor.Tensor[f32],
-    key: tensor.Tensor[f32],
-    value: tensor.Tensor[f32],
+def attention[T](
+    query: tensor.Tensor[T],
+    key: tensor.Tensor[T],
+    value: tensor.Tensor[T],
     head_dimension: int,
-) -> tensor.Tensor[f32]:
+) -> tensor.Tensor[T]:
     key_transposed = tensor.permute(key, [0, 2, 1])
     scores = tensor.scale(tensor.matmul(query, key_transposed), 1.0 / (float(head_dimension) ** 0.5))
     probabilities = tensor.softmax_last(scores)
     return tensor.matmul(probabilities, value)
 
-def batched_attention_f32(
-    query: tensor.Tensor[f32],
-    key: tensor.Tensor[f32],
-    value: tensor.Tensor[f32],
+def batched_attention[T](
+    query: tensor.Tensor[T],
+    key: tensor.Tensor[T],
+    value: tensor.Tensor[T],
     head_dimension: int,
-) -> tensor.Tensor[f32]:
+) -> tensor.Tensor[T]:
     key_transposed = tensor.permute(key, [0, 1, 3, 2])
     scores = tensor.scale(tensor.matmul(query, key_transposed), 1.0 / (float(head_dimension) ** 0.5))
     probabilities = tensor.softmax_last(scores)
     return tensor.matmul(probabilities, value)
 
-def qwen3_attention_f32(
+def qwen3_attention[T](
     parameters: borrow StateDict,
     configuration: borrow Qwen3Config,
-    input: tensor.Tensor[f32],
-) -> tensor.Tensor[f32]:
+    input: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
     input_shape = tensor.shape(input)
     assert(size(input_shape) == 3, "Qwen3 attention expects [batch, sequence, hidden]")
     assert(input_shape[2] == configuration.hidden_size, "Qwen3 hidden dimension does not match configuration")
     batch = input_shape[0]
     sequence = input_shape[1]
-    query := linear_f32(borrow parameters, "q_proj", copy input)
-    key := linear_f32(borrow parameters, "k_proj", copy input)
-    value := linear_f32(borrow parameters, "v_proj", input)
+    query := linear(borrow parameters, "q_proj", copy input)
+    key := linear(borrow parameters, "k_proj", copy input)
+    value := linear(borrow parameters, "v_proj", input)
 
     query = tensor.permute(
         tensor.reshape(query, [batch, sequence, configuration.attention_heads, configuration.head_dimension]),
@@ -443,8 +447,8 @@ def qwen3_attention_f32(
         [0, 2, 1, 3],
     )
 
-    query = RmsNorm((borrow parameters).f32("q_norm.weight"), configuration.rms_epsilon).forward(query)
-    key = RmsNorm((borrow parameters).f32("k_norm.weight"), configuration.rms_epsilon).forward(key)
+    query = rms_norm(borrow parameters, "q_norm", configuration.rms_epsilon, query)
+    key = rms_norm(borrow parameters, "k_norm", configuration.rms_epsilon, key)
     rope_configuration = tensor.ranked([configuration.rope_theta, 0.0], [2])
     query = tensor.rope(query, rope_configuration)
     key = tensor.rope(key, rope_configuration)
@@ -452,59 +456,59 @@ def qwen3_attention_f32(
     repeats = int(configuration.attention_heads / configuration.key_value_heads)
     key = tensor.repeat(key, [1, repeats])
     value = tensor.repeat(value, [1, repeats])
-    attended = batched_attention_f32(query, key, value, configuration.head_dimension)
+    attended = batched_attention(query, key, value, configuration.head_dimension)
     merged = tensor.reshape(
         tensor.permute(attended, [0, 2, 1, 3]),
         [batch, sequence, configuration.attention_heads * configuration.head_dimension],
     )
-    return linear_f32(borrow parameters, "o_proj", merged)
+    return linear(borrow parameters, "o_proj", merged)
 
-def qwen3_mlp_f32(parameters: borrow StateDict, input: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
-    gate = tensor.silu(linear_f32(borrow parameters, "gate_proj", copy input))
-    up = linear_f32(borrow parameters, "up_proj", input)
-    return linear_f32(borrow parameters, "down_proj", tensor.multiply(gate, up))
+def qwen3_mlp[T](parameters: borrow StateDict, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    gate = tensor.silu(linear(borrow parameters, "gate_proj", copy input))
+    up = linear(borrow parameters, "up_proj", input)
+    return linear(borrow parameters, "down_proj", tensor.multiply(gate, up))
 
-def qwen3_layer_f32(
+def qwen3_layer[T](
     parameters: borrow StateDict,
     configuration: borrow Qwen3Config,
-    input: tensor.Tensor[f32],
-) -> tensor.Tensor[f32]:
-    normalized = rms_norm_f32(borrow parameters, "input_layernorm", configuration.rms_epsilon, copy input)
+    input: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
+    normalized = rms_norm(borrow parameters, "input_layernorm", configuration.rms_epsilon, copy input)
     attention_parameters = scoped(borrow parameters, "self_attn")
-    attended = qwen3_attention_f32(borrow attention_parameters, configuration, normalized)
+    attended = qwen3_attention(borrow attention_parameters, configuration, normalized)
     residual = tensor.add(input, attended)
-    post_normalized = rms_norm_f32(
+    post_normalized = rms_norm(
         borrow parameters,
         "post_attention_layernorm",
         configuration.rms_epsilon,
         copy residual,
     )
     mlp_parameters = scoped(borrow parameters, "mlp")
-    return tensor.add(residual, qwen3_mlp_f32(borrow mlp_parameters, post_normalized))
+    return tensor.add(residual, qwen3_mlp(borrow mlp_parameters, post_normalized))
 
-def qwen3_forward_f32(
+def qwen3_forward[T](
     parameters: borrow StateDict,
     configuration: borrow Qwen3Config,
-    embeddings: tensor.Tensor[f32],
-) -> tensor.Tensor[f32]:
+    embeddings: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
     hidden := embeddings
     for layer in range(0, configuration.layers):
         layer_parameters = scoped(borrow parameters, "layers." + string(layer))
-        hidden = qwen3_layer_f32(
+        hidden = qwen3_layer(
             borrow layer_parameters,
             configuration,
             hidden,
         )
-    return rms_norm_f32(parameters, "norm", configuration.rms_epsilon, hidden)
+    return rms_norm(parameters, "norm", configuration.rms_epsilon, hidden)
 
-def omnivoice_logits_f32(
+def omnivoice_logits[T](
     parameters: borrow StateDict,
     configuration: borrow OmniVoiceConfig,
-    embeddings: tensor.Tensor[f32],
-) -> tensor.Tensor[f32]:
+    embeddings: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
     llm_parameters = scoped(borrow parameters, "llm")
-    hidden = qwen3_forward_f32(borrow llm_parameters, borrow configuration.transformer, embeddings)
-    flat = linear_f32(parameters, "audio_heads", hidden)
+    hidden = qwen3_forward(borrow llm_parameters, borrow configuration.transformer, embeddings)
+    flat = linear(parameters, "audio_heads", hidden)
     hidden_shape = tensor.shape(hidden)
     batch = hidden_shape[0]
     sequence = hidden_shape[1]
@@ -542,7 +546,7 @@ def validate_omnivoice_state(
         assert(current.entry("post_attention_layernorm.weight").shape == [configuration.transformer.hidden_size])
     return true
 
-class OmniVoice: F32Module
+class OmniVoice: Module[f32]
     parameters: StateDict
     configuration: OmniVoiceConfig
 
@@ -552,7 +556,7 @@ class OmniVoice: F32Module
         assert(validate_omnivoice_state(borrow parameters, borrow configuration))
 
     def forward(embeddings: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
-        return omnivoice_logits_f32(
+        return omnivoice_logits(
             borrow parameters,
             borrow configuration,
             embeddings,
@@ -563,7 +567,7 @@ class OmniVoice: F32Module
         audio_ids: tensor.Tensor[i64],
         audio_mask: tensor.Tensor[f32],
     ) -> tensor.Tensor[f32]:
-        embeddings = omnivoice_embeddings_f32(
+        embeddings = omnivoice_embeddings(
             borrow parameters,
             borrow configuration,
             text_ids,
@@ -596,7 +600,7 @@ test "scaled dot-product attention executes as batched MLIR tensor operations":
     query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
     key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
     value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 2, 2]))
-    output = attention_f32(query, key, value, 2)
+    output = attention(query, key, value, 2)
     assert(tensor.shape(output) == [1, 2, 2])
     assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0])
 
@@ -604,7 +608,7 @@ test "attention preserves model batch and head axes":
     query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
     key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
     value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 1, 2, 2]))
-    output = batched_attention_f32(query, key, value, 2)
+    output = batched_attention(query, key, value, 2)
     assert(tensor.shape(output) == [2, 1, 2, 2])
     assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0, 6.0, 7.0, 6.0, 7.0])
 

@@ -1851,7 +1851,7 @@ fn default_numeric_matches(default: &str, concrete: &str) -> bool {
         ),
         "float" => matches!(
             concrete,
-            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128"
+            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128"
         ),
         _ => false,
     }

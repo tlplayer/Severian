@@ -118,6 +118,9 @@ impl ProgramIndex {
 pub struct TypedProgram {
     pub index: ProgramIndex,
     pub hir: Program,
+    /// Program-local structural applications (including Tensor element and
+    /// shape refinements) used by every later lowering stage.
+    pub types: severian_universal::TypeContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -142,12 +145,13 @@ pub fn analyze_package_with_context(
     let lowered_module_graph = lower_extensions(module_graph)?;
     let lowered_module_graph = lower_trait_typed_parameters(&lowered_module_graph);
     let module_graph = &lowered_module_graph;
+    let mut types = universal.types.clone();
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
-    validate_generic_bodies(module_graph, &index, &universal.types)?;
-    let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
-    let package_classes = collect_package_classes(module_graph, &index);
-    let package_lists = collect_package_lists(module_graph, &universal.types);
+    let package_classes = collect_package_classes(module_graph, &index, &mut types)?;
+    validate_generic_bodies(module_graph, &index, &types)?;
+    let specializations = collect_generic_specializations(module_graph, &index, &types)?;
+    let package_lists = collect_package_lists(module_graph, &types);
     let registry_traits = module_graph
         .modules
         .iter()
@@ -263,7 +267,7 @@ pub fn analyze_package_with_context(
                     &definition.name,
                     original,
                     &binding.substitution,
-                    &universal.types,
+                    &types,
                     definition.module,
                     &package_classes,
                 )?;
@@ -280,7 +284,7 @@ pub fn analyze_package_with_context(
                         .iter()
                         .map(|annotation| {
                             resolve_package_type(
-                                &universal.types,
+                                &mut types,
                                 annotation,
                                 definition.module,
                                 &package_classes,
@@ -294,7 +298,7 @@ pub fn analyze_package_with_context(
                         .iter()
                         .map(|annotation| {
                             resolve_package_union_members(
-                                &universal.types,
+                                &mut types,
                                 annotation,
                                 definition.module,
                                 &package_classes,
@@ -303,14 +307,14 @@ pub fn analyze_package_with_context(
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     result: resolve_package_type(
-                        &universal.types,
+                        &mut types,
                         &signature.result,
                         definition.module,
                         &package_classes,
                         &package_lists,
                     )?,
                     result_union: resolve_package_union_members(
-                        &universal.types,
+                        &mut types,
                         &signature.result,
                         definition.module,
                         &package_classes,
@@ -353,7 +357,7 @@ pub fn analyze_package_with_context(
             .collect::<Vec<_>>();
         let mut analyzed = analyze_with_package_functions(
             &ast,
-            &universal.types,
+            &mut types,
             AnalysisContext {
                 mode,
                 module_name: &module_name,
@@ -388,7 +392,7 @@ pub fn analyze_package_with_context(
         hir.modules.push(analyzed);
     }
 
-    Ok(TypedProgram { index, hir })
+    Ok(TypedProgram { index, hir, types })
 }
 
 fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnostic> {
@@ -456,7 +460,11 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
     lowered
 }
 
-fn collect_package_classes(module_graph: &ModuleGraph, index: &ProgramIndex) -> Vec<PackageClass> {
+fn collect_package_classes(
+    module_graph: &ModuleGraph,
+    index: &ProgramIndex,
+    types: &mut severian_universal::TypeContext,
+) -> Result<Vec<PackageClass>, Diagnostic> {
     let mut classes = module_graph
         .modules
         .iter()
@@ -497,14 +505,33 @@ fn collect_package_classes(module_graph: &ModuleGraph, index: &ProgramIndex) -> 
                 _ => None,
             })
         })
-        .enumerate()
-        .map(|(ordinal, (module, declaration))| PackageClass {
-            module,
-            ty: TypeId(u32::MAX.saturating_sub(ordinal as u32)),
-            declaration,
-            lookups: BTreeMap::new(),
+        .map(|(module, declaration)| {
+            let path = format!(
+                "source.{:032x}.{}",
+                module.0, declaration.name
+            );
+            let ty = types
+                .register_source_declaration(
+                    path,
+                    declaration.name.clone(),
+                    declaration.type_parameters.len(),
+                )
+                .map_err(|error| {
+                    Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                })?;
+            if declaration.name == "Tensor" {
+                types.mark_tensor_constructor(ty).map_err(|error| {
+                    Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                })?;
+            }
+            Ok(PackageClass {
+                module,
+                ty,
+                declaration,
+                lookups: BTreeMap::new(),
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
     for class in &mut classes {
         for source in index.modules.keys().copied() {
             let names = visible_class_names(source, class, index);
@@ -513,7 +540,7 @@ fn collect_package_classes(module_graph: &ModuleGraph, index: &ProgramIndex) -> 
             }
         }
     }
-    classes
+    Ok(classes)
 }
 
 fn visible_class_names(
@@ -567,7 +594,7 @@ fn visible_class_names(
 }
 
 fn resolve_package_type(
-    types: &severian_universal::TypeContext,
+    types: &mut severian_universal::TypeContext,
     annotation: &TypeAnnotation,
     module: ModuleId,
     classes: &[PackageClass],
@@ -702,7 +729,11 @@ fn resolve_package_type(
                     .iter()
                     .map(|argument| resolve_package_type(types, argument, module, classes, lists))
                     .collect::<Result<Vec<_>, _>>()?;
-                return Ok(crate::generic_class_type_id(class.ty, &arguments));
+                return types
+                    .instantiate_applied(class.ty, arguments)
+                    .map_err(|error| {
+                        Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
+                    });
             }
         }
     }
@@ -715,7 +746,7 @@ fn resolve_package_type(
 }
 
 fn resolve_package_union_members(
-    types: &severian_universal::TypeContext,
+    types: &mut severian_universal::TypeContext,
     annotation: &TypeAnnotation,
     module: ModuleId,
     classes: &[PackageClass],

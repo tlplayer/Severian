@@ -118,9 +118,11 @@ impl Context {
                 ffi::mlirGetDialectHandle__func__(),
                 ffi::mlirGetDialectHandle__gpu__(),
                 ffi::mlirGetDialectHandle__llvm__(),
+                ffi::mlirGetDialectHandle__linalg__(),
                 ffi::mlirGetDialectHandle__math__(),
                 ffi::mlirGetDialectHandle__rocdl__(),
                 ffi::mlirGetDialectHandle__scf__(),
+                ffi::mlirGetDialectHandle__tensor__(),
                 ffi::mlirGetDialectHandle__vector__(),
             ] {
                 ffi::mlirDialectHandleInsertDialect(dialect, registry);
@@ -208,7 +210,9 @@ impl<'context> Module<'context> {
     }
 
     fn verify_allowed_dialects(&self, target: &TargetSpec) -> Result<(), MlirError> {
-        let mut allowed = ["builtin", "arith", "async", "cf", "func", "llvm", "scf"]
+        let mut allowed = [
+            "builtin", "arith", "async", "cf", "func", "linalg", "llvm", "math", "scf", "tensor",
+        ]
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
@@ -315,13 +319,13 @@ fn verify_entry_signature(
     {
         return Err(MlirError::SignatureMismatch);
     }
-    for (index, expected) in inputs.iter().copied().enumerate() {
+    for (index, expected) in inputs.iter().enumerate() {
         let actual = unsafe { ffi::mlirFunctionTypeGetInput(function_type, index as isize) };
         if !unsafe { ffi::mlirTypeEqual(actual, lowered_type(context, expected)?) } {
             return Err(MlirError::SignatureMismatch);
         }
     }
-    for (index, expected) in outputs.iter().copied().enumerate() {
+    for (index, expected) in outputs.iter().enumerate() {
         let actual = unsafe { ffi::mlirFunctionTypeGetResult(function_type, index as isize) };
         if !unsafe { ffi::mlirTypeEqual(actual, lowered_type(context, expected)?) } {
             return Err(MlirError::SignatureMismatch);
@@ -330,10 +334,12 @@ fn verify_entry_signature(
     Ok(())
 }
 
-fn lowered_type(context: &Context, ty: LoweredType) -> Result<ffi::MlirType, MlirError> {
+fn lowered_type(context: &Context, ty: &LoweredType) -> Result<ffi::MlirType, MlirError> {
     Ok(unsafe {
         match ty {
-            LoweredType::Integer { bits, .. } => ffi::mlirIntegerTypeGet(context.raw, bits.into()),
+            LoweredType::Integer { bits, .. } => {
+                ffi::mlirIntegerTypeGet(context.raw, (*bits).into())
+            }
             LoweredType::Float {
                 format: LoweredFloatFormat::Float8E4M3Fn,
             } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f8E4M3FN")),
@@ -350,6 +356,9 @@ fn lowered_type(context: &Context, ty: LoweredType) -> Result<ffi::MlirType, Mli
                 format: LoweredFloatFormat::Ieee(64),
             } => ffi::mlirF64TypeGet(context.raw),
             LoweredType::Float {
+                format: LoweredFloatFormat::Ieee(80),
+            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f80")),
+            LoweredType::Float {
                 format: LoweredFloatFormat::Ieee(128),
             } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f128")),
             LoweredType::Float {
@@ -360,7 +369,11 @@ fn lowered_type(context: &Context, ty: LoweredType) -> Result<ffi::MlirType, Mli
                 ffi::mlirTypeParseGet(context.raw, ffi::string_ref("!llvm.ptr"))
             }
             LoweredType::None | LoweredType::Unit => ffi::mlirIntegerTypeGet(context.raw, 8),
-            unsupported => return Err(MlirError::UnsupportedType(unsupported)),
+            LoweredType::Tensor { .. } => ffi::mlirTypeParseGet(
+                context.raw,
+                ffi::string_ref(&crate::emit::mlir_type(ty)?),
+            ),
+            unsupported => return Err(MlirError::UnsupportedType(unsupported.clone())),
         }
     })
 }

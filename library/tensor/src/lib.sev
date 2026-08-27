@@ -274,6 +274,8 @@ def to_f_32[T](value: Tensor[T]) -> Tensor[f32]
 @compile(mlir, stablehlo, xla)
 def to_f_64[T](value: Tensor[T]) -> Tensor[f64]
 @compile(mlir, stablehlo, xla)
+def to_f_80[T](value: Tensor[T]) -> Tensor[f80]
+@compile(mlir, stablehlo, xla)
 def to_i_64[T](value: Tensor[T]) -> Tensor[i64]
 
 @compile(mlir, stablehlo, xla)
@@ -300,74 +302,6 @@ def gradient[T](value: Tensor[T]) -> Tensor[T]
 @compile(mlir, stablehlo, xla)
 def sgd[T](value: Tensor[T], learning_rate: float) -> Tensor[T]
 
-# These are compiler-recognized tensor primitives. On the XLA target they are
-# decomposed into StableHLO; they are not opaque model/runtime operations.
-@compile(mlir, stablehlo, xla)
-def multiply_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def multiply_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def subtract_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def divide_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def matmul_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def matmul_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def batched_matmul_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def transpose_bf_16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def transpose_f_32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def bf16_to_f_32(value: Tensor[bf16]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def f32_to_bf_16(value: Tensor[f32]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def mean_last_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def max_last_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def sum_last_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def rsqrt_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def exp_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def softmax_axis_f_32(value: Tensor[f32], axis: int) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def where_f_32(condition: Tensor[bool], on_true: Tensor[f32], on_false: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def sigmoid_bf_16(value: Tensor[bf16]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def broadcast_like_f_32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def broadcast_like_bf_16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def broadcast_bf_16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def broadcast_f_32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def gather_bf_16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def dynamic_slice_bf_16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def dynamic_update_slice_bf_16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def dynamic_update_slice_axis_bf_16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def scale_f_32(value: Tensor[f32], scale: float) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def cosine_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def sine_f_32(value: Tensor[f32]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def slice_f_32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def concatenate_f_32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def add_scalar_f_32(value: Tensor[f32], scalar: float) -> Tensor[f32]
 @compile(mlir, stablehlo, xla)
 def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
 @compile(mlir, stablehlo, xla)
@@ -380,12 +314,6 @@ def empty(shape: list[int]) -> Tensor[f64]
 def arange(stop: int) -> Tensor[f64]
 @compile(mlir, stablehlo, xla)
 def reshape[T](value: Tensor[T], shape: list[int]) -> Tensor[T]
-@compile(mlir, stablehlo, xla)
-def transpose[T](value: Tensor[T]) -> Tensor[T]
-@compile(mlir, stablehlo, xla)
-def matmul[T](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
-@compile(mlir, stablehlo, xla)
-def sum[T](value: Tensor[T]) -> Tensor[T]
 @compile(mlir, stablehlo, xla)
 def mean(value: Tensor[f64]) -> float
 @compile(mlir, stablehlo, xla)

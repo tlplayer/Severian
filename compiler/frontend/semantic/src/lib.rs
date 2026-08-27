@@ -57,9 +57,18 @@ pub fn analyze_with_context(
     types: &TypeContext,
     context: AnalysisContext<'_>,
 ) -> Result<Program, Diagnostic> {
-    analyze_with_package_functions(
+    analyze_with_context_and_types(ast, types, context).map(|(program, _)| program)
+}
+
+pub fn analyze_with_context_and_types(
+    ast: &severian_ast::Module,
+    types: &TypeContext,
+    context: AnalysisContext<'_>,
+) -> Result<(Program, TypeContext), Diagnostic> {
+    let mut types = types.clone();
+    let program = analyze_with_package_functions(
         ast,
-        types,
+        &mut types,
         context,
         &[],
         &[],
@@ -69,7 +78,8 @@ pub fn analyze_with_context(
         &[],
         None,
         None,
-    )
+    )?;
+    Ok((program, types))
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +123,7 @@ pub(crate) struct PackageConstant {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn analyze_with_package_functions(
     ast: &severian_ast::Module,
-    types: &TypeContext,
+    types: &mut TypeContext,
     context: AnalysisContext<'_>,
     visible_functions: &[PackageFunction],
     own_function_ids: &[FunctionId],
@@ -126,6 +136,38 @@ pub(crate) fn analyze_with_package_functions(
 ) -> Result<Program, Diagnostic> {
     let normalized_ast = normalize_extensions(ast)?;
     let ast = &normalized_ast;
+    let mut local_class_constructors = BTreeMap::new();
+    for declaration in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Class(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        let existing = package_classes
+            .iter()
+            .find(|class| {
+                class.declaration.name == declaration.name
+                    && source_module == Some(class.module)
+            })
+            .map(|class| class.ty);
+        let constructor = if let Some(existing) = existing {
+            existing
+        } else {
+            types
+                .register_source_declaration(
+                    format!("source.{}.{}", context.module_name, declaration.name),
+                    declaration.name.clone(),
+                    declaration.type_parameters.len(),
+                )
+                .map_err(|error| {
+                    Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                })?
+        };
+        if declaration.name == "Tensor" {
+            types.mark_tensor_constructor(constructor).map_err(|error| {
+                Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+            })?;
+        }
+        local_class_constructors.insert(declaration.name.clone(), constructor);
+    }
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
     let registry_ast = registry_ast.unwrap_or(ast);
@@ -192,8 +234,7 @@ pub(crate) fn analyze_with_package_functions(
         enum_binding_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
-        generic_class_constructors: BTreeMap::new(),
-        tensor_elements: BTreeMap::new(),
+        generic_class_constructors: local_class_constructors,
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
         pointer_types: BTreeMap::new(),
@@ -237,7 +278,8 @@ pub(crate) fn analyze_with_package_functions(
             .value_substitutions
             .insert(constant.lookup.clone(), value);
     }
-    let universal_type_ids = types
+    let universal_type_ids = analyzer
+        .types
         .definitions()
         .map(|definition| definition.id)
         .collect::<Vec<_>>();
@@ -347,9 +389,14 @@ pub(crate) fn analyze_with_package_functions(
             let parameters = method
                 .parameters
                 .iter()
-                .map(|parameter| analyzer.resolve_trait_type(&parameter.annotation))
+                .map(|parameter| {
+                    analyzer.resolve_trait_type(
+                        &parameter.annotation,
+                        &declaration.type_parameters,
+                    )
+                })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
-            let result = analyzer.resolve_trait_type(&method.result)?;
+            let result = analyzer.resolve_trait_type(&method.result, &declaration.type_parameters)?;
             methods.push(HirTraitMethodDeclaration {
                 name: method.name.clone(),
                 parameters,
@@ -424,8 +471,9 @@ pub(crate) fn analyze_with_package_functions(
                 result = analyzer.instantiate_fallible_type(result, error);
             }
         }
-        let compile_route = if types.definition(result).is_some() {
-            types
+        let compile_route = if analyzer.types.definition(result).is_some() {
+            analyzer
+                .types
                 .compile_route(result)
                 .map_err(|error| semantic_error(error.to_string(), ast_function.result.span))?
         } else {
@@ -501,7 +549,10 @@ pub(crate) fn analyze_with_package_functions(
                 .get(index)
                 .copied()
                 .unwrap_or(FunctionId(module.functions.len() as u128));
-            let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+            let unit = analyzer
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit");
             let mode_suffix = if test.modes.is_empty() {
                 String::new()
             } else {
@@ -676,8 +727,12 @@ pub(crate) fn analyze_with_package_functions(
             }
         }
         let allows_fallthrough = result_type
-            == types.resolve_name("unit").expect("bootstrap defines unit")
-            || types
+            == analyzer
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit")
+            || analyzer
+                .types
                 .definition(result_type)
                 .is_some_and(|definition| definition.name == "None");
         let falls_through = block_flow(ast_body) == ControlFlow::FallsThrough;
@@ -690,7 +745,8 @@ pub(crate) fn analyze_with_package_functions(
         }
         if allows_fallthrough
             && falls_through
-            && types
+            && analyzer
+                .types
                 .definition(result_type)
                 .is_some_and(|definition| definition.name == "None")
         {
@@ -767,7 +823,10 @@ pub(crate) fn analyze_with_package_functions(
         analyzer.parameter_effects.insert(function.id, effects);
         function.body = Some(body);
         if function.name == "main" {
-            let arguments_type = types.resolve_name("args").expect("bootstrap defines args");
+            let arguments_type = analyzer
+                .types
+                .resolve_name("args")
+                .expect("bootstrap defines args");
             let valid_parameters = match function.parameters.as_slice() {
                 [] => true,
                 [parameter] => parameter.contract.ty == arguments_type,
@@ -809,7 +868,10 @@ pub(crate) fn analyze_with_package_functions(
             analyzer.mocks.clear();
             analyzer.callable_substitutions.clear();
             analyzer.active_operator_namespaces.clear();
-            let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+            let unit = analyzer
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit");
             let mut body = Block::default();
             if module.tests[offset]
                 .modes
@@ -1032,7 +1094,7 @@ pub(crate) fn normalize_extensions(
 }
 
 struct Analyzer<'a> {
-    types: &'a TypeContext,
+    types: &'a mut TypeContext,
     names: BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
     mutable_variables: BTreeSet<severian_hir::VariableId>,
     value_substitutions: BTreeMap<String, Expression>,
@@ -1070,7 +1132,6 @@ struct Analyzer<'a> {
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     generic_class_constructors: BTreeMap<String, TypeId>,
-    tensor_elements: BTreeMap<TypeId, TypeId>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
     pointer_types: BTreeMap<TypeId, TypeId>,
@@ -1148,6 +1209,7 @@ struct LoweredHook {
 struct ClassInstance {
     ty: TypeId,
     name: String,
+    arguments: Vec<TypeId>,
     fields: Vec<HirClassFieldDeclaration>,
     source_fields: Vec<severian_ast::PropertyDeclaration>,
     constructors: Vec<severian_ast::FunctionDeclaration>,
@@ -1384,6 +1446,7 @@ impl Analyzer<'_> {
             let placeholder = ClassInstance {
                 ty,
                 name: declaration.name.clone(),
+                arguments: Vec::new(),
                 fields: Vec::new(),
                 source_fields: Vec::new(),
                 constructors: Vec::new(),
@@ -1432,6 +1495,7 @@ impl Analyzer<'_> {
                 ClassInstance {
                     ty,
                     name: declaration.name.clone(),
+                    arguments: Vec::new(),
                     fields: fields.clone(),
                     source_fields: Vec::new(),
                     constructors: Vec::new(),
@@ -1444,6 +1508,7 @@ impl Analyzer<'_> {
                 ClassInstance {
                     ty,
                     name: declaration.name.clone(),
+                    arguments: Vec::new(),
                     fields: fields.clone(),
                     source_fields: Vec::new(),
                     constructors: Vec::new(),
@@ -1595,6 +1660,7 @@ impl Analyzer<'_> {
             let placeholder = ClassInstance {
                 ty: package_class.ty,
                 name: package_class.declaration.name.clone(),
+                arguments: Vec::new(),
                 fields: Vec::new(),
                 source_fields: package_class.declaration.fields.clone(),
                 constructors: package_class.declaration.constructors.clone(),
@@ -1681,6 +1747,7 @@ impl Analyzer<'_> {
             let instance = ClassInstance {
                 ty: package_class.ty,
                 name: package_class.declaration.name.clone(),
+                arguments: Vec::new(),
                 fields: fields.clone(),
                 source_fields: package_class.declaration.fields.clone(),
                 constructors: package_class.declaration.constructors.clone(),
@@ -1882,9 +1949,12 @@ impl Analyzer<'_> {
     fn resolve_trait_type(
         &mut self,
         annotation: &TypeAnnotation,
+        type_parameters: &[String],
     ) -> Result<HirTraitType, Diagnostic> {
         if annotation.simple_name() == Some("Self") {
             Ok(HirTraitType::SelfType)
+        } else if type_annotation_mentions(annotation, type_parameters) {
+            Ok(HirTraitType::Symbolic(render_type_annotation(annotation)))
         } else {
             self.resolve_source_type(annotation)
                 .map(HirTraitType::Concrete)
@@ -8596,24 +8666,14 @@ impl Analyzer<'_> {
         let mut inferred = BTreeMap::<String, TypeId>::new();
         let mut fields = Vec::with_capacity(arguments.len());
         for (argument, field) in arguments.iter().zip(&declaration.fields) {
-            let field_type_name = field.annotation.simple_name().ok_or_else(|| {
-                Diagnostic::new(
-                    "E000204",
-                    "generic constructor inference currently requires named field types",
-                    Some(field.annotation.span),
-                )
-            })?;
-            if parameters.contains(field_type_name) {
-                let expected_field = inferred.get(field_type_name).copied();
-                let value = self.expression(&argument.value, expected_field)?;
-                inferred
-                    .entry(field_type_name.to_owned())
-                    .or_insert(value.type_id);
-                fields.push(value);
-            } else {
-                let field_type = resolve_type_annotation(self.types, &field.annotation)?;
-                fields.push(self.expression(&argument.value, Some(field_type))?);
-            }
+            let value = self.expression(&argument.value, None)?;
+            self.infer_class_type_arguments(
+                &field.annotation,
+                value.type_id,
+                &parameters,
+                &mut inferred,
+            )?;
+            fields.push(value);
         }
         let concrete = declaration
             .type_parameters
@@ -8651,6 +8711,73 @@ impl Analyzer<'_> {
             },
             span,
         })
+    }
+
+    fn infer_class_type_arguments(
+        &self,
+        annotation: &TypeAnnotation,
+        actual: TypeId,
+        parameters: &BTreeSet<&str>,
+        inferred: &mut BTreeMap<String, TypeId>,
+    ) -> Result<(), Diagnostic> {
+        if let Some(name) = annotation.simple_name() {
+            if parameters.contains(name) {
+                if let Some(known) = inferred.get(name) {
+                    if *known != actual {
+                        return Err(semantic_error(
+                            format!("conflicting inferred types for `{name}`"),
+                            annotation.span,
+                        ));
+                    }
+                } else {
+                    inferred.insert(name.to_owned(), actual);
+                }
+                return Ok(());
+            }
+        }
+        if let Some((name, arguments)) = annotation.named_parts() {
+            if !arguments.is_empty() {
+                let Some((constructor, actual_arguments)) = self.types.applied_parts(actual) else {
+                    return Err(semantic_error(
+                        format!("expected an application of `{name}`"),
+                        annotation.span,
+                    ));
+                };
+                let constructor_name = &self
+                    .types
+                    .definition(constructor)
+                    .ok_or_else(|| {
+                        semantic_error("unknown applied type constructor".into(), annotation.span)
+                    })?
+                    .name;
+                if constructor_name.rsplit('.').next() != name.rsplit('.').next()
+                    || arguments.len() != actual_arguments.len()
+                {
+                    return Err(semantic_error(
+                        format!("expected `{name}` with {} type argument(s)", arguments.len()),
+                        annotation.span,
+                    ));
+                }
+                for (argument, actual_argument) in arguments.iter().zip(actual_arguments) {
+                    self.infer_class_type_arguments(
+                        argument,
+                        actual_argument,
+                        parameters,
+                        inferred,
+                    )?;
+                }
+                return Ok(());
+            }
+        }
+        let expected = resolve_type_annotation(self.types, annotation)?;
+        if self.types.assignable(actual, expected) {
+            Ok(())
+        } else {
+            Err(semantic_error(
+                "constructor argument does not satisfy its declared field type".into(),
+                annotation.span,
+            ))
+        }
     }
 
     fn instantiate_class(
@@ -8710,9 +8837,6 @@ impl Analyzer<'_> {
         }
         let key = (name.to_owned(), concrete.to_vec());
         if let Some(instance) = self.class_instances.get(&key) {
-            if name.rsplit('.').next() == Some("Tensor") {
-                self.tensor_elements.insert(instance.ty, concrete[0]);
-            }
             return Ok(instance.clone());
         }
         let substitution = declaration
@@ -8729,19 +8853,28 @@ impl Analyzer<'_> {
                 ty,
             });
         }
-        let ty = self
+        let constructor = self
             .generic_class_constructors
             .get(name)
             .copied()
-            .map(|constructor| generic_class_type_id(constructor, concrete))
-            .unwrap_or_else(|| {
-                let ty = TypeId(self.next_class_type);
-                self.next_class_type = self.next_class_type.saturating_sub(1);
-                ty
-            });
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    format!("class `{name}` has no registered type constructor"),
+                    Some(span),
+                )
+            })?;
+        let ty = if concrete.is_empty() {
+            constructor
+        } else {
+            self.types
+                .instantiate_applied(constructor, concrete.to_vec())
+                .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?
+        };
         let instance = ClassInstance {
             ty,
             name: name.to_owned(),
+            arguments: concrete.to_vec(),
             fields: fields.clone(),
             source_fields: declaration.fields.clone(),
             constructors: declaration.constructors.clone(),
@@ -8750,9 +8883,6 @@ impl Analyzer<'_> {
         };
         self.class_instances.insert(key, instance.clone());
         self.class_instances_by_type.insert(ty, instance.clone());
-        if name.rsplit('.').next() == Some("Tensor") {
-            self.tensor_elements.insert(ty, concrete[0]);
-        }
         self.lowered_classes.push(HirClassDeclaration {
             id: ty,
             name: format!(
@@ -11343,50 +11473,15 @@ impl Analyzer<'_> {
     }
 
     fn tensor_element_type(&self, ty: TypeId) -> Option<TypeId> {
-        self.tensor_elements.get(&ty).copied().or_else(|| {
-            if self
-                .class_instances_by_type
-                .get(&ty)
-                .is_some_and(|class| class.name == "Tensor")
-            {
-                return self.types.resolve_name("f64");
-            }
-            let class = self.lowered_classes.iter().find(|class| class.id == ty)?;
-            let element = class.name.strip_prefix("Tensor[")?.strip_suffix(']')?;
-            self.types.resolve_name(element)
-        })
+        self.types.tensor(ty).map(|tensor| tensor.element)
     }
 
     fn resolve_tensor_element_type(
         &mut self,
         ty: TypeId,
-        span: severian_source::Span,
+        _span: severian_source::Span,
     ) -> Option<TypeId> {
-        if let Some(element) = self.tensor_element_type(ty) {
-            return Some(element);
-        }
-        let elements = self
-            .types
-            .definitions()
-            .filter_map(|definition| {
-                self.types.primitive(definition.id).and_then(|primitive| {
-                    matches!(
-                        primitive.category,
-                        severian_universal::PrimitiveCategory::Integer
-                            | severian_universal::PrimitiveCategory::Float
-                            | severian_universal::PrimitiveCategory::Measured
-                    )
-                    .then_some(definition.id)
-                })
-            })
-            .collect::<Vec<_>>();
-        for element in elements {
-            if self.tensor_type(element, span).ok() == Some(ty) {
-                self.tensor_elements.insert(ty, element);
-                return Some(element);
-            }
-        }
-        None
+        self.tensor_element_type(ty)
     }
 
     fn math_call(
@@ -11557,7 +11652,7 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let result = arguments
+        let source = arguments
             .first()
             .map(|argument| argument.type_id)
             .ok_or_else(|| {
@@ -11567,19 +11662,83 @@ impl Analyzer<'_> {
                     Some(span),
                 )
             })?;
-        if expected.is_some_and(|expected| expected != result) {
+        let source_tensor = self.types.tensor(source);
+        let source_shape = source_tensor.as_ref().map(|tensor| tensor.shape.clone());
+        let right_shape = arguments
+            .get(1)
+            .and_then(|argument| self.types.tensor(argument.type_id))
+            .map(|tensor| tensor.shape);
+        let inferred_shape = match operation {
+            severian_universal::tensor::ADD
+            | severian_universal::tensor::SUBTRACT
+            | severian_universal::tensor::MULTIPLY
+            | severian_universal::tensor::DIVIDE => source_shape
+                .as_ref()
+                .zip(right_shape.as_ref())
+                .map(|(left, right)| left.broadcast(right))
+                .transpose()
+                .map_err(|error| semantic_error(error.to_string(), span))?,
+            severian_universal::tensor::MATMUL => source_shape
+                .as_ref()
+                .zip(right_shape.as_ref())
+                .map(|(left, right)| left.matmul(right))
+                .transpose()
+                .map_err(|error| semantic_error(error.to_string(), span))?,
+            severian_universal::tensor::TRANSPOSE => source_shape.as_ref().map(|shape| {
+                let Some(dimensions) = shape.dimensions() else {
+                    return severian_universal::TensorShape::Unranked;
+                };
+                severian_universal::TensorShape::Ranked(
+                    dimensions.iter().copied().rev().collect(),
+                )
+            }),
+            severian_universal::tensor::REDUCE_SUM => Some(
+                severian_universal::TensorShape::ranked([1]),
+            ),
+            severian_universal::tensor::MEAN_LAST => source_shape.as_ref().map(|shape| {
+                let Some(dimensions) = shape.dimensions() else {
+                    return severian_universal::TensorShape::Unranked;
+                };
+                if dimensions.len() <= 1 {
+                    severian_universal::TensorShape::ranked([1])
+                } else {
+                    severian_universal::TensorShape::Ranked(
+                        dimensions[..dimensions.len() - 1].to_vec(),
+                    )
+                }
+            }),
+            severian_universal::tensor::RESHAPE
+            | severian_universal::tensor::PERMUTE
+            | severian_universal::tensor::SLICE
+            | severian_universal::tensor::REDUCE_SUM_AXIS
+            | severian_universal::tensor::GATHER
+            | severian_universal::tensor::CONCATENATE
+            | severian_universal::tensor::REPEAT => {
+                Some(severian_universal::TensorShape::Unranked)
+            }
+            _ => source_shape,
+        };
+        let result = match (source_tensor, inferred_shape.as_ref()) {
+            (Some(_), Some(shape)) => self
+                .types
+                .refine_tensor_shape(source, shape.clone())
+                .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?,
+            _ => source,
+        };
+        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
             return Err(semantic_error(
                 "tensor operation does not satisfy the expected type".into(),
                 span,
             ));
         }
-        Ok(self.tensor_intrinsic(
-            operation,
-            arguments,
-            result,
-            severian_universal::Attrs::new(),
-            span,
-        ))
+        let mut attributes = severian_universal::Attrs::new();
+        if let Some(shape) = inferred_shape {
+            attributes.insert(
+                severian_universal::tensor::RESULT_SHAPE,
+                severian_universal::AttrValue::TensorShape(shape),
+            );
+        }
+        Ok(self.tensor_intrinsic(operation, arguments, result, attributes, span))
     }
 
     fn tensor_list_property(
@@ -11609,11 +11768,29 @@ impl Analyzer<'_> {
             .types
             .resolve_name("string")
             .expect("bootstrap defines pointer-backed storage");
+        let mut attributes = severian_universal::Attrs::new();
+        let inferred_shape = self
+            .types
+            .tensor(tensor.type_id)
+            .map(|tensor_type| tensor_type.shape)
+            .and_then(|shape| {
+                if matches!(shape, severian_universal::TensorShape::Unranked) {
+                    tensor_expression_shape(&tensor)
+                } else {
+                    Some(shape)
+                }
+            });
+        if let Some(shape) = inferred_shape {
+            attributes.insert(
+                severian_universal::tensor::RESULT_SHAPE,
+                severian_universal::AttrValue::TensorShape(shape),
+            );
+        }
         let value = self.tensor_intrinsic(
             operation,
             vec![tensor],
             storage,
-            severian_universal::Attrs::new(),
+            attributes,
             span,
         );
         Ok(Expression {
@@ -11661,7 +11838,7 @@ impl Analyzer<'_> {
                 span,
             );
             let result = self.instantiate_list_type(integer);
-            if expected.is_some_and(|expected| expected != result) {
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
                 return Err(semantic_error(
                     "SafeTensor shape does not satisfy the expected type".into(),
                     span,
@@ -11712,7 +11889,7 @@ impl Analyzer<'_> {
                 .resolve_name(element_name)
                 .expect("universal defines every tensor storage dtype");
             let result = self.tensor_type(element, span)?;
-            if expected.is_some_and(|expected| expected != result) {
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
                 return Err(semantic_error(
                     "mapped SafeTensor does not satisfy the expected tensor type".into(),
                     span,
@@ -11812,8 +11989,8 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("f64")
                 .expect("bootstrap defines f64");
-            let result = self.tensor_type(f64_type, span)?;
-            if expected.is_some_and(|expected| expected != result) {
+            let mut result = self.tensor_type(f64_type, span)?;
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
                 return Err(semantic_error(
                     "tensor constructor does not satisfy the expected type".into(),
                     span,
@@ -11821,6 +11998,12 @@ impl Analyzer<'_> {
             }
             let mut attributes = severian_universal::Attrs::new();
             if let Some(shape) = tensor_literal_shape(&arguments[1].value) {
+                result = self
+                    .types
+                    .refine_tensor_shape(result, shape.clone())
+                    .map_err(|error| {
+                        Diagnostic::new("E000204", error.to_string(), Some(span))
+                    })?;
                 attributes.insert(
                     severian_universal::tensor::RESULT_SHAPE,
                     severian_universal::AttrValue::TensorShape(shape),
@@ -11905,11 +12088,14 @@ impl Analyzer<'_> {
 
         if name == "concatenate" && arguments.len() == 3 {
             let left = self.expression(&arguments[0].value, None)?;
-            if self
-                .resolve_tensor_element_type(left.type_id, span)
-                .is_some()
-            {
-                let right = self.expression(&arguments[1].value, Some(left.type_id))?;
+            if let Some(left_element) = self.resolve_tensor_element_type(left.type_id, span) {
+                let right = self.expression(&arguments[1].value, None)?;
+                if self.resolve_tensor_element_type(right.type_id, span) != Some(left_element) {
+                    return Err(semantic_error(
+                        "concatenated tensors must have the same element type".into(),
+                        arguments[1].value.span,
+                    ));
+                }
                 let integer = self
                     .types
                     .resolve_name("int")
@@ -12032,11 +12218,14 @@ impl Analyzer<'_> {
         };
         if let (Some(operation), [left, right]) = (tensor_pair_operation, arguments) {
             let left = self.expression(&left.value, None)?;
-            if self
-                .resolve_tensor_element_type(left.type_id, span)
-                .is_some()
-            {
-                let right = self.expression(&right.value, Some(left.type_id))?;
+            if let Some(left_element) = self.resolve_tensor_element_type(left.type_id, span) {
+                let right = self.expression(&right.value, None)?;
+                if self.resolve_tensor_element_type(right.type_id, span) != Some(left_element) {
+                    return Err(semantic_error(
+                        "tensor operands must have the same element type".into(),
+                        right.span,
+                    ));
+                }
                 return self
                     .tensor_operation(operation, vec![left, right], expected, span)
                     .map(Some);
@@ -12046,11 +12235,14 @@ impl Analyzer<'_> {
 
         if name == "layer_norm_backward" && arguments.len() == 3 {
             let input = self.expression(&arguments[0].value, None)?;
-            if self
-                .resolve_tensor_element_type(input.type_id, span)
-                .is_some()
-            {
-                let upstream = self.expression(&arguments[1].value, Some(input.type_id))?;
+            if let Some(input_element) = self.resolve_tensor_element_type(input.type_id, span) {
+                let upstream = self.expression(&arguments[1].value, None)?;
+                if self.resolve_tensor_element_type(upstream.type_id, span) != Some(input_element) {
+                    return Err(semantic_error(
+                        "tensor operands must have the same element type".into(),
+                        upstream.span,
+                    ));
+                }
                 let float = self
                     .types
                     .resolve_name("float")
@@ -12112,7 +12304,16 @@ impl Analyzer<'_> {
                 {
                     let mut resolved = vec![first.clone()];
                     for argument in &arguments[1..] {
-                        resolved.push(self.expression(&argument.value, Some(first.type_id))?);
+                        let value = self.expression(&argument.value, None)?;
+                        if self.resolve_tensor_element_type(value.type_id, span)
+                            != self.resolve_tensor_element_type(first.type_id, span)
+                        {
+                            return Err(semantic_error(
+                                "tensor operands must have the same element type".into(),
+                                argument.value.span,
+                            ));
+                        }
+                        resolved.push(value);
                     }
                     return self
                         .tensor_operation(operation, resolved, expected, span)
@@ -12122,7 +12323,7 @@ impl Analyzer<'_> {
         }
 
         let target_element = match name {
-            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f128" | "i8" | "i16"
+            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128" | "i8" | "i16"
             | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
                 self.types.resolve_name(name)
             }
@@ -12132,6 +12333,7 @@ impl Analyzer<'_> {
             "to_bf_16" => self.types.resolve_name("bf16"),
             "to_f_32" => self.types.resolve_name("f32"),
             "to_f_64" => self.types.resolve_name("f64"),
+            "to_f_80" => self.types.resolve_name("f80"),
             "to_i_64" => self.types.resolve_name("i64"),
             _ => None,
         };
@@ -12141,7 +12343,7 @@ impl Analyzer<'_> {
                 return Ok(None);
             };
             let result = self.tensor_type(target_element, span)?;
-            if expected.is_some_and(|expected| expected != result) {
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
                 return Err(semantic_error(
                     "tensor conversion does not satisfy the expected type".into(),
                     span,
@@ -14644,13 +14846,30 @@ impl Analyzer<'_> {
             }
             return Ok(Some(selected));
         }
-        let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
+        let Some(method) = instance
+            .methods
+            .iter()
+            .find(|method| method.name == *name)
+            .cloned()
+        else {
             return Err(Diagnostic::new(
                 "E000211",
                 format!("class `{}` has no method `{name}`", instance.name),
                 Some(callee.span),
             ));
         };
+        let method_substitution = self
+            .classes
+            .get(&instance.name)
+            .map(|declaration| {
+                declaration
+                    .type_parameters
+                    .iter()
+                    .cloned()
+                    .zip(instance.arguments.iter().copied())
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
         let required_parameters = method
             .parameters
             .iter()
@@ -14748,7 +14967,11 @@ impl Analyzer<'_> {
             } if !matches!(value.kind, AstExpressionKind::Name(_)) => Some(value),
             _ => None,
         }) {
-            let result_type = self.resolve_source_type(&method.result)?;
+            let result_type = if method_substitution.is_empty() {
+                self.resolve_source_type(&method.result)?
+            } else {
+                self.resolve_instantiated_type(&method.result, &method_substitution)?
+            };
             if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
                 return Err(semantic_error(
                     "method result does not satisfy the expected type".into(),
@@ -14786,7 +15009,14 @@ impl Analyzer<'_> {
                         self.callable_substitutions
                             .insert(parameter.name.clone(), callable);
                     } else {
-                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                        let parameter_type = if method_substitution.is_empty() {
+                            self.resolve_source_type(&parameter.annotation)?
+                        } else {
+                            self.resolve_instantiated_type(
+                                &parameter.annotation,
+                                &method_substitution,
+                            )?
+                        };
                         let value = self.expression(argument, Some(parameter_type))?;
                         self.value_substitutions
                             .insert(parameter.name.clone(), value);
@@ -15304,6 +15534,75 @@ impl Analyzer<'_> {
     }
 }
 
+fn tensor_expression_shape(expression: &Expression) -> Option<severian_universal::TensorShape> {
+    let ExpressionKind::Call {
+        callee:
+            severian_hir::Callee::Intrinsic {
+                attributes,
+                ..
+            },
+        ..
+    } = &expression.kind
+    else {
+        return None;
+    };
+    match attributes.get(&severian_universal::tensor::RESULT_SHAPE) {
+        Some(severian_universal::AttrValue::TensorShape(shape)) => Some(shape.clone()),
+        _ => None,
+    }
+}
+
+fn type_annotation_mentions(annotation: &TypeAnnotation, names: &[String]) -> bool {
+    match &annotation.kind {
+        severian_ast::TypeAnnotationKind::Named { name, arguments } => {
+            names.contains(name)
+                || arguments
+                    .iter()
+                    .any(|argument| type_annotation_mentions(argument, names))
+        }
+        severian_ast::TypeAnnotationKind::Function { parameters, result } => {
+            parameters
+                .iter()
+                .any(|parameter| type_annotation_mentions(parameter, names))
+                || type_annotation_mentions(result, names)
+        }
+        severian_ast::TypeAnnotationKind::Union(members) => members
+            .iter()
+            .any(|member| type_annotation_mentions(member, names)),
+    }
+}
+
+fn render_type_annotation(annotation: &TypeAnnotation) -> String {
+    match &annotation.kind {
+        severian_ast::TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => {
+            name.clone()
+        }
+        severian_ast::TypeAnnotationKind::Named { name, arguments } => format!(
+            "{}[{}]",
+            name,
+            arguments
+                .iter()
+                .map(render_type_annotation)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        severian_ast::TypeAnnotationKind::Function { parameters, result } => format!(
+            "({}) -> {}",
+            parameters
+                .iter()
+                .map(render_type_annotation)
+                .collect::<Vec<_>>()
+                .join(", "),
+            render_type_annotation(result)
+        ),
+        severian_ast::TypeAnnotationKind::Union(members) => members
+            .iter()
+            .map(render_type_annotation)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
 pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
     // Reserve the upper quarter of synthetic IDs for structural tuples. The
     // stable fold makes package signature collection and body analysis agree
@@ -15317,22 +15616,6 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
 pub(crate) fn list_type_id(element: TypeId) -> TypeId {
     let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
     TypeId(0x0c00_0000 | (hash & 0x03ff_ffff))
-}
-
-pub(crate) fn generic_class_type_id(constructor: TypeId, arguments: &[TypeId]) -> TypeId {
-    // Package signature collection and per-module semantic analysis must agree
-    // on instantiated nominal identities. Include the constructor in the hash
-    // so unrelated families instantiated with the same arguments stay
-    // distinct.
-    let hash = std::iter::once(&constructor)
-        .chain(arguments)
-        .fold(0x811c_9dc5u32, |hash, ty| {
-            (hash ^ ty.0).wrapping_mul(0x0100_0193)
-        });
-    // Do not use 0x08..=0x0b: universal reserves that entire masked range for
-    // structural raw pointers. Applied classes must continue to lower as
-    // aggregates even when their element happens to be a pointer.
-    TypeId(0xe000_0000 | (hash & 0x0fff_ffff))
 }
 
 pub(crate) const fn any_type_id() -> TypeId {
@@ -15853,12 +16136,29 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
         _ => None,
     }) {
         for implemented in &class.traits {
-            let Some((trait_name, _)) = implemented.named_parts() else {
+            let Some((trait_name, trait_arguments)) = implemented.named_parts() else {
                 continue;
             };
             let Some(contract) = traits.get(trait_name) else {
                 continue;
             };
+            if contract.type_parameters.len() != trait_arguments.len() {
+                return Err(Diagnostic::new(
+                    "E000218",
+                    format!(
+                        "trait `{trait_name}` expects {} type argument(s), found {}",
+                        contract.type_parameters.len(),
+                        trait_arguments.len()
+                    ),
+                    Some(implemented.span),
+                ));
+            }
+            let trait_substitution = contract
+                .type_parameters
+                .iter()
+                .cloned()
+                .zip(trait_arguments.iter().cloned())
+                .collect::<BTreeMap<_, _>>();
             for required in &contract.methods {
                 let Some(provided) = class
                     .methods
@@ -15874,16 +16174,25 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         Some(class.span),
                     ));
                 };
-                let same_parameters = required.parameters.len() == provided.parameters.len()
-                    && required.parameters.iter().zip(&provided.parameters).all(
+                let required_parameters = required
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        substitute_type_annotation(&parameter.annotation, &trait_substitution)
+                    })
+                    .collect::<Vec<_>>();
+                let required_result =
+                    substitute_type_annotation(&required.result, &trait_substitution);
+                let same_parameters = required_parameters.len() == provided.parameters.len()
+                    && required_parameters.iter().zip(&provided.parameters).all(
                         |(required, provided)| {
-                            same_type_annotation(&required.annotation, &provided.annotation)
+                            same_type_annotation(required, &provided.annotation)
                         },
                     );
                 if !same_parameters
-                    || !(implementation_result_satisfies(&required.result, &provided.result)
+                    || !(implementation_result_satisfies(&required_result, &provided.result)
                         || implementation_result_implements_trait(
-                            &required.result,
+                            &required_result,
                             &provided.result,
                             &traits,
                             ast,
@@ -15929,13 +16238,22 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                 if required.operator == severian_ast::OperatorSyntax::Index {
                     continue;
                 }
-                let same_parameters = required.parameters.len() == provided.parameters.len()
-                    && required.parameters.iter().zip(&provided.parameters).all(
+                let required_parameters = required
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        substitute_type_annotation(&parameter.annotation, &trait_substitution)
+                    })
+                    .collect::<Vec<_>>();
+                let required_result =
+                    substitute_type_annotation(&required.result, &trait_substitution);
+                let same_parameters = required_parameters.len() == provided.parameters.len()
+                    && required_parameters.iter().zip(&provided.parameters).all(
                         |(required, provided)| {
-                            same_type_annotation(&required.annotation, &provided.annotation)
+                            same_type_annotation(required, &provided.annotation)
                         },
                     );
-                if !same_parameters || !same_type_annotation(&required.result, &provided.result) {
+                if !same_parameters || !same_type_annotation(&required_result, &provided.result) {
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -15951,6 +16269,49 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
         }
     }
     Ok(())
+}
+
+fn substitute_type_annotation(
+    annotation: &TypeAnnotation,
+    substitution: &BTreeMap<String, TypeAnnotation>,
+) -> TypeAnnotation {
+    let kind = match &annotation.kind {
+        severian_ast::TypeAnnotationKind::Named { name, arguments } => {
+            if arguments.is_empty() {
+                if let Some(replacement) = substitution.get(name) {
+                    return replacement.clone();
+                }
+            }
+            severian_ast::TypeAnnotationKind::Named {
+                name: name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|argument| substitute_type_annotation(argument, substitution))
+                    .collect(),
+            }
+        }
+        severian_ast::TypeAnnotationKind::Function { parameters, result } => {
+            severian_ast::TypeAnnotationKind::Function {
+                parameters: parameters
+                    .iter()
+                    .map(|parameter| substitute_type_annotation(parameter, substitution))
+                    .collect(),
+                result: Box::new(substitute_type_annotation(result, substitution)),
+            }
+        }
+        severian_ast::TypeAnnotationKind::Union(members) => {
+            severian_ast::TypeAnnotationKind::Union(
+                members
+                    .iter()
+                    .map(|member| substitute_type_annotation(member, substitution))
+                    .collect(),
+            )
+        }
+    };
+    TypeAnnotation {
+        kind,
+        span: annotation.span,
+    }
 }
 
 fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
@@ -16893,6 +17254,11 @@ fn conversion_rank(
     if !types.assignable(actual, expected) {
         return None;
     }
+    if let (Some(actual_tensor), Some(expected_tensor)) =
+        (types.tensor(actual), types.tensor(expected))
+    {
+        return (actual_tensor.element == expected_tensor.element).then_some(ConversionRank::Exact);
+    }
     let conversion = types.numeric_conversion(actual, expected)?;
     match conversion.kind {
         severian_universal::ConversionKind::Identity => Some(ConversionRank::Exact),
@@ -17709,6 +18075,22 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn applied_traits_and_nested_generic_methods_substitute_type_arguments() {
+        let (program, _) = analyze_source(
+            "class Tensor[T]:\n    handle: string\n\ntrait Module[T]:\n    def forward(input: Tensor[T]) -> Tensor[T]\n\nclass Identity: Module[f32]\n    def forward(input: Tensor[f32]) -> Tensor[f32]:\n        return input\n\nclass Holder[T]:\n    value: Tensor[T]\n    def get() -> Tensor[T]:\n        return value\n\ndef main():\n    value = Tensor[f32](\"tensor\")\n    holder = Holder(value)\n    output: Tensor[f32] = holder.get()\n",
+        );
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn tensor_element_parameters_do_not_freeze_dynamic_shapes() {
+        let (program, _) = analyze_source(
+            "class Tensor[T]:\n    handle: string\n\n@compile(mlir)\ndef ranked(values: list[float], shape: list[int]) -> Tensor[f64]\n\n@compile(mlir)\ndef add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]\n\ndef main():\n    matrix = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])\n    row = ranked([10.0, 20.0, 30.0], [3])\n    result: Tensor[f64] = add(matrix, row)\n",
+        );
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

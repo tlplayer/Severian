@@ -23,11 +23,11 @@ explicit cache root, and immutable revisions can be supplied with
 
 ## Typed modules
 
-`F32Module` is the minimal inference contract for the OmniVoice checkpoint:
+`Module[T]` is the dtype-generic inference contract used by model composition:
 
 ```sev
-trait F32Module:
-    def forward(input: tensor.Tensor[f32]) -> tensor.Tensor[f32]
+trait Module[T]:
+    def forward(input: tensor.Tensor[T]) -> tensor.Tensor[T]
 ```
 
 `Linear`, `Affine`, `Embedding`, and `RmsNorm` implement or build on that

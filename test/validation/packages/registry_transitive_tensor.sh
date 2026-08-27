@@ -44,9 +44,20 @@ cat > "$MATRIX_ROOT/src/lib.sev" <<'SEV'
 import tensor
 
 def product() -> list[float]:
-    left = tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
-    right = tensor.tensor([5.0, 6.0, 7.0, 8.0], [2, 2])
+    left = tensor.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    right = tensor.tensor([7.0, 8.0, 9.0, 10.0, 11.0, 12.0], [3, 2])
     return tensor.values(tensor.matmul(left, right))
+
+def broadcast_sum() -> list[float]:
+    matrix = tensor.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    row = tensor.tensor([10.0, 20.0, 30.0], [3])
+    return tensor.values(tensor.add(matrix, row))
+
+def transposed() -> list[float]:
+    matrix = tensor.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    value = tensor.transpose(matrix)
+    assert(tensor.shape(value) == [3, 2])
+    return tensor.values(value)
 SEV
 
 echo "publishing matrix package"
@@ -73,6 +84,12 @@ import matrix_kernel
 
 def compute() -> list[float]:
     return matrix_kernel.product()
+
+def compute_broadcast() -> list[float]:
+    return matrix_kernel.broadcast_sum()
+
+def compute_transpose() -> list[float]:
+    return matrix_kernel.transposed()
 SEV
 
 echo "publishing service package"
@@ -104,7 +121,9 @@ import matrix_service
 
 def main():
     result = matrix_service.compute()
-    assert(result == [19.0, 22.0, 43.0, 50.0])
+    assert(result == [58.0, 64.0, 139.0, 154.0])
+    assert(matrix_service.compute_broadcast() == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0])
+    assert(matrix_service.compute_transpose() == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
     print("transitive matrix result ok")
 SEV
 

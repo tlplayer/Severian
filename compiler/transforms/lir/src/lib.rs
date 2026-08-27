@@ -3,7 +3,7 @@
 use severian_artifact::ArtifactId;
 use severian_source::Span;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LoweredFloatFormat {
     Float8E4M3Fn,
     Float8E5M2,
@@ -11,7 +11,26 @@ pub enum LoweredFloatFormat {
     BrainFloat16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LoweredTensorElement {
+    Integer { bits: u16, signed: bool },
+    Float { format: LoweredFloatFormat },
+    Boolean,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LoweredTensorDimension {
+    Dynamic,
+    Known(u64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LoweredTensorShape {
+    Unranked,
+    Ranked(Vec<LoweredTensorDimension>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
     Integer { bits: u16, signed: bool },
     Float { format: LoweredFloatFormat },
@@ -22,10 +41,14 @@ pub enum LoweredType {
     Unit,
     Arguments,
     Aggregate(u32),
+    Tensor {
+        element: LoweredTensorElement,
+        shape: LoweredTensorShape,
+    },
     Task(TaskValueType),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskValueType {
     Integer { bits: u16, signed: bool },
     Float { format: LoweredFloatFormat },
@@ -36,6 +59,10 @@ pub enum TaskValueType {
     Unit,
     Arguments,
     Aggregate(u32),
+    Tensor {
+        element: LoweredTensorElement,
+        shape: LoweredTensorShape,
+    },
 }
 
 impl LoweredType {
@@ -50,6 +77,7 @@ impl LoweredType {
             Self::Unit => TaskValueType::Unit,
             Self::Arguments => TaskValueType::Arguments,
             Self::Aggregate(id) => TaskValueType::Aggregate(id),
+            Self::Tensor { element, shape } => TaskValueType::Tensor { element, shape },
             Self::Task(_) => return None,
         }))
     }
@@ -68,6 +96,7 @@ impl LoweredType {
             TaskValueType::Unit => Self::Unit,
             TaskValueType::Arguments => Self::Arguments,
             TaskValueType::Aggregate(id) => Self::Aggregate(id),
+            TaskValueType::Tensor { element, shape } => Self::Tensor { element, shape },
         })
     }
 }
@@ -124,7 +153,7 @@ pub struct LocalDecl {
     pub span: Option<Span>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Value {
     pub id: ValueId,
     pub ty: LoweredType,
@@ -384,10 +413,11 @@ pub struct TraitMethodDeclaration {
     pub result: TraitType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraitType {
     SelfType,
     Concrete(LoweredType),
+    Symbolic(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,4 +1,6 @@
-use crate::{DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, TyId, TypeId};
+use crate::{
+    DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, TensorShape, TyId, TypeId,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -34,6 +36,13 @@ pub struct Signature {
 pub enum TypeKind {
     Primitive(PrimitiveId),
     Nominal(DefId, Substitution),
+    /// A tensor keeps its element and shape structurally. It is not an opaque
+    /// nominal whose generic arguments must be reconstructed from a name.
+    Tensor {
+        constructor: DefId,
+        element: TyId,
+        shape: TensorShape,
+    },
     Parameter(GenericParamId),
     Infer(InferVarId),
     Function(Signature),
@@ -47,7 +56,7 @@ pub enum TypeKind {
     Resource(DefId, Substitution),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TyInterner {
     kinds: Vec<TypeKind>,
     interned: BTreeMap<TypeKind, TyId>,
@@ -120,6 +129,18 @@ impl TyInterner {
         match kind {
             TypeKind::Parameter(parameter) => substitution.get(parameter).unwrap_or(ty),
             TypeKind::Primitive(_) | TypeKind::Infer(_) => ty,
+            TypeKind::Tensor {
+                constructor,
+                element,
+                shape,
+            } => {
+                let element = self.substitute(element, substitution);
+                self.intern(TypeKind::Tensor {
+                    constructor,
+                    element,
+                    shape,
+                })
+            }
             TypeKind::Nominal(definition, arguments) => {
                 let arguments = Substitution::new(
                     arguments
@@ -239,6 +260,20 @@ impl InferenceContext {
         match (interner.kind(left), interner.kind(right)) {
             (Some(TypeKind::Infer(variable)), _) => self.bind(interner, *variable, right),
             (_, Some(TypeKind::Infer(variable))) => self.bind(interner, *variable, left),
+            (
+                Some(TypeKind::Tensor {
+                    constructor: left_constructor,
+                    element: left_element,
+                    shape: left_shape,
+                }),
+                Some(TypeKind::Tensor {
+                    constructor: right_constructor,
+                    element: right_element,
+                    shape: right_shape,
+                }),
+            ) if left_constructor == right_constructor && left_shape == right_shape => {
+                self.unify(interner, *left_element, *right_element)
+            }
             (Some(TypeKind::Tuple(left)), Some(TypeKind::Tuple(right)))
             | (Some(TypeKind::Union(left)), Some(TypeKind::Union(right)))
                 if left.len() == right.len() =>
@@ -323,6 +358,9 @@ fn occurs(
             substitution
                 .values()
                 .any(|ty| occurs(interner, bindings, variable, ty))
+        }
+        Some(TypeKind::Tensor { element, .. }) => {
+            occurs(interner, bindings, variable, *element)
         }
         Some(TypeKind::Function(signature)) => signature
             .parameters

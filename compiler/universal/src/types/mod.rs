@@ -1,8 +1,8 @@
 use crate::{
     BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, GenericParamId,
-    LiteralKind, IntegerWidth, LiteralValue, OperatorSignature, PrimitiveCategory,
-    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, Substitution, TyInterner, TypeKind,
-    TypeConstraint, TypeId, TypePattern, UnaryOperator,
+    IntegerWidth, LiteralKind, LiteralValue, OperatorSignature, PrimitiveCategory,
+    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, Substitution, TensorShape,
+    TensorType, TyInterner, TypeConstraint, TypeId, TypeKind, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -14,6 +14,11 @@ pub enum TypeDefinitionKind {
     Applied {
         constructor: TypeId,
         arguments: Vec<TypeId>,
+    },
+    Tensor {
+        constructor: TypeId,
+        element: TypeId,
+        shape: TensorShape,
     },
 }
 
@@ -41,7 +46,7 @@ pub struct ResolvedUnary {
     pub result: TypeId,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeContext {
     interner: TyInterner,
     definitions: BTreeMap<TypeId, TypeDefinition>,
@@ -53,6 +58,8 @@ pub struct TypeContext {
     unary: Vec<(UnaryOperator, TypeId, TypeId)>,
     compile_routes: BTreeMap<TypeId, CompilerId>,
     applications: BTreeMap<(TypeId, Vec<TypeId>), TypeId>,
+    tensor_constructors: BTreeSet<TypeId>,
+    tensors: BTreeMap<(TypeId, TypeId, TensorShape), TypeId>,
     capabilities: BTreeMap<TypeId, BTreeSet<TypeId>>,
     trait_binary: BTreeMap<TypeId, BTreeSet<BinaryOperator>>,
     trait_unary: BTreeMap<TypeId, BTreeSet<UnaryOperator>>,
@@ -203,6 +210,66 @@ impl TypeContext {
         Ok(id)
     }
 
+    /// Registers a package-scoped source declaration without adding its short
+    /// name to the universal prelude. Package semantic lookup owns visibility;
+    /// TypeContext owns the declaration's structural identity.
+    pub fn register_source_declaration(
+        &mut self,
+        path: impl Into<String>,
+        name: impl Into<String>,
+        parameter_count: usize,
+    ) -> Result<TypeId, TypeError> {
+        let path = path.into();
+        let name = name.into();
+        let declaration = DeclarationId::from_path(&path);
+        if let Some(existing) = self.by_declaration.get(&declaration) {
+            let known = &self.definitions[existing];
+            return if known.path == path {
+                Ok(*existing)
+            } else {
+                Err(TypeError::IdentityCollision(known.path.clone(), path))
+            };
+        }
+        let id = self.interner.intern(TypeKind::Nominal(
+            DefId {
+                package: 0,
+                module: 0,
+                declaration,
+            },
+            Substitution::default(),
+        ));
+        self.definitions.insert(
+            id,
+            TypeDefinition {
+                id,
+                declaration,
+                path,
+                name,
+                parameter_count,
+                kind: TypeDefinitionKind::Trait,
+            },
+        );
+        self.by_declaration.insert(declaration, id);
+        Ok(id)
+    }
+
+    /// Marks the ordinary generic declaration used as the source-level tensor
+    /// constructor. Applications of it become structural tensor types.
+    pub fn mark_tensor_constructor(&mut self, constructor: TypeId) -> Result<(), TypeError> {
+        let definition = self
+            .definition(constructor)
+            .ok_or(TypeError::UnknownTypeId(constructor))?;
+        if definition.parameter_count != 1 {
+            return Err(TypeError::GenericArity {
+                constructor,
+                expected: 1,
+                actual: definition.parameter_count,
+            });
+        }
+        self.tensor_constructors.insert(constructor);
+        Ok(())
+    }
+
     fn define_primitive(
         &mut self,
         type_id: TypeId,
@@ -336,7 +403,9 @@ impl TypeContext {
     pub fn primitive(&self, id: TypeId) -> Option<&PrimitiveDefinition> {
         match &self.definition(id)?.kind {
             TypeDefinitionKind::Primitive(primitive) => Some(primitive),
-            TypeDefinitionKind::Trait | TypeDefinitionKind::Applied { .. } => None,
+            TypeDefinitionKind::Trait
+            | TypeDefinitionKind::Applied { .. }
+            | TypeDefinitionKind::Tensor { .. } => None,
         }
     }
 
@@ -385,9 +454,11 @@ impl TypeContext {
                 actual: arguments.len(),
             });
         }
-        for argument in &arguments {
-            self.definition(*argument)
-                .ok_or(TypeError::UnknownTypeId(*argument))?;
+        if self.tensor_constructors.contains(&constructor) {
+            let [element] = arguments.as_slice() else {
+                unreachable!("tensor constructor arity was validated");
+            };
+            return self.instantiate_tensor(constructor, *element, TensorShape::Unranked);
         }
         if let Some(existing) = self.applications.get(&(constructor, arguments.clone())) {
             return Ok(*existing);
@@ -396,9 +467,7 @@ impl TypeContext {
             .iter()
             .map(|argument| {
                 self.definition(*argument)
-                    .expect("arguments were validated")
-                    .path
-                    .as_str()
+                    .map_or_else(|| format!("type#{}", argument.0), |known| known.path.clone())
             })
             .collect::<Vec<_>>()
             .join(",");
@@ -419,7 +488,7 @@ impl TypeContext {
             DefId {
                 package: 0,
                 module: 0,
-                declaration,
+                declaration: definition.declaration,
             },
             substitution,
         ));
@@ -442,6 +511,124 @@ impl TypeContext {
         Ok(id)
     }
 
+    pub fn instantiate_applied(
+        &mut self,
+        constructor: TypeId,
+        arguments: Vec<TypeId>,
+    ) -> Result<TypeId, TypeError> {
+        self.instantiate(constructor, arguments)
+    }
+
+    pub fn instantiate_tensor(
+        &mut self,
+        constructor: TypeId,
+        element: TypeId,
+        shape: TensorShape,
+    ) -> Result<TypeId, TypeError> {
+        let definition = self
+            .definition(constructor)
+            .ok_or(TypeError::UnknownTypeId(constructor))?;
+        if !self.tensor_constructors.contains(&constructor) {
+            return Err(TypeError::NotTensorConstructor(constructor));
+        }
+        if let Some(existing) = self
+            .tensors
+            .get(&(constructor, element, shape.clone()))
+        {
+            return Ok(*existing);
+        }
+        let element_path = self
+            .definition(element)
+            .map_or_else(|| format!("type#{}", element.0), |known| known.path.clone());
+        let shape_path = tensor_shape_path(&shape);
+        let path = format!("{}[{element_path};{shape_path}]", definition.path);
+        let name = format!("{}[{element_path};{shape_path}]", definition.name);
+        let declaration = DeclarationId::from_path(&path);
+        let constructor_definition = definition.declaration;
+        let id = self.interner.intern(TypeKind::Tensor {
+            constructor: DefId {
+                package: 0,
+                module: 0,
+                declaration: constructor_definition,
+            },
+            element,
+            shape: shape.clone(),
+        });
+        self.definitions.insert(
+            id,
+            TypeDefinition {
+                id,
+                declaration,
+                path,
+                name,
+                parameter_count: 0,
+                kind: TypeDefinitionKind::Tensor {
+                    constructor,
+                    element,
+                    shape: shape.clone(),
+                },
+            },
+        );
+        self.by_declaration.insert(declaration, id);
+        self.tensors.insert((constructor, element, shape), id);
+        Ok(id)
+    }
+
+    pub fn tensor(&self, type_id: TypeId) -> Option<TensorType> {
+        match &self.definition(type_id)?.kind {
+            TypeDefinitionKind::Tensor { element, shape, .. } => Some(TensorType {
+                element: *element,
+                shape: shape.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Decomposes any structural generic application without knowing its
+    /// source package. Tensor is an ordinary one-argument application here;
+    /// its shape remains available through `tensor`.
+    pub fn applied_parts(&self, type_id: TypeId) -> Option<(TypeId, Vec<TypeId>)> {
+        match &self.definition(type_id)?.kind {
+            TypeDefinitionKind::Applied {
+                constructor,
+                arguments,
+            } => Some((*constructor, arguments.clone())),
+            TypeDefinitionKind::Tensor {
+                constructor,
+                element,
+                ..
+            } => Some((*constructor, vec![*element])),
+            TypeDefinitionKind::Primitive(_) | TypeDefinitionKind::Trait => None,
+        }
+    }
+
+    pub fn tensor_constructor(&self, type_id: TypeId) -> Option<TypeId> {
+        match &self.definition(type_id)?.kind {
+            TypeDefinitionKind::Tensor { constructor, .. } => Some(*constructor),
+            _ => None,
+        }
+    }
+
+    pub fn refine_tensor_shape(
+        &mut self,
+        type_id: TypeId,
+        shape: TensorShape,
+    ) -> Result<TypeId, TypeError> {
+        let TypeDefinitionKind::Tensor {
+            constructor,
+            element,
+            ..
+        } = self
+            .definition(type_id)
+            .ok_or(TypeError::UnknownTypeId(type_id))?
+            .kind
+            .clone()
+        else {
+            return Err(TypeError::NotTensor(type_id));
+        };
+        self.instantiate_tensor(constructor, element, shape)
+    }
+
     pub fn compile_route(&self, type_id: TypeId) -> Result<CompileRoute, TypeError> {
         let Some(definition) = self.definition(type_id) else {
             return match self.kind(type_id) {
@@ -453,12 +640,18 @@ impl TypeContext {
                     | TypeKind::Union(_)
                     | TypeKind::Reference { .. },
                 ) => Ok(CompileRoute::Standard),
-                Some(TypeKind::Primitive(_) | TypeKind::Nominal(_, _) | TypeKind::Resource(_, _))
+                Some(
+                    TypeKind::Primitive(_)
+                    | TypeKind::Nominal(_, _)
+                    | TypeKind::Tensor { .. }
+                    | TypeKind::Resource(_, _),
+                )
                 | None => Err(TypeError::UnknownTypeId(type_id)),
             };
         };
         let route_owner = match &definition.kind {
-            TypeDefinitionKind::Applied { constructor, .. } => *constructor,
+            TypeDefinitionKind::Applied { constructor, .. }
+            | TypeDefinitionKind::Tensor { constructor, .. } => *constructor,
             _ => type_id,
         };
         Ok(self
@@ -475,6 +668,16 @@ impl TypeContext {
     pub fn assignable(&self, actual: TypeId, expected: TypeId) -> bool {
         if actual == expected {
             return true;
+        }
+        if let (Some(actual_tensor), Some(expected_tensor)) =
+            (self.tensor(actual), self.tensor(expected))
+        {
+            if self.tensor_constructor(actual) != self.tensor_constructor(expected)
+                || actual_tensor.element != expected_tensor.element
+            {
+                return false;
+            }
+            return tensor_shape_assignable(&actual_tensor.shape, &expected_tensor.shape);
         }
         if let Some(TypeKind::Union(members)) = self.kind(expected) {
             return members
@@ -658,6 +861,33 @@ fn exact(pattern: TypePattern) -> Option<TypeId> {
     }
 }
 
+fn tensor_shape_path(shape: &TensorShape) -> String {
+    match shape {
+        TensorShape::Unranked => "*".into(),
+        TensorShape::Ranked(dimensions) => dimensions
+            .iter()
+            .map(|dimension| match dimension {
+                crate::TensorDimension::Dynamic => "?".into(),
+                crate::TensorDimension::Known(value) => value.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("x"),
+    }
+}
+
+fn tensor_shape_assignable(actual: &TensorShape, expected: &TensorShape) -> bool {
+    match (actual, expected) {
+        (_, TensorShape::Unranked) => true,
+        (TensorShape::Unranked, TensorShape::Ranked(_)) => false,
+        (TensorShape::Ranked(actual), TensorShape::Ranked(expected)) => {
+            actual.len() == expected.len()
+                && actual.iter().zip(expected).all(|(actual, expected)| {
+                    matches!(expected, crate::TensorDimension::Dynamic) || actual == expected
+                })
+        }
+    }
+}
+
 fn resolve_pattern(pattern: TypePattern, left: TypeId, right: TypeId) -> Option<TypeId> {
     Some(match pattern {
         TypePattern::Exact(id) => id,
@@ -757,6 +987,8 @@ pub enum TypeError {
     UnknownName(String),
     IdentityCollision(String, String),
     UnknownTypeId(TypeId),
+    NotTensor(TypeId),
+    NotTensorConstructor(TypeId),
     AlreadyDefined(String),
     InvalidDefaultLiteralCategory,
     DuplicateDefault(LiteralKind),

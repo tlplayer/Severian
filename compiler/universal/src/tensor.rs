@@ -47,6 +47,45 @@ pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_typ
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
 
+/// Operations whose result preserves the element type selected by the first
+/// tensor operand. Shape-changing operations may refine shape independently;
+/// none of them are allowed to replace or erase `T`.
+pub const TYPE_PRESERVING_OPERATIONS: &[OpId] = &[
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
+    REDUCE_SUM,
+    REDUCE_SUM_AXIS,
+    MATMUL,
+    TRANSPOSE,
+    SLICE,
+    MATERIALIZE,
+    RESHAPE,
+    PERMUTE,
+    MEAN_LAST,
+    RSQRT,
+    EXP,
+    LOG,
+    TANH,
+    SILU,
+    SOFTMAX_LAST,
+    GATHER,
+    CONCATENATE,
+    REPEAT,
+    ROPE,
+    RELU,
+    SCALE,
+    LAYER_NORM,
+    RELU_BACKWARD,
+    SOFTMAX_BACKWARD,
+    LAYER_NORM_BACKWARD,
+    BACKWARD_MSE,
+    GRADIENT,
+    SGD,
+    ADD_SCALAR,
+];
+
 pub fn compiler_id() -> CompilerId {
     CompilerId::from_path("tensor.compiler.TensorCompiler")
 }
@@ -62,36 +101,16 @@ pub enum TensorElementKind {
 }
 
 impl TensorElementKind {
-    pub const ALL: [Self; 17] = [
-        Self::SignedInteger(8),
-        Self::SignedInteger(16),
-        Self::SignedInteger(32),
-        Self::SignedInteger(64),
-        Self::SignedInteger(128),
-        Self::UnsignedInteger(8),
-        Self::UnsignedInteger(16),
-        Self::UnsignedInteger(32),
-        Self::UnsignedInteger(64),
-        Self::UnsignedInteger(128),
-        Self::Float8E4M3Fn,
-        Self::Float8E5M2,
-        Self::IeeeFloat(16),
-        Self::BrainFloat16,
-        Self::IeeeFloat(32),
-        Self::IeeeFloat(64),
-        Self::IeeeFloat(128),
-    ];
-
     pub fn from_type(types: &TypeContext, element: TypeId) -> Option<Self> {
         match types.primitive(element)?.representation {
             PrimitiveRepresentation::Integer {
                 bits: IntegerWidth::Fixed(bits),
                 signed: true,
-            } if matches!(bits, 8 | 16 | 32 | 64 | 128) => Some(Self::SignedInteger(bits)),
+            } => Some(Self::SignedInteger(bits)),
             PrimitiveRepresentation::Integer {
                 bits: IntegerWidth::Fixed(bits),
                 signed: false,
-            } if matches!(bits, 8 | 16 | 32 | 64 | 128) => Some(Self::UnsignedInteger(bits)),
+            } => Some(Self::UnsignedInteger(bits)),
             PrimitiveRepresentation::Float {
                 format: FloatFormat::Float8E4M3Fn,
             } => Some(Self::Float8E4M3Fn),
@@ -100,7 +119,7 @@ impl TensorElementKind {
             } => Some(Self::Float8E5M2),
             PrimitiveRepresentation::Float {
                 format: FloatFormat::Ieee(bits),
-            } if matches!(bits, 16 | 32 | 64 | 128) => Some(Self::IeeeFloat(bits)),
+            } => Some(Self::IeeeFloat(bits)),
             PrimitiveRepresentation::Float {
                 format: FloatFormat::BrainFloat16,
             } => Some(Self::BrainFloat16),
@@ -108,8 +127,8 @@ impl TensorElementKind {
         }
     }
 
-    pub fn storage_tag(self) -> u8 {
-        match self {
+    pub fn storage_tag(self) -> Option<u8> {
+        Some(match self {
             Self::SignedInteger(8) => 0,
             Self::SignedInteger(16) => 1,
             Self::SignedInteger(32) => 2,
@@ -127,8 +146,8 @@ impl TensorElementKind {
             Self::IeeeFloat(32) => 14,
             Self::IeeeFloat(64) => 15,
             Self::IeeeFloat(128) => 16,
-            _ => unreachable!("tensor element widths are validated at construction"),
-        }
+            _ => return None,
+        })
     }
 
     pub const fn bits(self) -> u16 {
@@ -156,7 +175,7 @@ impl TensorElementKind {
 }
 
 pub fn element_storage_tag(types: &TypeContext, element: TypeId) -> Option<u8> {
-    TensorElementKind::from_type(types, element).map(TensorElementKind::storage_tag)
+    TensorElementKind::from_type(types, element)?.storage_tag()
 }
 
 #[derive(Clone)]
@@ -170,12 +189,21 @@ struct TensorOperationInterface {
 impl OperationInterface for TensorOperationInterface {
     fn infer_types(
         &self,
-        _operands: &[TyId],
+        operands: &[TyId],
         _attributes: &Attrs,
     ) -> Result<Vec<TyId>, OperationDiagnostic> {
+        if TYPE_PRESERVING_OPERATIONS.contains(&self.id) {
+            return operands.first().copied().map(|operand| vec![operand]).ok_or_else(|| {
+                OperationDiagnostic {
+                    operation: self.id,
+                    message: "type-preserving tensor operation requires a tensor operand".into(),
+                }
+            });
+        }
         Err(OperationDiagnostic {
             operation: self.id,
-            message: "tensor result types are resolved by semantic generic inference".into(),
+            message: "tensor result type requires an explicit element or non-tensor result type"
+                .into(),
         })
     }
 
@@ -282,23 +310,45 @@ impl TensorDimension {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TensorShape(pub Vec<TensorDimension>);
+pub enum TensorShape {
+    /// Rank is not known until execution. This is the shape of a source-level
+    /// `Tensor[T]` annotation and lowers to MLIR's unranked tensor type.
+    #[default]
+    Unranked,
+    /// Rank is known. Individual dimensions may remain dynamic.
+    Ranked(Vec<TensorDimension>),
+}
 
 impl TensorShape {
     pub fn ranked(dimensions: impl IntoIterator<Item = u64>) -> Self {
-        Self(dimensions.into_iter().map(TensorDimension::Known).collect())
+        Self::Ranked(
+            dimensions
+                .into_iter()
+                .map(TensorDimension::Known)
+                .collect(),
+        )
     }
 
     pub fn dynamic(rank: usize) -> Self {
-        Self(vec![TensorDimension::Dynamic; rank])
+        Self::Ranked(vec![TensorDimension::Dynamic; rank])
     }
 
-    pub fn rank(&self) -> usize {
-        self.0.len()
+    pub fn rank(&self) -> Option<usize> {
+        match self {
+            Self::Unranked => None,
+            Self::Ranked(dimensions) => Some(dimensions.len()),
+        }
+    }
+
+    pub fn dimensions(&self) -> Option<&[TensorDimension]> {
+        match self {
+            Self::Unranked => None,
+            Self::Ranked(dimensions) => Some(dimensions),
+        }
     }
 
     pub fn element_count(&self) -> Option<u64> {
-        self.0.iter().try_fold(1u64, |count, dimension| {
+        self.dimensions()?.iter().try_fold(1u64, |count, dimension| {
             let TensorDimension::Known(dimension) = dimension else {
                 return None;
             };
@@ -307,17 +357,20 @@ impl TensorShape {
     }
 
     pub fn broadcast(&self, other: &Self) -> Result<Self, TensorError> {
-        let rank = self.rank().max(other.rank());
+        let (Some(left_dimensions), Some(right_dimensions)) =
+            (self.dimensions(), other.dimensions())
+        else {
+            return Ok(Self::Unranked);
+        };
+        let rank = left_dimensions.len().max(right_dimensions.len());
         let mut dimensions = Vec::with_capacity(rank);
         for offset in 0..rank {
-            let left = self
-                .0
-                .get(self.rank().wrapping_sub(offset + 1))
+            let left = left_dimensions
+                .get(left_dimensions.len().wrapping_sub(offset + 1))
                 .copied()
                 .unwrap_or(TensorDimension::Known(1));
-            let right = other
-                .0
-                .get(other.rank().wrapping_sub(offset + 1))
+            let right = right_dimensions
+                .get(right_dimensions.len().wrapping_sub(offset + 1))
                 .copied()
                 .unwrap_or(TensorDimension::Known(1));
             dimensions.push(
@@ -327,15 +380,18 @@ impl TensorShape {
             );
         }
         dimensions.reverse();
-        Ok(Self(dimensions))
+        Ok(Self::Ranked(dimensions))
     }
 
     pub fn matmul(&self, other: &Self) -> Result<Self, TensorError> {
-        if self.rank() < 2 || other.rank() < 2 {
+        let (Some(left), Some(right)) = (self.dimensions(), other.dimensions()) else {
+            return Ok(Self::Unranked);
+        };
+        if left.len() < 2 || right.len() < 2 {
             return Err(TensorError::MatmulRequiresRankTwo);
         }
-        let left_contract = self.0[self.rank() - 1];
-        let right_contract = other.0[other.rank() - 2];
+        let left_contract = left[left.len() - 1];
+        let right_contract = right[right.len() - 2];
         if matches!(
             (left_contract, right_contract),
             (TensorDimension::Known(left), TensorDimension::Known(right)) if left != right
@@ -345,27 +401,33 @@ impl TensorShape {
                 right_contract,
             ));
         }
-        let batches = TensorShape(self.0[..self.rank() - 2].to_vec())
-            .broadcast(&TensorShape(other.0[..other.rank() - 2].to_vec()))?;
-        let mut result = batches.0;
-        result.push(self.0[self.rank() - 2]);
-        result.push(other.0[other.rank() - 1]);
-        Ok(Self(result))
+        let batches = TensorShape::Ranked(left[..left.len() - 2].to_vec()).broadcast(
+            &TensorShape::Ranked(right[..right.len() - 2].to_vec()),
+        )?;
+        let Self::Ranked(mut result) = batches else {
+            return Ok(Self::Unranked);
+        };
+        result.push(left[left.len() - 2]);
+        result.push(right[right.len() - 1]);
+        Ok(Self::Ranked(result))
     }
 
     pub fn permute(&self, axes: &[usize]) -> Result<Self, TensorError> {
-        if axes.len() != self.rank() {
+        let Some(source) = self.dimensions() else {
+            return Ok(Self::Unranked);
+        };
+        if axes.len() != source.len() {
             return Err(TensorError::InvalidPermutation);
         }
-        let mut seen = vec![false; self.rank()];
-        let mut dimensions = Vec::with_capacity(self.rank());
+        let mut seen = vec![false; source.len()];
+        let mut dimensions = Vec::with_capacity(source.len());
         for axis in axes {
-            if *axis >= self.rank() || std::mem::replace(&mut seen[*axis], true) {
+            if *axis >= source.len() || std::mem::replace(&mut seen[*axis], true) {
                 return Err(TensorError::InvalidPermutation);
             }
-            dimensions.push(self.0[*axis]);
+            dimensions.push(source[*axis]);
         }
-        Ok(Self(dimensions))
+        Ok(Self::Ranked(dimensions))
     }
 }
 
@@ -496,17 +558,37 @@ mod tests {
     #[test]
     fn every_required_tensor_dtype_has_storage_and_accumulation_semantics() {
         let types = types();
-        let names = [
-            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f8e4m3fn",
-            "f8e5m2", "f16", "bf16", "f32", "f64", "f128",
+        let kinds = [
+            ("i8", TensorElementKind::SignedInteger(8)),
+            ("i16", TensorElementKind::SignedInteger(16)),
+            ("i32", TensorElementKind::SignedInteger(32)),
+            ("i64", TensorElementKind::SignedInteger(64)),
+            ("i128", TensorElementKind::SignedInteger(128)),
+            ("u8", TensorElementKind::UnsignedInteger(8)),
+            ("u16", TensorElementKind::UnsignedInteger(16)),
+            ("u32", TensorElementKind::UnsignedInteger(32)),
+            ("u64", TensorElementKind::UnsignedInteger(64)),
+            ("u128", TensorElementKind::UnsignedInteger(128)),
+            ("f8e4m3fn", TensorElementKind::Float8E4M3Fn),
+            ("f8e5m2", TensorElementKind::Float8E5M2),
+            ("f16", TensorElementKind::IeeeFloat(16)),
+            ("bf16", TensorElementKind::BrainFloat16),
+            ("f32", TensorElementKind::IeeeFloat(32)),
+            ("f64", TensorElementKind::IeeeFloat(64)),
+            ("f128", TensorElementKind::IeeeFloat(128)),
         ];
-        for (tag, (name, kind)) in names.into_iter().zip(TensorElementKind::ALL).enumerate() {
+        for (tag, (name, kind)) in kinds.into_iter().enumerate() {
             let element = types.resolve_name(name).unwrap();
             assert_eq!(TensorElementKind::from_type(&types, element), Some(kind));
             assert_eq!(element_storage_tag(&types, element), Some(tag as u8));
             assert!(kind.byte_width().is_power_of_two());
-            assert!(TensorElementKind::ALL.contains(&kind.accumulation()));
         }
+        let f80 = types.resolve_name("f80").unwrap();
+        assert_eq!(
+            TensorElementKind::from_type(&types, f80),
+            Some(TensorElementKind::IeeeFloat(80))
+        );
+        assert_eq!(element_storage_tag(&types, f80), None);
         assert_eq!(
             TensorElementKind::Float8E4M3Fn.accumulation(),
             TensorElementKind::IeeeFloat(32)
@@ -525,5 +607,36 @@ mod tests {
     fn tensor_operation_ids_are_backend_independent() {
         assert_eq!(ADD, OpId::named("tensor", "add"));
         assert_ne!(ADD, MATMUL);
+    }
+
+    #[test]
+    fn every_tensor_operation_preserves_each_structural_element_type_generically() {
+        let mut builder = TypeContextBuilder::new();
+        crate::install_primitives(&mut builder).unwrap();
+        let mut types = builder.build();
+        let constructor = types
+            .register_source_declaration("tensor.Tensor", "Tensor", 1)
+            .unwrap();
+        types.mark_tensor_constructor(constructor).unwrap();
+        let mut registry = OperationRegistry::default();
+        install_operations(&mut registry).unwrap();
+        let element_names = [
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128",
+            "f16", "f32", "f64", "f80", "f128",
+        ];
+        for name in element_names {
+            let element = types.resolve_name(name).unwrap();
+            let tensor = types
+                .instantiate_tensor(constructor, element, TensorShape::ranked([2, 2]))
+                .unwrap();
+            for operation in TYPE_PRESERVING_OPERATIONS {
+                let result = registry
+                    .interface(*operation)
+                    .unwrap()
+                    .infer_types(&[tensor], &Attrs::new())
+                    .unwrap();
+                assert_eq!(result, [tensor], "{operation:?} erased Tensor[{name}]");
+            }
+        }
     }
 }

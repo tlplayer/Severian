@@ -152,12 +152,13 @@ impl Compiler {
     /// Orchestrates both MIR routes and returns one verified MLIR module.
     /// Custom handlers never depend on or invoke ordinary lowering directly.
     pub fn compile_mir_to_mlir(&self, mir: &MirModule) -> Result<String, CompileError> {
-        let plan =
-            severian_compile::plan(mir, &self.context.types).map_err(CompileError::Compile)?;
+        let plan = severian_compile::plan(mir, self.types_for(mir))
+            .map_err(CompileError::Compile)?;
         self.compile_plan_to_mlir(&plan)
     }
 
     fn compile_plan_to_mlir(&self, plan: &CompilePlan) -> Result<String, CompileError> {
+        let types = self.types_for(&plan.source);
         let target = crate::components::ensure_for_plan(plan, &self.target)
             .map_err(CompileError::Component)?;
         let artifacts = self
@@ -165,16 +166,20 @@ impl Compiler {
             .compile(
                 plan,
                 &CompileContext {
-                    types: &self.context.types,
+                    types,
                     target: &target,
                 },
             )
             .map_err(CompileError::Compile)?;
         let resumed = plan.resumed_mir();
-        let lir = severian_lowering::lower(&resumed, &self.context.types, &target)
+        let lir = severian_lowering::lower(&resumed, types, &target)
             .map_err(CompileError::Lowering)?;
         let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
         severian_mlir::compose(&ordinary, &artifacts, &target).map_err(CompileError::Mlir)
+    }
+
+    fn types_for<'a>(&'a self, mir: &'a MirModule) -> &'a severian_universal::TypeContext {
+        mir.types.as_ref().unwrap_or(&self.context.types)
     }
 
     pub fn compile_source(
@@ -218,7 +223,7 @@ impl Compiler {
         .map_err(|error| {
             CompileError::Diagnostic(Diagnostic::new("E000701", error.to_string(), None))
         })?;
-        let mut hir = severian_semantic::analyze_with_context(
+        let (mut hir, types) = severian_semantic::analyze_with_context_and_types(
             &ast,
             &self.context.types,
             severian_semantic::AnalysisContext {
@@ -233,7 +238,13 @@ impl Compiler {
         apply_external_calls(&ast, &external, &mut hir)?;
         severian_ownership::validate(&hir).map_err(CompileError::Diagnostic)?;
         let mut mir = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
-        severian_mir::run_required_pipeline(&mut mir, &self.context)
+        mir.types = Some(types);
+        let mut context = self.context.clone();
+        context.types = mir
+            .types
+            .clone()
+            .expect("the in-memory pipeline installed its structural type catalog");
+        severian_mir::run_required_pipeline(&mut mir, &context)
             .map_err(CompileError::MirPass)?;
         Ok(mir)
     }
@@ -265,7 +276,7 @@ impl Compiler {
                 Ok(output)
             }
             EmitStage::Hir => {
-                let (hir, _) = self.check_file_to_hir(source, CompileMode::Build)?;
+                let (hir, _, _) = self.check_file_to_hir(source, CompileMode::Build)?;
                 Ok(format!("{hir:#?}\n"))
             }
             EmitStage::Mir => {
@@ -274,35 +285,29 @@ impl Compiler {
             }
             EmitStage::Lir => {
                 let mir = self.check_file_to_mir(source, CompileMode::Build)?;
-                let plan = severian_compile::plan(&mir, &self.context.types)
+                let types = self.types_for(&mir);
+                let plan = severian_compile::plan(&mir, types)
                     .map_err(CompileError::Compile)?;
-                let lir = severian_lowering::lower(
-                    &plan.resumed_mir(),
-                    &self.context.types,
-                    &self.target,
-                )
+                let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
                 .map_err(CompileError::Lowering)?;
                 Ok(format!("{lir:#?}\n"))
             }
             EmitStage::Mlir => {
                 let mir = self.check_file_to_mir(source, CompileMode::Build)?;
-                let plan = severian_compile::plan(&mir, &self.context.types)
+                let types = self.types_for(&mir);
+                let plan = severian_compile::plan(&mir, types)
                     .map_err(CompileError::Compile)?;
                 let artifacts = self
                     .compile_handlers
                     .compile(
                         &plan,
                         &CompileContext {
-                            types: &self.context.types,
+                            types,
                             target: &self.target,
                         },
                     )
                     .map_err(CompileError::Compile)?;
-                let lir = severian_lowering::lower(
-                    &plan.resumed_mir(),
-                    &self.context.types,
-                    &self.target,
-                )
+                let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
                 .map_err(CompileError::Lowering)?;
                 let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
                 let text = if artifacts.is_empty() {
@@ -395,8 +400,8 @@ impl Compiler {
             CompileMode::Build
         };
         let mir = self.check_file_to_mir(source, mode)?;
-        let plan =
-            severian_compile::plan(&mir, &self.context.types).map_err(CompileError::Compile)?;
+        let plan = severian_compile::plan(&mir, self.types_for(&mir))
+            .map_err(CompileError::Compile)?;
         Ok(self.routes(&plan))
     }
 
@@ -586,7 +591,14 @@ impl Compiler {
         &self,
         source: &Path,
         mode: CompileMode,
-    ) -> Result<(severian_hir::Program, Vec<SourceFile>), CompileError> {
+    ) -> Result<
+        (
+            severian_hir::Program,
+            Vec<SourceFile>,
+            severian_universal::TypeContext,
+        ),
+        CompileError,
+    > {
         let graph = self.resolve_modules(source)?;
         self.check_graph_to_hir(graph, mode)
     }
@@ -595,7 +607,14 @@ impl Compiler {
         &self,
         mut graph: severian_modules::ModuleGraph,
         mode: CompileMode,
-    ) -> Result<(severian_hir::Program, Vec<SourceFile>), CompileError> {
+    ) -> Result<
+        (
+            severian_hir::Program,
+            Vec<SourceFile>,
+            severian_universal::TypeContext,
+        ),
+        CompileError,
+    > {
         let root_package = graph
             .modules
             .last()
@@ -645,7 +664,7 @@ impl Compiler {
         severian_ownership::validate(&typed.hir).map_err(|diagnostic| {
             CompileError::Diagnostic(diagnostic.with_sources(sources.iter().cloned()))
         })?;
-        Ok((typed.hir, sources))
+        Ok((typed.hir, sources, typed.types))
     }
 
     fn check_file_to_mir(
@@ -653,8 +672,8 @@ impl Compiler {
         source: &Path,
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
-        let (hir, sources) = self.check_file_to_hir(source, mode)?;
-        self.check_hir_to_mir(hir, sources)
+        let (hir, sources, types) = self.check_file_to_hir(source, mode)?;
+        self.check_hir_to_mir(hir, sources, types)
     }
 
     fn check_graph_to_mir(
@@ -662,17 +681,24 @@ impl Compiler {
         graph: severian_modules::ModuleGraph,
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
-        let (hir, sources) = self.check_graph_to_hir(graph, mode)?;
-        self.check_hir_to_mir(hir, sources)
+        let (hir, sources, types) = self.check_graph_to_hir(graph, mode)?;
+        self.check_hir_to_mir(hir, sources, types)
     }
 
     fn check_hir_to_mir(
         &self,
         hir: severian_hir::Program,
         sources: Vec<SourceFile>,
+        types: severian_universal::TypeContext,
     ) -> Result<MirModule, CompileError> {
         let mut merged = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
-        severian_mir::run_required_pipeline(&mut merged, &self.context)
+        merged.types = Some(types);
+        let mut context = self.context.clone();
+        context.types = merged
+            .types
+            .clone()
+            .expect("the source pipeline installed its structural type catalog");
+        severian_mir::run_required_pipeline(&mut merged, &context)
             .map_err(CompileError::MirPass)?;
         if let Some(source) = sources.last() {
             attach_assertion_locations(&mut merged, source);
@@ -693,11 +719,11 @@ impl Compiler {
             .map(|source| self.native_linker_arguments(source, output))
             .transpose()?
             .unwrap_or_default();
-        let plan =
-            severian_compile::plan(mir, &self.context.types).map_err(CompileError::Compile)?;
+        let types = self.types_for(mir);
+        let plan = severian_compile::plan(mir, types).map_err(CompileError::Compile)?;
         if linker_arguments.is_empty() && !plan.has_custom_regions() {
             let resumed = plan.resumed_mir();
-            let lir = severian_lowering::lower(&resumed, &self.context.types, &self.target)
+            let lir = severian_lowering::lower(&resumed, types, &self.target)
                 .map_err(CompileError::Lowering)?;
             if severian_backend::supports_direct_lir(&lir) {
                 return severian_backend::emit_executable(&lir, output)

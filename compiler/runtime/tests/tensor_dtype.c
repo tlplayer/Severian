@@ -49,7 +49,7 @@ static void exercise_safetensor_view(int32_t dtype, const char *name) {
     sev_tensor *tensor = sev_safetensor_view((int64_t)(intptr_t)&store, "x", dtype);
     assert(tensor->dtype == dtype);
     assert(tensor->rank == 1 && tensor->shape[0] == 1 && tensor->count == 1);
-    assert(tensor->values[0].bits == sev_read_u128(bytes + 8 + header_length, width));
+    assert(sev_tensor_value(tensor, 0).bits == sev_read_u128(bytes + 8 + header_length, width));
     free(tensor->values);
     free(tensor->shape);
     free(tensor->strides);

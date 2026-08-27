@@ -29,6 +29,10 @@ pub use verify::{verify, VerifyError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
+    /// Program-local structural type catalog. Source generic applications are
+    /// interned here so planning and lowering never need to reconstruct them
+    /// from display names.
+    pub types: Option<severian_universal::TypeContext>,
     pub globals: Vec<GlobalDecl>,
     pub initializer: CfgBody,
     pub functions: Vec<Function>,
@@ -58,10 +62,11 @@ pub struct TraitMethodDeclaration {
     pub result: TraitType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraitType {
     SelfType,
     Concrete(severian_universal::TypeId),
+    Symbolic(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

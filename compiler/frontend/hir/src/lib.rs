@@ -220,10 +220,11 @@ pub struct TraitMethodDeclaration {
     pub result: TraitType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraitType {
     SelfType,
     Concrete(TypeId),
+    Symbolic(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
