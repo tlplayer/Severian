@@ -787,10 +787,8 @@ fn registry_publish_consume_golden_path() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("registry publish/consume golden path passed")
-    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("registry publish/consume golden path passed"));
 }
 
 #[cfg(unix)]
@@ -808,9 +806,92 @@ fn registry_transitive_tensor_golden_path() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("transitive tensor package golden path passed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn registry_dependency_command_golden_path() {
+    let script = repository_root().join("test/validation/packages/registry_dependency_commands.sh");
+    let output = Command::new("bash")
+        .arg(script)
+        .env("SEVERIAN_BIN", env!("CARGO_BIN_EXE_sev"))
+        .output()
+        .unwrap();
     assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("transitive tensor package golden path passed")
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("registry dependency command golden path passed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn registry_run_install_golden_path() {
+    let script = repository_root().join("test/validation/packages/registry_run_install.sh");
+    let output = Command::new("bash")
+        .arg(script)
+        .env("SEVERIAN_BIN", env!("CARGO_BIN_EXE_sev"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("registry run/install golden path passed")
+    );
+}
+
+#[test]
+#[ignore = "assembles the complete LLVM/MLIR portable distribution"]
+fn portable_release_golden_path() {
+    let root = repository_root();
+    let output = Command::new(root.join("test/validation/packages/portable_release.sh"))
+        .current_dir(&root)
+        .output()
+        .expect("portable release golden script should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn standalone_installer_golden_path() {
+    let root = repository_root();
+    let output = Command::new(root.join("test/validation/release/install_release.sh"))
+        .current_dir(&root)
+        .output()
+        .expect("standalone installer golden script should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn git_ephemeral_run_golden_path() {
+    let root = repository_root();
+    let output = Command::new(root.join("test/validation/packages/git_run.sh"))
+        .current_dir(&root)
+        .output()
+        .expect("Git run golden script should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -1045,11 +1126,7 @@ fn timeout_and_soft_expectations_are_runner_enforced() {
     assert!(output.status.success());
 
     let failing = root.join("failing.sev");
-    fs::write(
-        &failing,
-        "test:\n    expect(false)\n    expect(false)\n",
-    )
-    .unwrap();
+    fs::write(&failing, "test:\n    expect(false)\n    expect(false)\n").unwrap();
     let output = sev().args(["test"]).arg(&failing).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();

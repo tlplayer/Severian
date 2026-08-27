@@ -1,0 +1,132 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install native compiler dependencies
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y mlir-21-tools libsqlite3-dev zstd
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: scripts/release/validate_release_tag.sh "$RELEASE_TAG"
+
+      - name: Test workspace on release architecture
+        run: cargo test --locked --workspace
+
+      - name: Build portable release
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          version=${RELEASE_VERSION#v}
+          output="$RUNNER_TEMP/severian-$version-$RELEASE_TARGET"
+          scripts/release/build_portable_release.sh \
+            --version "$version" \
+            --target "$RELEASE_TARGET" \
+            --output "$output"
+          mkdir -p dist
+          mv "$output.tar.zst" dist/
+
+      - name: Attest release archive
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.tar.zst
+
+      - name: Preserve Sigstore bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          version=${RELEASE_VERSION#v}
+          cp "$BUNDLE" "dist/severian-$version-$RELEASE_TARGET.tar.zst.sigstore.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: severian-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: severian-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate release checksums
+        run: |
+          cd dist
+          LC_ALL=C sha256sum *.tar.zst | sort -k 2 > checksums.txt
+
+      - name: Attest checksum manifest
+        id: attest-checksums
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/checksums.txt
+
+      - name: Preserve checksum Sigstore bundle
+        env:
+          BUNDLE: ${{ steps.attest-checksums.outputs.bundle-path }}
+        run: cp "$BUNDLE" dist/checksums.txt.sigstore.json
+
+      - name: Create immutable-ready GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" --draft --verify-tag --generate-notes --title "Severian $RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/*
+          gh release edit "$RELEASE_TAG" --draft=false --latest

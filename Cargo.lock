@@ -175,6 +175,7 @@ dependencies = [
  "severian-universal",
  "severian-xxi",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]

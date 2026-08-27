@@ -185,16 +185,10 @@ fn installed(component: &Component) -> bool {
 }
 
 fn local_component(component: &Component) -> Option<std::path::PathBuf> {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)?;
+    let components = crate::runtime_paths::component_root();
     match component.id.as_str() {
-        "compiler.stablehlo" => Some(
-            repository.join("target/components/bin/severian-stablehlo-opt"),
-        ),
-        "runtime.mlir-rocm" => Some(
-            repository.join("target/components/rocm-runtime/libmlir_rocm_runtime.so"),
-        ),
+        "compiler.stablehlo" => Some(components.join("bin/severian-stablehlo-opt")),
+        "runtime.mlir-rocm" => Some(components.join("rocm-runtime/libmlir_rocm_runtime.so")),
         _ => None,
     }
 }

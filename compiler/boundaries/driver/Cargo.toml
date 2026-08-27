@@ -32,6 +32,7 @@ severian-tensor-compiler = { path = "../../../library/compute/tensor/compiler" }
 severian-universal = { path = "../../universal" }
 severian-xxi = { path = "../xxi" }
 toml = "0.8"
+toml_edit = "0.22"
 
 [lib]
 path = "src/lib.rs"

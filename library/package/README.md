@@ -9,12 +9,13 @@ The design keeps four things separate:
 | Object | Meaning | Authored by |
 | --- | --- | --- |
 | `package.toml` | Desired package, targets, dependencies, and policy | Developer |
-| `package.lock` | Exact dependency resolution (format fixture today) | `sev` |
+| `sev.lock` | Exact dependency resolution | `sev add/remove/update` |
 | `target/` | Local build cache and development outputs | `sev build` / `sev test` |
 | `.pkg` | Versioned distributable realization of a library | `sev build` |
 
 `target/` is disposable. A `.pkg` is the versioned distribution boundary; the
-current compiler writes version 1 library bundles but does not consume them yet.
+`sev build` writes version 1 library bundles. `sev publish` writes version 2
+distributions containing metadata, source fallback, and compatible binaries.
 Neither object is a substitute for the manifest or lockfile.
 
 ## Vocabulary
@@ -37,7 +38,7 @@ manifests and metadata retain this distinction.
 05-building/
 ├── README.md
 ├── package.toml
-├── package.lock
+├── sev.lock
 └── src/
     ├── lib.sev
     ├── math.sev
@@ -96,11 +97,12 @@ Rules:
    `[dev-dependencies]`.
 8. Source paths and package archive entries may not escape their package root.
 
-Exact-version dependencies may resolve from the default local filesystem
+Version dependencies resolve from the default local filesystem
 registry (or one selected by `SEVERIAN_REGISTRY`). `sev publish` writes both the
-versioned `.pkg` artifact and its source realization there. Remote registry
-transport, Git dependencies, ranges, and authentication remain explicit
-errors; the resolver never silently selects unrelated source.
+versioned `.pkg` artifact and its exploded realization there. `sev add` accepts
+latest, major-prefix, and exact selectors such as `tensor`, `tensor@2`, and
+`tensor@2.1.0`. Remote registry transport and authentication are not yet
+implemented; the resolver never silently selects unrelated source.
 
 The black-box golden path is
 [`registry_publish_consume.sh`](../../test/validation/packages/registry_publish_consume.sh).
@@ -120,13 +122,11 @@ diagnostic to report the complete application-to-service-to-matrix chain.
 
 ## Lockfile contract
 
-Lockfile generation and consumption are not implemented yet. The checked-in
-`package.lock` is therefore a format fixture, not an input used by today’s
-resolver. Once implemented, it is tool-owned generated data and should be
-committed for applications. It records exact package identities, versions,
-sources, revisions, checksums, features, and dependency edges. It does not
-record the build machine, current profile, output path, credentials, or
-environment variables.
+`sev add`, `sev update`, and `sev remove` atomically update `package.toml` and
+regenerate `sev.lock`. The lock records exact package identities, versions,
+source kinds, content checksums, and dependency edges. It is tool-owned data and
+should be committed for applications. Build-time enforcement of an unchanged
+lock is the next resolver step; current builds resolve the manifest graph.
 
 Resolution must be deterministic:
 
@@ -149,6 +149,13 @@ sev test
 sev build
 sev run
 sev run --bin 05-building
+sev add tensor
+sev add tensor@2
+sev update tensor
+sev remove tensor
+sev run tool@1.3
+sev run github.com/example/tool
+sev install tool@1.3
 sev build --profile release
 sev check --emit mir --bin 05-building
 ```
@@ -170,21 +177,44 @@ target/
 The platform is `host` unless overridden by `build.target` or `--target`; the
 profile is `dev` unless overridden by `build.profile` or `--profile`.
 
+`add` changes the current project, `install` changes the machine-level command
+set, and `run` resolves only for the current invocation. GitHub shorthands and
+`git+https://...#revision` are cached ephemeral package checkouts.
+
+## Portable Severian release
+
+Release maintainers can assemble a host-specific distribution with:
+
+```bash
+scripts/release/build_portable_release.sh
+```
+
+The resulting `.tar.zst` contains `sev`, the Severian standard libraries,
+Clang, LLD, MLIR tools, LLVM/MLIR shared runtimes, and Clang resource files.
+Its wrapper resolves everything relative to the unpacked directory through
+`SEVERIAN_HOME`; users do not need Rust, Cargo, LLVM, or MLIR installed. The
+archive still targets its declared host ABI and therefore expects the host's
+ordinary system C runtime.
+
 ## `.pkg` compatibility boundary
 
-The current `SEVPKG` version 1 writer emits a deterministic library source
-bundle containing the library name and every reachable module owned by that
-package. Executable artifacts remain in `target/<platform>/<profile>/bin`.
-This small writer is implemented today. Its magic, version, and byte-level test
-fixtures define the compatibility contract for the future reader.
+The local build `SEVPKG` version 1 writer emits a deterministic library source
+bundle. Publishing uses version 2: a deterministic indexed container with
+sorted, normalized entries for `metadata/`, optional `source/`, and
+`artifacts/<platform>/<profile>/bin`. Registry execution prefers a compatible
+binary and compiles the included source into the cache when that artifact is
+absent. When only the `.pkg` remains, the reader safely materializes it into the
+distribution cache first. Entry flags preserve executability; bounds checks,
+duplicate detection, and normalized-path validation happen before execution.
+Its magic, version, and byte-level tests define the compatibility contract.
 
-The intended next archive version is a logical container with these sections:
+Version 2 is a logical container whose implemented sections can grow toward:
 
 ```text
 building.pkg/
 ├── metadata/
 │   ├── package.toml       # frozen source manifest
-│   ├── package.lock       # exact dependency graph
+│   ├── sev.lock           # exact dependency graph
 │   ├── build.toml         # compiler, profile, and reproducibility data
 │   ├── artifacts.toml     # artifact index and compatibility requirements
 │   └── checksums.toml     # digest for every indexed object
@@ -280,12 +310,16 @@ warning, but it does not silently bypass the program's safety model.
 | Local target layout shown above | Implemented |
 | `SEVPKG` v1 reachable-source library writer | Implemented |
 | Consuming an emitted `.pkg` as a dependency | Not implemented |
-| `sev publish` and exact-version local registry source consumption | Implemented |
+| `sev publish` and version-selected local registry consumption | Implemented |
 | Registry publish/consume golden-path validation | Implemented |
 | Published transitive dependency closure and import isolation | Implemented |
 | General package interfaces (`.pkgi`) | Partial; primitive interface records exist |
-| Remote registry/Git resolution and lockfile generation | Reserved, not implemented |
-| Rich indexed `.pkg` archive and artifact selection | Design contract |
+| Atomic `sev add`, `remove`, `update` and lock generation | Implemented |
+| Registry `sev run` and machine-level `sev install` | Implemented |
+| Ephemeral Git/GitHub `sev run` | Implemented |
+| `SEVPKG` v2 writer/reader and native/source selection | Implemented |
+| Remote registry transport and authentication | Not implemented |
+| Portable Severian release with bundled LLVM/MLIR tools | Implemented by release builder |
 | Network/container policy enforcement | Design contract |
 
 Keeping this table honest is part of the example. Documentation must not claim

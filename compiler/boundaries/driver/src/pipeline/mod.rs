@@ -855,31 +855,28 @@ impl Compiler {
                 )]),
             }
         });
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("the driver crate is nested below the repository root");
+        let library = crate::runtime_paths::library_root();
         let standard = [
-            ("abi", repository.join("library/interop/abi")),
-            ("cli", repository.join("library/system/cli")),
-            ("csv", repository.join("library/data/csv")),
-            ("data_format", repository.join("library/data/format")),
-            ("device", repository.join("library/system/device")),
-            ("driver", repository.join("library/system/driver")),
-            ("environment", repository.join("library/system/environment")),
-            ("ffi", repository.join("library/interop/ffi")),
-            ("file", repository.join("library/system/file")),
-            ("io", repository.join("library/system/io")),
-            ("json", repository.join("library/data/json")),
-            ("math", repository.join("library/core/math")),
-            ("model", repository.join("library/model")),
-            ("os", repository.join("library/system/os")),
-            ("parallel", repository.join("library/compute/parallel")),
-            ("path", repository.join("library/system/path")),
-            ("platform", repository.join("library/system/platform")),
-            ("process", repository.join("library/system/process")),
-            ("tensor", repository.join("library/tensor")),
-            ("yaml", repository.join("library/data/yaml")),
+            ("abi", library.join("interop/abi")),
+            ("cli", library.join("system/cli")),
+            ("csv", library.join("data/csv")),
+            ("data_format", library.join("data/format")),
+            ("device", library.join("system/device")),
+            ("driver", library.join("system/driver")),
+            ("environment", library.join("system/environment")),
+            ("ffi", library.join("interop/ffi")),
+            ("file", library.join("system/file")),
+            ("io", library.join("system/io")),
+            ("json", library.join("data/json")),
+            ("math", library.join("core/math")),
+            ("model", library.join("model")),
+            ("os", library.join("system/os")),
+            ("parallel", library.join("compute/parallel")),
+            ("path", library.join("system/path")),
+            ("platform", library.join("system/platform")),
+            ("process", library.join("system/process")),
+            ("tensor", library.join("tensor")),
+            ("yaml", library.join("data/yaml")),
         ];
         let mut next = packages
             .packages

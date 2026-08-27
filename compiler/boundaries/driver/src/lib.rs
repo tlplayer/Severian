@@ -3,6 +3,7 @@
 pub mod config;
 mod components;
 mod pipeline;
+mod runtime_paths;
 
 pub use pipeline::{
     check_file, compile_file, compile_source, CompileError, CompiledTest, Compiler, EmitStage,

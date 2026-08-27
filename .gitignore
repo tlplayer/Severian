@@ -17,6 +17,7 @@ __pycache__/
 *.stderr
 *.stdout
 *ev.lock
+!docs/examples/05-building/sev.lock
 tmp*
 ./tmp
 !library/*/src/lib.stderr

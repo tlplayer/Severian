@@ -6,14 +6,33 @@ Rust-like safety, Go-style concurrency, and MLIR/XLA-backed execution.
 ## Install
 
 ```sh
-git clone https://github.com/tlplayer/Severian.git
-cd Severian
-cargo install \
-    --path compiler/boundaries/driver \
-    --force
-
-sev doctor
+curl -LsSf https://severian.dev/install.sh | sh
+sev --version
+sev init hello
+cd hello
+sev run
 ```
+
+Pin an exact release with:
+
+```sh
+curl -LsSf https://severian.dev/install.sh | SEV_VERSION=0.1.0 sh
+```
+
+The installer downloads a prebuilt archive from the canonical
+[GitHub Releases](https://github.com/tlplayer/Severian/releases) page, verifies
+its SHA-256 checksum, and installs it under `~/.local`. It never invokes Cargo
+or builds Severian from source. Set `SEV_ATTESTATION=required` to additionally
+require GitHub Sigstore provenance verification through `gh`.
+
+Currently tested release targets are `x86_64-unknown-linux-gnu` and
+`aarch64-unknown-linux-gnu`. Optional accelerator stacks are not required for
+installation; inspect them separately with `sev doctor`.
+
+Contributors building Severian itself should use Cargo as described in
+[CONTRIBUTING.md](CONTRIBUTING.md). Building the compiler and using the compiler
+are intentionally separate workflows.
+
 ## Nightly Bootstrapped compiler
 
 ```sh
