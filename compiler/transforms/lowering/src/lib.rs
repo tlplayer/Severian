@@ -137,6 +137,11 @@ mod cfg_lowering_entry {
                 })
             })
             .collect::<Result<Vec<_>, LoweringError>>()?;
+        let uses_gpu = cfg_uses_gpu(&initializer_cfg)
+            || functions
+                .iter()
+                .filter_map(|function| function.cfg.as_ref())
+                .any(cfg_uses_gpu);
         Ok(LirModule {
             values: context.values,
             globals: Vec::new(),
@@ -147,9 +152,9 @@ mod cfg_lowering_entry {
             classes,
             storage_globals,
             initializer_cfg: Some(initializer_cfg),
-            gpu_architecture: context
-                .target
-                .rocm_device()
+            gpu_architecture: uses_gpu
+                .then(|| context.target.rocm_device())
+                .flatten()
                 .map(|device| device.architecture.clone()),
         })
     }
@@ -233,13 +238,7 @@ impl CfgLowering<'_> {
             }
             blocks.push(severian_lir::BasicBlock {
                 id: severian_lir::BlockId(block.id.0),
-                execution: block.execution.filter(|placement| match placement {
-                    severian_universal::ExecutionPlacement::Gpu => {
-                        self.target.rocm_device().is_some()
-                    }
-                    severian_universal::ExecutionPlacement::Host
-                    | severian_universal::ExecutionPlacement::Simd => true,
-                }),
+                execution: block.execution,
                 operations,
                 operation_spans,
                 terminator,
@@ -277,6 +276,7 @@ impl CfgLowering<'_> {
                 block.operation_spans.push(block.terminator_span);
             }
         }
+        retain_supported_gpu_regions(&mut blocks, self.target.rocm_device().is_some());
         Ok(severian_lir::CfgBody {
             entry: severian_lir::BlockId(body.entry.0),
             blocks,
@@ -919,6 +919,144 @@ impl CfgLowering<'_> {
     }
 }
 
+fn cfg_uses_gpu(body: &severian_lir::CfgBody) -> bool {
+    body.blocks
+        .iter()
+        .any(|block| block.execution == Some(severian_universal::ExecutionPlacement::Gpu))
+}
+
+/// Keeps a placed CFG region on the device only when every block can be
+/// represented without calling back into the native host runtime. Placement is
+/// a portable request, so an unavailable or incompatible device route executes
+/// the complete region on its ordinary host path.
+fn retain_supported_gpu_regions(blocks: &mut [severian_lir::BasicBlock], rocm_available: bool) {
+    use severian_universal::ExecutionPlacement;
+
+    let gpu_blocks = blocks
+        .iter()
+        .filter(|block| block.execution == Some(ExecutionPlacement::Gpu))
+        .map(|block| block.id)
+        .collect::<BTreeSet<_>>();
+    if gpu_blocks.is_empty() {
+        return;
+    }
+    if !rocm_available {
+        for block in blocks {
+            if block.execution == Some(ExecutionPlacement::Gpu) {
+                block.execution = None;
+            }
+        }
+        return;
+    }
+
+    let mut adjacency =
+        std::collections::BTreeMap::<severian_lir::BlockId, BTreeSet<severian_lir::BlockId>>::new();
+    for block in blocks.iter() {
+        if !gpu_blocks.contains(&block.id) {
+            continue;
+        }
+        for successor in lir_cfg_successors(&block.terminator) {
+            if gpu_blocks.contains(&successor) {
+                adjacency.entry(block.id).or_default().insert(successor);
+                adjacency.entry(successor).or_default().insert(block.id);
+            }
+        }
+    }
+
+    let compatible = blocks
+        .iter()
+        .map(|block| (block.id, gpu_block_is_device_compatible(block)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut visited = BTreeSet::new();
+    let mut fallback = BTreeSet::new();
+    for seed in &gpu_blocks {
+        if visited.contains(seed) {
+            continue;
+        }
+        let mut pending = vec![*seed];
+        let mut component = BTreeSet::new();
+        let mut supported = true;
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            component.insert(id);
+            supported &= compatible.get(&id).copied().unwrap_or(false);
+            pending.extend(
+                adjacency
+                    .get(&id)
+                    .into_iter()
+                    .flat_map(|neighbors| neighbors.iter().copied()),
+            );
+        }
+        if !supported {
+            fallback.extend(component);
+        }
+    }
+
+    for block in blocks {
+        if fallback.contains(&block.id) {
+            block.execution = None;
+        }
+    }
+}
+
+fn gpu_block_is_device_compatible(block: &severian_lir::BasicBlock) -> bool {
+    block
+        .operations
+        .iter()
+        .all(gpu_operation_is_device_compatible)
+        && matches!(
+            block.terminator,
+            severian_lir::Terminator::Goto(_) | severian_lir::Terminator::Branch { .. }
+        )
+}
+
+fn gpu_operation_is_device_compatible(operation: &LirOperation) -> bool {
+    matches!(
+        operation,
+        LirOperation::Constant {
+            value: Constant::Integer(_)
+                | Constant::Float(_)
+                | Constant::Boolean(_)
+                | Constant::None
+                | Constant::Unit,
+            ..
+        } | LirOperation::Unary { .. }
+            | LirOperation::Convert { .. }
+            | LirOperation::Binary { .. }
+            | LirOperation::Aggregate { .. }
+            | LirOperation::FieldGet { .. }
+            | LirOperation::FieldSet { .. }
+            | LirOperation::Load { .. }
+            | LirOperation::AddressOf { .. }
+            | LirOperation::Store { .. }
+    )
+}
+
+fn lir_cfg_successors(terminator: &severian_lir::Terminator) -> Vec<severian_lir::BlockId> {
+    match terminator {
+        severian_lir::Terminator::Goto(target) | severian_lir::Terminator::Call { target, .. } => {
+            vec![*target]
+        }
+        severian_lir::Terminator::Branch {
+            then_block,
+            else_block,
+            ..
+        } => vec![*then_block, *else_block],
+        severian_lir::Terminator::Switch {
+            targets, fallback, ..
+        } => targets
+            .iter()
+            .map(|(_, target)| *target)
+            .chain(std::iter::once(*fallback))
+            .collect(),
+        severian_lir::Terminator::Return(_)
+        | severian_lir::Terminator::Throw(_)
+        | severian_lir::Terminator::Unreachable => Vec::new(),
+    }
+}
+
 fn cfg_dominators(body: &severian_mir::CfgBody) -> Vec<BTreeSet<severian_mir::BlockId>> {
     let all = body
         .blocks
@@ -1202,6 +1340,55 @@ mod cfg_tests {
             lir.initializer_cfg.as_ref().unwrap().blocks[1].execution,
             Some(severian_universal::ExecutionPlacement::Gpu)
         );
+    }
+
+    #[test]
+    fn gpu_cfg_regions_that_call_the_host_runtime_fall_back_as_a_unit() {
+        use severian_lir::{BasicBlock, BlockId, Operation, Terminator};
+        use severian_universal::ExecutionPlacement;
+
+        let block = |id, execution, operations: Vec<Operation>, terminator| BasicBlock {
+            id: BlockId(id),
+            execution,
+            operation_spans: vec![None; operations.len()],
+            operations,
+            terminator,
+            terminator_span: None,
+        };
+        let mut blocks = vec![
+            block(0, None, Vec::new(), Terminator::Goto(BlockId(1))),
+            block(
+                1,
+                Some(ExecutionPlacement::Gpu),
+                vec![Operation::Constant {
+                    value: Constant::Integer("1".into()),
+                    result: ValueId(0),
+                }],
+                Terminator::Goto(BlockId(2)),
+            ),
+            block(
+                2,
+                Some(ExecutionPlacement::Gpu),
+                vec![Operation::RuntimeCall {
+                    symbol: "__sev_list_len".into(),
+                    arguments: vec![ValueId(1)],
+                    result: Some(ValueId(2)),
+                }],
+                Terminator::Goto(BlockId(3)),
+            ),
+            block(3, None, Vec::new(), Terminator::Return(None)),
+        ];
+
+        retain_supported_gpu_regions(&mut blocks, true);
+
+        assert_eq!(blocks[1].execution, None);
+        assert_eq!(blocks[2].execution, None);
+        assert!(!cfg_uses_gpu(&severian_lir::CfgBody {
+            entry: BlockId(0),
+            blocks,
+            locals: Vec::new(),
+            return_type: LoweredType::Unit,
+        }));
     }
 
     #[test]
