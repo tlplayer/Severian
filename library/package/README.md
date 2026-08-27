@@ -109,6 +109,15 @@ creates an unrelated application with `sev new`, consumes the library using
 only registry package declarations, and builds and runs the application. The
 CLI contract suite executes the same script.
 
+Transitive package closure is covered by
+[`registry_transitive_tensor.sh`](../../test/validation/packages/registry_transitive_tensor.sh).
+It publishes `tensor`, a matrix package that performs tensor matmul, and a
+service package that calls the matrix package. A third application declares
+only the service. The resolver discovers the service's published dependency
+edges, while still rejecting a direct import of the undeclared matrix package.
+The test also removes one transitive release temporarily and requires the
+diagnostic to report the complete application-to-service-to-matrix chain.
+
 ## Lockfile contract
 
 Lockfile generation and consumption are not implemented yet. The checked-in
@@ -273,6 +282,7 @@ warning, but it does not silently bypass the program's safety model.
 | Consuming an emitted `.pkg` as a dependency | Not implemented |
 | `sev publish` and exact-version local registry source consumption | Implemented |
 | Registry publish/consume golden-path validation | Implemented |
+| Published transitive dependency closure and import isolation | Implemented |
 | General package interfaces (`.pkgi`) | Partial; primitive interface records exist |
 | Remote registry/Git resolution and lockfile generation | Reserved, not implemented |
 | Rich indexed `.pkg` archive and artifact selection | Design contract |

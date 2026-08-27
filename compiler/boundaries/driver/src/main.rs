@@ -463,7 +463,7 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     fs::create_dir_all(&source_output)
         .map_err(|error| format!("could not create {}: {error}", source_output.display()))?;
 
-    let source_root = fs::canonicalize(library.path.parent().unwrap_or_else(|| Path::new(".")))
+    let source_root = fs::canonicalize(&manifest.root)
         .map_err(|error| format!("could not resolve package source root: {error}"))?;
     for module in compiler
         .resolved_module_paths(&library.path)
@@ -491,22 +491,9 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
             )
         })?;
     }
-    let library_relative = library.path.strip_prefix(&source_root).map_err(|_| {
-        format!(
-            "library source `{}` escapes `{}`",
-            library.path.display(),
-            source_root.display()
-        )
-    })?;
     fs::write(
         source_output.join("package.toml"),
-        format!(
-            "[package]\nname = {:?}\nversion = {:?}\npublish = false\n\n[lib]\nname = {:?}\npath = {:?}\n",
-            manifest.name,
-            library.version,
-            library.name,
-            library_relative.to_string_lossy()
-        ),
+        manifest.published_source_manifest()?,
     )
     .map_err(|error| format!("could not write published source manifest: {error}"))?;
     let artifact = staging.join(format!("{}-{}.pkg", manifest.name, library.version));

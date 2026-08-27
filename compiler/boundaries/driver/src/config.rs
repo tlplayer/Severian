@@ -424,6 +424,86 @@ impl Manifest {
             packages,
         }
     }
+
+    /// Produces the source manifest stored in a registry release. Runtime
+    /// dependencies are frozen to registry package identities; development
+    /// paths and root-only targets must not leak into a consumer's graph.
+    pub fn published_source_manifest(&self) -> Result<String, String> {
+        let root = self
+            .package_graph
+            .packages
+            .get(&self.package_graph.root)
+            .expect("resolved package graph contains its root");
+        let mut document = root.manifest.clone();
+        let table = document
+            .as_table_mut()
+            .ok_or_else(|| "package manifest root must be a table".to_owned())?;
+        table.remove("bin");
+        table.remove("dev-dependencies");
+
+        let package = table
+            .get_mut("package")
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| "published package requires a `[package]` table".to_owned())?;
+        package.insert("publish".into(), toml::Value::Boolean(false));
+        package.remove("default-run");
+
+        let replacements = root
+            .dependencies
+            .iter()
+            .map(|(alias, id)| {
+                let dependency = self.package_graph.packages.get(id).ok_or_else(|| {
+                    format!("resolved dependency `{alias}` is missing from the package graph")
+                })?;
+                let version = manifest_package_version(&dependency.manifest);
+                let registry = root
+                    .manifest
+                    .get("dependencies")
+                    .and_then(toml::Value::as_table)
+                    .and_then(|dependencies| dependencies.get(alias))
+                    .and_then(toml::Value::as_table)
+                    .and_then(|detail| detail.get("registry"))
+                    .and_then(toml::Value::as_str)
+                    .filter(|registry| *registry != "default");
+                let value = if alias == &dependency.name && registry.is_none() {
+                    toml::Value::String(version)
+                } else {
+                    let mut detail = toml::map::Map::new();
+                    detail.insert(
+                        "package".into(),
+                        toml::Value::String(dependency.name.clone()),
+                    );
+                    detail.insert("version".into(), toml::Value::String(version));
+                    if let Some(registry) = registry {
+                        detail.insert(
+                            "registry".into(),
+                            toml::Value::String(registry.to_owned()),
+                        );
+                    }
+                    toml::Value::Table(detail)
+                };
+                Ok((alias.clone(), value))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let dependencies = table
+            .entry("dependencies")
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| "`[dependencies]` must be a table".to_owned())?;
+        dependencies.clear();
+        dependencies.extend(replacements);
+        toml::to_string_pretty(&document)
+            .map_err(|error| format!("could not serialize published package manifest: {error}"))
+    }
+}
+
+fn manifest_package_version(manifest: &toml::Value) -> String {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("0.1.0")
+        .to_owned()
 }
 
 struct PackageGraphBuilder<'a> {
@@ -505,8 +585,10 @@ impl<'a> PackageGraphBuilder<'a> {
         }
         let id = severian_modules::PackageId(self.next_id);
         self.next_id += 1;
-        let dependencies = self.resolve_dependencies(&root, &document.dependencies)?;
-        let dev_dependencies = self.resolve_dependencies(&root, &document.dev_dependencies)?;
+        let dependencies =
+            self.resolve_dependencies(&root, &name, &document.dependencies)?;
+        let dev_dependencies =
+            self.resolve_dependencies(&root, &name, &document.dev_dependencies)?;
         self.visiting.remove(&manifest_path);
         self.resolved.insert(manifest_path, id);
         self.packages.insert(
@@ -527,17 +609,62 @@ impl<'a> PackageGraphBuilder<'a> {
     fn resolve_dependencies(
         &mut self,
         root: &Path,
+        owner: &str,
         declarations: &BTreeMap<String, DependencyDeclaration>,
     ) -> Result<BTreeMap<String, severian_modules::PackageId>, String> {
         declarations
             .iter()
             .map(|(alias, declaration)| {
-                let path = dependency_path(alias, declaration)?;
+                let path = dependency_path(alias, declaration).map_err(|error| {
+                    format!("package `{owner}` dependency `{alias}` could not resolve: {error}")
+                })?;
                 let manifest = root.join(path).join("package.toml");
-                let id = self.resolve(&manifest, true)?;
+                let id = self.resolve(&manifest, true).map_err(|error| {
+                    format!("while resolving package `{owner}` dependency `{alias}`: {error}")
+                })?;
+                let dependency = self
+                    .packages
+                    .get(&id)
+                    .expect("resolved dependency was inserted into the package graph");
+                if let Some(expected) = dependency_package_name(alias, declaration) {
+                    if dependency.name != expected {
+                        return Err(format!(
+                            "package `{owner}` dependency `{alias}` requested package `{expected}` but resolved `{}`",
+                            dependency.name
+                        ));
+                    }
+                }
+                if let Some(expected) = dependency_version(declaration) {
+                    let actual = manifest_package_version(&dependency.manifest);
+                    if actual != expected {
+                        return Err(format!(
+                            "package `{owner}` dependency `{alias}` requires version `{expected}` but resolved `{actual}`"
+                        ));
+                    }
+                }
                 Ok((alias.clone(), id))
             })
             .collect()
+    }
+}
+
+fn dependency_package_name<'a>(
+    alias: &'a str,
+    declaration: &'a DependencyDeclaration,
+) -> Option<&'a str> {
+    match declaration {
+        DependencyDeclaration::Version(_) => Some(alias),
+        DependencyDeclaration::Detailed(detail) => detail
+            .package
+            .as_deref()
+            .or_else(|| detail.path.is_none().then_some(alias)),
+    }
+}
+
+fn dependency_version(declaration: &DependencyDeclaration) -> Option<&str> {
+    match declaration {
+        DependencyDeclaration::Version(version) => Some(version),
+        DependencyDeclaration::Detailed(detail) => detail.version.as_deref(),
     }
 }
 
@@ -810,6 +937,18 @@ fn is_configuration_table(path: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn temporary_package(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "severian-package-config-{name}-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
     #[test]
     fn catalog_drives_defaults_validation_and_template() {
         let catalog = Catalog::load().unwrap();
@@ -828,6 +967,43 @@ mod tests {
         );
         assert!(registry_release_path(root, "../example", "1.2.3").is_err());
         assert!(registry_release_path(root, "example", "../1.2.3").is_err());
+    }
+
+    #[test]
+    fn published_source_manifest_freezes_path_dependencies_to_registry_identities() {
+        let root = temporary_package("published-manifest");
+        let dependency = root.join("dependency");
+        let package = root.join("package");
+        std::fs::create_dir_all(dependency.join("src")).unwrap();
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::write(
+            dependency.join("package.toml"),
+            "[package]\nname = \"actual-dependency\"\nversion = \"2.3.4\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+        )
+        .unwrap();
+        std::fs::write(dependency.join("src/lib.sev"), "def value() -> int:\n    return 1\n")
+            .unwrap();
+        std::fs::write(
+            package.join("package.toml"),
+            "[package]\nname = \"root\"\nversion = \"1.0.0\"\ndefault-run = \"root\"\n\n[[bin]]\nname = \"root\"\npath = \"src/main.sev\"\n\n[lib]\npath = \"src/lib.sev\"\n\n[dependencies]\nhelper = { path = \"../dependency\" }\n\n[dev-dependencies]\ntest_helper = { path = \"../dependency\" }\n",
+        )
+        .unwrap();
+        std::fs::write(package.join("src/lib.sev"), "import helper\n").unwrap();
+        std::fs::write(package.join("src/main.sev"), "print(\"root\")\n").unwrap();
+
+        let manifest = Manifest::load(&package.join("package.toml"), &Catalog::load().unwrap())
+            .unwrap();
+        let published = manifest.published_source_manifest().unwrap();
+        let value = published.parse::<toml::Value>().unwrap();
+        let dependency = &value["dependencies"]["helper"];
+        assert_eq!(dependency["package"].as_str(), Some("actual-dependency"));
+        assert_eq!(dependency["version"].as_str(), Some("2.3.4"));
+        assert!(dependency.get("path").is_none());
+        assert!(value.get("dev-dependencies").is_none());
+        assert!(value.get("bin").is_none());
+        assert!(value["package"].get("default-run").is_none());
+        assert_eq!(value["package"]["publish"].as_bool(), Some(false));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
