@@ -65,6 +65,8 @@ fn extract_cfg_compile_operations(
 ) -> Result<(), CompileError> {
     let locals = body.locals.clone();
     for block in &mut body.blocks {
+        // A constant whose type owns this compile route is itself a compile
+        // operation. Normalize it before finding maximal same-compiler runs.
         for statement in &mut block.statements {
             let routed_assignment = match statement {
                 severian_mir::CfgStatement::Assign(
@@ -99,46 +101,133 @@ fn extract_cfg_compile_operations(
                     )]),
                 };
             }
-            let severian_mir::CfgStatement::Operation {
-                id,
-                operands,
-                results,
-                attributes,
-            } = statement
-            else {
+        }
+
+        let old_statements = std::mem::take(&mut block.statements);
+        let old_spans = std::mem::take(&mut block.statement_spans);
+        let mut statements = Vec::with_capacity(old_statements.len());
+        let mut spans = Vec::with_capacity(old_spans.len());
+        let mut start = 0usize;
+        while start < old_statements.len() {
+            let Some(compiler) = cfg_statement_compiler(&old_statements[start]) else {
+                statements.push(old_statements[start].clone());
+                spans.push(old_spans.get(start).copied().flatten());
+                start += 1;
                 continue;
             };
-            let Some(severian_universal::AttrValue::Compiler(compiler)) =
-                attributes.get(&severian_universal::COMPILE_TYPE_ATTRIBUTE)
-            else {
-                continue;
-            };
-            let compiler = *compiler;
-            let operand_types = operands
-                .iter()
-                .map(|operand| cfg_operand_type(&locals, globals, operand))
-                .collect::<Result<Vec<_>, _>>()?;
-            let result_types = results
-                .iter()
-                .map(|place| cfg_place_type(&locals, globals, place))
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut end = start + 1;
+            while end < old_statements.len()
+                && cfg_statement_compiler(&old_statements[end]) == Some(compiler)
+            {
+                end += 1;
+            }
+
             let region_id = CompiledRegionId::new(*next_region);
             *next_region += 1;
-            attributes.insert(
+            let mut external_operands = Vec::new();
+            let mut input_types = Vec::new();
+            let mut slot_types = Vec::new();
+            let mut place_slots = BTreeMap::new();
+            let mut final_results = BTreeMap::new();
+            let mut compile_operations = Vec::with_capacity(end - start);
+
+            for statement in &old_statements[start..end] {
+                let severian_mir::CfgStatement::Operation {
+                    id,
+                    operands,
+                    results,
+                    attributes,
+                } = statement
+                else {
+                    unreachable!("same-compiler run contains an operation")
+                };
+                let mut operand_types = Vec::with_capacity(operands.len());
+                let mut operand_slots = Vec::with_capacity(operands.len());
+                for operand in operands {
+                    let ty = cfg_operand_type(&locals, globals, operand)?;
+                    let existing = match operand {
+                        severian_mir::Operand::Copy(place)
+                        | severian_mir::Operand::Move(place) => place_slots.get(place).copied(),
+                        severian_mir::Operand::Constant { .. } => None,
+                        severian_mir::Operand::Function(_) => {
+                            return Err(CompileError::InvalidArtifact(
+                                "CompileOp cannot consume a function value".into(),
+                            ))
+                        }
+                    };
+                    let slot = if let Some(slot) = existing {
+                        slot
+                    } else {
+                        let slot = u32::try_from(slot_types.len()).map_err(|_| {
+                            CompileError::InvalidArtifact(
+                                "compiled region has too many values".into(),
+                            )
+                        })?;
+                        slot_types.push(ty);
+                        input_types.push(ty);
+                        external_operands.push(operand.clone());
+                        if let severian_mir::Operand::Copy(place)
+                        | severian_mir::Operand::Move(place) = operand
+                        {
+                            place_slots.insert(place.clone(), slot);
+                        }
+                        slot
+                    };
+                    operand_types.push(ty);
+                    operand_slots.push(slot);
+                }
+
+                let mut result_types = Vec::with_capacity(results.len());
+                let mut result_slots = Vec::with_capacity(results.len());
+                for place in results {
+                    let ty = cfg_place_type(&locals, globals, place)?;
+                    let slot = u32::try_from(slot_types.len()).map_err(|_| {
+                        CompileError::InvalidArtifact("compiled region has too many values".into())
+                    })?;
+                    slot_types.push(ty);
+                    place_slots.insert(place.clone(), slot);
+                    final_results.insert(place.clone(), (slot, ty));
+                    result_types.push(ty);
+                    result_slots.push(slot);
+                }
+                compile_operations.push(crate::CompileOperation {
+                    id: *id,
+                    operands: operand_types,
+                    results: result_types,
+                    operand_slots,
+                    result_slots,
+                    attributes: attributes.clone(),
+                });
+            }
+
+            let (result_places, output_slots, output_types) = final_results.into_iter().fold(
+                (Vec::new(), Vec::new(), Vec::new()),
+                |(mut places, mut slots, mut types), (place, (slot, ty))| {
+                    places.push(place);
+                    slots.push(slot);
+                    types.push(ty);
+                    (places, slots, types)
+                },
+            );
+            let mut wrapper_attributes = compile_operations[0].attributes.clone();
+            wrapper_attributes.insert(
                 severian_universal::COMPILED_ARTIFACT_ATTRIBUTE,
                 severian_universal::AttrValue::Integer(i128::from(region_id.index())),
             );
+            statements.push(severian_mir::CfgStatement::Operation {
+                id: compile_operations[0].id,
+                operands: external_operands,
+                results: result_places,
+                attributes: wrapper_attributes,
+            });
+            spans.push(old_spans.get(start).copied().flatten());
             regions.push(CompileRegion {
                 id: region_id,
                 compiler,
                 operations: Vec::new(),
-                compile_operations: vec![crate::CompileOperation {
-                    id: *id,
-                    operands: operand_types.clone(),
-                    results: result_types.clone(),
-                    attributes: attributes.clone(),
-                }],
-                inputs: operand_types
+                compile_operations,
+                output_slots,
+                inputs: input_types
                     .into_iter()
                     .enumerate()
                     .map(|(index, type_id)| Value {
@@ -146,7 +235,7 @@ fn extract_cfg_compile_operations(
                         type_id,
                     })
                     .collect(),
-                outputs: result_types
+                outputs: output_types
                     .into_iter()
                     .enumerate()
                     .map(|(index, type_id)| Value {
@@ -160,9 +249,22 @@ fn extract_cfg_compile_operations(
                     may_trap: true,
                 },
             });
+            start = end;
         }
+        block.statements = statements;
+        block.statement_spans = spans;
     }
     Ok(())
+}
+
+fn cfg_statement_compiler(statement: &severian_mir::CfgStatement) -> Option<CompilerId> {
+    let severian_mir::CfgStatement::Operation { attributes, .. } = statement else {
+        return None;
+    };
+    match attributes.get(&severian_universal::COMPILE_TYPE_ATTRIBUTE) {
+        Some(severian_universal::AttrValue::Compiler(compiler)) => Some(*compiler),
+        _ => None,
+    }
 }
 
 fn cfg_operand_type(
@@ -487,6 +589,7 @@ fn build_region(
         compiler,
         operations,
         compile_operations: Vec::new(),
+        output_slots: Vec::new(),
         inputs,
         outputs,
         effects,

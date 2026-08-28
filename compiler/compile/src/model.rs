@@ -19,6 +19,9 @@ pub struct CompileRegion {
     pub compiler: CompilerId,
     pub operations: Vec<MirOperation>,
     pub compile_operations: Vec<CompileOperation>,
+    /// Value slots returned by the region entry point. Input slots are always
+    /// `0..inputs.len()`; operation result slots follow them.
+    pub output_slots: Vec<u32>,
     pub inputs: Vec<MirValue>,
     pub outputs: Vec<MirValue>,
     pub effects: EffectSet,
@@ -29,6 +32,10 @@ pub struct CompileOperation {
     pub id: OpId,
     pub operands: Vec<TypeId>,
     pub results: Vec<TypeId>,
+    /// Region-local SSA slots corresponding one-for-one with `operands` and
+    /// `results`. These make data flow explicit across operations in a region.
+    pub operand_slots: Vec<u32>,
+    pub result_slots: Vec<u32>,
     pub attributes: Attrs,
 }
 

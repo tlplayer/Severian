@@ -6,9 +6,10 @@ use severian_mlir::{
     LoweredTensorShape, LoweredType, MlirArtifact,
 };
 use severian_universal::{
-    tensor, AttrValue, Attrs, FloatFormat, IntegerWidth, OpId, PrimitiveRepresentation,
+    tensor, AttrValue, Attrs, FloatFormat, IntegerWidth, PrimitiveRepresentation,
     TensorDimension, TensorShape, TypeContext, TypeId,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Generic compiler for structural `Tensor[T]` operations. Dtypes are lowered
 /// exclusively through `PrimitiveRepresentation`; operation names never
@@ -22,20 +23,18 @@ impl CompileHandler for TensorCompiler {
         region: &CompileRegion,
         context: &CompileContext<'_>,
     ) -> Result<MlirArtifact, CompileError> {
-        let [operation] = region.compile_operations.as_slice() else {
-            return Err(invalid(
-                "the tensor compiler expects one reduced CompileOp per region",
-            ));
-        };
-        let inputs = operation
-            .operands
+        if region.compile_operations.is_empty() {
+            return Err(invalid("the tensor compiler requires a non-empty region"));
+        }
+        let inputs = region
+            .inputs
             .iter()
-            .map(|ty| lower_type(*ty, context))
+            .map(|value| lower_type(value.type_id, context))
             .collect::<Result<Vec<_>, _>>()?;
-        let outputs = operation
-            .results
+        let outputs = region
+            .outputs
             .iter()
-            .map(|ty| lower_type(*ty, context))
+            .map(|value| lower_type(value.type_id, context))
             .collect::<Result<Vec<_>, _>>()?;
         let input_spellings = inputs
             .iter()
@@ -58,18 +57,166 @@ impl CompileHandler for TensorCompiler {
             [output] => format!(" -> {output}"),
             outputs => format!(" -> ({})", outputs.join(", ")),
         };
-        let declarations = operation_declarations(operation.id, &inputs, &outputs)?;
-        let body = lower_operation(
-            operation.id,
-            &inputs,
-            &outputs,
-            &input_spellings,
-            &output_spellings,
-            &operation.attributes,
-        )?;
+        let mut declarations = BTreeSet::new();
+        let mut helpers = String::new();
+        let mut entry_body = String::new();
+        let mut slot_types = inputs
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(slot, ty)| (slot as u32, ty))
+            .collect::<BTreeMap<_, _>>();
+        let mut inferred_next_slot = inputs.len() as u32;
+        let mut inferred_result_slots = Vec::new();
+
+        for (index, operation) in region.compile_operations.iter().enumerate() {
+            let operation_kind = tensor::TensorOp::decode(operation.id, &operation.attributes)
+                .ok_or_else(|| invalid(format!(
+                    "tensor operation {:?} has no structural operation kind",
+                    operation.id
+                )))?;
+            let operation_inputs = operation
+                .operands
+                .iter()
+                .map(|ty| lower_type(*ty, context))
+                .collect::<Result<Vec<_>, _>>()?;
+            let operation_outputs = operation
+                .results
+                .iter()
+                .map(|ty| lower_type(*ty, context))
+                .collect::<Result<Vec<_>, _>>()?;
+            let operand_slots = if operation.operand_slots.is_empty()
+                && region.compile_operations.len() == 1
+            {
+                (0..operation_inputs.len() as u32).collect::<Vec<_>>()
+            } else {
+                operation.operand_slots.clone()
+            };
+            let result_slots = if operation.result_slots.is_empty()
+                && region.compile_operations.len() == 1
+            {
+                let slots = (inferred_next_slot
+                    ..inferred_next_slot + operation_outputs.len() as u32)
+                    .collect::<Vec<_>>();
+                inferred_next_slot += operation_outputs.len() as u32;
+                slots
+            } else {
+                operation.result_slots.clone()
+            };
+            if operand_slots.len() != operation_inputs.len()
+                || result_slots.len() != operation_outputs.len()
+            {
+                return Err(invalid("tensor region value slots do not match operation arity"));
+            }
+            for (slot, expected) in operand_slots.iter().zip(&operation_inputs) {
+                if slot_types.get(slot) != Some(expected) {
+                    return Err(invalid(format!(
+                        "tensor region operand slot {slot} has the wrong type"
+                    )));
+                }
+            }
+            for (slot, ty) in result_slots.iter().zip(&operation_outputs) {
+                if slot_types.insert(*slot, ty.clone()).is_some() {
+                    return Err(invalid(format!("tensor region slot {slot} is defined twice")));
+                }
+            }
+            inferred_result_slots = result_slots.clone();
+            let operation_input_spellings = operation_inputs
+                .iter()
+                .map(type_spelling)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| invalid(error.to_string()))?;
+            let operation_output_spellings = operation_outputs
+                .iter()
+                .map(type_spelling)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| invalid(error.to_string()))?;
+            for declaration in operation_declarations(
+                operation_kind,
+                &operation_inputs,
+                &operation_outputs,
+            )?
+            .lines()
+            .filter(|line| !line.is_empty())
+            {
+                declarations.insert(declaration.to_owned());
+            }
+            let helper_parameters = operation_input_spellings
+                .iter()
+                .enumerate()
+                .map(|(operand, ty)| format!("%arg{operand}: {ty}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let helper_result = match operation_output_spellings.as_slice() {
+                [output] => format!(" -> {output}"),
+                outputs => format!(" -> ({})", outputs.join(", ")),
+            };
+            let helper_body = lower_operation(
+                operation_kind,
+                &operation_inputs,
+                &operation_outputs,
+                &operation_input_spellings,
+                &operation_output_spellings,
+                &operation.attributes,
+            )?;
+            helpers.push_str(&format!(
+                "  func.func private @__sev_tensor_op_{index}({helper_parameters}){helper_result} {{\n{helper_body}  }}\n"
+            ));
+            let arguments = operand_slots
+                .iter()
+                .map(|slot| {
+                    if (*slot as usize) < inputs.len() {
+                        format!("%arg{slot}")
+                    } else {
+                        format!("%v{slot}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let result_names = result_slots
+                .iter()
+                .map(|slot| format!("%v{slot}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            entry_body.push_str(&format!(
+                "    {result_names} = func.call @__sev_tensor_op_{index}({arguments}) : ({input_types}){helper_result}\n",
+                input_types = operation_input_spellings.join(", "),
+            ));
+        }
+        let output_slots = if region.output_slots.is_empty() {
+            inferred_result_slots
+        } else {
+            region.output_slots.clone()
+        };
+        if output_slots.len() != outputs.len() {
+            return Err(invalid("tensor region output slots do not match its result signature"));
+        }
+        let return_values = output_slots
+            .iter()
+            .map(|slot| {
+                if (*slot as usize) < inputs.len() {
+                    format!("%arg{slot}")
+                } else {
+                    format!("%v{slot}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        if outputs.is_empty() {
+            entry_body.push_str("    return\n");
+        } else {
+            entry_body.push_str(&format!(
+                "    return {return_values} : {}\n",
+                output_spellings.join(", ")
+            ));
+        }
+        let declarations = declarations
+            .into_iter()
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
         Ok(MlirArtifact {
             module: format!(
-                "module {{\n{declarations}  func.func @entry({parameters}){result_signature} {{\n{body}  }}\n}}"
+                "module {{\n{declarations}{helpers}  func.func @entry({parameters}){result_signature} {{\n{entry_body}  }}\n}}"
             ),
             inputs,
             outputs,
@@ -78,14 +225,14 @@ impl CompileHandler for TensorCompiler {
 }
 
 fn operation_declarations(
-    operation: OpId,
+    operation: tensor::TensorOp,
     inputs: &[LoweredType],
     outputs: &[LoweredType],
 ) -> Result<String, CompileError> {
-    if operation == tensor::FROM_ELEMENTS {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromElements) {
         return Ok("  func.func private @__sev_list_get_f64(!llvm.ptr, i64) -> f64\n".into());
     }
-    if operation == tensor::VALUES {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Values) {
         let [LoweredType::Tensor { element, .. }] = inputs else {
             return Err(invalid("values requires one structural tensor operand"));
         };
@@ -94,13 +241,18 @@ fn operation_declarations(
             "  func.func private @__sev_list_create() -> !llvm.ptr\n  func.func private @__sev_list_push_f64(!llvm.ptr, {scalar})\n"
         ));
     }
-    if matches!(operation, tensor::SHAPE | tensor::STRIDES) {
+    if matches!(
+        operation,
+        tensor::TensorOp::StorageView(
+            tensor::StorageViewOp::Shape | tensor::StorageViewOp::Strides
+        )
+    ) {
         return Ok(
             "  func.func private @__sev_list_create() -> !llvm.ptr\n  func.func private @__sev_list_push_i64(!llvm.ptr, i64)\n"
                 .into(),
         );
     }
-    if matches!(operation, tensor::CONVERT | tensor::RMS_NORM) {
+    if operation == tensor::TensorOp::Convert {
         return Ok(
             "  func.func private @__sev_f8e4m3fn_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e4m3fn(f32) -> i8\n  func.func private @__sev_f8e5m2_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e5m2(f32) -> i8\n"
                 .into(),
@@ -111,14 +263,14 @@ fn operation_declarations(
 }
 
 fn lower_operation(
-    operation: OpId,
+    operation: tensor::TensorOp,
     inputs: &[LoweredType],
     outputs: &[LoweredType],
     input_spellings: &[String],
     output_spellings: &[String],
     attributes: &Attrs,
 ) -> Result<String, CompileError> {
-    if operation == tensor::FROM_ELEMENTS {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromElements) {
         let [output] = output_spellings else {
             return Err(invalid("from_elements requires one tensor result"));
         };
@@ -149,7 +301,7 @@ fn lower_operation(
         return Ok(body);
     }
 
-    if operation == tensor::VALUES {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Values) {
         let [input] = inputs else {
             return Err(invalid("values requires one tensor operand"));
         };
@@ -199,14 +351,14 @@ fn lower_operation(
         return Ok(body);
     }
 
-    if matches!(operation, tensor::SHAPE | tensor::STRIDES) {
+    if matches!(operation, tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape | tensor::StorageViewOp::Strides)) {
         let [LoweredType::Tensor { shape, .. }] = inputs else {
             return Err(invalid("shape and strides require one tensor operand"));
         };
         let shape = effective_shape(shape, attributes);
         let dimensions = static_dimensions(&shape)
             .map_err(|error| invalid(format!("shape metadata: {error}")))?;
-        let values = if operation == tensor::SHAPE {
+        let values = if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape) {
             dimensions
         } else {
             let mut stride = 1usize;
@@ -236,37 +388,28 @@ fn lower_operation(
         return Err(invalid("tensor operations currently produce one result"));
     };
     let result_element = tensor_element(result_type)?;
-    if operation == tensor::CONVERT {
+    if operation == tensor::TensorOp::Convert {
         return lower_tensor_conversion(inputs, result_type, input_spellings, output);
     }
-    if operation == tensor::RMS_NORM {
-        return lower_rms_norm(
-            inputs,
-            result_type,
-            input_spellings,
-            output,
-            result_element,
-        );
-    }
-    let binary = if operation == tensor::ADD {
+    let binary = if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add) {
         Some(if is_float(result_element) {
             "arith.addf"
         } else {
             "arith.addi"
         })
-    } else if operation == tensor::SUBTRACT {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Subtract) {
         Some(if is_float(result_element) {
             "arith.subf"
         } else {
             "arith.subi"
         })
-    } else if operation == tensor::MULTIPLY {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Multiply) {
         Some(if is_float(result_element) {
             "arith.mulf"
         } else {
             "arith.muli"
         })
-    } else if operation == tensor::DIVIDE {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Divide) {
         Some(match result_element {
             LoweredTensorElement::Float { .. } => "arith.divf",
             LoweredTensorElement::Integer { signed: true, .. } => "arith.divsi",
@@ -333,13 +476,13 @@ fn lower_operation(
         ));
     }
 
-    let unary = if operation == tensor::EXP {
+    let unary = if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Exp) {
         Some("math.exp")
-    } else if operation == tensor::LOG {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Log) {
         Some("math.log")
-    } else if operation == tensor::TANH {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Tanh) {
         Some("math.tanh")
-    } else if operation == tensor::RSQRT {
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Rsqrt) {
         Some("math.rsqrt")
     } else {
         None
@@ -360,14 +503,14 @@ fn lower_operation(
         ));
     }
 
-    if operation == tensor::MATERIALIZE {
+    if operation == tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Materialize) {
         if input_spellings.len() != 1 || input_spellings.first() != Some(output) {
             return Err(invalid("materialize preserves the complete tensor type"));
         }
         return Ok(format!("    return %arg0 : {output}\n"));
     }
 
-    if operation == tensor::TRANSPOSE {
+    if operation == tensor::TensorOp::Permute(tensor::PermuteOp::Reverse) {
         let [input] = input_spellings else {
             return Err(invalid("transpose requires one tensor operand"));
         };
@@ -402,7 +545,7 @@ fn lower_operation(
         ));
     }
 
-    if operation == tensor::MATMUL {
+    if operation == tensor::TensorOp::Matmul {
         let [
             LoweredType::Tensor {
                 element: left_element,
@@ -419,36 +562,30 @@ fn lower_operation(
         if left_element != right_element || left_element != &result_element {
             return Err(invalid("matmul operands and result must have one element type"));
         }
-        if static_dimensions(left_shape)
-            .and_then(|dimensions| {
-                (dimensions.len() == 2)
-                    .then_some(dimensions)
-                    .ok_or_else(|| invalid("matmul left operand must have rank two"))
-            })
-            .is_err()
-            || static_dimensions(right_shape)
-                .and_then(|dimensions| {
-                    (dimensions.len() == 2)
-                        .then_some(dimensions)
-                        .ok_or_else(|| invalid("matmul right operand must have rank two"))
-                })
-                .is_err()
-        {
-            return Err(invalid(
-                "initial generic linalg.matmul lowering requires statically ranked operands",
-            ));
-        }
+        let left_dimensions = match left_shape {
+            LoweredTensorShape::Ranked(dimensions) if dimensions.len() >= 2 => dimensions,
+            _ => return Err(invalid("matmul left operand must have known rank at least two")),
+        };
+        let right_dimensions = match right_shape {
+            LoweredTensorShape::Ranked(dimensions) if dimensions.len() >= 2 => dimensions,
+            _ => return Err(invalid("matmul right operand must have known rank at least two")),
+        };
         let LoweredType::Tensor { element, shape } = result_type else {
             unreachable!();
         };
         let shape = effective_shape(shape, attributes);
-        if static_dimensions(&shape)
-            .map_err(|error| invalid(format!("matmul: {error}")))?
-            .len()
-            != 2
-        {
-            return Err(invalid("initial generic linalg.matmul lowering requires rank two"));
+        let LoweredTensorShape::Ranked(output_dimensions) = &shape else {
+            return Err(invalid("matmul result must have known rank"));
+        };
+        if output_dimensions.len() < 2 {
+            return Err(invalid("matmul result rank must be at least two"));
         }
+        // Dynamic broadcast selection requires runtime indexing and is a
+        // separate lowering concern. Rank and static batch shape are already
+        // fully generic here.
+        static_dimensions(left_shape).map_err(|error| invalid(format!("matmul: {error}")))?;
+        static_dimensions(right_shape).map_err(|error| invalid(format!("matmul: {error}")))?;
+        static_dimensions(&shape).map_err(|error| invalid(format!("matmul: {error}")))?;
         let scalar = tensor_element_spelling(*element)?;
         let zero = if is_float(*element) { "0.0" } else { "0" };
         let ranked_type = type_spelling(&LoweredType::Tensor {
@@ -456,10 +593,45 @@ fn lower_operation(
             shape,
         })
         .map_err(|error| invalid(error.to_string()))?;
+        let output_rank = output_dimensions.len();
+        let batch_rank = output_rank - 2;
+        let loops = (0..=output_rank)
+            .map(|axis| format!("d{axis}"))
+            .collect::<Vec<_>>();
+        let batch_map = |dimensions: &[LoweredTensorDimension]| {
+            let source_batch = dimensions.len() - 2;
+            let offset = batch_rank - source_batch;
+            dimensions[..source_batch]
+                .iter()
+                .enumerate()
+                .map(|(axis, dimension)| match dimension {
+                    LoweredTensorDimension::Known(1) => "0".into(),
+                    _ => format!("d{}", offset + axis),
+                })
+                .collect::<Vec<String>>()
+        };
+        let mut left_map = batch_map(left_dimensions);
+        left_map.push(format!("d{batch_rank}"));
+        left_map.push(format!("d{output_rank}"));
+        let mut right_map = batch_map(right_dimensions);
+        right_map.push(format!("d{output_rank}"));
+        right_map.push(format!("d{}", batch_rank + 1));
+        let output_map = (0..output_rank)
+            .map(|axis| format!("d{axis}"))
+            .collect::<Vec<_>>();
+        let mut iterators = vec!["\"parallel\""; output_rank];
+        iterators.push("\"reduction\"");
+        let multiply = if is_float(*element) { "arith.mulf" } else { "arith.muli" };
+        let add = if is_float(*element) { "arith.addf" } else { "arith.addi" };
         return Ok(format!(
-            "    %empty = tensor.empty() : {ranked_type}\n    %zero = arith.constant {zero} : {scalar}\n    %initialized = linalg.fill ins(%zero : {scalar}) outs(%empty : {ranked_type}) -> {ranked_type}\n    %result = linalg.matmul ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%initialized : {ranked_type}) -> {ranked_type}\n    return %result : {output}\n",
+            "    %empty = tensor.empty() : {ranked_type}\n    %zero = arith.constant {zero} : {scalar}\n    %initialized = linalg.fill ins(%zero : {scalar}) outs(%empty : {ranked_type}) -> {ranked_type}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({output_map})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%initialized : {ranked_type}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %acc: {scalar}):\n      %product = {multiply} %left, %right : {scalar}\n      %sum = {add} %acc, %product : {scalar}\n      linalg.yield %sum : {scalar}\n    }} -> {ranked_type}\n    return %result : {output}\n",
             left_type = input_spellings[0],
             right_type = input_spellings[1],
+            loops = loops.join(", "),
+            left_map = left_map.join(", "),
+            right_map = right_map.join(", "),
+            output_map = output_map.join(", "),
+            iterators = iterators.join(", "),
         ));
     }
 

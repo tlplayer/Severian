@@ -5,87 +5,174 @@ use crate::{
 };
 use std::fmt;
 
-pub const FROM_ELEMENTS: OpId = OpId::named("tensor", "from_elements");
-pub const CONVERT: OpId = OpId::named("tensor", "convert");
-pub const ADD: OpId = OpId::named("tensor", "add");
-pub const SUBTRACT: OpId = OpId::named("tensor", "subtract");
-pub const MULTIPLY: OpId = OpId::named("tensor", "multiply");
-pub const DIVIDE: OpId = OpId::named("tensor", "divide");
-pub const REDUCE_SUM: OpId = OpId::named("tensor", "reduce_sum");
-pub const REDUCE_SUM_AXIS: OpId = OpId::named("tensor", "reduce_sum_axis");
+pub const ELEMENTWISE: OpId = OpId::named("tensor", "elementwise");
+pub const REDUCE: OpId = OpId::named("tensor", "reduce");
 pub const MATMUL: OpId = OpId::named("tensor", "matmul");
-pub const TRANSPOSE: OpId = OpId::named("tensor", "transpose");
-pub const SLICE: OpId = OpId::named("tensor", "slice");
-pub const MATERIALIZE: OpId = OpId::named("tensor", "materialize");
-pub const SHAPE: OpId = OpId::named("tensor", "shape");
-pub const STRIDES: OpId = OpId::named("tensor", "strides");
-pub const VALUES: OpId = OpId::named("tensor", "values");
-pub const RESHAPE: OpId = OpId::named("tensor", "reshape");
+pub const RESHAPE_VIEW: OpId = OpId::named("tensor", "reshape_view");
 pub const PERMUTE: OpId = OpId::named("tensor", "permute");
-pub const MEAN_LAST: OpId = OpId::named("tensor", "mean_last");
-pub const RSQRT: OpId = OpId::named("tensor", "rsqrt");
-pub const EXP: OpId = OpId::named("tensor", "exp");
-pub const LOG: OpId = OpId::named("tensor", "log");
-pub const TANH: OpId = OpId::named("tensor", "tanh");
-pub const SILU: OpId = OpId::named("tensor", "silu");
-pub const SOFTMAX_LAST: OpId = OpId::named("tensor", "softmax_last");
+pub const SLICE: OpId = OpId::named("tensor", "slice");
+pub const BROADCAST: OpId = OpId::named("tensor", "broadcast");
 pub const GATHER: OpId = OpId::named("tensor", "gather");
+pub const SCATTER: OpId = OpId::named("tensor", "scatter");
 pub const CONCATENATE: OpId = OpId::named("tensor", "concatenate");
-pub const REPEAT: OpId = OpId::named("tensor", "repeat");
-pub const ROPE: OpId = OpId::named("tensor", "rope");
-pub const RELU: OpId = OpId::named("tensor", "relu");
-pub const SCALE: OpId = OpId::named("tensor", "scale");
-pub const LAYER_NORM: OpId = OpId::named("tensor", "layer_norm");
-pub const RELU_BACKWARD: OpId = OpId::named("tensor", "relu_backward");
-pub const SOFTMAX_BACKWARD: OpId = OpId::named("tensor", "softmax_backward");
-pub const LAYER_NORM_BACKWARD: OpId = OpId::named("tensor", "layer_norm_backward");
-pub const BACKWARD_MSE: OpId = OpId::named("tensor", "backward_mse");
-pub const GRADIENT: OpId = OpId::named("tensor", "gradient");
-pub const SGD: OpId = OpId::named("tensor", "sgd");
-pub const ADD_SCALAR: OpId = OpId::named("tensor", "add_scalar");
-pub const RMS_NORM: OpId = OpId::named("tensor", "rms_norm");
+pub const CONVERT: OpId = OpId::named("tensor", "convert");
+pub const STORAGE_VIEW: OpId = OpId::named("tensor", "storage_view");
+pub const OPERATION_KIND: AttributeId = AttributeId::from_name("tensor.operation_kind");
 pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_type");
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
 
+/// The small, structural tensor IR. Public tensor-library functions select a
+/// variant through `OPERATION_KIND`; adding a library algorithm does not add
+/// another universal operation identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TensorOp {
+    Elementwise(ElementwiseOp),
+    Reduce(ReductionOp),
+    Matmul,
+    ReshapeView(ReshapeViewOp),
+    Permute(PermuteOp),
+    Slice,
+    Broadcast(BroadcastOp),
+    Gather,
+    Scatter,
+    Concatenate,
+    Convert,
+    StorageView(StorageViewOp),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ElementwiseOp {
+    Add, Subtract, Multiply, Divide, Exp, Log, Tanh, Rsqrt, Relu, Scale, AddScalar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ReductionOp { Sum, SumAxis, MeanLast, MaxLast }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ReshapeViewOp { Reshape, Materialize }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PermuteOp { Axes, Reverse }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BroadcastOp { Like, Repeat }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StorageViewOp { FromElements, Shape, Strides, Values }
+
+impl TensorOp {
+    pub const fn id(self) -> OpId {
+        match self {
+            Self::Elementwise(_) => ELEMENTWISE,
+            Self::Reduce(_) => REDUCE,
+            Self::Matmul => MATMUL,
+            Self::ReshapeView(_) => RESHAPE_VIEW,
+            Self::Permute(_) => PERMUTE,
+            Self::Slice => SLICE,
+            Self::Broadcast(_) => BROADCAST,
+            Self::Gather => GATHER,
+            Self::Scatter => SCATTER,
+            Self::Concatenate => CONCATENATE,
+            Self::Convert => CONVERT,
+            Self::StorageView(_) => STORAGE_VIEW,
+        }
+    }
+
+    pub const fn kind(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Elementwise(ElementwiseOp::Add) => "add",
+            Self::Elementwise(ElementwiseOp::Subtract) => "subtract",
+            Self::Elementwise(ElementwiseOp::Multiply) => "multiply",
+            Self::Elementwise(ElementwiseOp::Divide) => "divide",
+            Self::Elementwise(ElementwiseOp::Exp) => "exp",
+            Self::Elementwise(ElementwiseOp::Log) => "log",
+            Self::Elementwise(ElementwiseOp::Tanh) => "tanh",
+            Self::Elementwise(ElementwiseOp::Rsqrt) => "rsqrt",
+            Self::Elementwise(ElementwiseOp::Relu) => "relu",
+            Self::Elementwise(ElementwiseOp::Scale) => "scale",
+            Self::Elementwise(ElementwiseOp::AddScalar) => "add_scalar",
+            Self::Reduce(ReductionOp::Sum) => "sum",
+            Self::Reduce(ReductionOp::SumAxis) => "sum_axis",
+            Self::Reduce(ReductionOp::MeanLast) => "mean_last",
+            Self::Reduce(ReductionOp::MaxLast) => "max_last",
+            Self::ReshapeView(ReshapeViewOp::Reshape) => "reshape",
+            Self::ReshapeView(ReshapeViewOp::Materialize) => "materialize",
+            Self::Permute(PermuteOp::Axes) => "axes",
+            Self::Permute(PermuteOp::Reverse) => "reverse",
+            Self::Broadcast(BroadcastOp::Like) => "like",
+            Self::Broadcast(BroadcastOp::Repeat) => "repeat",
+            Self::StorageView(StorageViewOp::FromElements) => "from_elements",
+            Self::StorageView(StorageViewOp::Shape) => "shape",
+            Self::StorageView(StorageViewOp::Strides) => "strides",
+            Self::StorageView(StorageViewOp::Values) => "values",
+            Self::Matmul | Self::Slice | Self::Gather | Self::Scatter
+            | Self::Concatenate | Self::Convert => return None,
+        })
+    }
+
+    pub fn apply(self, attributes: &mut Attrs) -> OpId {
+        if let Some(kind) = self.kind() {
+            attributes.insert(OPERATION_KIND, crate::AttrValue::String(kind.into()));
+        }
+        self.id()
+    }
+
+    pub fn decode(id: OpId, attributes: &Attrs) -> Option<Self> {
+        let kind = match attributes.get(&OPERATION_KIND) {
+            Some(crate::AttrValue::String(kind)) => Some(kind.as_str()),
+            _ => None,
+        };
+        Some(match (id, kind) {
+            (ELEMENTWISE, Some("add")) => Self::Elementwise(ElementwiseOp::Add),
+            (ELEMENTWISE, Some("subtract")) => Self::Elementwise(ElementwiseOp::Subtract),
+            (ELEMENTWISE, Some("multiply")) => Self::Elementwise(ElementwiseOp::Multiply),
+            (ELEMENTWISE, Some("divide")) => Self::Elementwise(ElementwiseOp::Divide),
+            (ELEMENTWISE, Some("exp")) => Self::Elementwise(ElementwiseOp::Exp),
+            (ELEMENTWISE, Some("log")) => Self::Elementwise(ElementwiseOp::Log),
+            (ELEMENTWISE, Some("tanh")) => Self::Elementwise(ElementwiseOp::Tanh),
+            (ELEMENTWISE, Some("rsqrt")) => Self::Elementwise(ElementwiseOp::Rsqrt),
+            (ELEMENTWISE, Some("relu")) => Self::Elementwise(ElementwiseOp::Relu),
+            (ELEMENTWISE, Some("scale")) => Self::Elementwise(ElementwiseOp::Scale),
+            (ELEMENTWISE, Some("add_scalar")) => Self::Elementwise(ElementwiseOp::AddScalar),
+            (REDUCE, Some("sum")) => Self::Reduce(ReductionOp::Sum),
+            (REDUCE, Some("sum_axis")) => Self::Reduce(ReductionOp::SumAxis),
+            (REDUCE, Some("mean_last")) => Self::Reduce(ReductionOp::MeanLast),
+            (REDUCE, Some("max_last")) => Self::Reduce(ReductionOp::MaxLast),
+            (MATMUL, None) => Self::Matmul,
+            (RESHAPE_VIEW, Some("reshape")) => Self::ReshapeView(ReshapeViewOp::Reshape),
+            (RESHAPE_VIEW, Some("materialize")) => Self::ReshapeView(ReshapeViewOp::Materialize),
+            (PERMUTE, Some("axes")) => Self::Permute(PermuteOp::Axes),
+            (PERMUTE, Some("reverse")) => Self::Permute(PermuteOp::Reverse),
+            (SLICE, None) => Self::Slice,
+            (BROADCAST, Some("like")) => Self::Broadcast(BroadcastOp::Like),
+            (BROADCAST, Some("repeat")) => Self::Broadcast(BroadcastOp::Repeat),
+            (GATHER, None) => Self::Gather,
+            (SCATTER, None) => Self::Scatter,
+            (CONCATENATE, None) => Self::Concatenate,
+            (CONVERT, None) => Self::Convert,
+            (STORAGE_VIEW, Some("from_elements")) => Self::StorageView(StorageViewOp::FromElements),
+            (STORAGE_VIEW, Some("shape")) => Self::StorageView(StorageViewOp::Shape),
+            (STORAGE_VIEW, Some("strides")) => Self::StorageView(StorageViewOp::Strides),
+            (STORAGE_VIEW, Some("values")) => Self::StorageView(StorageViewOp::Values),
+            _ => return None,
+        })
+    }
+}
+
 /// Operations whose result preserves the element type selected by the first
-/// tensor operand. Shape-changing operations may refine shape independently;
-/// none of them are allowed to replace or erase `T`.
+/// tensor operand. Shape-changing operations may refine shape independently.
 pub const TYPE_PRESERVING_OPERATIONS: &[OpId] = &[
-    ADD,
-    SUBTRACT,
-    MULTIPLY,
-    DIVIDE,
-    REDUCE_SUM,
-    REDUCE_SUM_AXIS,
+    ELEMENTWISE,
+    REDUCE,
     MATMUL,
-    TRANSPOSE,
-    SLICE,
-    MATERIALIZE,
-    RESHAPE,
+    RESHAPE_VIEW,
     PERMUTE,
-    MEAN_LAST,
-    RSQRT,
-    EXP,
-    LOG,
-    TANH,
-    SILU,
-    SOFTMAX_LAST,
+    SLICE,
+    BROADCAST,
     GATHER,
+    SCATTER,
     CONCATENATE,
-    REPEAT,
-    ROPE,
-    RELU,
-    SCALE,
-    LAYER_NORM,
-    RELU_BACKWARD,
-    SOFTMAX_BACKWARD,
-    LAYER_NORM_BACKWARD,
-    BACKWARD_MSE,
-    GRADIENT,
-    SGD,
-    ADD_SCALAR,
-    RMS_NORM,
 ];
 
 pub fn compiler_id() -> CompilerId {
@@ -183,7 +270,7 @@ pub fn element_storage_tag(types: &TypeContext, element: TypeId) -> Option<u8> {
 #[derive(Clone)]
 struct TensorOperationInterface {
     id: OpId,
-    operands: usize,
+    operands: std::ops::RangeInclusive<usize>,
     results: usize,
     capabilities: Vec<LoweringCapability>,
 }
@@ -214,12 +301,14 @@ impl OperationInterface for TensorOperationInterface {
         operation: &RegisteredOperation,
         _context: &IrContext<'_>,
     ) -> Result<(), OperationDiagnostic> {
-        if operation.operands.len() != self.operands || operation.results.len() != self.results {
+        if !self.operands.contains(&operation.operands.len())
+            || operation.results.len() != self.results
+        {
             return Err(OperationDiagnostic {
                 operation: self.id,
                 message: format!(
-                    "tensor operation expects {} operand(s) and {} result(s)",
-                    self.operands, self.results
+                    "tensor operation expects {}..={} operand(s) and {} result(s)",
+                    self.operands.start(), self.operands.end(), self.results
                 ),
             });
         }
@@ -241,45 +330,18 @@ impl OperationInterface for TensorOperationInterface {
 
 pub fn install_operations(registry: &mut OperationRegistry) -> Result<(), OperationDiagnostic> {
     for (id, operands) in [
-        (FROM_ELEMENTS, 2),
-        (CONVERT, 1),
-        (ADD, 2),
-        (SUBTRACT, 2),
-        (MULTIPLY, 2),
-        (DIVIDE, 2),
-        (REDUCE_SUM, 1),
-        (REDUCE_SUM_AXIS, 2),
-        (MATMUL, 2),
-        (TRANSPOSE, 1),
-        (SLICE, 4),
-        (MATERIALIZE, 1),
-        (SHAPE, 1),
-        (STRIDES, 1),
-        (VALUES, 1),
-        (RESHAPE, 2),
-        (PERMUTE, 2),
-        (MEAN_LAST, 1),
-        (RSQRT, 1),
-        (EXP, 1),
-        (LOG, 1),
-        (TANH, 1),
-        (SILU, 1),
-        (SOFTMAX_LAST, 1),
-        (GATHER, 2),
-        (CONCATENATE, 3),
-        (REPEAT, 2),
-        (ROPE, 2),
-        (RELU, 1),
-        (SCALE, 2),
-        (LAYER_NORM, 2),
-        (RELU_BACKWARD, 2),
-        (SOFTMAX_BACKWARD, 2),
-        (LAYER_NORM_BACKWARD, 3),
-        (BACKWARD_MSE, 1),
-        (GRADIENT, 1),
-        (SGD, 2),
-        (ADD_SCALAR, 2),
-        (RMS_NORM, 3),
+        (ELEMENTWISE, 1..=3),
+        (REDUCE, 1..=2),
+        (MATMUL, 2..=2),
+        (RESHAPE_VIEW, 1..=2),
+        (PERMUTE, 1..=2),
+        (SLICE, 4..=4),
+        (BROADCAST, 2..=2),
+        (GATHER, 2..=2),
+        (SCATTER, 3..=3),
+        (CONCATENATE, 3..=3),
+        (CONVERT, 1..=1),
+        (STORAGE_VIEW, 1..=2),
     ] {
         registry.register(
             id,
@@ -607,9 +669,18 @@ mod tests {
     }
 
     #[test]
-    fn tensor_operation_ids_are_backend_independent() {
-        assert_eq!(ADD, OpId::named("tensor", "add"));
-        assert_ne!(ADD, MATMUL);
+    fn tensor_operation_ids_are_small_and_backend_independent() {
+        let operations = [
+            ELEMENTWISE, REDUCE, MATMUL, RESHAPE_VIEW, PERMUTE, SLICE, BROADCAST,
+            GATHER, SCATTER, CONCATENATE, CONVERT, STORAGE_VIEW,
+        ];
+        assert_eq!(operations.len(), 12);
+        assert_eq!(ELEMENTWISE, OpId::named("tensor", "elementwise"));
+        assert_eq!(MATMUL, TensorOp::Matmul.id());
+        let mut attributes = Attrs::new();
+        let id = TensorOp::Elementwise(ElementwiseOp::Add).apply(&mut attributes);
+        assert_eq!(id, ELEMENTWISE);
+        assert_eq!(TensorOp::decode(id, &attributes), Some(TensorOp::Elementwise(ElementwiseOp::Add)));
     }
 
     #[test]

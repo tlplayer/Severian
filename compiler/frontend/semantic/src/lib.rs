@@ -5578,9 +5578,9 @@ impl Analyzer<'_> {
                     && matches!(name.as_str(), "shape" | "strides" | "values")
                 {
                     let operation = match name.as_str() {
-                        "shape" => severian_universal::tensor::SHAPE,
-                        "strides" => severian_universal::tensor::STRIDES,
-                        "values" => severian_universal::tensor::VALUES,
+                        "shape" => severian_universal::tensor::StorageViewOp::Shape,
+                        "strides" => severian_universal::tensor::StorageViewOp::Strides,
+                        "values" => severian_universal::tensor::StorageViewOp::Values,
                         _ => unreachable!(),
                     };
                     return self.tensor_list_property(operation, object, expected, ast.span);
@@ -7539,14 +7539,14 @@ impl Analyzer<'_> {
                     {
                         let right_value = self.expression(right, Some(left_value.type_id))?;
                         let operation = match operator {
-                            AstBinaryOperator::Add => severian_universal::tensor::ADD,
-                            AstBinaryOperator::Subtract => severian_universal::tensor::SUBTRACT,
-                            AstBinaryOperator::Multiply => severian_universal::tensor::MULTIPLY,
-                            AstBinaryOperator::Divide => severian_universal::tensor::DIVIDE,
+                            AstBinaryOperator::Add => severian_universal::tensor::ElementwiseOp::Add,
+                            AstBinaryOperator::Subtract => severian_universal::tensor::ElementwiseOp::Subtract,
+                            AstBinaryOperator::Multiply => severian_universal::tensor::ElementwiseOp::Multiply,
+                            AstBinaryOperator::Divide => severian_universal::tensor::ElementwiseOp::Divide,
                             _ => unreachable!(),
                         };
                         return Ok(self.tensor_operation(
-                            operation,
+                            severian_universal::tensor::TensorOp::Elementwise(operation),
                             vec![left_value, right_value],
                             expected,
                             ast.span,
@@ -11605,7 +11605,7 @@ impl Analyzer<'_> {
 
     fn tensor_intrinsic(
         &mut self,
-        operation: severian_universal::OpId,
+        operation: severian_universal::tensor::TensorOp,
         arguments: Vec<Expression>,
         result: TypeId,
         mut attributes: severian_universal::Attrs,
@@ -11631,6 +11631,7 @@ impl Analyzer<'_> {
                 severian_universal::AttrValue::Type(element),
             );
         }
+        let operation = operation.apply(&mut attributes);
         Expression {
             id: self.next_id(),
             type_id: result,
@@ -11647,7 +11648,7 @@ impl Analyzer<'_> {
 
     fn tensor_operation(
         &mut self,
-        operation: severian_universal::OpId,
+        operation: severian_universal::tensor::TensorOp,
         arguments: Vec<Expression>,
         expected: Option<TypeId>,
         span: severian_source::Span,
@@ -11669,22 +11670,26 @@ impl Analyzer<'_> {
             .and_then(|argument| self.types.tensor(argument.type_id))
             .map(|tensor| tensor.shape);
         let inferred_shape = match operation {
-            severian_universal::tensor::ADD
-            | severian_universal::tensor::SUBTRACT
-            | severian_universal::tensor::MULTIPLY
-            | severian_universal::tensor::DIVIDE => source_shape
+            severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Add
+                | severian_universal::tensor::ElementwiseOp::Subtract
+                | severian_universal::tensor::ElementwiseOp::Multiply
+                | severian_universal::tensor::ElementwiseOp::Divide,
+            ) => source_shape
                 .as_ref()
                 .zip(right_shape.as_ref())
                 .map(|(left, right)| left.broadcast(right))
                 .transpose()
                 .map_err(|error| semantic_error(error.to_string(), span))?,
-            severian_universal::tensor::MATMUL => source_shape
+            severian_universal::tensor::TensorOp::Matmul => source_shape
                 .as_ref()
                 .zip(right_shape.as_ref())
                 .map(|(left, right)| left.matmul(right))
                 .transpose()
                 .map_err(|error| semantic_error(error.to_string(), span))?,
-            severian_universal::tensor::TRANSPOSE => source_shape.as_ref().map(|shape| {
+            severian_universal::tensor::TensorOp::Permute(
+                severian_universal::tensor::PermuteOp::Reverse,
+            ) => source_shape.as_ref().map(|shape| {
                 let Some(dimensions) = shape.dimensions() else {
                     return severian_universal::TensorShape::Unranked;
                 };
@@ -11692,10 +11697,15 @@ impl Analyzer<'_> {
                     dimensions.iter().copied().rev().collect(),
                 )
             }),
-            severian_universal::tensor::REDUCE_SUM => Some(
+            severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::Sum,
+            ) => Some(
                 severian_universal::TensorShape::ranked([1]),
             ),
-            severian_universal::tensor::MEAN_LAST => source_shape.as_ref().map(|shape| {
+            severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::MeanLast
+                | severian_universal::tensor::ReductionOp::MaxLast,
+            ) => source_shape.as_ref().map(|shape| {
                 let Some(dimensions) = shape.dimensions() else {
                     return severian_universal::TensorShape::Unranked;
                 };
@@ -11707,13 +11717,22 @@ impl Analyzer<'_> {
                     )
                 }
             }),
-            severian_universal::tensor::RESHAPE
-            | severian_universal::tensor::PERMUTE
-            | severian_universal::tensor::SLICE
-            | severian_universal::tensor::REDUCE_SUM_AXIS
-            | severian_universal::tensor::GATHER
-            | severian_universal::tensor::CONCATENATE
-            | severian_universal::tensor::REPEAT => {
+            severian_universal::tensor::TensorOp::ReshapeView(
+                severian_universal::tensor::ReshapeViewOp::Reshape,
+            )
+            | severian_universal::tensor::TensorOp::Permute(
+                severian_universal::tensor::PermuteOp::Axes,
+            )
+            | severian_universal::tensor::TensorOp::Slice
+            | severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::SumAxis,
+            )
+            | severian_universal::tensor::TensorOp::Gather
+            | severian_universal::tensor::TensorOp::Scatter
+            | severian_universal::tensor::TensorOp::Concatenate
+            | severian_universal::tensor::TensorOp::Broadcast(
+                severian_universal::tensor::BroadcastOp::Repeat,
+            ) => {
                 Some(severian_universal::TensorShape::Unranked)
             }
             _ => source_shape,
@@ -11743,12 +11762,12 @@ impl Analyzer<'_> {
 
     fn tensor_list_property(
         &mut self,
-        operation: severian_universal::OpId,
+        operation: severian_universal::tensor::StorageViewOp,
         tensor: Expression,
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let element = if operation == severian_universal::tensor::VALUES {
+        let element = if operation == severian_universal::tensor::StorageViewOp::Values {
             self.types
                 .resolve_name("float")
                 .expect("bootstrap defines float")
@@ -11787,7 +11806,7 @@ impl Analyzer<'_> {
             );
         }
         let value = self.tensor_intrinsic(
-            operation,
+            severian_universal::tensor::TensorOp::StorageView(operation),
             vec![tensor],
             storage,
             attributes,
@@ -11813,6 +11832,71 @@ impl Analyzer<'_> {
     ) -> Result<Option<Expression>, Diagnostic> {
         if self.tensor_class_name().is_none() || arguments.iter().any(|arg| arg.name.is_some()) {
             return Ok(None);
+        }
+        if let AstExpressionKind::TypeApplication {
+            callee: application,
+            arguments: type_arguments,
+        } = &callee.kind
+        {
+            if callable_path(application)
+                .as_deref()
+                .is_some_and(|path| path.rsplit('.').next() == Some("mapped"))
+            {
+                let ([element], [handle, tensor_name]) =
+                    (type_arguments.as_slice(), arguments)
+                else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "`mapped[T]` expects a handle and tensor name",
+                        Some(span),
+                    ));
+                };
+                let element = self.resolve_source_type(element)?;
+                let tag = severian_universal::tensor::element_storage_tag(&self.types, element)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            "SafeTensor storage does not support this element type",
+                            Some(span),
+                        )
+                    })?;
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let i32_type = self
+                    .types
+                    .resolve_name("i32")
+                    .expect("bootstrap defines i32");
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                let result = self.tensor_type(element, span)?;
+                if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+                    return Err(semantic_error(
+                        "mapped SafeTensor does not satisfy the expected tensor type".into(),
+                        span,
+                    ));
+                }
+                let handle = self.expression(&handle.value, Some(integer))?;
+                let tensor_name = self.expression(&tensor_name.value, Some(string))?;
+                let tag = Expression {
+                    id: self.next_id(),
+                    type_id: i32_type,
+                    kind: ExpressionKind::Literal(severian_universal::LiteralValue::Integer(
+                        tag.to_string(),
+                    )),
+                    span,
+                };
+                return Ok(Some(self.runtime_call(
+                    "__sev_safetensor_view",
+                    &[integer, string, i32_type],
+                    result,
+                    vec![handle, tensor_name, tag],
+                    span,
+                )));
+            }
         }
         let Some(path) = callable_path(callee) else {
             return Ok(None);
@@ -11855,57 +11939,6 @@ impl Analyzer<'_> {
             }));
         }
 
-        let mapped_element = match name {
-            "mapped_i8" => Some(("i8", "__sev_safetensor_i8_view")),
-            "mapped_i16" => Some(("i16", "__sev_safetensor_i16_view")),
-            "mapped_i32" => Some(("i32", "__sev_safetensor_i32_view")),
-            "mapped_i64" => Some(("i64", "__sev_safetensor_i64_view")),
-            "mapped_i128" => Some(("i128", "__sev_safetensor_i128_view")),
-            "mapped_u8" => Some(("u8", "__sev_safetensor_u8_view")),
-            "mapped_u16" => Some(("u16", "__sev_safetensor_u16_view")),
-            "mapped_u32" => Some(("u32", "__sev_safetensor_u32_view")),
-            "mapped_u64" => Some(("u64", "__sev_safetensor_u64_view")),
-            "mapped_u128" => Some(("u128", "__sev_safetensor_u128_view")),
-            "mapped_f8e4m3fn" => Some(("f8e4m3fn", "__sev_safetensor_f8e4m3fn_view")),
-            "mapped_f8e5m2" => Some(("f8e5m2", "__sev_safetensor_f8e5m2_view")),
-            "mapped_f16" => Some(("f16", "__sev_safetensor_f16_view")),
-            "mapped_bf16" => Some(("bf16", "__sev_safetensor_bf16_view")),
-            "mapped_f32" => Some(("f32", "__sev_safetensor_f32_view")),
-            "mapped_f64" => Some(("f64", "__sev_safetensor_f64_view")),
-            "mapped_f128" => Some(("f128", "__sev_safetensor_f128_view")),
-            _ => None,
-        };
-        if let (Some((element_name, symbol)), [handle, tensor_name]) = (mapped_element, arguments) {
-            let integer = self
-                .types
-                .resolve_name("int")
-                .expect("bootstrap defines int");
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            let element = self
-                .types
-                .resolve_name(element_name)
-                .expect("universal defines every tensor storage dtype");
-            let result = self.tensor_type(element, span)?;
-            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
-                return Err(semantic_error(
-                    "mapped SafeTensor does not satisfy the expected tensor type".into(),
-                    span,
-                ));
-            }
-            let handle = self.expression(&handle.value, Some(integer))?;
-            let tensor_name = self.expression(&tensor_name.value, Some(string))?;
-            return Ok(Some(self.runtime_call(
-                symbol,
-                &[integer, string],
-                result,
-                vec![handle, tensor_name],
-                span,
-            )));
-        }
-
         if let AstExpressionKind::Member { object, name } = &callee.kind {
             let object_path = callable_path(object);
             let package_namespace = object_path.as_ref().is_some_and(|namespace| {
@@ -11926,7 +11959,7 @@ impl Analyzer<'_> {
                     return match (name.as_str(), arguments) {
                         ("strides", []) => self
                             .tensor_list_property(
-                                severian_universal::tensor::STRIDES,
+                                severian_universal::tensor::StorageViewOp::Strides,
                                 receiver,
                                 expected,
                                 span,
@@ -11934,7 +11967,9 @@ impl Analyzer<'_> {
                             .map(Some),
                         ("materialize", []) => self
                             .tensor_operation(
-                                severian_universal::tensor::MATERIALIZE,
+                                severian_universal::tensor::TensorOp::ReshapeView(
+                                    severian_universal::tensor::ReshapeViewOp::Materialize,
+                                ),
                                 vec![receiver],
                                 expected,
                                 span,
@@ -11953,7 +11988,7 @@ impl Analyzer<'_> {
                             let ends = self.list_storage_expression(ends, span);
                             let steps = self.list_storage_expression(steps, span);
                             self.tensor_operation(
-                                severian_universal::tensor::SLICE,
+                                severian_universal::tensor::TensorOp::Slice,
                                 vec![receiver, starts, ends, steps],
                                 expected,
                                 span,
@@ -12010,7 +12045,9 @@ impl Analyzer<'_> {
                 );
             }
             return Ok(Some(self.tensor_intrinsic(
-                severian_universal::tensor::FROM_ELEMENTS,
+                severian_universal::tensor::TensorOp::StorageView(
+                    severian_universal::tensor::StorageViewOp::FromElements,
+                ),
                 vec![values, shape],
                 result,
                 attributes,
@@ -12025,9 +12062,9 @@ impl Analyzer<'_> {
                 .is_some()
             {
                 let operation = match name {
-                    "shape" => severian_universal::tensor::SHAPE,
-                    "strides" => severian_universal::tensor::STRIDES,
-                    "values" => severian_universal::tensor::VALUES,
+                    "shape" => severian_universal::tensor::StorageViewOp::Shape,
+                    "strides" => severian_universal::tensor::StorageViewOp::Strides,
+                    "values" => severian_universal::tensor::StorageViewOp::Values,
                     _ => unreachable!(),
                 };
                 return self
@@ -12054,16 +12091,22 @@ impl Analyzer<'_> {
                     resolved.push(self.list_storage_expression(list, span));
                 }
                 return self
-                    .tensor_operation(severian_universal::tensor::SLICE, resolved, expected, span)
+                    .tensor_operation(severian_universal::tensor::TensorOp::Slice, resolved, expected, span)
                     .map(Some);
             }
             return Ok(None);
         }
 
         let list_spec_operation = match name {
-            "reshape" => Some(severian_universal::tensor::RESHAPE),
-            "permute" => Some(severian_universal::tensor::PERMUTE),
-            "repeat" => Some(severian_universal::tensor::REPEAT),
+            "reshape" => Some(severian_universal::tensor::TensorOp::ReshapeView(
+                severian_universal::tensor::ReshapeViewOp::Reshape,
+            )),
+            "permute" => Some(severian_universal::tensor::TensorOp::Permute(
+                severian_universal::tensor::PermuteOp::Axes,
+            )),
+            "repeat" => Some(severian_universal::tensor::TensorOp::Broadcast(
+                severian_universal::tensor::BroadcastOp::Repeat,
+            )),
             _ => None,
         };
         if let (Some(operation), [value, specification]) = (list_spec_operation, arguments) {
@@ -12105,7 +12148,7 @@ impl Analyzer<'_> {
                 let axis = self.list_storage_expression(axis, span);
                 return self
                     .tensor_operation(
-                        severian_universal::tensor::CONCATENATE,
+                        severian_universal::tensor::TensorOp::Concatenate,
                         vec![left, right, axis],
                         expected,
                         span,
@@ -12128,32 +12171,8 @@ impl Analyzer<'_> {
                 {
                     return self
                         .tensor_operation(
-                            severian_universal::tensor::GATHER,
+                            severian_universal::tensor::TensorOp::Gather,
                             vec![value, indices],
-                            expected,
-                            span,
-                        )
-                        .map(Some);
-                }
-            }
-            return Ok(None);
-        }
-
-        if name == "rope" && arguments.len() == 2 {
-            let value = self.expression(&arguments[0].value, None)?;
-            if self
-                .resolve_tensor_element_type(value.type_id, span)
-                .is_some()
-            {
-                let configuration = self.expression(&arguments[1].value, None)?;
-                if self
-                    .resolve_tensor_element_type(configuration.type_id, span)
-                    .is_some()
-                {
-                    return self
-                        .tensor_operation(
-                            severian_universal::tensor::ROPE,
-                            vec![value, configuration],
                             expected,
                             span,
                         )
@@ -12176,7 +12195,9 @@ impl Analyzer<'_> {
                 let axis = self.expression(&arguments[1].value, Some(integer))?;
                 return self
                     .tensor_operation(
-                        severian_universal::tensor::REDUCE_SUM_AXIS,
+                        severian_universal::tensor::TensorOp::Reduce(
+                            severian_universal::tensor::ReductionOp::SumAxis,
+                        ),
                         vec![value, axis],
                         expected,
                         span,
@@ -12187,10 +12208,8 @@ impl Analyzer<'_> {
         }
 
         let scalar_operation = match name {
-            "scale" => Some(severian_universal::tensor::SCALE),
-            "layer_norm" => Some(severian_universal::tensor::LAYER_NORM),
-            "sgd" => Some(severian_universal::tensor::SGD),
-            "add_scalar" => Some(severian_universal::tensor::ADD_SCALAR),
+            "scale" => Some(severian_universal::tensor::ElementwiseOp::Scale),
+            "add_scalar" => Some(severian_universal::tensor::ElementwiseOp::AddScalar),
             _ => None,
         };
         if let (Some(operation), [value, scalar]) = (scalar_operation, arguments) {
@@ -12205,80 +12224,9 @@ impl Analyzer<'_> {
                     .expect("bootstrap defines the tensor scalar type");
                 let scalar = self.expression(&scalar.value, Some(float))?;
                 return self
-                    .tensor_operation(operation, vec![value, scalar], expected, span)
-                    .map(Some);
-            }
-            return Ok(None);
-        }
-
-        let tensor_pair_operation = match name {
-            "relu_backward" => Some(severian_universal::tensor::RELU_BACKWARD),
-            "softmax_backward" => Some(severian_universal::tensor::SOFTMAX_BACKWARD),
-            _ => None,
-        };
-        if let (Some(operation), [left, right]) = (tensor_pair_operation, arguments) {
-            let left = self.expression(&left.value, None)?;
-            if let Some(left_element) = self.resolve_tensor_element_type(left.type_id, span) {
-                let right = self.expression(&right.value, None)?;
-                if self.resolve_tensor_element_type(right.type_id, span) != Some(left_element) {
-                    return Err(semantic_error(
-                        "tensor operands must have the same element type".into(),
-                        right.span,
-                    ));
-                }
-                return self
-                    .tensor_operation(operation, vec![left, right], expected, span)
-                    .map(Some);
-            }
-            return Ok(None);
-        }
-
-        if name == "layer_norm_backward" && arguments.len() == 3 {
-            let input = self.expression(&arguments[0].value, None)?;
-            if let Some(input_element) = self.resolve_tensor_element_type(input.type_id, span) {
-                let upstream = self.expression(&arguments[1].value, None)?;
-                if self.resolve_tensor_element_type(upstream.type_id, span) != Some(input_element) {
-                    return Err(semantic_error(
-                        "tensor operands must have the same element type".into(),
-                        upstream.span,
-                    ));
-                }
-                let float = self
-                    .types
-                    .resolve_name("float")
-                    .expect("bootstrap defines float");
-                let epsilon = self.expression(&arguments[2].value, Some(float))?;
-                return self
                     .tensor_operation(
-                        severian_universal::tensor::LAYER_NORM_BACKWARD,
-                        vec![input, upstream, epsilon],
-                        expected,
-                        span,
-                    )
-                    .map(Some);
-            }
-            return Ok(None);
-        }
-
-        if name == "rms_norm" && arguments.len() == 3 {
-            let input = self.expression(&arguments[0].value, None)?;
-            if let Some(input_element) = self.resolve_tensor_element_type(input.type_id, span) {
-                let weights = self.expression(&arguments[1].value, None)?;
-                if self.resolve_tensor_element_type(weights.type_id, span) != Some(input_element) {
-                    return Err(semantic_error(
-                        "RMSNorm input and weights must have the same element type".into(),
-                        weights.span,
-                    ));
-                }
-                let float = self
-                    .types
-                    .resolve_name("float")
-                    .expect("bootstrap defines float");
-                let epsilon = self.expression(&arguments[2].value, Some(float))?;
-                return self
-                    .tensor_operation(
-                        severian_universal::tensor::RMS_NORM,
-                        vec![input, weights, epsilon],
+                        severian_universal::tensor::TensorOp::Elementwise(operation),
+                        vec![value, scalar],
                         expected,
                         span,
                     )
@@ -12288,36 +12236,32 @@ impl Analyzer<'_> {
         }
 
         let operation = match name {
-            "add" => Some(severian_universal::tensor::ADD),
-            "subtract" => Some(severian_universal::tensor::SUBTRACT),
-            "multiply" => Some(severian_universal::tensor::MULTIPLY),
-            "divide" => Some(severian_universal::tensor::DIVIDE),
-            "sum" => Some(severian_universal::tensor::REDUCE_SUM),
-            "matmul" => Some(severian_universal::tensor::MATMUL),
-            "transpose" => Some(severian_universal::tensor::TRANSPOSE),
-            "materialize" => Some(severian_universal::tensor::MATERIALIZE),
-            "mean_last" => Some(severian_universal::tensor::MEAN_LAST),
-            "rsqrt" => Some(severian_universal::tensor::RSQRT),
-            "exp" => Some(severian_universal::tensor::EXP),
-            "log" => Some(severian_universal::tensor::LOG),
-            "tanh" => Some(severian_universal::tensor::TANH),
-            "silu" => Some(severian_universal::tensor::SILU),
-            "softmax" | "softmax_rows" | "softmax_last" => {
-                Some(severian_universal::tensor::SOFTMAX_LAST)
-            }
-            "relu" => Some(severian_universal::tensor::RELU),
-            "backward_mse" => Some(severian_universal::tensor::BACKWARD_MSE),
-            "gradient" => Some(severian_universal::tensor::GRADIENT),
+            "add" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Add)),
+            "subtract" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Subtract)),
+            "multiply" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Multiply)),
+            "divide" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Divide)),
+            "sum" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::Sum)),
+            "matmul" => Some(severian_universal::tensor::TensorOp::Matmul),
+            "transpose" => Some(severian_universal::tensor::TensorOp::Permute(severian_universal::tensor::PermuteOp::Reverse)),
+            "materialize" => Some(severian_universal::tensor::TensorOp::ReshapeView(severian_universal::tensor::ReshapeViewOp::Materialize)),
+            "mean_last" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::MeanLast)),
+            "maximum_last" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::MaxLast)),
+            "rsqrt" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Rsqrt)),
+            "exp" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Exp)),
+            "log" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Log)),
+            "tanh" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Tanh)),
+            "relu" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Relu)),
             _ => None,
         };
         if let Some(operation) = operation {
             let expected_arity = if matches!(
                 operation,
-                severian_universal::tensor::ADD
-                    | severian_universal::tensor::SUBTRACT
-                    | severian_universal::tensor::MULTIPLY
-                    | severian_universal::tensor::DIVIDE
-                    | severian_universal::tensor::MATMUL
+                severian_universal::tensor::TensorOp::Elementwise(
+                    severian_universal::tensor::ElementwiseOp::Add
+                        | severian_universal::tensor::ElementwiseOp::Subtract
+                        | severian_universal::tensor::ElementwiseOp::Multiply
+                        | severian_universal::tensor::ElementwiseOp::Divide
+                ) | severian_universal::tensor::TensorOp::Matmul
             ) {
                 2
             } else {
@@ -12398,7 +12342,7 @@ impl Analyzer<'_> {
                 );
             }
             return Ok(Some(self.tensor_intrinsic(
-                severian_universal::tensor::CONVERT,
+                severian_universal::tensor::TensorOp::Convert,
                 vec![value],
                 result,
                 attributes,
