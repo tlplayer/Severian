@@ -6,10 +6,10 @@
 //! owns this versioned ABI, the full fusion graph, and the TTIR it submits.
 //! Pass ordering is adapted from Triton (MIT); see `THIRD_PARTY_NOTICES.md`.
 
-use severian_fusion::{FusionGraph, FusionRegion, NodeKind};
+use severian_fusion::{ElementKind, FusionGraph, FusionRegion, NodeKind};
 use std::fmt;
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -196,6 +196,34 @@ impl From<NodeKind> for AbiNodeKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum AbiElementKind {
+    SignedInteger = 1,
+    UnsignedInteger = 2,
+    IeeeFloat = 3,
+    BrainFloat = 4,
+    Float8E4M3Fn = 5,
+    Float8E5M2 = 6,
+    Boolean = 7,
+    Opaque = 255,
+}
+
+impl From<ElementKind> for AbiElementKind {
+    fn from(kind: ElementKind) -> Self {
+        match kind {
+            ElementKind::SignedInteger => Self::SignedInteger,
+            ElementKind::UnsignedInteger => Self::UnsignedInteger,
+            ElementKind::IeeeFloat => Self::IeeeFloat,
+            ElementKind::BrainFloat => Self::BrainFloat,
+            ElementKind::Float8E4M3Fn => Self::Float8E4M3Fn,
+            ElementKind::Float8E5M2 => Self::Float8E5M2,
+            ElementKind::Boolean => Self::Boolean,
+            ElementKind::Opaque => Self::Opaque,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct AbiNode {
@@ -206,6 +234,7 @@ pub struct AbiNode {
     pub inputs: AbiSlice<u32>,
     /// Known dimensions are non-negative; `-1` is dynamic.
     pub dimensions: AbiSlice<i64>,
+    pub element_kind: AbiElementKind,
     pub element_bits: u16,
     pub _reserved: u16,
     pub bytes_read: u64,
@@ -326,6 +355,7 @@ pub fn with_abi_request<R>(
                 attributes: AbiSlice::from_slice(&node.attributes),
                 inputs: AbiSlice::from_slice(&input_storage[index]),
                 dimensions: AbiSlice::from_slice(&dimension_storage[index]),
+                element_kind: node.shape.element_kind.into(),
                 element_bits: node.shape.element_bytes.saturating_mul(8),
                 _reserved: 0,
                 bytes_read: node.bytes_read,
@@ -539,5 +569,17 @@ mod tests {
         assert!(amd.iter().any(|pass| pass.donor_name == "amdgcn-to-hsaco"));
         assert!(nvidia.iter().any(|pass| pass.donor_name == "ptx-to-cubin"));
         assert!(!amd.iter().any(|pass| pass.donor_name == "ptx-to-cubin"));
+    }
+
+    #[test]
+    fn dtype_kind_is_abi_data_not_a_function_name() {
+        assert_eq!(
+            AbiElementKind::from(ElementKind::IeeeFloat),
+            AbiElementKind::IeeeFloat
+        );
+        assert_ne!(
+            AbiElementKind::from(ElementKind::SignedInteger),
+            AbiElementKind::from(ElementKind::UnsignedInteger)
+        );
     }
 }

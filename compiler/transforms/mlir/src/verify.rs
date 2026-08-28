@@ -179,8 +179,12 @@ impl<'context> Module<'context> {
         while !current.is_null() {
             if operation_name(current) == "func.func" {
                 if self.operation_has_body(current) {
-                    count += 1;
-                    entry = Some(current);
+                    if operation_string_attribute(current, "sym_visibility").as_deref()
+                        != Some("private")
+                    {
+                        count += 1;
+                        entry = Some(current);
+                    }
                 } else {
                     declarations += 1;
                 }
@@ -213,9 +217,9 @@ impl<'context> Module<'context> {
         let mut allowed = [
             "builtin", "arith", "async", "cf", "func", "linalg", "llvm", "math", "scf", "tensor",
         ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
         for capability in target.capabilities.iter() {
             if let Some(dialect) = capability.strip_prefix("mlir.dialect.") {
                 allowed.insert(dialect.to_owned());
@@ -252,8 +256,12 @@ impl<'context> Module<'context> {
 }
 
 fn operation_symbol_name(operation: ffi::MlirOperation) -> Option<String> {
+    operation_string_attribute(operation, "sym_name")
+}
+
+fn operation_string_attribute(operation: ffi::MlirOperation, name: &str) -> Option<String> {
     let attribute =
-        unsafe { ffi::mlirOperationGetAttributeByName(operation, ffi::string_ref("sym_name")) };
+        unsafe { ffi::mlirOperationGetAttributeByName(operation, ffi::string_ref(name)) };
     if attribute.is_null() {
         return None;
     }
@@ -369,10 +377,9 @@ fn lowered_type(context: &Context, ty: &LoweredType) -> Result<ffi::MlirType, Ml
                 ffi::mlirTypeParseGet(context.raw, ffi::string_ref("!llvm.ptr"))
             }
             LoweredType::None | LoweredType::Unit => ffi::mlirIntegerTypeGet(context.raw, 8),
-            LoweredType::Tensor { .. } => ffi::mlirTypeParseGet(
-                context.raw,
-                ffi::string_ref(&crate::emit::mlir_type(ty)?),
-            ),
+            LoweredType::Tensor { .. } => {
+                ffi::mlirTypeParseGet(context.raw, ffi::string_ref(&crate::emit::mlir_type(ty)?))
+            }
             unsupported => return Err(MlirError::UnsupportedType(unsupported.clone())),
         }
     })

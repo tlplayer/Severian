@@ -350,7 +350,7 @@ def linear[T](parameters: borrow StateDict, name: string, input: tensor.Tensor[T
 
 def rms_norm[T](parameters: borrow StateDict, name: string, epsilon: float, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
     weights = parameter_like(borrow parameters, name + ".weight", copy input)
-    return RmsNorm(weights, epsilon).forward(input)
+    return tensor.rms_norm(input, weights, epsilon)
 
 def text_embeddings(
     parameters: borrow StateDict,

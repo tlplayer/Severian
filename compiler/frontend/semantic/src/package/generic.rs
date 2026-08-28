@@ -633,33 +633,25 @@ pub(super) fn collect_generic_specializations(
                         index,
                         &mut specializations,
                     )?,
-                    Item::Function(function) => {
-                        let id = function_def_id(module.package, module.id, &module.ast, function);
-                        let substitution = if function.type_parameters.is_empty() {
-                            Some(Substitution::new())
-                        } else {
-                            specializations
-                                .get(&id)
-                                .and_then(|instances| instances.keys().next().cloned())
-                        };
-                        let Some(substitution) = substitution else {
-                            continue;
-                        };
-                        let mut names = globals.clone();
-                        for parameter in &function.parameters {
-                            if let Some(name) =
-                                specialized_type_name(&parameter.annotation, &substitution)
-                            {
-                                names.insert(parameter.name.clone(), name);
+                    Item::Function(function) => visit_function_for_specializations(
+                        module,
+                        function,
+                        &globals,
+                        index,
+                        &mut specializations,
+                    )?,
+                    Item::Class(class) if class.type_parameters.is_empty() => {
+                        let mut fields = globals.clone();
+                        for field in &class.fields {
+                            if let Some(name) = type_annotation_name(&field.annotation) {
+                                fields.insert(field.name.clone(), name);
                             }
                         }
-                        let result = specialized_type_name(&function.result, &substitution);
-                        if let Some(body) = &function.body {
-                            visit_statements_for_specializations(
-                                module.id,
-                                body,
-                                result.as_deref(),
-                                &mut names,
+                        for function in class.constructors.iter().chain(&class.methods) {
+                            visit_function_for_specializations(
+                                module,
+                                function,
+                                &fields,
                                 index,
                                 &mut specializations,
                             )?;
@@ -686,6 +678,44 @@ pub(super) fn collect_generic_specializations(
     }
     validate_specializations(module_graph, index, types, &specializations)?;
     Ok(specializations)
+}
+
+fn visit_function_for_specializations(
+    module: &severian_modules::ResolvedModule,
+    function: &severian_ast::FunctionDeclaration,
+    inherited_names: &BTreeMap<String, String>,
+    index: &ProgramIndex,
+    specializations: &mut Specializations,
+) -> Result<(), Diagnostic> {
+    let id = function_def_id(module.package, module.id, &module.ast, function);
+    let substitution = if function.type_parameters.is_empty() {
+        Some(Substitution::new())
+    } else {
+        specializations
+            .get(&id)
+            .and_then(|instances| instances.keys().next().cloned())
+    };
+    let Some(substitution) = substitution else {
+        return Ok(());
+    };
+    let mut names = inherited_names.clone();
+    for parameter in &function.parameters {
+        if let Some(name) = specialized_type_name(&parameter.annotation, &substitution) {
+            names.insert(parameter.name.clone(), name);
+        }
+    }
+    let result = specialized_type_name(&function.result, &substitution);
+    if let Some(body) = &function.body {
+        visit_statements_for_specializations(
+            module.id,
+            body,
+            result.as_deref(),
+            &mut names,
+            index,
+            specializations,
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_specializations(
@@ -1934,7 +1964,7 @@ fn expression_type_name(
         ),
         severian_ast::ExpressionKind::Call { callee, arguments } => {
             let path = ast_callable_path(callee)?;
-            resolve_path(module, &path, index)
+            let direct = resolve_path(module, &path, index)
                 .into_iter()
                 .find_map(|definition| match &index.definitions[&definition].kind {
                     DefKind::Function(function) if function.type_parameters.is_empty() => {
@@ -1943,8 +1973,11 @@ fn expression_type_name(
                     DefKind::Function(function) => {
                         let mut substitution = Substitution::new();
                         for (parameter, argument) in function.parameters.iter().zip(arguments) {
-                            let actual =
-                                expression_type_name(module, &argument.value, names, index)?;
+                            let Some(actual) =
+                                expression_type_name(module, &argument.value, names, index)
+                            else {
+                                continue;
+                            };
                             infer_substitution(
                                 parameter,
                                 &actual,
@@ -1967,7 +2000,80 @@ fn expression_type_name(
                     }
                     DefKind::Type => Some(index.definitions[&definition].name.clone()),
                     _ => None,
-                })
+                });
+            if direct.is_some() {
+                return direct;
+            }
+            let severian_ast::ExpressionKind::Member { object, name } = &callee.kind else {
+                return None;
+            };
+            let receiver = expression_type_name(module, object, names, index)?;
+            let (owner, owner_arguments) = type_application_parts(&receiver)?;
+            index.methods.get(name)?.iter().find_map(|method| {
+                if !same_type_constructor(&method.owner, owner)
+                    || method.owner_type_parameters.len() != owner_arguments.len()
+                    || method.parameters.len() != arguments.len()
+                {
+                    return None;
+                }
+                let mut substitution = method
+                    .owner_type_parameters
+                    .iter()
+                    .zip(&owner_arguments)
+                    .map(|(parameter, actual)| (parameter.clone(), (*actual).to_owned()))
+                    .collect::<Substitution>();
+                let mut conflict = None;
+                for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                    let Some(actual) = expression_type_name(module, &argument.value, names, index)
+                    else {
+                        continue;
+                    };
+                    conflict = infer_substitution(
+                        parameter,
+                        &actual,
+                        &method.type_parameters,
+                        &mut substitution,
+                    )
+                    .err();
+                    if conflict.is_some() {
+                        break;
+                    }
+                }
+                if conflict.is_some()
+                    || method
+                        .type_parameters
+                        .iter()
+                        .any(|parameter| !substitution.contains_key(parameter))
+                {
+                    return None;
+                }
+                type_annotation_name(&specialize_annotation(&method.result, &substitution))
+            })
+        }
+        severian_ast::ExpressionKind::Unary { operator, operand } => {
+            if *operator == severian_ast::UnaryOperator::Not {
+                Some("bool".to_owned())
+            } else {
+                expression_type_name(module, operand, names, index)
+            }
+        }
+        severian_ast::ExpressionKind::Member { object, name } => {
+            let receiver = expression_type_name(module, object, names, index)?;
+            let (owner, owner_arguments) = type_application_parts(&receiver)?;
+            index.fields.get(name)?.iter().find_map(|field| {
+                if !same_type_constructor(&field.owner, owner)
+                    || field.owner_type_parameters.len() != owner_arguments.len()
+                {
+                    return None;
+                }
+                let substitution = field
+                    .owner_type_parameters
+                    .iter()
+                    .zip(&owner_arguments)
+                    .map(|(parameter, actual)| (parameter.clone(), (*actual).to_owned()))
+                    .collect::<Substitution>();
+                type_annotation_name(&specialize_annotation(&field.annotation, &substitution))
+            })
         }
         severian_ast::ExpressionKind::List(values) => {
             let element = values

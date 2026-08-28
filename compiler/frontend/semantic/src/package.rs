@@ -49,9 +49,18 @@ pub struct TraitDecl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDecl {
+    pub type_parameters: Vec<String>,
+    pub fields: Vec<severian_ast::PropertyDeclaration>,
+    pub constructors: Vec<severian_ast::FunctionDeclaration>,
+    pub methods: Vec<severian_ast::FunctionDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
     Function(FunctionDecl),
     Type,
+    Class(ClassDecl),
     Trait(TraitDecl),
     Constant,
     Import,
@@ -64,6 +73,22 @@ pub struct Definition {
     pub module: ModuleId,
     pub visibility: Visibility,
     pub kind: DefKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodDecl {
+    pub owner: String,
+    pub owner_type_parameters: Vec<String>,
+    pub type_parameters: Vec<String>,
+    pub parameters: Vec<TypeAnnotation>,
+    pub result: TypeAnnotation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldDecl {
+    pub owner: String,
+    pub owner_type_parameters: Vec<String>,
+    pub annotation: TypeAnnotation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +120,8 @@ pub struct ProgramIndex {
     pub modules: BTreeMap<ModuleId, ModuleScope>,
     pub definitions: BTreeMap<DefId, Definition>,
     pub exports: BTreeMap<ModuleId, ExportMap>,
+    pub methods: BTreeMap<String, Vec<MethodDecl>>,
+    pub fields: BTreeMap<String, Vec<FieldDecl>>,
 }
 
 impl ProgramIndex {
@@ -506,10 +533,7 @@ fn collect_package_classes(
             })
         })
         .map(|(module, declaration)| {
-            let path = format!(
-                "source.{:032x}.{}",
-                module.0, declaration.name
-            );
+            let path = format!("source.{:032x}.{}", module.0, declaration.name);
             let ty = types
                 .register_source_declaration(
                     path,
@@ -561,7 +585,7 @@ fn visible_class_names(
                     .is_some_and(|definition| {
                         definition.module == class.module
                             && definition.name == class.declaration.name
-                            && matches!(definition.kind, DefKind::Type)
+                            && matches!(definition.kind, DefKind::Type | DefKind::Class(_))
                     })
             })
     };
@@ -1086,6 +1110,36 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
         let mut items = Vec::new();
         let mut module_bindings = BTreeSet::new();
         for item in &module.ast.items {
+            if let Item::Class(class) = item {
+                for field in &class.fields {
+                    index
+                        .fields
+                        .entry(field.name.clone())
+                        .or_default()
+                        .push(FieldDecl {
+                            owner: class.name.clone(),
+                            owner_type_parameters: class.type_parameters.clone(),
+                            annotation: field.annotation.clone(),
+                        });
+                }
+                for method in &class.methods {
+                    index
+                        .methods
+                        .entry(method.name.clone())
+                        .or_default()
+                        .push(MethodDecl {
+                            owner: class.name.clone(),
+                            owner_type_parameters: class.type_parameters.clone(),
+                            type_parameters: method.type_parameters.clone(),
+                            parameters: method
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.annotation.clone())
+                                .collect(),
+                            result: method.result.clone(),
+                        });
+                }
+            }
             if let Item::Import(import) = item {
                 let subject = match &import.subject {
                     ImportSubject::Name(name) | ImportSubject::Locator(name) => name,
@@ -1180,7 +1234,12 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     module.id,
                     "class",
                     &declaration.name,
-                    DefKind::Type,
+                    DefKind::Class(ClassDecl {
+                        type_parameters: declaration.type_parameters.clone(),
+                        fields: declaration.fields.clone(),
+                        constructors: declaration.constructors.clone(),
+                        methods: declaration.methods.clone(),
+                    }),
                 ),
                 Item::Enum(declaration) => item_identity(
                     module.package,

@@ -125,6 +125,7 @@ fn extract_cfg_compile_operations(
             let region_id = CompiledRegionId::new(*next_region);
             *next_region += 1;
             let mut external_operands = Vec::new();
+            let mut external_slots = Vec::new();
             let mut input_types = Vec::new();
             let mut slot_types = Vec::new();
             let mut place_slots = BTreeMap::new();
@@ -146,8 +147,9 @@ fn extract_cfg_compile_operations(
                 for operand in operands {
                     let ty = cfg_operand_type(&locals, globals, operand)?;
                     let existing = match operand {
-                        severian_mir::Operand::Copy(place)
-                        | severian_mir::Operand::Move(place) => place_slots.get(place).copied(),
+                        severian_mir::Operand::Copy(place) | severian_mir::Operand::Move(place) => {
+                            place_slots.get(place).copied()
+                        }
                         severian_mir::Operand::Constant { .. } => None,
                         severian_mir::Operand::Function(_) => {
                             return Err(CompileError::InvalidArtifact(
@@ -166,6 +168,7 @@ fn extract_cfg_compile_operations(
                         slot_types.push(ty);
                         input_types.push(ty);
                         external_operands.push(operand.clone());
+                        external_slots.push(slot);
                         if let severian_mir::Operand::Copy(place)
                         | severian_mir::Operand::Move(place) = operand
                         {
@@ -198,6 +201,44 @@ fn extract_cfg_compile_operations(
                     result_slots,
                     attributes: attributes.clone(),
                 });
+            }
+
+            // Discovery interleaves external operands with produced values,
+            // but the region ABI reserves the dense prefix for inputs. Remap
+            // once after discovery so rank, dtype, and operation count never
+            // affect slot identity.
+            let mut slot_remap = BTreeMap::new();
+            for (new, old) in external_slots.into_iter().enumerate() {
+                slot_remap.insert(
+                    old,
+                    u32::try_from(new).map_err(|_| {
+                        CompileError::InvalidArtifact("compiled region has too many inputs".into())
+                    })?,
+                );
+            }
+            let mut next_slot = u32::try_from(input_types.len()).map_err(|_| {
+                CompileError::InvalidArtifact("compiled region has too many inputs".into())
+            })?;
+            for operation in &compile_operations {
+                for old in &operation.result_slots {
+                    slot_remap.entry(*old).or_insert_with(|| {
+                        let slot = next_slot;
+                        next_slot += 1;
+                        slot
+                    });
+                }
+            }
+            for operation in &mut compile_operations {
+                for slot in operation
+                    .operand_slots
+                    .iter_mut()
+                    .chain(&mut operation.result_slots)
+                {
+                    *slot = slot_remap[slot];
+                }
+            }
+            for (slot, _) in final_results.values_mut() {
+                *slot = slot_remap[slot];
             }
 
             let (result_places, output_slots, output_types) = final_results.into_iter().fold(

@@ -1,5 +1,7 @@
 use severian_compile::CompileRegion;
-use severian_fusion::{Dimension, FusionGraph, FusionNode, GraphError, NodeId, NodeKind, Shape};
+use severian_fusion::{
+    Dimension, ElementKind, FusionGraph, FusionNode, GraphError, NodeId, NodeKind, Shape,
+};
 use severian_universal::{
     tensor, FloatFormat, IntegerWidth, PrimitiveRepresentation, TensorDimension, TensorShape,
     TypeContext, TypeId,
@@ -187,10 +189,21 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
                 })
                 .collect(),
         };
-        return Ok(Shape {
+        let element_kind = match tensor::TensorElementKind::from_type(types, tensor.element)
+            .ok_or(FusionGraphError::UnsupportedType(tensor.element))?
+        {
+            tensor::TensorElementKind::SignedInteger(_) => ElementKind::SignedInteger,
+            tensor::TensorElementKind::UnsignedInteger(_) => ElementKind::UnsignedInteger,
+            tensor::TensorElementKind::Float8E4M3Fn => ElementKind::Float8E4M3Fn,
+            tensor::TensorElementKind::Float8E5M2 => ElementKind::Float8E5M2,
+            tensor::TensorElementKind::IeeeFloat(_) => ElementKind::IeeeFloat,
+            tensor::TensorElementKind::BrainFloat16 => ElementKind::BrainFloat,
+        };
+        return Ok(Shape::typed(
             dimensions,
-            element_bytes: u16::from(element_bytes),
-        });
+            element_kind,
+            u16::from(element_bytes),
+        ));
     }
     let primitive = types
         .primitive(type_id)
@@ -220,10 +233,24 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
         PrimitiveRepresentation::Boolean => 8,
         _ => return Err(FusionGraphError::UnsupportedType(type_id)),
     };
-    Ok(Shape {
-        dimensions: Vec::new(),
-        element_bytes: bits.div_ceil(8),
-    })
+    let element_kind = match primitive.representation {
+        PrimitiveRepresentation::Integer { signed: true, .. } => ElementKind::SignedInteger,
+        PrimitiveRepresentation::Integer { signed: false, .. }
+        | PrimitiveRepresentation::PointerInteger { .. } => ElementKind::UnsignedInteger,
+        PrimitiveRepresentation::Float {
+            format: FloatFormat::Float8E4M3Fn,
+        } => ElementKind::Float8E4M3Fn,
+        PrimitiveRepresentation::Float {
+            format: FloatFormat::Float8E5M2,
+        } => ElementKind::Float8E5M2,
+        PrimitiveRepresentation::Float {
+            format: FloatFormat::BrainFloat16,
+        } => ElementKind::BrainFloat,
+        PrimitiveRepresentation::Float { .. } => ElementKind::IeeeFloat,
+        PrimitiveRepresentation::Boolean => ElementKind::Boolean,
+        _ => return Err(FusionGraphError::UnsupportedType(type_id)),
+    };
+    Ok(Shape::typed([], element_kind, bits.div_ceil(8)))
 }
 
 fn estimate_flops(

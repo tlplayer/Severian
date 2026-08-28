@@ -682,14 +682,7 @@ fn render_cfg_body_function(
                 continue;
             }
         }
-        render_cfg_terminator(
-            output,
-            module,
-            body,
-            &block.terminator,
-            4,
-            &mut ssa_locals,
-        )?;
+        render_cfg_terminator(output, module, body, &block.terminator, 4, &mut ssa_locals)?;
     }
     output.push_str("  }\n");
     Ok(())
@@ -3259,6 +3252,13 @@ mod tests {
     #[test]
     fn invalid_or_disallowed_generated_ir_is_rejected() {
         let target = TargetSpec::new("x86_64-unknown-linux");
+        let helper = MlirArtifact {
+            module: "module { func.func private @helper() { return } func.func @entry() { func.call @helper() : () -> () return } }".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        verify_artifact(artifact_id(), helper, &target).unwrap();
+
         let invalid = MlirArtifact {
             module: "module { func.func @bad() {".into(),
             inputs: vec![],

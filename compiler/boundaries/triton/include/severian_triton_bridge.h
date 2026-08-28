@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define SEV_TRITON_ABI_VERSION 1u
+#define SEV_TRITON_ABI_VERSION 2u
 
 typedef struct { const uint8_t *data; size_t len; } sev_triton_bytes;
 typedef struct { const uint32_t *data; size_t len; } sev_triton_u32_slice;
@@ -37,6 +37,17 @@ typedef enum {
   SEV_TRITON_INTERNAL_FAILURE = 255,
 } sev_triton_status;
 
+typedef enum {
+  SEV_TRITON_SIGNED_INTEGER = 1,
+  SEV_TRITON_UNSIGNED_INTEGER = 2,
+  SEV_TRITON_IEEE_FLOAT = 3,
+  SEV_TRITON_BRAIN_FLOAT = 4,
+  SEV_TRITON_FLOAT8_E4M3FN = 5,
+  SEV_TRITON_FLOAT8_E5M2 = 6,
+  SEV_TRITON_BOOLEAN = 7,
+  SEV_TRITON_OPAQUE = 255,
+} sev_triton_element_kind;
+
 typedef struct {
   uint32_t id;
   uint32_t kind;
@@ -44,6 +55,7 @@ typedef struct {
   sev_triton_i64_slice attributes;
   sev_triton_u32_slice inputs;
   sev_triton_i64_slice dimensions;
+  sev_triton_element_kind element_kind;
   uint16_t element_bits;
   uint16_t reserved;
   uint64_t bytes_read;

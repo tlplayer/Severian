@@ -371,8 +371,18 @@ fn lower_operation(
             return Err(invalid("shape and strides require one tensor operand"));
         };
         let shape = effective_shape(shape, attributes);
-        let dimensions = static_dimensions(&shape)
-            .map_err(|error| invalid(format!("shape metadata: {error}")))?;
+        let dimensions = match static_dimensions(&shape) {
+            Ok(dimensions) => dimensions,
+            Err(_) if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape) => {
+                let input = input_spellings
+                    .first()
+                    .ok_or_else(|| invalid("shape input type is missing"))?;
+                return Ok(format!(
+                    "    %result = func.call @__sev_list_create() : () -> !llvm.ptr\n    %rank = tensor.rank %arg0 : {input}\n    %zero = arith.constant 0 : index\n    %one = arith.constant 1 : index\n    scf.for %axis = %zero to %rank step %one {{\n      %dimension = tensor.dim %arg0, %axis : {input}\n      %dimension_i64 = arith.index_cast %dimension : index to i64\n      func.call @__sev_list_push_i64(%result, %dimension_i64) : (!llvm.ptr, i64) -> ()\n    }}\n    return %result : !llvm.ptr\n"
+                ));
+            }
+            Err(error) => return Err(invalid(format!("shape metadata: {error}"))),
+        };
         let values = if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape) {
             dimensions
         } else {
@@ -1435,6 +1445,53 @@ mod tests {
     }
 
     #[test]
+    fn unranked_shape_is_materialized_from_runtime_tensor_rank() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let storage = types.resolve_name("string").unwrap();
+        let unranked = types
+            .instantiate_tensor(constructor, f32, TensorShape::Unranked)
+            .unwrap();
+        let mut attributes = Attrs::new();
+        let operation = tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape);
+        let region = CompileRegion {
+            id: CompiledRegionId::new(0),
+            compiler: tensor::compiler_id(),
+            operations: Vec::new(),
+            compile_operations: vec![CompileOperation {
+                id: operation.apply(&mut attributes),
+                operands: vec![unranked],
+                results: vec![storage],
+                operand_slots: vec![0],
+                result_slots: vec![1],
+                attributes,
+            }],
+            output_slots: vec![1],
+            inputs: vec![Value {
+                id: ValueId(0),
+                type_id: unranked,
+            }],
+            outputs: vec![Value {
+                id: ValueId(1),
+                type_id: storage,
+            }],
+            effects: EffectSet::default(),
+        };
+        let artifact = TensorCompiler
+            .compile(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &TargetSpec::host(),
+                },
+            )
+            .unwrap();
+        assert!(artifact.module.contains("tensor.rank %arg0"));
+        assert!(artifact.module.contains("tensor.dim %arg0, %axis"));
+        assert!(artifact.module.contains("scf.for %axis"));
+    }
+
+    #[test]
     fn broadcasting_changes_shape_without_changing_element_type() {
         let (mut types, constructor) = types();
         let f32 = types.resolve_name("f32").unwrap();
@@ -1537,6 +1594,10 @@ mod tests {
         region.outputs[0].type_id = tensor_type;
         let graph = fusion_graph(&region, &types).unwrap();
         assert_eq!(graph.nodes().len(), 4);
+        assert_eq!(
+            graph.node(severian_fusion::NodeId(0)).shape.element_kind,
+            severian_fusion::ElementKind::IeeeFloat
+        );
         assert_eq!(graph.node(severian_fusion::NodeId(2)).operation, "multiply");
         assert_eq!(graph.node(severian_fusion::NodeId(3)).operation, "rsqrt");
     }

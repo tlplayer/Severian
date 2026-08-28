@@ -27,9 +27,22 @@ pub enum Dimension {
     Known(u64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementKind {
+    SignedInteger,
+    UnsignedInteger,
+    IeeeFloat,
+    BrainFloat,
+    Float8E4M3Fn,
+    Float8E5M2,
+    Boolean,
+    Opaque,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shape {
     pub dimensions: Vec<Dimension>,
+    pub element_kind: ElementKind,
     pub element_bytes: u16,
 }
 
@@ -37,6 +50,19 @@ impl Shape {
     pub fn ranked(dimensions: impl IntoIterator<Item = u64>, element_bytes: u16) -> Self {
         Self {
             dimensions: dimensions.into_iter().map(Dimension::Known).collect(),
+            element_kind: ElementKind::Opaque,
+            element_bytes,
+        }
+    }
+
+    pub fn typed(
+        dimensions: impl IntoIterator<Item = Dimension>,
+        element_kind: ElementKind,
+        element_bytes: u16,
+    ) -> Self {
+        Self {
+            dimensions: dimensions.into_iter().collect(),
+            element_kind,
             element_bytes,
         }
     }

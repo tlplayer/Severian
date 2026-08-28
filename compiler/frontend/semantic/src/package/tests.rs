@@ -306,6 +306,138 @@ fn uncalled_generic_declarations_are_indexed_without_forcing_a_body_instance() {
 }
 
 #[test]
+fn ownership_unary_arguments_specialize_nested_generic_calls() {
+    let root = temporary();
+    let source = root.join("nested-generic-copy.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\ndef selected(value: i32) -> i32:\n    return identity(copy value)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let identity = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "identity")
+        .unwrap()
+        .id;
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.definition == identity));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn concrete_class_methods_request_generic_function_specializations() {
+    let root = temporary();
+    let source = root.join("class-generic-call.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\nclass Runner:\n    value: i32\n    def run() -> i32:\n        return identity(copy value)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let identity = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "identity")
+        .unwrap()
+        .id;
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.definition == identity));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn method_call_results_contribute_generic_type_evidence() {
+    let root = temporary();
+    let source = root.join("method-result-generic-call.sev");
+    std::fs::write(
+        &source,
+        "class Source:\n    def value() -> i32:\n        return 1\ndef convert[A, B](source: A, target: B) -> B:\n    return target\ndef selected(source: Source, target: f64) -> f64:\n    return convert(source.value(), target)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let convert = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "convert")
+        .unwrap()
+        .id;
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.definition == convert));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn generic_results_flow_through_bindings_into_nested_generic_calls() {
+    let root = temporary();
+    let source = root.join("nested-generic-result.sev");
+    std::fs::write(
+        &source,
+        "class Box[T]:\n    value: T\ndef normalize[T](input: Box[T]) -> Box[T]:\n    return input\ndef attend[T](input: Box[T]) -> Box[T]:\n    return input\ndef layer[T](input: Box[T]) -> Box[T]:\n    normalized = normalize(copy input)\n    return attend(normalized)\ndef run(input: Box[f32]) -> Box[f32]:\n    return layer(input)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    for name in ["normalize", "attend", "layer"] {
+        let definition = typed
+            .index
+            .definitions
+            .values()
+            .find(|definition| definition.name == name)
+            .unwrap()
+            .id;
+        assert!(typed.hir.modules[0]
+            .functions
+            .iter()
+            .any(|function| function.definition == definition));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn irrelevant_unknown_arguments_do_not_erase_generic_result_types() {
+    let root = temporary();
+    let source = root.join("partial-generic-evidence.sev");
+    std::fs::write(
+        &source,
+        "class Box[T]:\n    value: T\ndef scale[T](input: Box[T], amount: float) -> Box[T]:\n    return input\ndef consume[T](input: Box[T]) -> Box[T]:\n    return input\ndef run[T](input: Box[T], width: int) -> Box[T]:\n    scaled = scale(input, 1.0 / float(width))\n    return consume(scaled)\ndef selected(input: Box[f32]) -> Box[f32]:\n    return run(input, 2)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let consume = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "consume")
+        .unwrap()
+        .id;
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.definition == consume));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn hooks_wrap_loop_returns_and_ownership_reaches_a_fixed_point() {
     let root = temporary();
     let source = root.join("hook-loop.sev");
