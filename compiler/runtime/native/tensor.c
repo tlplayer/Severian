@@ -344,9 +344,9 @@ int64_t __sev_safetensor_byte_end(int64_t handle, const char *name) {
 static int32_t sev_safetensor_dtype_tag(const char *dtype) {
     const char *names[] = {
         "I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128",
-        "F8_E4M3FN", "F8_E5M2", "F16", "BF16", "F32", "F64", "F128"
+        "F8_E4M3FN", "F8_E5M2", "F16", "BF16", "F32", "F64", "F128", "F80"
     };
-    for (int32_t index = 0; index < 17; ++index) {
+    for (int32_t index = 0; index < 18; ++index) {
         if (strcmp(dtype, names[index]) == 0) return index;
     }
     if (strcmp(dtype, "F8_E4M3") == 0) return 10;
@@ -427,6 +427,8 @@ sev_storage_view_abi *__sev_safetensor_view(int64_t handle, const char *name) {
     free(shape);
     size_t byte_width = storage_dtype == 4 || storage_dtype == 9 || storage_dtype == 16
         ? 16
+        : storage_dtype == 17
+            ? 10
         : storage_dtype == 3 || storage_dtype == 8 || storage_dtype == 15
             ? 8
             : storage_dtype == 2 || storage_dtype == 7 || storage_dtype == 14
@@ -519,6 +521,74 @@ int64_t __sev_storage_view_offset(const void *storage) {
     return view->offset;
 }
 
+static int32_t sev_tensor_test_dtype(uint32_t kind, uint32_t bits, uint32_t format) {
+    if (kind == SEV_STORAGE_ELEMENT_SIGNED_INTEGER && format == SEV_STORAGE_FLOAT_NONE) {
+        if (bits == 8) return 0;
+        if (bits == 16) return 1;
+        if (bits == 32) return 2;
+        if (bits == 64) return 3;
+        if (bits == 128) return 4;
+    }
+    if (kind == SEV_STORAGE_ELEMENT_UNSIGNED_INTEGER && format == SEV_STORAGE_FLOAT_NONE) {
+        if (bits == 8) return 5;
+        if (bits == 16) return 6;
+        if (bits == 32) return 7;
+        if (bits == 64) return 8;
+        if (bits == 128) return 9;
+    }
+    if (kind == SEV_STORAGE_ELEMENT_FLOAT) {
+        if (bits == 8 && format == SEV_STORAGE_FLOAT8_E4M3_FN) return 10;
+        if (bits == 8 && format == SEV_STORAGE_FLOAT8_E5M2) return 11;
+        if (bits == 16 && format == SEV_STORAGE_FLOAT_IEEE) return 12;
+        if (bits == 16 && format == SEV_STORAGE_FLOAT_BRAIN) return 13;
+        if (bits == 32 && format == SEV_STORAGE_FLOAT_IEEE) return 14;
+        if (bits == 64 && format == SEV_STORAGE_FLOAT_IEEE) return 15;
+        if (bits == 128 && format == SEV_STORAGE_FLOAT_IEEE) return 16;
+        if (bits == 80 && format == SEV_STORAGE_FLOAT_IEEE) return 17;
+    }
+    return -1;
+}
+
+/*
+ * One data-driven descriptor fixture for the source-level conformance test.
+ * It deliberately uses the production StorageView ABI and never creates
+ * dtype- or rank-named symbols.
+ */
+void *__sev_tensor_test_storage_view(int32_t kind, int32_t bits, int32_t format) {
+    int32_t dtype = sev_tensor_test_dtype((uint32_t)kind, (uint32_t)bits, (uint32_t)format);
+    sev_tensor_abort_if(dtype < 0);
+    const int64_t shape[] = {2, 2};
+    sev_tensor *tensor = sev_tensor_new(2, shape, dtype);
+    size_t byte_width = ((size_t)bits + 7) / 8;
+    uint8_t *data = calloc(tensor->count == 0 ? 1 : tensor->count, byte_width);
+    sev_tensor_abort_if(data == NULL);
+    free(tensor->values);
+    tensor->values = NULL;
+    tensor->mapped_values = data;
+    tensor->mapped_byte_width = byte_width;
+    tensor->owns_values = 0;
+
+    sev_storage_view_abi *view = calloc(1, sizeof(*view));
+    sev_tensor_abort_if(view == NULL);
+    view->magic = SEV_STORAGE_VIEW_ABI_MAGIC;
+    view->abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
+    view->byte_size = (uint32_t)sizeof(*view);
+    view->flags = SEV_STORAGE_VIEW_CONTIGUOUS;
+    view->data = data;
+    view->byte_length = tensor->count * byte_width;
+    view->rank = tensor->rank;
+    view->dimensions = tensor->shape;
+    view->strides = tensor->strides;
+    view->offset = tensor->offset;
+    view->element.abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
+    view->element.byte_size = (uint32_t)sizeof(view->element);
+    view->element.kind = (uint32_t)kind;
+    view->element.bits = (uint32_t)bits;
+    view->element.float_format = (uint32_t)format;
+    view->owner = tensor;
+    return view;
+}
+
 static uintptr_t sev_tensor_f64_bits(double value) {
     uint64_t bits = 0;
     memcpy(&bits, &value, sizeof(bits));
@@ -534,9 +604,9 @@ static double sev_tensor_f64_from_bits(uintptr_t bits) {
 
 static unsigned sev_tensor_dtype_bits(int32_t dtype) {
     static const unsigned widths[] = {
-        8, 16, 32, 64, 128, 8, 16, 32, 64, 128, 8, 8, 16, 16, 32, 64, 128
+        8, 16, 32, 64, 128, 8, 16, 32, 64, 128, 8, 8, 16, 16, 32, 64, 128, 80
     };
-    sev_tensor_abort_if(dtype < 0 || dtype >= 17);
+    sev_tensor_abort_if(dtype < 0 || dtype >= 18);
     return widths[dtype];
 }
 
@@ -613,6 +683,11 @@ static __float128 sev_tensor_float(sev_tensor_cell cell, int32_t dtype) {
             __float128 value;
             memcpy(&value, &cell.bits, sizeof(value));
             return value;
+        }
+        case 17: {
+            long double value = 0.0L;
+            memcpy(&value, &cell.bits, 10);
+            return (__float128)value;
         }
         default: abort();
     }
@@ -720,6 +795,9 @@ static sev_tensor_cell sev_tensor_from_float(__float128 value, int32_t dtype) {
         result.bits = raw;
     } else if (dtype == 16) {
         memcpy(&result.bits, &value, sizeof(value));
+    } else if (dtype == 17) {
+        long double narrowed = (long double)value;
+        memcpy(&result.bits, &narrowed, 10);
     } else {
         abort();
     }

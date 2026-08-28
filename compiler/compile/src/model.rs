@@ -685,6 +685,9 @@ pub struct GpuKernelBundle {
     pub architecture: String,
     pub graph: severian_fusion::FusionGraph,
     pub plan: severian_fusion::FusionPlan,
+    /// CompileRegion value slot to fusion-graph node. StorageView aliases and
+    /// multi-operation regions make this mapping non-positional.
+    pub value_nodes: BTreeMap<u32, severian_fusion::NodeId>,
     pub inputs: Vec<severian_mlir::LoweredType>,
     pub outputs: Vec<severian_mlir::LoweredType>,
 }
@@ -695,6 +698,38 @@ impl GpuKernelBundle {
         specialization: &severian_fusion::KernelSpecialization,
     ) -> Result<(), severian_fusion::SpecializationError> {
         specialization.validate(&self.graph, self.target)
+    }
+
+    pub fn compile_region_specialization(
+        &self,
+        specialization: &severian_fusion::KernelSpecialization,
+    ) -> Result<CompileRegionSpecialization, RegionSpecializationError> {
+        let shapes = specialization
+            .shapes
+            .iter()
+            .map(|shape| (shape.node, shape.dimensions.as_slice()))
+            .collect::<BTreeMap<_, _>>();
+        let strides = specialization
+            .strides
+            .iter()
+            .map(|strides| (strides.node, strides))
+            .collect::<BTreeMap<_, _>>();
+        let mut values = Vec::with_capacity(self.value_nodes.len());
+        for (slot, node) in &self.value_nodes {
+            let dimensions = shapes
+                .get(node)
+                .ok_or(RegionSpecializationError::MissingRuntimeShape(*slot))?;
+            let layout = strides
+                .get(node)
+                .ok_or(RegionSpecializationError::MissingRuntimeShape(*slot))?;
+            values.push(RuntimeValueSpecialization {
+                slot: *slot,
+                dimensions: dimensions.to_vec(),
+                strides: layout.strides.clone(),
+                offset: layout.offset,
+            });
+        }
+        Ok(CompileRegionSpecialization { values })
     }
 }
 

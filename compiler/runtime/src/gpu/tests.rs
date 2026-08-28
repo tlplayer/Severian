@@ -1,7 +1,7 @@
 use super::*;
 use severian_fusion::{
-    plan, DeviceModel, ElementKind, FusionGraph, FusionNode, KernelSpecialization, NodeKind, Rank,
-    RuntimeShape, Shape, StorageLayout,
+    plan, ContractionDimension, DeviceModel, ElementKind, FusionGraph, FusionNode,
+    KernelSpecialization, Matmul, NodeKind, Rank, RuntimeShape, Shape, StorageLayout,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -107,6 +107,32 @@ struct MockCompiler {
     count: Arc<AtomicUsize>,
 }
 
+fn f32_storage_view(dimensions: Vec<u64>) -> crate::StorageView {
+    let mut stride = 1i64;
+    let mut strides = vec![0; dimensions.len()];
+    for axis in (0..dimensions.len()).rev() {
+        strides[axis] = stride;
+        stride *= dimensions[axis] as i64;
+    }
+    crate::StorageView::new(
+        0x1000,
+        dimensions.iter().product::<u64>() * 4,
+        crate::StorageElementRepresentationAbi {
+            abi_version: crate::STORAGE_VIEW_ABI_VERSION,
+            byte_size: core::mem::size_of::<crate::StorageElementRepresentationAbi>() as u32,
+            kind: crate::StorageElementKind::Float,
+            bits: 32,
+            float_format: crate::StorageFloatFormat::Ieee,
+            reserved: 0,
+        },
+        dimensions,
+        strides,
+        0,
+        crate::StorageOwnership::Borrowed,
+    )
+    .unwrap()
+}
+
 #[test]
 fn storage_view_metadata_creates_the_kernel_specialization_before_compilation() {
     let mut parameter = FusionNode::structural(
@@ -162,6 +188,117 @@ fn storage_view_metadata_creates_the_kernel_specialization_before_compilation() 
     assert_eq!(specialization.target, GpuTarget::Nvidia);
     let packed = pack_arguments(&MockDriver::default(), &prepared.arguments).unwrap();
     assert_eq!(packed.value(0), Some(0x1000u64.to_ne_bytes().as_slice()));
+}
+
+#[test]
+fn storage_specialization_propagates_elementwise_result_shapes_and_strides() {
+    let runtime = || {
+        let mut node = FusionNode::structural(
+            0,
+            NodeKind::Parameter,
+            [],
+            Shape::unranked(ElementKind::IeeeFloat, 32),
+        );
+        node.layout = StorageLayout::Runtime;
+        node
+    };
+    let left = runtime();
+    let mut right = runtime();
+    right.id = NodeId(1);
+    let mut add = FusionNode::structural(
+        2,
+        NodeKind::Elementwise,
+        [NodeId(0), NodeId(1)],
+        Shape::unranked(ElementKind::IeeeFloat, 32),
+    );
+    add.operation = "add".into();
+    add.layout = StorageLayout::Runtime;
+    let graph = FusionGraph::new(vec![left, right, add]).unwrap();
+    let specialization = specialize_storage_views(
+        &graph,
+        GpuTarget::Nvidia,
+        &[
+            StorageSpecializationBinding {
+                node: NodeId(0),
+                view: f32_storage_view(vec![2, 1, 4]),
+            },
+            StorageSpecializationBinding {
+                node: NodeId(1),
+                view: f32_storage_view(vec![1, 3, 4]),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        specialization
+            .shapes
+            .iter()
+            .find(|shape| shape.node == NodeId(2))
+            .unwrap()
+            .dimensions,
+        [2, 3, 4]
+    );
+    let output = specialization
+        .strides
+        .iter()
+        .find(|strides| strides.node == NodeId(2))
+        .unwrap();
+    assert_eq!(output.strides, [12, 4, 1]);
+    assert_eq!(output.offset, 0);
+}
+
+#[test]
+fn storage_specialization_propagates_rank_generic_batched_matmul() {
+    let parameter = |id| {
+        let mut node = FusionNode::structural(
+            id,
+            NodeKind::Parameter,
+            [],
+            Shape::unranked(ElementKind::IeeeFloat, 32),
+        );
+        node.layout = StorageLayout::Runtime;
+        node
+    };
+    let mut matmul = FusionNode::structural(
+        2,
+        NodeKind::Contraction,
+        [NodeId(0), NodeId(1)],
+        Shape::unranked(ElementKind::IeeeFloat, 32),
+    );
+    matmul.operation = "matmul".into();
+    matmul.layout = StorageLayout::Runtime;
+    matmul.matmul = Some(Matmul {
+        lhs_shape: Rank::Unranked,
+        rhs_shape: Rank::Unranked,
+        result_shape: Rank::Unranked,
+        batch_dimensions: Vec::new(),
+        contraction_dimensions: vec![ContractionDimension { lhs: 0, rhs: 0 }],
+    });
+    let graph = FusionGraph::new(vec![parameter(0), parameter(1), matmul]).unwrap();
+    let specialization = specialize_storage_views(
+        &graph,
+        GpuTarget::Nvidia,
+        &[
+            StorageSpecializationBinding {
+                node: NodeId(0),
+                view: f32_storage_view(vec![2, 1, 4, 8]),
+            },
+            StorageSpecializationBinding {
+                node: NodeId(1),
+                view: f32_storage_view(vec![1, 3, 8, 16]),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        specialization
+            .shapes
+            .iter()
+            .find(|shape| shape.node == NodeId(2))
+            .unwrap()
+            .dimensions,
+        [2, 3, 4, 16]
+    );
 }
 
 impl GpuCompiler for MockCompiler {
@@ -319,6 +456,53 @@ fn schedules_dependencies_and_reuses_compiled_and_loaded_kernels() {
     assert_eq!(runtime.driver().launches[0].grid, [4, 1, 1]);
     assert!(runtime.driver().launches[0].dependencies.is_empty());
     assert_eq!(runtime.driver().launches[1].dependencies, [EventId(0)]);
+}
+
+#[test]
+fn storage_view_to_specialization_cache_launcher_and_execution_is_one_path() {
+    let graph = graph(ElementKind::IeeeFloat, 32);
+    let fusion = plan(&graph, DeviceModel::conservative_gpu());
+    let options = options();
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut runtime = GpuRuntime::new(
+        MockDriver::default(),
+        MockCompiler {
+            count: Arc::clone(&count),
+        },
+        KernelCache::memory(),
+    )
+    .unwrap();
+    let left_bytes = vec![1u8; 4096];
+    let right_bytes = vec![2u8; 4096];
+    let inputs = [
+        HostStorageInput {
+            node: NodeId(0),
+            view: f32_storage_view(vec![1024]),
+            bytes: &left_bytes,
+        },
+        HostStorageInput {
+            node: NodeId(1),
+            view: f32_storage_view(vec![1024]),
+            bytes: &right_bytes,
+        },
+    ];
+
+    let first = runtime
+        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &options)
+        .unwrap();
+    assert_eq!(first.execution.cache_misses, 1);
+    assert_eq!(first.execution.cache_hits, 0);
+    assert_eq!(first.specialization.shapes.len(), 3);
+    assert!(first.buffers.contains_key(&NodeId(2)));
+
+    let second = runtime
+        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &options)
+        .unwrap();
+    assert_eq!(second.execution.cache_misses, 0);
+    assert_eq!(second.execution.cache_hits, 1);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(runtime.driver().launches.len(), 2);
+    assert_eq!(runtime.driver().launches[0].arguments.offsets.len(), 3);
 }
 
 #[test]

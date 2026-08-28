@@ -1,0 +1,299 @@
+import tensor
+
+
+'''
+This is the source-level tensor conformance specification.
+
+Scalar representations covered here:
+    signed integer:   i8, i16, i32, i64, i128
+    unsigned integer: u8, u16, u32, u64, u128
+    floating point:   f8e4m3fn, f8e5m2, f16, bf16, f32, f64, f80, f128
+
+Structural operation classes covered here:
+    Elementwise, Reduce, Matmul, Reshape/View, Permute, Slice, Broadcast,
+    Gather, Scatter, Concatenate, Convert, StorageView
+
+Model compositions covered here:
+    RMSNorm, sigmoid, SiLU, softmax, RoPE, layer normalization, backward
+    operations, gradient accumulation, and SGD.
+
+The test is intentionally an executable goal, not a list of current backend
+exceptions. A failing cell remains visible until this complete route works:
+
+    StorageViewAbi
+        -> runtime rank/shape/stride specialization
+        -> CPU MLIR or GPU TTIR
+        -> compiled-kernel cache
+        -> launcher
+        -> execution
+
+Dtype and rank are data throughout this test. The single native fixture below
+accepts representation fields as ordinary values; it must never be replaced
+with dtype-named ABI symbols.
+'''
+
+
+@c(symbol = "__sev_tensor_test_storage_view")
+def storage_view_fixture(kind: i32, bits: i32, format: i32) -> bytes
+
+
+def storage_view[T](kind: i32, bits: i32, format: i32) -> Tensor[T]:
+    return tensor.from_storage[T](storage_view_fixture(kind, bits, format))
+
+
+def exercise_structural_numeric[T](left: Tensor[T], right: Tensor[T], indices: Tensor[i64]) -> bool:
+    # Elementwise
+    added = tensor.add(copy left, copy right)
+    subtracted = tensor.subtract(copy left, copy right)
+    multiplied = tensor.multiply(copy left, copy right)
+    divided = tensor.divide(copy left, copy right)
+    activated = tensor.relu(copy left)
+
+    # Reductions and rank-generic contraction
+    total = tensor.sum(copy left)
+    row_total = tensor.sum_axis(copy left, 1)
+    row_maximum = tensor.maximum_last(copy left)
+    product = tensor.matmul(copy left, copy right)
+
+    # Views, layout, indexing, broadcast, and mutation
+    reshaped = tensor.reshape(copy left, [1, 4])
+    transposed = tensor.transpose(copy left)
+    permuted = tensor.permute(copy left, [1, 0])
+    sliced = tensor.slice(copy left, [0, 0], [2, 2], [1, 1])
+    materialized = tensor.materialize(sliced)
+    broadcast = tensor.broadcast_like(copy left, copy right)
+    repeated = tensor.repeat(copy left, [0, 2])
+    gathered = tensor.gather(copy left, copy indices)
+    scattered = tensor.scatter(copy left, indices, copy right)
+    joined = tensor.concatenate(copy left, right, [0])
+
+    # Convert is structural even when source and target representations match.
+    converted = tensor.convert_like(copy joined, copy joined)
+
+    # StorageView metadata and value extraction must work for every element.
+    left_shape = tensor.shape(copy left)
+    left_strides = tensor.strides(copy left)
+    left_values = tensor.values(left)
+
+    # Keep every result observable so no stage can erase an unimplemented op.
+    observed: usize := 0
+    observed += size(tensor.shape(added))
+    observed += size(tensor.shape(subtracted))
+    observed += size(tensor.shape(multiplied))
+    observed += size(tensor.shape(divided))
+    observed += size(tensor.shape(activated))
+    observed += size(tensor.shape(total))
+    observed += size(tensor.shape(row_total))
+    observed += size(tensor.shape(row_maximum))
+    observed += size(tensor.shape(product))
+    observed += size(tensor.shape(reshaped))
+    observed += size(tensor.shape(transposed))
+    observed += size(tensor.shape(permuted))
+    observed += size(tensor.shape(materialized))
+    observed += size(tensor.shape(broadcast))
+    observed += size(tensor.shape(repeated))
+    observed += size(tensor.shape(gathered))
+    observed += size(tensor.shape(scattered))
+    observed += size(tensor.shape(converted))
+    observed += size(left_shape)
+    observed += size(left_strides)
+    observed += size(left_values)
+    return observed > 0
+
+
+def exercise_float_primitives[T](value: Tensor[T], weights: Tensor[T]) -> bool:
+    exponential = tensor.exp[T](copy value)
+    logarithm = tensor.log[T](copy value)
+    hyperbolic = tensor.tanh[T](copy value)
+    inverse_root = tensor.rsqrt[T](copy value)
+    gaussian = tensor.gelu[T](copy value)
+    scaled = tensor.scale[T](copy value, 0.5)
+    shifted = tensor.add_scalar[T](copy value, f32(1.0))
+    average = tensor.mean_last[T](copy value)
+
+    normalized = tensor.rms_norm[T](copy value, copy weights, 0.00001)
+    sigmoid = tensor.sigmoid[T](copy value)
+    silu = tensor.silu[T](copy value)
+    softmax = tensor.softmax_last[T](copy value)
+    softmax_rows = tensor.softmax_rows[T](copy value)
+    softmax_alias = tensor.softmax[T](copy value)
+    rotated = tensor.rotate_half[T](copy value)
+    rope = tensor.rope[T](copy value, copy weights, copy weights)
+    layer_normalized = tensor.layer_norm[T](copy value, 0.00001)
+
+    relu_gradient = tensor.relu_backward[T](copy value, copy weights)
+    softmax_gradient = tensor.softmax_backward[T](copy softmax, copy weights)
+    layer_gradient = tensor.layer_norm_backward[T](copy value, copy weights, 0.00001)
+    accumulated = tensor.gradient[T](copy value)
+    updated = tensor.sgd[T](copy value, 0.001)
+
+    # Every public storage/compute conversion remains the same Convert op.
+    as_e4m3 = tensor.to_f8_e4_m3_fn[T](copy value)
+    as_e5m2 = tensor.to_f8_e5_m2[T](copy value)
+    as_f16 = tensor.to_f_16[T](copy value)
+    as_bf16 = tensor.to_bf_16[T](copy value)
+    as_f32 = tensor.to_f_32[T](copy value)
+    as_f64 = tensor.to_f_64[T](copy value)
+    as_f80 = tensor.to_f_80[T](copy value)
+    as_i64 = tensor.to_i_64[T](copy value)
+    compute_value = tensor.compute_as_f32[T](copy value)
+    stored_e4m3 = tensor.store_as_f8e4m3fn[T](copy value)
+    stored_e5m2 = tensor.store_as_f8e5m2[T](copy value)
+
+    observed: usize := 0
+    observed += size(tensor.shape(exponential))
+    observed += size(tensor.shape(logarithm))
+    observed += size(tensor.shape(hyperbolic))
+    observed += size(tensor.shape(inverse_root))
+    observed += size(tensor.shape(gaussian))
+    observed += size(tensor.shape(scaled))
+    observed += size(tensor.shape(shifted))
+    observed += size(tensor.shape(average))
+    observed += size(tensor.shape(normalized))
+    observed += size(tensor.shape(sigmoid))
+    observed += size(tensor.shape(silu))
+    observed += size(tensor.shape(softmax))
+    observed += size(tensor.shape(softmax_rows))
+    observed += size(tensor.shape(softmax_alias))
+    observed += size(tensor.shape(rotated))
+    observed += size(tensor.shape(rope))
+    observed += size(tensor.shape(layer_normalized))
+    observed += size(tensor.shape(relu_gradient))
+    observed += size(tensor.shape(softmax_gradient))
+    observed += size(tensor.shape(layer_gradient))
+    observed += size(tensor.shape(accumulated))
+    observed += size(tensor.shape(updated))
+    observed += size(tensor.shape(as_e4m3))
+    observed += size(tensor.shape(as_e5m2))
+    observed += size(tensor.shape(as_f16))
+    observed += size(tensor.shape(as_bf16))
+    observed += size(tensor.shape(as_f32))
+    observed += size(tensor.shape(as_f64))
+    observed += size(tensor.shape(as_f80))
+    observed += size(tensor.shape(as_i64))
+    observed += size(tensor.shape(compute_value))
+    observed += size(tensor.shape(stored_e4m3))
+    observed += size(tensor.shape(stored_e5m2))
+    return observed > 0
+
+
+def exercise_storage[T](value: Tensor[T]) -> bool:
+    dimensions = tensor.shape(copy value)
+    strides = tensor.strides(copy value)
+    values = tensor.values(value)
+    return dimensions == [2, 2] and size(strides) == 2 and size(values) == 4
+
+
+test "all integer and floating representations execute every structural numeric operation":
+    left = tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    right = tensor.tensor([4.0, 3.0, 2.0, 1.0], [2, 2])
+    indices = tensor.i64(tensor.tensor([0.0, 1.0], [2]))
+
+    assert(exercise_structural_numeric[i8](tensor.i8(copy left), tensor.i8(copy right), copy indices))
+    assert(exercise_structural_numeric[i16](tensor.i16(copy left), tensor.i16(copy right), copy indices))
+    assert(exercise_structural_numeric[i32](tensor.i32(copy left), tensor.i32(copy right), copy indices))
+    assert(exercise_structural_numeric[i64](tensor.i64(copy left), tensor.i64(copy right), copy indices))
+    assert(exercise_structural_numeric[i128](tensor.i128(copy left), tensor.i128(copy right), copy indices))
+    assert(exercise_structural_numeric[u8](tensor.u8(copy left), tensor.u8(copy right), copy indices))
+    assert(exercise_structural_numeric[u16](tensor.u16(copy left), tensor.u16(copy right), copy indices))
+    assert(exercise_structural_numeric[u32](tensor.u32(copy left), tensor.u32(copy right), copy indices))
+    assert(exercise_structural_numeric[u64](tensor.u64(copy left), tensor.u64(copy right), copy indices))
+    assert(exercise_structural_numeric[u128](tensor.u128(copy left), tensor.u128(copy right), copy indices))
+    assert(exercise_structural_numeric[f8e4m3fn](tensor.f8e4m3fn(copy left), tensor.f8e4m3fn(copy right), copy indices))
+    assert(exercise_structural_numeric[f8e5m2](tensor.f8e5m2(copy left), tensor.f8e5m2(copy right), copy indices))
+    assert(exercise_structural_numeric[f16](tensor.f16(copy left), tensor.f16(copy right), copy indices))
+    assert(exercise_structural_numeric[bf16](tensor.bf16(copy left), tensor.bf16(copy right), copy indices))
+    assert(exercise_structural_numeric[f32](tensor.f32(copy left), tensor.f32(copy right), copy indices))
+    assert(exercise_structural_numeric[f64](tensor.f64(copy left), tensor.f64(copy right), copy indices))
+    assert(exercise_structural_numeric[f80](tensor.f80(copy left), tensor.f80(copy right), copy indices))
+    assert(exercise_structural_numeric[f128](tensor.f128(left), tensor.f128(right), indices))
+
+
+test "all floating representations execute floating primitives and model compositions":
+    value = tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    weights = tensor.tensor([1.0, 1.0, 1.0, 1.0], [2, 2])
+
+    assert(exercise_float_primitives[f8e4m3fn](tensor.f8e4m3fn(copy value), tensor.f8e4m3fn(copy weights)))
+    assert(exercise_float_primitives[f8e5m2](tensor.f8e5m2(copy value), tensor.f8e5m2(copy weights)))
+    assert(exercise_float_primitives[f16](tensor.f16(copy value), tensor.f16(copy weights)))
+    assert(exercise_float_primitives[bf16](tensor.bf16(copy value), tensor.bf16(copy weights)))
+    assert(exercise_float_primitives[f32](tensor.f32(copy value), tensor.f32(copy weights)))
+    assert(exercise_float_primitives[f64](tensor.f64(copy value), tensor.f64(copy weights)))
+    assert(exercise_float_primitives[f80](tensor.f80(copy value), tensor.f80(copy weights)))
+    assert(exercise_float_primitives[f128](tensor.f128(value), tensor.f128(weights)))
+
+
+test "all representations cross the generic StorageViewAbi specialization boundary":
+    # kind: 1 = signed integer, 2 = unsigned integer, 3 = float
+    # format: 0 = none, 1 = IEEE, 2 = BF16, 3/4 = the two FP8 formats
+    assert(exercise_storage[i8](storage_view[i8](1, 8, 0)))
+    assert(exercise_storage[i16](storage_view[i16](1, 16, 0)))
+    assert(exercise_storage[i32](storage_view[i32](1, 32, 0)))
+    assert(exercise_storage[i64](storage_view[i64](1, 64, 0)))
+    assert(exercise_storage[i128](storage_view[i128](1, 128, 0)))
+    assert(exercise_storage[u8](storage_view[u8](2, 8, 0)))
+    assert(exercise_storage[u16](storage_view[u16](2, 16, 0)))
+    assert(exercise_storage[u32](storage_view[u32](2, 32, 0)))
+    assert(exercise_storage[u64](storage_view[u64](2, 64, 0)))
+    assert(exercise_storage[u128](storage_view[u128](2, 128, 0)))
+    assert(exercise_storage[f8e4m3fn](storage_view[f8e4m3fn](3, 8, 3)))
+    assert(exercise_storage[f8e5m2](storage_view[f8e5m2](3, 8, 4)))
+    assert(exercise_storage[f16](storage_view[f16](3, 16, 1)))
+    assert(exercise_storage[bf16](storage_view[bf16](3, 16, 2)))
+    assert(exercise_storage[f32](storage_view[f32](3, 32, 1)))
+    assert(exercise_storage[f64](storage_view[f64](3, 64, 1)))
+    assert(exercise_storage[f80](storage_view[f80](3, 80, 1)))
+    assert(exercise_storage[f128](storage_view[f128](3, 128, 1)))
+
+
+test "all storage representations convert through the same Convert operation identity":
+    original = tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+
+    assert(tensor.values(tensor.f64(tensor.i8(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.i16(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.i32(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.i64(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.i128(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.u8(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.u16(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.u32(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.u64(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.u128(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f8e4m3fn(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f8e5m2(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f16(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.bf16(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f32(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f64(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f80(copy original))) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.f64(tensor.f128(original))) == [1.0, 2.0, 3.0, 4.0])
+
+
+test "rank zero, one, two, and four remain data instead of operation identities":
+    scalar = tensor.tensor([2.0], [])
+    vector = tensor.tensor([1.0, 2.0, 3.0, 4.0], [4])
+    matrix = tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    batched = tensor.tensor([1.0, 2.0, 3.0, 4.0], [1, 1, 2, 2])
+
+    assert(tensor.shape(tensor.add(copy scalar, scalar)) == [])
+    assert(tensor.shape(tensor.add(copy vector, vector)) == [4])
+    assert(tensor.shape(tensor.matmul(copy matrix, matrix)) == [2, 2])
+    assert(tensor.shape(tensor.matmul(copy batched, batched)) == [1, 1, 2, 2])
+
+
+test "the complete public constructor reduction and autodiff surface remains executable":
+    ranked = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    zeros = tensor.zeros([2, 2])
+    ones = tensor.ones([2, 2])
+    empty = tensor.empty([2, 2])
+    sequence = tensor.arange(4)
+
+    assert(tensor.shape(ranked) == [2, 2])
+    assert(tensor.shape(zeros) == [2, 2])
+    assert(tensor.shape(ones) == [2, 2])
+    assert(tensor.shape(empty) == [2, 2])
+    assert(tensor.shape(sequence) == [4])
+    assert(tensor.mean(tensor.tensor([1.0, 2.0, 3.0], [3])) == 2.0)
+    assert(tensor.maximum(tensor.tensor([1.0, 3.0, 2.0], [3])) == 3.0)
+    assert(tensor.minimum(tensor.tensor([2.0, 1.0, 3.0], [3])) == 1.0)
+    assert(tensor.shape(tensor.backward_mse(tensor.tensor([1.0, 2.0], [2]))) == [2])

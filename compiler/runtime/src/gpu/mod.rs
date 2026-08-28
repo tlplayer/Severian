@@ -9,7 +9,7 @@ pub use cache::{CacheKey, KernelCache};
 
 use severian_fusion::{
     Dimension, ElementKind, FusionGraph, FusionPlan, FusionRegion, GpuTarget, KernelSpecialization,
-    NodeId, Rank, RegionId, RuntimeShape, RuntimeStrides,
+    NodeId, NodeKind, Rank, RegionId, RuntimeShape, RuntimeStrides, StorageLayout,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -44,6 +44,23 @@ pub struct PreparedStorageInputs {
     pub arguments: Vec<KernelArgument>,
 }
 
+/// One host-resident tensor descriptor and its safely borrowed payload. The
+/// descriptor supplies type/rank/layout metadata; the payload supplies bytes
+/// for the selected device. Native pointers are never reinterpreted as MLIR
+/// tensors by this API.
+pub struct HostStorageInput<'a> {
+    pub node: NodeId,
+    pub view: crate::StorageView,
+    pub bytes: &'a [u8],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphExecution {
+    pub specialization: KernelSpecialization,
+    pub buffers: BTreeMap<NodeId, BufferId>,
+    pub execution: ExecutionResult,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageSpecializationError {
     UnknownNode(NodeId),
@@ -56,6 +73,14 @@ pub enum StorageSpecializationError {
     },
     InvalidElementWidth(u32),
     InvalidElementRepresentation(crate::StorageElementRepresentationAbi),
+    ShapeInference {
+        node: NodeId,
+        message: String,
+    },
+    StrideInference {
+        node: NodeId,
+        message: String,
+    },
     InvalidSpecialization(severian_fusion::SpecializationError),
 }
 
@@ -101,15 +126,362 @@ pub fn specialize_storage_views(
             offset: binding.view.offset,
         });
     }
+    complete_kernel_specialization(
+        graph,
+        KernelSpecialization {
+            shapes,
+            strides,
+            target,
+        },
+    )
+}
+
+/// Completes a partial runtime specialization in graph order. Input
+/// descriptors remain the source of truth; result shapes are derived from the
+/// structural operation and never from dtype- or rank-specific symbols.
+pub fn complete_kernel_specialization(
+    graph: &FusionGraph,
+    partial: KernelSpecialization,
+) -> Result<KernelSpecialization, StorageSpecializationError> {
+    let target = partial.target;
+    let mut shapes = partial
+        .shapes
+        .into_iter()
+        .map(|shape| (shape.node, shape.dimensions))
+        .collect::<BTreeMap<_, _>>();
+    let mut strides = partial
+        .strides
+        .into_iter()
+        .map(|strides| (strides.node, (strides.strides, strides.offset)))
+        .collect::<BTreeMap<_, _>>();
+
+    for node in graph.nodes() {
+        let inferred = match shapes.get(&node.id) {
+            Some(shape) => Some(shape.clone()),
+            None => infer_node_shape(graph, node.id, &shapes)?,
+        };
+        let dimensions = concrete_node_shape(node.id, &node.shape.rank, inferred)?;
+        shapes.insert(node.id, dimensions.clone());
+
+        if !strides.contains_key(&node.id) {
+            let inferred = infer_node_strides(graph, node.id, &dimensions, &strides)?;
+            strides.insert(node.id, inferred);
+        }
+    }
+
     let specialization = KernelSpecialization {
-        shapes,
-        strides,
+        shapes: shapes
+            .into_iter()
+            .map(|(node, dimensions)| RuntimeShape { node, dimensions })
+            .collect(),
+        strides: strides
+            .into_iter()
+            .map(|(node, (strides, offset))| RuntimeStrides {
+                node,
+                strides,
+                offset,
+            })
+            .collect(),
         target,
     };
     specialization
         .validate(graph, target)
         .map_err(StorageSpecializationError::InvalidSpecialization)?;
     Ok(specialization)
+}
+
+fn concrete_node_shape(
+    node: NodeId,
+    contract: &Rank,
+    inferred: Option<Vec<u64>>,
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    match contract {
+        Rank::Unranked => inferred.ok_or_else(|| StorageSpecializationError::ShapeInference {
+            node,
+            message: "unranked value requires runtime shape data or structural inference".into(),
+        }),
+        Rank::Ranked(dimensions) => {
+            let provided = inferred.unwrap_or_else(|| {
+                dimensions
+                    .iter()
+                    .filter_map(|dimension| match dimension {
+                        Dimension::Known(value) => Some(*value),
+                        Dimension::Dynamic => None,
+                    })
+                    .collect()
+            });
+            if provided.len() != dimensions.len() {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node,
+                    message: format!(
+                        "ranked value requires {} dimensions but {} were inferred",
+                        dimensions.len(),
+                        provided.len()
+                    ),
+                });
+            }
+            for (axis, (expected, found)) in dimensions.iter().zip(&provided).enumerate() {
+                if let Dimension::Known(expected) = expected {
+                    if expected != found {
+                        return Err(StorageSpecializationError::ShapeInference {
+                            node,
+                            message: format!(
+                                "dimension {axis} requires {expected} but runtime inference produced {found}"
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(provided)
+        }
+    }
+}
+
+fn infer_node_shape(
+    graph: &FusionGraph,
+    node: NodeId,
+    shapes: &BTreeMap<NodeId, Vec<u64>>,
+) -> Result<Option<Vec<u64>>, StorageSpecializationError> {
+    let node_data = graph.node(node);
+    let input = |index: usize| {
+        node_data
+            .inputs
+            .get(index)
+            .and_then(|input| shapes.get(input))
+            .cloned()
+    };
+    let data_shapes = || {
+        node_data
+            .inputs
+            .iter()
+            .zip(&node_data.operand_roles)
+            .filter(|(_, role)| matches!(role, severian_fusion::OperandRole::Data))
+            .filter_map(|(input, _)| shapes.get(input).cloned())
+            .collect::<Vec<_>>()
+    };
+    let inferred = match node_data.kind {
+        NodeKind::Parameter | NodeKind::Constant => None,
+        NodeKind::Elementwise => {
+            let mut inputs = data_shapes().into_iter();
+            let Some(mut result) = inputs.next() else {
+                return Ok(None);
+            };
+            for shape in inputs {
+                result = broadcast_runtime_shape(&result, &shape).ok_or_else(|| {
+                    StorageSpecializationError::ShapeInference {
+                        node,
+                        message: format!(
+                            "elementwise operands {:?} and {:?} do not broadcast",
+                            result, shape
+                        ),
+                    }
+                })?;
+            }
+            Some(result)
+        }
+        NodeKind::Reduction => {
+            let Some(mut source) = input(0) else {
+                return Ok(None);
+            };
+            match node_data.operation.as_str() {
+                "sum" => Some(vec![1]),
+                "sum_axis" => {
+                    let axis = node_data.attributes.first().copied().ok_or_else(|| {
+                        StorageSpecializationError::ShapeInference {
+                            node,
+                            message: "sum_axis has no structural axis identity".into(),
+                        }
+                    })?;
+                    let axis = usize::try_from(axis).map_err(|_| {
+                        StorageSpecializationError::ShapeInference {
+                            node,
+                            message: format!("sum_axis has invalid axis {axis}"),
+                        }
+                    })?;
+                    if axis >= source.len() {
+                        return Err(StorageSpecializationError::ShapeInference {
+                            node,
+                            message: format!(
+                                "sum_axis axis {axis} is outside runtime rank {}",
+                                source.len()
+                            ),
+                        });
+                    }
+                    source.remove(axis);
+                    if source.is_empty() {
+                        source.push(1);
+                    }
+                    Some(source)
+                }
+                "mean_last" | "max_last" => {
+                    if source.is_empty() {
+                        return Err(StorageSpecializationError::ShapeInference {
+                            node,
+                            message: "last-axis reduction requires rank at least one".into(),
+                        });
+                    }
+                    source.pop();
+                    if source.is_empty() {
+                        source.push(1);
+                    }
+                    Some(source)
+                }
+                operation => {
+                    return Err(StorageSpecializationError::ShapeInference {
+                        node,
+                        message: format!("unknown reduction operation `{operation}`"),
+                    })
+                }
+            }
+        }
+        NodeKind::Contraction => match (input(0), input(1)) {
+            (Some(left), Some(right)) => Some(matmul_runtime_shape(node, &left, &right)?),
+            _ => None,
+        },
+        NodeKind::Reshape => match node_data.operation.as_str() {
+            "materialize" => input(0),
+            _ => None,
+        },
+        NodeKind::Permute => match node_data.operation.as_str() {
+            "reverse" => input(0).map(|mut shape| {
+                shape.reverse();
+                shape
+            }),
+            _ => None,
+        },
+        NodeKind::Broadcast => {
+            let mut inputs = node_data
+                .inputs
+                .iter()
+                .filter_map(|input| shapes.get(input));
+            let Some(mut result) = inputs.next().cloned() else {
+                return Ok(None);
+            };
+            for shape in inputs {
+                result = broadcast_runtime_shape(&result, shape).ok_or_else(|| {
+                    StorageSpecializationError::ShapeInference {
+                        node,
+                        message: "broadcast operands are incompatible".into(),
+                    }
+                })?;
+            }
+            Some(result)
+        }
+        NodeKind::Scatter | NodeKind::Convert | NodeKind::StorageView => input(0),
+        NodeKind::Slice | NodeKind::Gather | NodeKind::Concatenate => None,
+    };
+    Ok(inferred)
+}
+
+fn broadcast_runtime_shape(left: &[u64], right: &[u64]) -> Option<Vec<u64>> {
+    let rank = left.len().max(right.len());
+    let mut result = vec![1; rank];
+    for offset in 0..rank {
+        let left = left
+            .len()
+            .checked_sub(offset + 1)
+            .map(|axis| left[axis])
+            .unwrap_or(1);
+        let right = right
+            .len()
+            .checked_sub(offset + 1)
+            .map(|axis| right[axis])
+            .unwrap_or(1);
+        result[rank - offset - 1] = if left == right {
+            left
+        } else if left == 1 {
+            right
+        } else if right == 1 {
+            left
+        } else {
+            return None;
+        };
+    }
+    Some(result)
+}
+
+fn matmul_runtime_shape(
+    node: NodeId,
+    left: &[u64],
+    right: &[u64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    if left.len() < 2 || right.len() < 2 {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "matmul requires runtime rank at least two".into(),
+        });
+    }
+    if left[left.len() - 1] != right[right.len() - 2] {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "matmul contraction dimensions do not match".into(),
+        });
+    }
+    let batch = broadcast_runtime_shape(&left[..left.len() - 2], &right[..right.len() - 2])
+        .ok_or_else(|| StorageSpecializationError::ShapeInference {
+            node,
+            message: "matmul batch dimensions do not broadcast".into(),
+        })?;
+    let mut result = batch;
+    result.push(left[left.len() - 2]);
+    result.push(right[right.len() - 1]);
+    Ok(result)
+}
+
+fn infer_node_strides(
+    graph: &FusionGraph,
+    node: NodeId,
+    dimensions: &[u64],
+    known: &BTreeMap<NodeId, (Vec<i64>, i64)>,
+) -> Result<(Vec<i64>, i64), StorageSpecializationError> {
+    let node_data = graph.node(node);
+    if node_data.kind == NodeKind::Parameter && matches!(node_data.layout, StorageLayout::Runtime) {
+        return Err(StorageSpecializationError::StrideInference {
+            node,
+            message: "runtime-layout parameter requires descriptor strides".into(),
+        });
+    }
+    if node_data.kind == NodeKind::Scatter {
+        if let Some(input) = node_data.inputs.first().and_then(|input| known.get(input)) {
+            return Ok(input.clone());
+        }
+    }
+    if node_data.kind == NodeKind::Permute && node_data.operation == "reverse" {
+        if let Some((mut strides, offset)) = node_data
+            .inputs
+            .first()
+            .and_then(|input| known.get(input))
+            .cloned()
+        {
+            strides.reverse();
+            return Ok((strides, offset));
+        }
+    }
+    contiguous_runtime_strides(node, dimensions)
+}
+
+fn contiguous_runtime_strides(
+    node: NodeId,
+    dimensions: &[u64],
+) -> Result<(Vec<i64>, i64), StorageSpecializationError> {
+    let mut stride = 1i64;
+    let mut strides = vec![0; dimensions.len()];
+    for axis in (0..dimensions.len()).rev() {
+        strides[axis] = stride;
+        let dimension = i64::try_from(dimensions[axis]).map_err(|_| {
+            StorageSpecializationError::StrideInference {
+                node,
+                message: format!("dimension {} exceeds the stride ABI", dimensions[axis]),
+            }
+        })?;
+        stride = stride.checked_mul(dimension).ok_or_else(|| {
+            StorageSpecializationError::StrideInference {
+                node,
+                message: "contiguous stride calculation overflowed".into(),
+            }
+        })?;
+    }
+    Ok((strides, 0))
 }
 
 pub fn prepare_storage_inputs(
@@ -339,6 +711,15 @@ pub enum RuntimeError {
     AddressOverflow,
     GridOverflow,
     MissingOutputShape(NodeId),
+    Specialization(StorageSpecializationError),
+    DuplicateStorageInput(NodeId),
+    MissingNodeBuffer(NodeId),
+    HostStorageLength {
+        node: NodeId,
+        descriptor_bytes: u64,
+        supplied_bytes: usize,
+    },
+    TensorSizeOverflow(NodeId),
     DuplicateExecution(RegionExecutionId),
     UnknownDependency {
         execution: RegionExecutionId,
@@ -365,6 +746,27 @@ impl fmt::Display for RuntimeError {
             Self::GridOverflow => formatter.write_str("GPU launch grid overflow"),
             Self::MissingOutputShape(node) => {
                 write!(formatter, "node {} has no concrete runtime shape", node.0)
+            }
+            Self::Specialization(error) => {
+                write!(formatter, "GPU specialization failed: {error}")
+            }
+            Self::DuplicateStorageInput(node) => {
+                write!(formatter, "node {} has more than one storage input", node.0)
+            }
+            Self::MissingNodeBuffer(node) => {
+                write!(formatter, "node {} has no allocated GPU buffer", node.0)
+            }
+            Self::HostStorageLength {
+                node,
+                descriptor_bytes,
+                supplied_bytes,
+            } => write!(
+                formatter,
+                "node {} describes {} storage bytes but only {} were supplied",
+                node.0, descriptor_bytes, supplied_bytes
+            ),
+            Self::TensorSizeOverflow(node) => {
+                write!(formatter, "node {} tensor byte size overflowed", node.0)
             }
             Self::DuplicateExecution(execution) => {
                 write!(formatter, "duplicate GPU execution id {}", execution.0)
@@ -528,6 +930,137 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         self.driver
             .download(buffer, offset, data)
             .map_err(RuntimeError::Driver)
+    }
+
+    /// Executes a complete fusion plan from versioned StorageView metadata.
+    /// Runtime rank/shape/stride facts are completed before compilation; each
+    /// fusion region then flows through the normal compiler cache and driver
+    /// launcher. Dtype and rank never participate in symbol identity.
+    pub fn execute_storage_graph(
+        &mut self,
+        device: DeviceId,
+        graph: &FusionGraph,
+        plan: &FusionPlan,
+        inputs: &[HostStorageInput<'_>],
+        options: &CompilerOptions,
+    ) -> Result<GraphExecution, RuntimeError> {
+        let target = self.device(device)?.target;
+        let bindings = inputs
+            .iter()
+            .map(|input| StorageSpecializationBinding {
+                node: input.node,
+                view: input.view.clone(),
+            })
+            .collect::<Vec<_>>();
+        let specialization = specialize_storage_views(graph, target, &bindings)
+            .map_err(RuntimeError::Specialization)?;
+        let mut buffers = BTreeMap::new();
+        for input in inputs {
+            if buffers.contains_key(&input.node) {
+                return Err(RuntimeError::DuplicateStorageInput(input.node));
+            }
+            if input.bytes.len() < input.view.byte_length as usize {
+                return Err(RuntimeError::HostStorageLength {
+                    node: input.node,
+                    descriptor_bytes: input.view.byte_length,
+                    supplied_bytes: input.bytes.len(),
+                });
+            }
+            let buffer = self.allocate(device, input.view.byte_length, 256)?;
+            self.upload(buffer, 0, &input.bytes[..input.view.byte_length as usize])?;
+            buffers.insert(input.node, buffer);
+        }
+
+        let schedule = schedule_fusion_regions(graph, plan)?;
+        let shape_by_node = specialization
+            .shapes
+            .iter()
+            .map(|shape| (shape.node, shape.dimensions.as_slice()))
+            .collect::<BTreeMap<_, _>>();
+        for scheduled in &schedule {
+            let region = &plan.regions[scheduled.region.0 as usize];
+            for output in &region.outputs {
+                if buffers.contains_key(output) {
+                    continue;
+                }
+                let node = graph.node(*output);
+                let aliased = node.aliases.first().and_then(|alias| {
+                    node.inputs
+                        .get(usize::from(alias.input_index))
+                        .and_then(|input| buffers.get(input))
+                        .copied()
+                });
+                let buffer = if let Some(buffer) = aliased {
+                    buffer
+                } else {
+                    let dimensions = shape_by_node
+                        .get(output)
+                        .ok_or(RuntimeError::MissingOutputShape(*output))?;
+                    let elements = dimensions
+                        .iter()
+                        .try_fold(1u64, |size, dimension| size.checked_mul(*dimension));
+                    let bytes = elements
+                        .and_then(|elements| {
+                            elements.checked_mul(u64::from(node.shape.element_bits.div_ceil(8)))
+                        })
+                        .ok_or(RuntimeError::TensorSizeOverflow(*output))?;
+                    self.allocate(device, bytes, 256)?
+                };
+                buffers.insert(*output, buffer);
+            }
+        }
+
+        let execution_ids = schedule
+            .iter()
+            .enumerate()
+            .map(|(index, scheduled)| (scheduled.region, RegionExecutionId(index as u32)))
+            .collect::<BTreeMap<_, _>>();
+        let invocations = schedule
+            .iter()
+            .map(|scheduled| {
+                let region = &plan.regions[scheduled.region.0 as usize];
+                let arguments = region
+                    .inputs
+                    .iter()
+                    .chain(&region.outputs)
+                    .map(|node| {
+                        buffers
+                            .get(node)
+                            .copied()
+                            .map(|buffer| KernelArgument::Buffer {
+                                buffer,
+                                byte_offset: 0,
+                            })
+                            .ok_or(RuntimeError::MissingNodeBuffer(*node))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let dependencies = scheduled
+                    .dependencies
+                    .iter()
+                    .map(|dependency| {
+                        execution_ids
+                            .get(dependency)
+                            .copied()
+                            .ok_or(RuntimeError::CyclicRegionDependencies)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(RegionInvocation {
+                    id: execution_ids[&scheduled.region],
+                    graph,
+                    region,
+                    specialization: &specialization,
+                    options,
+                    arguments,
+                    dependencies,
+                })
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
+        let execution = self.execute(device, &invocations)?;
+        Ok(GraphExecution {
+            specialization,
+            buffers,
+            execution,
+        })
     }
 
     pub fn execute(

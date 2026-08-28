@@ -2,7 +2,7 @@
 
 mod fusion;
 
-pub use fusion::{fusion_graph, FusionGraphError};
+pub use fusion::{fusion_graph, fusion_graph_with_slots, FusionGraphError};
 
 use severian_compile::{
     CompileContext, CompileError, CompileHandler, CompileRegion, CompileRegionSpecialization,
@@ -42,6 +42,32 @@ impl CompileHandler for TensorCompiler {
                 .map(CompiledRegionArtifact::GpuKernel);
         }
         self.compile_cpu(region, context)
+            .map(CompiledRegionArtifact::CpuMlir)
+    }
+
+    fn compile_specialized(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+        specialization: &CompileRegionSpecialization,
+    ) -> Result<CompiledRegionArtifact, CompileError> {
+        if region.placement == Some(ExecutionPlacement::Gpu) {
+            let (region, types) = region
+                .specialize_for_emission(context.types, specialization)
+                .map_err(|error| {
+                    invalid(format!("GPU tensor runtime specialization failed: {error}"))
+                })?;
+            return self
+                .compile_gpu(
+                    &region,
+                    &CompileContext {
+                        types: &types,
+                        target: context.target,
+                    },
+                )
+                .map(CompiledRegionArtifact::GpuKernel);
+        }
+        self.compile_specialized_cpu(region, context, specialization)
             .map(CompiledRegionArtifact::CpuMlir)
     }
 }
@@ -320,7 +346,7 @@ impl TensorCompiler {
             .iter()
             .map(|value| lower_type(value.type_id, context))
             .collect::<Result<Vec<_>, _>>()?;
-        let graph = fusion_graph(region, context.types)
+        let (graph, value_nodes) = fusion_graph_with_slots(region, context.types)
             .map_err(|error| CompileError::InvalidArtifact(error.to_string()))?;
         let plan = plan_fusion(&graph, DeviceModel::conservative_gpu());
         Ok(GpuKernelBundle {
@@ -328,6 +354,7 @@ impl TensorCompiler {
             architecture: device.architecture.clone(),
             graph,
             plan,
+            value_nodes,
             inputs,
             outputs,
         })
@@ -2606,7 +2633,8 @@ mod tests {
     use super::*;
     use severian_artifact::{ArtifactId, CompiledRegionId};
     use severian_compile::{
-        CompileOperation, CompileRegionSpecialization, EffectSet, RuntimeValueSpecialization,
+        CompileOperation, CompileRegionSpecialization, CompilerRegistry, EffectSet,
+        RuntimeValueSpecialization, VerifiedCompiledRegionArtifact,
     };
     use severian_mir::{Value, ValueId};
     use severian_target::{Device, DeviceKind, FeatureSet, TargetSpec};
@@ -3200,6 +3228,49 @@ mod tests {
     }
 
     #[test]
+    fn compiler_registry_routes_runtime_specialization_without_handler_downcasts() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::Unranked)
+            .unwrap();
+        let mut region = direct_region(
+            &[tensor_type, tensor_type],
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+        );
+        region.rebuild_value_contracts(&types).unwrap();
+        let mut registry = CompilerRegistry::new();
+        registry
+            .register(tensor::compiler_id(), TensorCompiler)
+            .unwrap();
+        let target = TargetSpec::host();
+        let artifact = registry
+            .compile_specialized_region(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+                &CompileRegionSpecialization {
+                    values: (0..3)
+                        .map(|slot| RuntimeValueSpecialization {
+                            slot,
+                            dimensions: vec![2, 3],
+                            strides: vec![3, 1],
+                            offset: 0,
+                        })
+                        .collect(),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            artifact,
+            VerifiedCompiledRegionArtifact::CpuMlir(_)
+        ));
+    }
+
+    #[test]
     fn runtime_specialization_does_not_confuse_rank_zero_with_unranked() {
         let (mut types, constructor) = types();
         let f32 = types.resolve_name("f32").unwrap();
@@ -3646,6 +3717,18 @@ mod tests {
         };
         assert_eq!(bundle.inputs, [LoweredType::Bytes]);
         assert_eq!(bundle.graph.nodes().len(), 2);
+        assert_eq!(
+            bundle.value_nodes.get(&0),
+            Some(&severian_fusion::NodeId(0))
+        );
+        assert_eq!(
+            bundle.value_nodes.get(&1),
+            Some(&severian_fusion::NodeId(0))
+        );
+        assert_eq!(
+            bundle.value_nodes.get(&2),
+            Some(&severian_fusion::NodeId(1))
+        );
         let parameter = bundle.graph.node(severian_fusion::NodeId(0));
         assert_eq!(parameter.kind, severian_fusion::NodeKind::Parameter);
         assert_eq!(
@@ -3657,6 +3740,41 @@ mod tests {
         assert_eq!(
             bundle.graph.node(severian_fusion::NodeId(1)).kind,
             severian_fusion::NodeKind::Elementwise
+        );
+        let specialization = bundle
+            .compile_region_specialization(&severian_fusion::KernelSpecialization {
+                shapes: vec![
+                    severian_fusion::RuntimeShape {
+                        node: severian_fusion::NodeId(0),
+                        dimensions: vec![2, 4],
+                    },
+                    severian_fusion::RuntimeShape {
+                        node: severian_fusion::NodeId(1),
+                        dimensions: vec![2, 4],
+                    },
+                ],
+                strides: vec![
+                    severian_fusion::RuntimeStrides {
+                        node: severian_fusion::NodeId(0),
+                        strides: vec![4, 1],
+                        offset: 0,
+                    },
+                    severian_fusion::RuntimeStrides {
+                        node: severian_fusion::NodeId(1),
+                        strides: vec![4, 1],
+                        offset: 0,
+                    },
+                ],
+                target: severian_fusion::GpuTarget::Nvidia,
+            })
+            .unwrap();
+        assert_eq!(
+            specialization
+                .values
+                .iter()
+                .map(|value| (value.slot, value.dimensions.clone()))
+                .collect::<Vec<_>>(),
+            [(0, vec![2, 4]), (1, vec![2, 4]), (2, vec![2, 4])]
         );
     }
 

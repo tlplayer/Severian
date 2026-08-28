@@ -58,6 +58,15 @@ pub fn fusion_graph(
     region: &CompileRegion,
     types: &TypeContext,
 ) -> Result<FusionGraph, FusionGraphError> {
+    fusion_graph_with_slots(region, types).map(|(graph, _)| graph)
+}
+
+/// Builds a fusion graph and preserves the structural value-slot mapping used
+/// by runtime specialization and launcher argument packing.
+pub fn fusion_graph_with_slots(
+    region: &CompileRegion,
+    types: &TypeContext,
+) -> Result<(FusionGraph, BTreeMap<u32, NodeId>), FusionGraphError> {
     let mut nodes = Vec::new();
     let mut slots = BTreeMap::new();
     let contracts = region
@@ -170,6 +179,14 @@ pub fn fusion_graph(
         let kind = node_kind(structural);
         let id = NodeId(nodes.len() as u32);
         let mut node = FusionNode::structural(id.0, kind, inputs, shape);
+        if let Some(severian_universal::AttrValue::Integers(values)) =
+            operation.attributes.get(&tensor::REDUCTION_AXES)
+        {
+            node.attributes = values
+                .iter()
+                .filter_map(|value| i64::try_from(*value).ok())
+                .collect();
+        }
         node.operand_roles = contracts
             .get(&result_slot)
             .and_then(|contract| contract.tensor.as_ref())
@@ -240,7 +257,8 @@ pub fn fusion_graph(
         }
         nodes.push(node);
     }
-    FusionGraph::new(nodes).map_err(FusionGraphError::InvalidGraph)
+    let graph = FusionGraph::new(nodes).map_err(FusionGraphError::InvalidGraph)?;
+    Ok((graph, slots))
 }
 
 fn shape_from_contract(contract: &TensorValueContract) -> Shape {

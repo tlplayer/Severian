@@ -92,7 +92,86 @@ pub enum StorageViewOp {
     Values,
 }
 
+impl ElementwiseOp {
+    pub const ALL: [Self; 11] = [
+        Self::Add,
+        Self::Subtract,
+        Self::Multiply,
+        Self::Divide,
+        Self::Exp,
+        Self::Log,
+        Self::Tanh,
+        Self::Rsqrt,
+        Self::Relu,
+        Self::Scale,
+        Self::AddScalar,
+    ];
+}
+
+impl ReductionOp {
+    pub const ALL: [Self; 4] = [Self::Sum, Self::SumAxis, Self::MeanLast, Self::MaxLast];
+}
+
+impl ReshapeViewOp {
+    pub const ALL: [Self; 2] = [Self::Reshape, Self::Materialize];
+}
+
+impl PermuteOp {
+    pub const ALL: [Self; 2] = [Self::Axes, Self::Reverse];
+}
+
+impl BroadcastOp {
+    pub const ALL: [Self; 2] = [Self::Like, Self::Repeat];
+}
+
+impl StorageViewOp {
+    pub const ALL: [Self; 5] = [
+        Self::FromElements,
+        Self::FromAbi,
+        Self::Shape,
+        Self::Strides,
+        Self::Values,
+    ];
+}
+
 impl TensorOp {
+    /// Complete structural operation catalogue. Backend conformance tests use
+    /// this instead of maintaining partial, dtype-specific operation lists.
+    pub const ALL: [Self; 32] = [
+        Self::Elementwise(ElementwiseOp::Add),
+        Self::Elementwise(ElementwiseOp::Subtract),
+        Self::Elementwise(ElementwiseOp::Multiply),
+        Self::Elementwise(ElementwiseOp::Divide),
+        Self::Elementwise(ElementwiseOp::Exp),
+        Self::Elementwise(ElementwiseOp::Log),
+        Self::Elementwise(ElementwiseOp::Tanh),
+        Self::Elementwise(ElementwiseOp::Rsqrt),
+        Self::Elementwise(ElementwiseOp::Relu),
+        Self::Elementwise(ElementwiseOp::Scale),
+        Self::Elementwise(ElementwiseOp::AddScalar),
+        Self::Reduce(ReductionOp::Sum),
+        Self::Reduce(ReductionOp::SumAxis),
+        Self::Reduce(ReductionOp::MeanLast),
+        Self::Reduce(ReductionOp::MaxLast),
+        Self::Matmul,
+        Self::ReshapeView(ReshapeViewOp::Reshape),
+        Self::ReshapeView(ReshapeViewOp::Materialize),
+        Self::Permute(PermuteOp::Axes),
+        Self::Permute(PermuteOp::Reverse),
+        Self::Slice,
+        Self::Broadcast(BroadcastOp::Like),
+        Self::Broadcast(BroadcastOp::Repeat),
+        Self::Gather,
+        Self::Scatter,
+        Self::Concatenate,
+        Self::Convert,
+        Self::StorageView(StorageViewOp::FromElements),
+        Self::StorageView(StorageViewOp::FromAbi),
+        Self::StorageView(StorageViewOp::Shape),
+        Self::StorageView(StorageViewOp::Strides),
+        Self::StorageView(StorageViewOp::Values),
+    ];
+
     pub const fn id(self) -> OpId {
         match self {
             Self::Elementwise(_) => ELEMENTWISE,
@@ -705,6 +784,37 @@ mod tests {
     }
 
     #[test]
+    fn exhaustive_tensor_operation_catalog_round_trips_without_hidden_identities() {
+        let operations = TensorOp::ALL
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(operations.len(), TensorOp::ALL.len());
+        for operation in TensorOp::ALL {
+            let mut attributes = Attrs::new();
+            let id = operation.apply(&mut attributes);
+            assert_eq!(TensorOp::decode(id, &attributes), Some(operation));
+        }
+        for operation in ElementwiseOp::ALL {
+            assert!(operations.contains(&TensorOp::Elementwise(operation)));
+        }
+        for operation in ReductionOp::ALL {
+            assert!(operations.contains(&TensorOp::Reduce(operation)));
+        }
+        for operation in ReshapeViewOp::ALL {
+            assert!(operations.contains(&TensorOp::ReshapeView(operation)));
+        }
+        for operation in PermuteOp::ALL {
+            assert!(operations.contains(&TensorOp::Permute(operation)));
+        }
+        for operation in BroadcastOp::ALL {
+            assert!(operations.contains(&TensorOp::Broadcast(operation)));
+        }
+        for operation in StorageViewOp::ALL {
+            assert!(operations.contains(&TensorOp::StorageView(operation)));
+        }
+    }
+
+    #[test]
     fn every_tensor_operation_preserves_each_structural_element_type_generically() {
         let mut builder = TypeContextBuilder::new();
         crate::install_primitives(&mut builder).unwrap();
@@ -716,8 +826,8 @@ mod tests {
         let mut registry = OperationRegistry::default();
         install_operations(&mut registry).unwrap();
         let element_names = [
-            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f16", "f32",
-            "f64", "f80", "f128",
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f8e4m3fn",
+            "f8e5m2", "f16", "bf16", "f32", "f64", "f80", "f128",
         ];
         for name in element_names {
             let element = types.resolve_name(name).unwrap();

@@ -1,6 +1,6 @@
 use crate::{
-    CompileContext, CompileError, CompilePlan, CompileRegion, CompiledRegionArtifact, PlanSegment,
-    VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
+    CompileContext, CompileError, CompilePlan, CompileRegion, CompileRegionSpecialization,
+    CompiledRegionArtifact, PlanSegment, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
 };
 use severian_artifact::ArtifactId;
 use severian_mlir::verify_artifact;
@@ -13,6 +13,31 @@ pub trait CompileHandler: Send + Sync {
         region: &CompileRegion,
         context: &CompileContext<'_>,
     ) -> Result<CompiledRegionArtifact, CompileError>;
+
+    /// Runtime/JIT compilation entry point. The default implementation
+    /// specializes the backend-neutral region contract before invoking the
+    /// ordinary target route; handlers never infer rank from native pointers.
+    fn compile_specialized(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+        specialization: &CompileRegionSpecialization,
+    ) -> Result<CompiledRegionArtifact, CompileError> {
+        let (region, types) = region
+            .specialize_for_emission(context.types, specialization)
+            .map_err(|error| {
+                CompileError::InvalidArtifact(format!(
+                    "runtime region specialization failed: {error}"
+                ))
+            })?;
+        self.compile(
+            &region,
+            &CompileContext {
+                types: &types,
+                target: context.target,
+            },
+        )
+    }
 }
 
 #[derive(Default)]
@@ -61,33 +86,58 @@ impl CompilerRegistry {
                     .handlers
                     .get(&region.compiler)
                     .ok_or(CompileError::MissingHandler(region.compiler))?;
-                let id = ArtifactId::for_region(region.id);
-                match handler.compile(region, context)? {
-                    CompiledRegionArtifact::CpuMlir(artifact) => {
-                        validate_arity(region, artifact.inputs.len(), artifact.outputs.len())?;
-                        verify_artifact(id, artifact, context.target)
-                            .map(VerifiedCompiledRegionArtifact::CpuMlir)
-                            .map_err(|error| CompileError::InvalidArtifact(error.to_string()))
-                    }
-                    CompiledRegionArtifact::GpuKernel(bundle) => {
-                        validate_arity(region, bundle.inputs.len(), bundle.outputs.len())?;
-                        if bundle.architecture.is_empty() {
-                            return Err(CompileError::InvalidArtifact(
-                                "GPU kernel bundle has no target architecture".into(),
-                            ));
-                        }
-                        if bundle.plan.node_regions.len() != bundle.graph.nodes().len() {
-                            return Err(CompileError::InvalidArtifact(
-                                "GPU fusion plan does not map the complete graph".into(),
-                            ));
-                        }
-                        Ok(VerifiedCompiledRegionArtifact::GpuKernel(
-                            VerifiedGpuKernelBundle { id, bundle },
-                        ))
-                    }
-                }
+                verify_compiled_region(region, context, handler.compile(region, context)?)
             })
             .collect()
+    }
+
+    pub fn compile_specialized_region(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+        specialization: &CompileRegionSpecialization,
+    ) -> Result<VerifiedCompiledRegionArtifact, CompileError> {
+        let handler = self
+            .handlers
+            .get(&region.compiler)
+            .ok_or(CompileError::MissingHandler(region.compiler))?;
+        verify_compiled_region(
+            region,
+            context,
+            handler.compile_specialized(region, context, specialization)?,
+        )
+    }
+}
+
+fn verify_compiled_region(
+    region: &CompileRegion,
+    context: &CompileContext<'_>,
+    artifact: CompiledRegionArtifact,
+) -> Result<VerifiedCompiledRegionArtifact, CompileError> {
+    let id = ArtifactId::for_region(region.id);
+    match artifact {
+        CompiledRegionArtifact::CpuMlir(artifact) => {
+            validate_arity(region, artifact.inputs.len(), artifact.outputs.len())?;
+            verify_artifact(id, artifact, context.target)
+                .map(VerifiedCompiledRegionArtifact::CpuMlir)
+                .map_err(|error| CompileError::InvalidArtifact(error.to_string()))
+        }
+        CompiledRegionArtifact::GpuKernel(bundle) => {
+            validate_arity(region, bundle.inputs.len(), bundle.outputs.len())?;
+            if bundle.architecture.is_empty() {
+                return Err(CompileError::InvalidArtifact(
+                    "GPU kernel bundle has no target architecture".into(),
+                ));
+            }
+            if bundle.plan.node_regions.len() != bundle.graph.nodes().len() {
+                return Err(CompileError::InvalidArtifact(
+                    "GPU fusion plan does not map the complete graph".into(),
+                ));
+            }
+            Ok(VerifiedCompiledRegionArtifact::GpuKernel(
+                VerifiedGpuKernelBundle { id, bundle },
+            ))
+        }
     }
 }
 
@@ -139,6 +189,7 @@ mod tests {
                 architecture: "gfx1100".into(),
                 graph,
                 plan,
+                value_nodes: std::collections::BTreeMap::new(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
             }))

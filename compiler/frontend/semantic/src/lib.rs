@@ -11525,6 +11525,11 @@ impl Analyzer<'_> {
         let Some(path) = callable_path(callee) else {
             return Ok(None);
         };
+        if let Some((namespace, _)) = path.rsplit_once('.') {
+            if namespace.rsplit('.').next() != Some("math") {
+                return Ok(None);
+            }
+        }
         let name = path.rsplit('.').next().unwrap_or(&path);
         if !matches!(
             name,
@@ -11814,11 +11819,14 @@ impl Analyzer<'_> {
             )
             | severian_universal::tensor::TensorOp::Slice
             | severian_universal::tensor::TensorOp::Gather
-            | severian_universal::tensor::TensorOp::Scatter
             | severian_universal::tensor::TensorOp::Concatenate
             | severian_universal::tensor::TensorOp::Broadcast(
                 severian_universal::tensor::BroadcastOp::Repeat,
             ) => Some(severian_universal::TensorShape::Unranked),
+            severian_universal::tensor::TensorOp::Broadcast(
+                severian_universal::tensor::BroadcastOp::Like,
+            ) => right_shape,
+            severian_universal::tensor::TensorOp::Scatter => source_shape,
             _ => source_shape,
         };
         let result = match (source_tensor, inferred_shape.as_ref()) {
@@ -12253,6 +12261,59 @@ impl Analyzer<'_> {
                 }
             }
             return Ok(None);
+        }
+
+        if name == "scatter" && arguments.len() == 3 {
+            let value = self.expression(&arguments[0].value, None)?;
+            let Some(element) = self.resolve_tensor_element_type(value.type_id, span) else {
+                return Ok(None);
+            };
+            let indices = self.expression(&arguments[1].value, None)?;
+            if self
+                .resolve_tensor_element_type(indices.type_id, span)
+                .is_none()
+            {
+                return Ok(None);
+            }
+            let updates = self.expression(&arguments[2].value, None)?;
+            if self.resolve_tensor_element_type(updates.type_id, span) != Some(element) {
+                return Err(semantic_error(
+                    "scatter updates must have the destination tensor element type".into(),
+                    arguments[2].value.span,
+                ));
+            }
+            return self
+                .tensor_operation(
+                    severian_universal::tensor::TensorOp::Scatter,
+                    vec![value, indices, updates],
+                    expected,
+                    span,
+                )
+                .map(Some);
+        }
+
+        if name == "broadcast_like" && arguments.len() == 2 {
+            let value = self.expression(&arguments[0].value, None)?;
+            let Some(element) = self.resolve_tensor_element_type(value.type_id, span) else {
+                return Ok(None);
+            };
+            let target = self.expression(&arguments[1].value, None)?;
+            if self.resolve_tensor_element_type(target.type_id, span) != Some(element) {
+                return Err(semantic_error(
+                    "broadcast source and target must have the same element type".into(),
+                    arguments[1].value.span,
+                ));
+            }
+            return self
+                .tensor_operation(
+                    severian_universal::tensor::TensorOp::Broadcast(
+                        severian_universal::tensor::BroadcastOp::Like,
+                    ),
+                    vec![value, target],
+                    expected,
+                    span,
+                )
+                .map(Some);
         }
 
         if name == "sum_axis" && arguments.len() == 2 {

@@ -162,6 +162,9 @@ def tanh[T](value: Tensor[T]) -> Tensor[T]
 def gather[T, index](value: Tensor[T], indices: Tensor[index]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
+def scatter[T, index](value: Tensor[T], indices: Tensor[index], updates: Tensor[T]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
 def concatenate[T](left: Tensor[T], right: Tensor[T], axis: list[int]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
