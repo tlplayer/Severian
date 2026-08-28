@@ -66,96 +66,13 @@ def entry(store: SafeTensorStore, name: string) -> SafeTensorEntry:
     assert(byte_start >= 0 and byte_end >= byte_start, "SafeTensor offsets are invalid for " + name)
     return SafeTensorEntry(store.handle, name, dtype, shape, byte_start, byte_end, store.path)
 
-def validate_entry(value: SafeTensorEntry, expected: string, width: int):
-    assert(value.dtype == expected or (expected == "F8_E4M3FN" and value.dtype == "F8_E4M3"), "SafeTensor dtype mismatch for " + value.name)
-    assert(value.byte_end - value.byte_start == element_count(value.shape) * width, "SafeTensor byte length does not match its shape")
+@compile(mlir, stablehlo, xla)
+def mapped[T](handle: int, name: string) -> Tensor[T]
 
-@compile(mlir, stablehlo, xla)
-def mapped_i8(handle: int, name: string) -> Tensor[i8]
-@compile(mlir, stablehlo, xla)
-def mapped_i16(handle: int, name: string) -> Tensor[i16]
-@compile(mlir, stablehlo, xla)
-def mapped_i32(handle: int, name: string) -> Tensor[i32]
-@compile(mlir, stablehlo, xla)
-def mapped_i64(handle: int, name: string) -> Tensor[i64]
-@compile(mlir, stablehlo, xla)
-def mapped_i128(handle: int, name: string) -> Tensor[i128]
-@compile(mlir, stablehlo, xla)
-def mapped_u8(handle: int, name: string) -> Tensor[u8]
-@compile(mlir, stablehlo, xla)
-def mapped_u16(handle: int, name: string) -> Tensor[u16]
-@compile(mlir, stablehlo, xla)
-def mapped_u32(handle: int, name: string) -> Tensor[u32]
-@compile(mlir, stablehlo, xla)
-def mapped_u64(handle: int, name: string) -> Tensor[u64]
-@compile(mlir, stablehlo, xla)
-def mapped_u128(handle: int, name: string) -> Tensor[u128]
-@compile(mlir, stablehlo, xla)
-def mapped_f8e4m3fn(handle: int, name: string) -> Tensor[f8e4m3fn]
-@compile(mlir, stablehlo, xla)
-def mapped_f8e5m2(handle: int, name: string) -> Tensor[f8e5m2]
-@compile(mlir, stablehlo, xla)
-def mapped_f16(handle: int, name: string) -> Tensor[f16]
-@compile(mlir, stablehlo, xla)
-def mapped_bf16(handle: int, name: string) -> Tensor[bf16]
-@compile(mlir, stablehlo, xla)
-def mapped_f32(handle: int, name: string) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def mapped_f64(handle: int, name: string) -> Tensor[f64]
-@compile(mlir, stablehlo, xla)
-def mapped_f128(handle: int, name: string) -> Tensor[f128]
-
-def load_i8(value: SafeTensorEntry) -> Tensor[i8]:
-    validate_entry(value, "I8", 1)
-    return mapped_i8(value.store_handle, value.name)
-def load_i16(value: SafeTensorEntry) -> Tensor[i16]:
-    validate_entry(value, "I16", 2)
-    return mapped_i16(value.store_handle, value.name)
-def load_i32(value: SafeTensorEntry) -> Tensor[i32]:
-    validate_entry(value, "I32", 4)
-    return mapped_i32(value.store_handle, value.name)
-def load_i64(value: SafeTensorEntry) -> Tensor[i64]:
-    validate_entry(value, "I64", 8)
-    return mapped_i64(value.store_handle, value.name)
-def load_i128(value: SafeTensorEntry) -> Tensor[i128]:
-    validate_entry(value, "I128", 16)
-    return mapped_i128(value.store_handle, value.name)
-def load_u8(value: SafeTensorEntry) -> Tensor[u8]:
-    validate_entry(value, "U8", 1)
-    return mapped_u8(value.store_handle, value.name)
-def load_u16(value: SafeTensorEntry) -> Tensor[u16]:
-    validate_entry(value, "U16", 2)
-    return mapped_u16(value.store_handle, value.name)
-def load_u32(value: SafeTensorEntry) -> Tensor[u32]:
-    validate_entry(value, "U32", 4)
-    return mapped_u32(value.store_handle, value.name)
-def load_u64(value: SafeTensorEntry) -> Tensor[u64]:
-    validate_entry(value, "U64", 8)
-    return mapped_u64(value.store_handle, value.name)
-def load_u128(value: SafeTensorEntry) -> Tensor[u128]:
-    validate_entry(value, "U128", 16)
-    return mapped_u128(value.store_handle, value.name)
-def load_f8e4m3fn(value: SafeTensorEntry) -> Tensor[f8e4m3fn]:
-    validate_entry(value, "F8_E4M3FN", 1)
-    return mapped_f8e4m3fn(value.store_handle, value.name)
-def load_f8e5m2(value: SafeTensorEntry) -> Tensor[f8e5m2]:
-    validate_entry(value, "F8_E5M2", 1)
-    return mapped_f8e5m2(value.store_handle, value.name)
-def load_f16(value: SafeTensorEntry) -> Tensor[f16]:
-    validate_entry(value, "F16", 2)
-    return mapped_f16(value.store_handle, value.name)
-def load_bf16(value: SafeTensorEntry) -> Tensor[bf16]:
-    validate_entry(value, "BF16", 2)
-    return mapped_bf16(value.store_handle, value.name)
-def load_f32(value: SafeTensorEntry) -> Tensor[f32]:
-    validate_entry(value, "F32", 4)
-    return mapped_f32(value.store_handle, value.name)
-def load_f64(value: SafeTensorEntry) -> Tensor[f64]:
-    validate_entry(value, "F64", 8)
-    return mapped_f64(value.store_handle, value.name)
-def load_f128(value: SafeTensorEntry) -> Tensor[f128]:
-    validate_entry(value, "F128", 16)
-    return mapped_f128(value.store_handle, value.name)
+# The element representation is a type argument in source and an ABI tag in
+# the compiler/runtime call. It is never encoded in an operation or symbol.
+def load[T](value: SafeTensorEntry) -> Tensor[T]:
+    return mapped[T](value.store_handle, value.name)
 
 # Backend handle construction and lifetime live at the tensor boundary.
 # Consumers use these typed APIs and never redeclare backend symbols.
@@ -212,9 +129,6 @@ def permute[T](value: Tensor[T], axes: list[int]) -> Tensor[T]
 def scale[T](value: Tensor[T], scale: float) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
-def softmax_rows[T](value: Tensor[T]) -> Tensor[T]
-
-@compile(mlir, stablehlo, xla)
 def exp[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
@@ -227,22 +141,16 @@ def rsqrt[T](value: Tensor[T]) -> Tensor[T]
 def mean_last[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
-def add_scalar[T](value: Tensor[T], scalar: f32) -> Tensor[T]
+def maximum_last[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
-def rms_norm[T](value: Tensor[T], weights: Tensor[T], epsilon: float) -> Tensor[T]
+def add_scalar[T](value: Tensor[T], scalar: f32) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
 def broadcast_like[T](value: Tensor[T], target: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
-def sigmoid[T](value: Tensor[T]) -> Tensor[T]
-
-@compile(mlir, stablehlo, xla)
 def gelu[T](value: Tensor[T]) -> Tensor[T]
-
-@compile(mlir, stablehlo, xla)
-def silu[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
 def tanh[T](value: Tensor[T]) -> Tensor[T]
@@ -256,11 +164,63 @@ def concatenate[T](left: Tensor[T], right: Tensor[T], axis: list[int]) -> Tensor
 @compile(mlir, stablehlo, xla)
 def repeat[T](value: Tensor[T], specification: list[int]) -> Tensor[T]
 
-@compile(mlir, stablehlo, xla)
-def rope[T](value: Tensor[T], configuration: Tensor[f64]) -> Tensor[T]
+def rms_norm[T](value: Tensor[T], weights: Tensor[T], epsilon: float) -> Tensor[T]:
+    squared = multiply(copy value, value)
+    variance = mean_last(squared)
+    inverse_root = rsqrt(add_scalar(variance, f32(epsilon)))
+    normalized = multiply(value, inverse_root)
+    return multiply(normalized, weights)
 
-@compile(mlir, stablehlo, xla)
-def softmax_last[T](value: Tensor[T]) -> Tensor[T]
+def sigmoid[T](value: Tensor[T]) -> Tensor[T]:
+    denominator = add_scalar(exp(scale(copy value, -1.0)), f32(1.0))
+    inverse_root = rsqrt(denominator)
+    return multiply(copy inverse_root, inverse_root)
+
+def silu[T](value: Tensor[T]) -> Tensor[T]:
+    return multiply(copy value, sigmoid(value))
+
+def softmax_last[T](value: Tensor[T]) -> Tensor[T]:
+    maximum = maximum_last(copy value)
+    shifted = subtract(value, maximum)
+    exponentials = exp(shifted)
+    dimensions = shape(exponentials)
+    last_axis: int = int(size(dimensions) - 1)
+    total = scale(mean_last(copy exponentials), float(dimensions[last_axis]))
+    return divide(exponentials, total)
+
+def softmax_rows[T](value: Tensor[T]) -> Tensor[T]:
+    return softmax_last(value)
+
+def rotate_half[T](value: Tensor[T]) -> Tensor[T]:
+    dimensions = shape(value)
+    assert(size(dimensions) > 0, "RoPE requires a ranked tensor")
+    last_axis: int = int(size(dimensions) - 1)
+    width = dimensions[last_axis]
+    assert(width % 2 == 0, "RoPE requires an even last dimension")
+    half = int(width / 2)
+    starts: list[int] := []
+    middle: list[int] := []
+    ends: list[int] := []
+    steps: list[int] := []
+    for axis in range(0, int(size(dimensions))):
+        starts.append(0)
+        middle.append(dimensions[axis])
+        ends.append(dimensions[axis])
+        steps.append(1)
+    middle[last_axis] = half
+    right_starts = copy starts
+    right_starts[last_axis] = half
+    left = slice(copy value, starts, middle, copy steps)
+    right = slice(value, right_starts, ends, steps)
+    return concatenate(scale(right, -1.0), left, [last_axis])
+
+# Qwen supplies its precomputed cosine and sine caches as ordinary tensors.
+# RoPE remains an elementwise/view composition and does not become an op ID.
+def rope[T](value: Tensor[T], cosine: Tensor[T], sine: Tensor[T]) -> Tensor[T]:
+    return add(
+        multiply(copy value, cosine),
+        multiply(rotate_half(value), sine),
+    )
 
 # Storage and compute dtype changes are explicit. Model code can keep FP8
 # weights while promoting arithmetic to f16/f32 accumulation.
@@ -406,7 +366,11 @@ test "concatenation and repeat carry explicit axis specifications":
 test "last-axis reductions and rotary embeddings support model composition":
     value = ranked([1.0, 3.0, 2.0, 4.0], [2, 2])
     assert(values(mean_last(value)) == [2.0, 3.0])
-    rotated = rope(ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 4]), ranked([1000000.0, 0.0], [2]))
+    rotated = rope(
+        ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 4]),
+        ranked([1.0, 1.0, 1.0, 1.0], [1, 1, 4]),
+        ranked([0.0, 0.0, 0.0, 0.0], [1, 1, 4]),
+    )
     assert(values(rotated) == [1.0, 2.0, 3.0, 4.0])
 
 test "RMSNorm preserves its generic tensor element and applies learned weights":

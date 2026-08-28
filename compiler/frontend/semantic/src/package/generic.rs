@@ -2129,7 +2129,9 @@ fn type_annotation_name(annotation: &TypeAnnotation) -> Option<String> {
 }
 
 fn simple_type_name(annotation: &TypeAnnotation) -> Option<String> {
-    annotation.simple_name().map(str::to_owned)
+    // Preserve applications such as Tensor[bf16]. Generic result inference
+    // needs the complete type, not only the outer constructor name.
+    type_annotation_name(annotation)
 }
 
 fn specialized_type_name(

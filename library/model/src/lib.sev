@@ -258,9 +258,6 @@ class StateDict:
             state_name(prefix, local_name),
         )
 
-    def f32(local_name: string) -> tensor.Tensor[f32]:
-        return tensor.mapped_f32(store_handle, state_name(prefix, local_name))
-
     def close() -> bool:
         return tensor.safetensor_close(store_handle) == 0
 
@@ -341,46 +338,50 @@ def omnivoice_unmask_schedule(
     assert(remaining == 0)
     return schedule
 
-def parameter_like[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
-    return tensor.convert_like(parameters.f32(name), like)
+def parameter[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    return tensor.load[T](parameters.entry(name))
 
 def linear[T](parameters: borrow StateDict, name: string, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
-    weights = parameter_like(borrow parameters, name + ".weight", copy input)
+    weights = parameter(borrow parameters, name + ".weight", copy input)
     return tensor.matmul(input, tensor.transpose(weights))
 
 def rms_norm[T](parameters: borrow StateDict, name: string, epsilon: float, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
-    weights = parameter_like(borrow parameters, name + ".weight", copy input)
+    weights = parameter(borrow parameters, name + ".weight", copy input)
     return tensor.rms_norm(input, weights, epsilon)
 
-def text_embeddings(
+def text_embeddings[T](
     parameters: borrow StateDict,
     text_ids: tensor.Tensor[i64],
-) -> tensor.Tensor[f32]:
+    like: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
     llm_parameters = scoped(borrow parameters, "llm")
-    return Embedding(llm_parameters.f32("embed_tokens.weight")).forward(text_ids)
+    weights = parameter(borrow llm_parameters, "embed_tokens.weight", like)
+    return Embedding(weights).forward(text_ids)
 
-def audio_embeddings(
+def audio_embeddings[T](
     parameters: borrow StateDict,
     configuration: borrow OmniVoiceConfig,
     audio_ids: tensor.Tensor[i64],
-) -> tensor.Tensor[f32]:
+    like: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
     offsets: list[float] := []
     for codebook in range(0, configuration.audio_codebooks):
         offsets.append(float(codebook * configuration.audio_vocabulary))
     offset_tensor = tensor.i64(tensor.ranked(offsets, [1, configuration.audio_codebooks, 1]))
     shifted_ids = tensor.add(audio_ids, offset_tensor)
-    embedded = Embedding(parameters.f32("audio_embeddings.weight")).forward(shifted_ids)
+    weights = parameter(parameters, "audio_embeddings.weight", like)
+    embedded = Embedding(weights).forward(shifted_ids)
     return tensor.sum_axis(embedded, 1)
 
-def omnivoice_embeddings(
+def omnivoice_embeddings[T](
     parameters: borrow StateDict,
     configuration: borrow OmniVoiceConfig,
     text_ids: tensor.Tensor[i64],
     audio_ids: tensor.Tensor[i64],
-    audio_mask: tensor.Tensor[f32],
-) -> tensor.Tensor[f32]:
-    text = text_embeddings(borrow parameters, text_ids)
-    audio = audio_embeddings(borrow parameters, configuration, audio_ids)
+    audio_mask: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
+    text = text_embeddings(borrow parameters, text_ids, copy audio_mask)
+    audio = audio_embeddings(borrow parameters, configuration, audio_ids, copy audio_mask)
     inverse_mask = tensor.add_scalar(tensor.scale(copy audio_mask, -1.0), f32(1.0))
     return tensor.add(
         tensor.multiply(text, inverse_mask),
@@ -638,7 +639,7 @@ test "downloaded model exposes real mapped SafeTensor metadata and BF16 values":
         norm = weight(store, "model.layers.0.input_layernorm.weight")
         assert(norm.dtype == "BF16")
         assert(norm.shape == [576])
-        values = tensor.values(tensor.load_bf16(norm))
+        values = tensor.values(tensor.load[bf16](norm))
         assert(size(values) == 576)
         assert(values[0] > 0.0)
         assert(tensor.close_safetensors(store))
@@ -648,7 +649,7 @@ test "generic linear lowering executes a real SmolLM2 projection":
     if valid_artifact(root):
         loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
         store = tensors(loaded)
-        q_projection = tensor.load_bf16(weight(store, "model.layers.0.self_attn.q_proj.weight"))
+        q_projection = tensor.load[bf16](weight(store, "model.layers.0.self_attn.q_proj.weight"))
         zeros: list[float] := []
         for _index in range(0, 576):
             zeros.append(0.0)

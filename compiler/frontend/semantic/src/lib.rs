@@ -11844,6 +11844,115 @@ impl Analyzer<'_> {
         {
             if callable_path(application)
                 .as_deref()
+                .is_some_and(|path| path.rsplit('.').next() == Some("load"))
+            {
+                let ([element], [entry]) = (type_arguments.as_slice(), arguments) else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "`load[T]` expects one SafeTensor entry",
+                        Some(span),
+                    ));
+                };
+                let element = self.resolve_source_type(element)?;
+                let tag = severian_universal::tensor::element_storage_tag(&self.types, element)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            "SafeTensor storage does not support this element type",
+                            Some(span),
+                        )
+                    })?;
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let i32_type = self
+                    .types
+                    .resolve_name("i32")
+                    .expect("bootstrap defines i32");
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                let result = self.tensor_type(element, span)?;
+                if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+                    return Err(semantic_error(
+                        "loaded SafeTensor does not satisfy the expected tensor type".into(),
+                        span,
+                    ));
+                }
+                let entry = self.expression(&entry.value, None)?;
+                let instance = self
+                    .class_instances_by_type
+                    .get(&entry.type_id)
+                    .filter(|instance| instance.name.rsplit('.').next() == Some("SafeTensorEntry"))
+                    .cloned()
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            "`load[T]` requires a SafeTensorEntry",
+                            Some(entry.span),
+                        )
+                    })?;
+                let field = |name: &str| {
+                    instance
+                        .fields
+                        .iter()
+                        .position(|field| field.name == name)
+                        .map(|index| (index as u32, instance.fields[index].ty))
+                        .ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000204",
+                                format!("SafeTensorEntry has no `{name}` field"),
+                                Some(span),
+                            )
+                        })
+                };
+                let (handle_index, handle_type) = field("store_handle")?;
+                let (name_index, name_type) = field("name")?;
+                if handle_type != integer || name_type != string {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "SafeTensorEntry storage fields have incompatible ABI types",
+                        Some(span),
+                    ));
+                }
+                let handle = Expression {
+                    id: self.next_id(),
+                    type_id: integer,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(entry.clone()),
+                        index: handle_index,
+                    },
+                    span,
+                };
+                let tensor_name = Expression {
+                    id: self.next_id(),
+                    type_id: string,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(entry),
+                        index: name_index,
+                    },
+                    span,
+                };
+                let tag = Expression {
+                    id: self.next_id(),
+                    type_id: i32_type,
+                    kind: ExpressionKind::Literal(severian_universal::LiteralValue::Integer(
+                        tag.to_string(),
+                    )),
+                    span,
+                };
+                return Ok(Some(self.runtime_call(
+                    "__sev_safetensor_view",
+                    &[integer, string, i32_type],
+                    result,
+                    vec![handle, tensor_name, tag],
+                    span,
+                )));
+            }
+            if callable_path(application)
+                .as_deref()
                 .is_some_and(|path| path.rsplit('.').next() == Some("mapped"))
             {
                 let ([element], [handle, tensor_name]) = (type_arguments.as_slice(), arguments)

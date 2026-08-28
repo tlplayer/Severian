@@ -593,6 +593,149 @@ fn lower_operation(
         ));
     }
 
+    if matches!(
+        operation,
+        tensor::TensorOp::Elementwise(
+            tensor::ElementwiseOp::Scale | tensor::ElementwiseOp::AddScalar
+        )
+    ) {
+        let [LoweredType::Tensor {
+            element,
+            shape: LoweredTensorShape::Ranked(dimensions),
+        }, LoweredType::Float {
+            format: scalar_format,
+        }] = inputs
+        else {
+            return Err(invalid(
+                "tensor-scalar elementwise operations require a ranked tensor and float scalar",
+            ));
+        };
+        if element != &result_element || input_spellings.first() != Some(output) {
+            return Err(invalid(
+                "tensor-scalar elementwise operations must preserve the tensor type",
+            ));
+        }
+        let LoweredTensorElement::Float { .. } = element else {
+            return Err(invalid("tensor-scalar model operations require floating tensors"));
+        };
+        let tensor_scalar = tensor_element_spelling(*element)?;
+        let argument_element = LoweredTensorElement::Float {
+            format: *scalar_format,
+        };
+        let argument_scalar = type_spelling(&LoweredType::Float {
+            format: *scalar_format,
+        })
+        .map_err(|error| invalid(error.to_string()))?;
+        let scalar_conversion = lower_scalar_conversion(
+            "%arg1",
+            argument_element,
+            *element,
+            &argument_scalar,
+            &tensor_scalar,
+            "%scalar",
+        )?;
+        let loops = (0..dimensions.len())
+            .map(|axis| format!("d{axis}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let instruction = if operation
+            == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Scale)
+        {
+            "arith.mulf"
+        } else {
+            "arith.addf"
+        };
+        return Ok(format!(
+            "{scalar_conversion}    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {output}) outs(%empty : {output}) {{\n    ^bb0(%value: {tensor_scalar}, %unused: {tensor_scalar}):\n      %computed = {instruction} %value, %scalar : {tensor_scalar}\n      linalg.yield %computed : {tensor_scalar}\n    }} -> {output}\n    return %result : {output}\n",
+            iterators = vec!["\"parallel\""; dimensions.len()].join(", "),
+        ));
+    }
+
+    if matches!(
+        operation,
+        tensor::TensorOp::Reduce(
+            tensor::ReductionOp::MeanLast | tensor::ReductionOp::MaxLast
+        )
+    ) {
+        let [LoweredType::Tensor {
+            element,
+            shape: input_shape,
+        }] = inputs
+        else {
+            return Err(invalid("last-axis reduction requires one tensor operand"));
+        };
+        if element != &result_element || !is_float(*element) {
+            return Err(invalid(
+                "last-axis model reductions require one floating element type",
+            ));
+        }
+        let input_dimensions = static_dimensions(input_shape)
+            .map_err(|error| invalid(format!("last-axis reduction: {error}")))?;
+        let Some(width) = input_dimensions.last().copied() else {
+            return Err(invalid("last-axis reduction requires a non-scalar tensor"));
+        };
+        if width == 0 {
+            return Err(invalid("last-axis reduction cannot reduce an empty dimension"));
+        }
+        let output_dimensions = input_dimensions[..input_dimensions.len() - 1]
+            .iter()
+            .map(|dimension| LoweredTensorDimension::Known(*dimension as u64))
+            .collect::<Vec<_>>();
+        let ranked_output = type_spelling(&LoweredType::Tensor {
+            element: *element,
+            shape: LoweredTensorShape::Ranked(output_dimensions),
+        })
+        .map_err(|error| invalid(error.to_string()))?;
+        let rank = input_dimensions.len();
+        let loops = (0..rank)
+            .map(|axis| format!("d{axis}"))
+            .collect::<Vec<_>>();
+        let outer = loops[..rank - 1].join(", ");
+        let scalar = tensor_element_spelling(*element)?;
+        let (initial, combine, prepare) = if operation
+            == tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast)
+        {
+            (
+                "0.0".to_owned(),
+                "arith.addf".to_owned(),
+                format!(
+                    "      %width = arith.constant {width}.0 : {scalar}\n      %prepared = arith.divf %value, %width : {scalar}\n"
+                ),
+            )
+        } else {
+            (
+                "-0x7FF0000000000000".to_owned(),
+                "arith.maximumf".to_owned(),
+                "      %prepared = arith.addf %value, %zero_value : ".to_owned()
+                    + &scalar
+                    + "\n",
+            )
+        };
+        let max_zero = if operation
+            == tensor::TensorOp::Reduce(tensor::ReductionOp::MaxLast)
+        {
+            format!("    %zero_value = arith.constant 0.0 : {scalar}\n")
+        } else {
+            String::new()
+        };
+        let cast = if &ranked_output == output {
+            format!("    return %reduced : {output}\n")
+        } else {
+            format!(
+                "    %result = tensor.cast %reduced : {ranked_output} to {output}\n    return %result : {output}\n"
+            )
+        };
+        return Ok(format!(
+            "    %empty = tensor.empty() : {ranked_output}\n    %initial_value = arith.constant {initial} : {scalar}\n    %initialized = linalg.fill ins(%initial_value : {scalar}) outs(%empty : {ranked_output}) -> {ranked_output}\n{max_zero}    %reduced = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%initialized : {ranked_output}) {{\n    ^bb0(%value: {scalar}, %accumulator: {scalar}):\n{prepare}      %next = {combine} %accumulator, %prepared : {scalar}\n      linalg.yield %next : {scalar}\n    }} -> {ranked_output}\n{cast}",
+            identity = loops.join(", "),
+            iterators = (0..rank)
+                .map(|axis| if axis + 1 == rank { "\"reduction\"" } else { "\"parallel\"" })
+                .collect::<Vec<_>>()
+                .join(", "),
+            input = input_spellings[0],
+        ));
+    }
+
     if operation == tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Materialize) {
         if input_spellings.len() != 1 || input_spellings.first() != Some(output) {
             return Err(invalid("materialize preserves the complete tensor type"));
