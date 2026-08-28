@@ -8,8 +8,8 @@ description = "Typed audio buffers, WAV I/O, and sample-rate conversion"
 path = "src/lib.sev"
 
 [dependencies]
-file = { path = "../file", version = "0.1.0" }
-math = { path = "../math", version = "0.1.0" }
+file = { path = "../../system/file", version = "0.1.0" }
+math = { path = "../../core/math", version = "0.1.0" }
 tensor = { path = "../../compute/tensor", version = "0.1.0" }
 
 [package.metadata.library]

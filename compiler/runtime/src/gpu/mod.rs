@@ -438,10 +438,7 @@ fn infer_node_shape(
                             message: "last-axis reduction requires rank at least one".into(),
                         });
                     }
-                    source.pop();
-                    if source.is_empty() {
-                        source.push(1);
-                    }
+                    *source.last_mut().expect("rank checked above") = 1;
                     Some(source)
                 }
                 operation => {
@@ -714,16 +711,26 @@ fn concatenate_runtime_shape(
     right: &[u64],
     axis: i64,
 ) -> Result<Vec<u64>, StorageSpecializationError> {
-    let axis = usize::try_from(axis).map_err(|_| StorageSpecializationError::ShapeInference {
-        node,
-        message: format!("invalid concatenate axis {axis}"),
-    })?;
-    if left.len() != right.len() || axis >= left.len() {
+    if left.len() != right.len() {
         return Err(StorageSpecializationError::ShapeInference {
             node,
-            message: "concatenate ranks or axis are incompatible".into(),
+            message: "concatenate ranks are incompatible".into(),
         });
     }
+    let rank = i64::try_from(left.len()).map_err(|_| {
+        StorageSpecializationError::ShapeInference {
+            node,
+            message: "concatenate rank exceeds the runtime ABI".into(),
+        }
+    })?;
+    let normalized = if axis < 0 { rank.checked_add(axis) } else { Some(axis) };
+    let axis = normalized
+        .and_then(|axis| usize::try_from(axis).ok())
+        .filter(|axis| *axis < left.len())
+        .ok_or_else(|| StorageSpecializationError::ShapeInference {
+            node,
+            message: format!("invalid concatenate axis {axis} for rank {rank}"),
+        })?;
     if left
         .iter()
         .zip(right)

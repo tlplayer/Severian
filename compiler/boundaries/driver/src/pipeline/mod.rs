@@ -753,6 +753,7 @@ impl Compiler {
         let program = self.compile_plan(&plan)?;
         let mut linker_arguments = linker_arguments;
         if !program.tensor_jit_source.is_empty() {
+            stage_tensor_jit_provider(output)?;
             let source = output.with_extension("tensor-jit.c");
             std::fs::write(&source, &program.tensor_jit_source).map_err(|error| {
                 CompileError::NativeLink(format!(
@@ -1165,6 +1166,53 @@ fn render_tensor_jit_launchers(
     Ok(source)
 }
 
+fn stage_tensor_jit_provider(output: &Path) -> Result<(), CompileError> {
+    #[cfg(target_os = "linux")]
+    const PROVIDER_NAME: &str = "libseverian_tensor_jit_provider.so";
+    #[cfg(target_os = "macos")]
+    const PROVIDER_NAME: &str = "libseverian_tensor_jit_provider.dylib";
+    #[cfg(target_os = "windows")]
+    const PROVIDER_NAME: &str = "severian_tensor_jit_provider.dll";
+
+    let executable = std::env::current_exe().map_err(|error| {
+        CompileError::NativeLink(format!(
+            "could not locate the Severian driver while staging the Tensor-JIT provider: {error}"
+        ))
+    })?;
+    let executable_directory = executable.parent().ok_or_else(|| {
+        CompileError::NativeLink(format!(
+            "Severian driver path {} has no parent directory",
+            executable.display()
+        ))
+    })?;
+    let provider = [
+        executable_directory.join(PROVIDER_NAME),
+        executable_directory
+            .parent()
+            .unwrap_or(executable_directory)
+            .join(PROVIDER_NAME),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+    .ok_or_else(|| {
+        CompileError::NativeLink(format!(
+            "Tensor-JIT provider {PROVIDER_NAME} was not built beside the Severian driver; build the severian-tensor-jit-provider workspace target"
+        ))
+    })?;
+    let destination_directory = output.parent().unwrap_or_else(|| Path::new("."));
+    let destination = destination_directory.join(PROVIDER_NAME);
+    if provider != destination {
+        std::fs::copy(&provider, &destination).map_err(|error| {
+            CompileError::NativeLink(format!(
+                "could not stage Tensor-JIT provider {} at {}: {error}",
+                provider.display(),
+                destination.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 fn render_tensor_jit_launcher(
     launcher: &severian_compile::VerifiedTensorJitBundle,
     program: &[u8],
@@ -1196,7 +1244,14 @@ fn render_tensor_jit_launcher(
         .join(",");
     let graph_hash = stable_tensor_jit_hash(program);
     let mut compiler_identity = bundle.architecture.as_bytes().to_vec();
-    compiler_identity.extend_from_slice(b"|severian-tensor-jit-v1|triton-08be0b4ccbac3e13e374e86fbfead4b4cac343e2");
+    compiler_identity.extend_from_slice(b"|severian-tensor-jit-v1|triton-");
+    compiler_identity.extend_from_slice(severian_triton::DONOR_REVISION.as_bytes());
+    compiler_identity.extend_from_slice(b"|provider-");
+    compiler_identity.extend_from_slice(
+        severian_tensor_jit_provider::PROVIDER_ABI_VERSION
+            .to_string()
+            .as_bytes(),
+    );
     let compiler_hash = stable_tensor_jit_hash(&compiler_identity);
     let result_declaration = if result_types.len() == 1 {
         String::new()

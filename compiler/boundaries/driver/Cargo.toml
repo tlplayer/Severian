@@ -31,6 +31,8 @@ severian-source = { path = "../../source" }
 severian-runtime = { path = "../../runtime" }
 severian-target = { path = "../../target" }
 severian-tensor-compiler = { path = "../../../library/compute/tensor/compiler" }
+severian-tensor-jit-provider = { path = "../tensor-jit-provider" }
+severian-triton = { path = "../triton" }
 severian-universal = { path = "../../universal" }
 severian-xxi = { path = "../xxi" }
 toml = "0.8"

@@ -1,0 +1,17 @@
+[package]
+name = "higgs_audio_v2"
+version = "0.1.0"
+edition = "2026"
+description = "Pinned Higgs Audio V2 neural audio decoder composed from tensor primitives"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+audio = { path = "../../../media/audio", version = "0.1.0" }
+tensor = { path = "../../../compute/tensor", version = "0.1.0" }
+
+[package.metadata.library]
+category = "ai"
+implementation = "source"
+status = "experimental"

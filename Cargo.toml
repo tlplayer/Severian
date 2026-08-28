@@ -125,6 +125,8 @@ severian-compile = [
     "severian-mir",
     "severian-mlir",
     "severian-target",
+    "severian-tensor-jit-provider",
+    "severian-triton",
     "severian-universal",
 ]
 severian-artifact = []

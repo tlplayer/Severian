@@ -145,6 +145,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         output.push_str("module {\n");
     }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
+    output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
+    output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
+    output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");
@@ -421,6 +424,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         output.push_str("module {\n");
     }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
+    output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
+    output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
+    output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");
@@ -668,7 +674,7 @@ fn render_cfg_body_function(
                 output.push_str(&format!(
                     "    %local{} = llvm.alloca %sev_one x {} : (i64) -> !llvm.ptr\n",
                     local.id.0,
-                    mlir_type(&local.ty)?
+                    cfg_local_storage_type(&local.ty)?
                 ));
             }
             for (argument, local) in body
@@ -679,6 +685,23 @@ fn render_cfg_body_function(
             {
                 if is_ssa_local_type(&local.ty) {
                     ssa_locals.insert(local.id, format!("%arg{argument}"));
+                    continue;
+                }
+                if matches!(local.ty, LoweredType::Tensor { .. }) {
+                    let boxed = format!("%argument_tensor_box_{argument}");
+                    render_tensor_aggregate_box(
+                        output,
+                        &format!("%arg{argument}"),
+                        &local.ty,
+                        &local.ty,
+                        &boxed,
+                        &format!("argument_tensor_{argument}"),
+                        4,
+                    )?;
+                    output.push_str(&format!(
+                        "    llvm.store {boxed}, %local{} : !llvm.ptr, !llvm.ptr\n",
+                        local.id.0
+                    ));
                     continue;
                 }
                 output.push_str(&format!(
@@ -725,7 +748,15 @@ fn render_cfg_body_function(
 }
 
 fn is_ssa_local_type(ty: &LoweredType) -> bool {
-    matches!(ty, LoweredType::Task(_) | LoweredType::Tensor { .. })
+    matches!(ty, LoweredType::Task(_))
+}
+
+fn cfg_local_storage_type(ty: &LoweredType) -> Result<String, MlirError> {
+    if matches!(ty, LoweredType::Tensor { .. }) {
+        Ok("!llvm.ptr".into())
+    } else {
+        mlir_type(ty)
+    }
 }
 
 fn cfg_ssa_live_ins(
@@ -1207,36 +1238,16 @@ fn render_cfg_operation(
                     let field_type = value_type(module, *field)?;
                     let target_type = aggregate_declaration_field_type(module, &aggregate_type, index)?;
                     let field_value = if tensor_aggregate_abi_type(&target_type).is_some() {
-                        let source = if matches!(
-                            field_type,
-                            LoweredType::Tensor {
-                                shape: LoweredTensorShape::Ranked(_),
-                                ..
-                            }
-                        ) {
-                            let unranked = unranked_tensor_type(&target_type)?;
-                            let cast = format!("%aggregate_unranked_{}_{}", result.0, index);
-                            output.push_str(&format!(
-                                "{indentation}{cast} = tensor.cast %v{} : {} to {unranked}\n",
-                                field.0,
-                                mlir_type(&field_type)?
-                            ));
-                            cast
-                        } else {
-                            format!("%v{}", field.0)
-                        };
-                        let buffer = format!("%aggregate_buffer_{}_{}", result.0, index);
-                        output.push_str(&format!(
-                            "{indentation}{buffer} = bufferization.to_buffer {source} read_only : {} to {}\n",
-                            unranked_tensor_type(&target_type)?,
-                            unranked_memref_type(&target_type)?
-                        ));
                         let converted = format!("%aggregate_field_{}_{}", result.0, index);
-                        output.push_str(&format!(
-                            "{indentation}{converted} = builtin.unrealized_conversion_cast {buffer} : {} to {}\n",
-                            unranked_memref_type(&target_type)?,
-                            aggregate_field_type(&target_type)?
-                        ));
+                        render_tensor_aggregate_box(
+                            output,
+                            &format!("%v{}", field.0),
+                            &field_type,
+                            target_type,
+                            &converted,
+                            &format!("aggregate_{}_{}", result.0, index),
+                            indent,
+                        )?;
                         converted
                     } else {
                         render_named_conversion(
@@ -1257,6 +1268,29 @@ fn render_cfg_operation(
         Operation::Load { place, result } => {
             let ty = value_type(module, *result)?;
             if let severian_lir::PlaceBase::Local(local) = place.base {
+                if place.projection.is_empty()
+                    && body
+                        .locals
+                        .get(local.0 as usize)
+                        .is_some_and(|local| matches!(local.ty, LoweredType::Tensor { .. }))
+                {
+                    let local_type = &body.locals[local.0 as usize].ty;
+                    let boxed = format!("%load_tensor_box_b{}_o{}", block.0, operation_index);
+                    output.push_str(&format!(
+                        "{indentation}{boxed} = llvm.load %local{} : !llvm.ptr -> !llvm.ptr\n",
+                        local.0
+                    ));
+                    render_tensor_aggregate_unbox(
+                        output,
+                        &boxed,
+                        local_type,
+                        &ty,
+                        &format!("%v{}", result.0),
+                        &format!("load_tensor_local_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?;
+                    return Ok(());
+                }
                 if place.projection.is_empty()
                     && body
                         .locals
@@ -1292,36 +1326,15 @@ fn render_cfg_operation(
                         "{indentation}%load_tensor_b{}_o{} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
                         block.0, operation_index, block.0, operation_index, field
                     ));
-                    let unranked = unranked_tensor_type(&stored_type)?;
-                    let unranked_memref = unranked_memref_type(&stored_type)?;
-                    let buffer = format!("%load_buffer_b{}_o{}", block.0, operation_index);
-                    output.push_str(&format!(
-                        "{indentation}{buffer} = builtin.unrealized_conversion_cast %load_tensor_b{}_o{} : {} to {unranked_memref}\n",
-                        block.0,
-                        operation_index,
-                        aggregate_field_type(&stored_type)?
-                    ));
-                    let loaded = if matches!(
-                        ty,
-                        LoweredType::Tensor {
-                            shape: LoweredTensorShape::Ranked(_),
-                            ..
-                        }
-                    ) {
-                        format!("%load_unranked_b{}_o{}", block.0, operation_index)
-                    } else {
-                        format!("%v{}", result.0)
-                    };
-                    output.push_str(&format!(
-                        "{indentation}{loaded} = bufferization.to_tensor {buffer} restrict writable : {unranked_memref} to {unranked}\n"
-                    ));
-                    if loaded != format!("%v{}", result.0) {
-                        output.push_str(&format!(
-                            "{indentation}%v{} = tensor.cast {loaded} : {unranked} to {}\n",
-                            result.0,
-                            mlir_type(&ty)?
-                        ));
-                    }
+                    render_tensor_aggregate_unbox(
+                        output,
+                        &format!("%load_tensor_b{}_o{}", block.0, operation_index),
+                        stored_type,
+                        &ty,
+                        &format!("%v{}", result.0),
+                        &format!("load_tensor_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?;
                 } else {
                     let extracted = format!("%load_field_b{}_o{}", block.0, operation_index);
                     output.push_str(&format!(
@@ -1368,6 +1381,29 @@ fn render_cfg_operation(
                     && body
                         .locals
                         .get(local.0 as usize)
+                        .is_some_and(|local| matches!(local.ty, LoweredType::Tensor { .. }))
+                {
+                    let target_type = &body.locals[local.0 as usize].ty;
+                    let boxed = format!("%store_tensor_box_b{}_o{}", block.0, operation_index);
+                    render_tensor_aggregate_box(
+                        output,
+                        &format!("%v{}", value.0),
+                        &ty,
+                        target_type,
+                        &boxed,
+                        &format!("store_tensor_local_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?;
+                    output.push_str(&format!(
+                        "{indentation}llvm.store {boxed}, %local{} : !llvm.ptr, !llvm.ptr\n",
+                        local.0
+                    ));
+                    return Ok(());
+                }
+                if place.projection.is_empty()
+                    && body
+                        .locals
+                        .get(local.0 as usize)
                         .is_some_and(|local| is_ssa_local_type(&local.ty))
                 {
                     let target_type = &body.locals[local.0 as usize].ty;
@@ -1407,37 +1443,15 @@ fn render_cfg_operation(
                     block.0, operation_index
                 ));
                 let stored = if tensor_aggregate_abi_type(&stored_type).is_some() {
-                    let source = if matches!(
-                        ty,
-                        LoweredType::Tensor {
-                            shape: LoweredTensorShape::Ranked(_),
-                            ..
-                        }
-                    ) {
-                        let name = format!("%store_unranked_b{}_o{}", block.0, operation_index);
-                        output.push_str(&format!(
-                            "{indentation}{name} = tensor.cast %v{} : {} to {}\n",
-                            value.0,
-                            mlir_type(&ty)?,
-                            unranked_tensor_type(&stored_type)?
-                        ));
-                        name
-                    } else {
-                        format!("%v{}", value.0)
-                    };
-                    let buffer = format!("%store_buffer_b{}_o{}", block.0, operation_index);
-                    output.push_str(&format!(
-                        "{indentation}{buffer} = bufferization.to_buffer {source} read_only : {} to {}\n",
-                        unranked_tensor_type(&stored_type)?,
-                        unranked_memref_type(&stored_type)?
-                    ));
-                    output.push_str(&format!(
-                        "{indentation}%store_tensor_b{}_o{} = builtin.unrealized_conversion_cast {buffer} : {} to {}\n",
-                        block.0,
-                        operation_index,
-                        unranked_memref_type(&stored_type)?,
-                        aggregate_field_type(&stored_type)?
-                    ));
+                    render_tensor_aggregate_box(
+                        output,
+                        &format!("%v{}", value.0),
+                        &ty,
+                        stored_type,
+                        &format!("%store_tensor_b{}_o{}", block.0, operation_index),
+                        &format!("store_tensor_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?;
                     format!("%store_tensor_b{}_o{}", block.0, operation_index)
                 } else {
                     render_named_conversion(
@@ -1857,7 +1871,33 @@ fn render_cfg_terminator(
                     target.0,
                     function_symbol(callee),
                 ));
-                if is_ssa_local_type(&callee.result) {
+                if matches!(callee.result, LoweredType::Tensor { .. }) {
+                    let severian_lir::PlaceBase::Local(local) = destination.base else {
+                        return Err(MlirError::UnsupportedOperation(
+                            "tensor call result must target a local place".into(),
+                        ));
+                    };
+                    if !destination.projection.is_empty() {
+                        return Err(MlirError::UnsupportedOperation(
+                            "tensor call result cannot target a projected place".into(),
+                        ));
+                    }
+                    let local_type = &body.locals[local.0 as usize].ty;
+                    let boxed = format!("%call_result_box_{}", target.0);
+                    render_tensor_aggregate_box(
+                        output,
+                        &format!("%call_result_{}", target.0),
+                        &callee.result,
+                        local_type,
+                        &boxed,
+                        &format!("call_result_tensor_{}", target.0),
+                        indent,
+                    )?;
+                    output.push_str(&format!(
+                        "{indentation}llvm.store {boxed}, %local{} : !llvm.ptr, !llvm.ptr\n",
+                        local.0
+                    ));
+                } else if is_ssa_local_type(&callee.result) {
                     let severian_lir::PlaceBase::Local(local) = destination.base else {
                         return Err(MlirError::UnsupportedOperation(
                             "tensor call result must target a local SSA place".into(),
@@ -3262,7 +3302,118 @@ fn tensor_aggregate_abi_type(ty: &LoweredType) -> Option<&'static str> {
             ..
         }
     )
-    .then_some("!llvm.struct<(i64, !llvm.ptr)>")
+    .then_some("!llvm.ptr")
+}
+
+const UNRANKED_MEMREF_DESCRIPTOR_TYPE: &str = "!llvm.struct<(i64, !llvm.ptr)>";
+
+fn render_tensor_aggregate_box(
+    output: &mut String,
+    source: &str,
+    source_type: &LoweredType,
+    tensor_type: &LoweredType,
+    result: &str,
+    unique: &str,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let unranked_tensor = unranked_tensor_type(tensor_type)?;
+    let unranked_memref = unranked_memref_type(tensor_type)?;
+    let tensor = if matches!(
+        source_type,
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(_),
+            ..
+        }
+    ) {
+        let cast = format!("%{unique}_unranked");
+        output.push_str(&format!(
+            "{indentation}{cast} = tensor.cast {source} : {} to {unranked_tensor}\n",
+            mlir_type(source_type)?
+        ));
+        cast
+    } else {
+        source.to_owned()
+    };
+    let buffer = format!("%{unique}_buffer");
+    let descriptor = format!("%{unique}_descriptor");
+    let rank = format!("%{unique}_rank");
+    let pointer = format!("%{unique}_pointer");
+    output.push_str(&format!(
+        "{indentation}{buffer} = bufferization.to_buffer {tensor} read_only : {unranked_tensor} to {unranked_memref}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{descriptor} = builtin.unrealized_conversion_cast {buffer} : {unranked_memref} to {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{rank} = llvm.extractvalue {descriptor}[0] : {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{pointer} = llvm.extractvalue {descriptor}[1] : {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{result} = func.call @__sev_tensor_box_unranked({rank}, {pointer}) : (i64, !llvm.ptr) -> !llvm.ptr\n"
+    ));
+    Ok(())
+}
+
+fn render_tensor_aggregate_unbox(
+    output: &mut String,
+    boxed: &str,
+    tensor_type: &LoweredType,
+    result_type: &LoweredType,
+    result: &str,
+    unique: &str,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let unranked_tensor = unranked_tensor_type(tensor_type)?;
+    let unranked_memref = unranked_memref_type(tensor_type)?;
+    let rank = format!("%{unique}_rank");
+    let pointer = format!("%{unique}_pointer");
+    let descriptor0 = format!("%{unique}_descriptor0");
+    let descriptor1 = format!("%{unique}_descriptor1");
+    let descriptor = format!("%{unique}_descriptor");
+    let buffer = format!("%{unique}_buffer");
+    output.push_str(&format!(
+        "{indentation}{rank} = func.call @__sev_tensor_box_rank({boxed}) : (!llvm.ptr) -> i64\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{pointer} = func.call @__sev_tensor_box_descriptor({boxed}) : (!llvm.ptr) -> !llvm.ptr\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{descriptor0} = llvm.mlir.undef : {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{descriptor1} = llvm.insertvalue {rank}, {descriptor0}[0] : {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{descriptor} = llvm.insertvalue {pointer}, {descriptor1}[1] : {UNRANKED_MEMREF_DESCRIPTOR_TYPE}\n"
+    ));
+    output.push_str(&format!(
+        "{indentation}{buffer} = builtin.unrealized_conversion_cast {descriptor} : {UNRANKED_MEMREF_DESCRIPTOR_TYPE} to {unranked_memref}\n"
+    ));
+    if matches!(
+        result_type,
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(_),
+            ..
+        }
+    ) {
+        let tensor = format!("%{unique}_unranked");
+        output.push_str(&format!(
+            "{indentation}{tensor} = bufferization.to_tensor {buffer} restrict writable : {unranked_memref} to {unranked_tensor}\n"
+        ));
+        output.push_str(&format!(
+            "{indentation}{result} = tensor.cast {tensor} : {unranked_tensor} to {}\n",
+            mlir_type(result_type)?
+        ));
+    } else {
+        output.push_str(&format!(
+            "{indentation}{result} = bufferization.to_tensor {buffer} restrict writable : {unranked_memref} to {unranked_tensor}\n"
+        ));
+    }
+    Ok(())
 }
 
 fn artifact_parameter(index: usize, ty: &LoweredType) -> Result<String, MlirError> {

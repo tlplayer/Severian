@@ -458,6 +458,31 @@ pub fn compile_specialized_fusion_cpu(
     specialization: &KernelSpecialization,
     target: &severian_target::TargetSpec,
 ) -> Result<MlirArtifact, CompileError> {
+    let terminal_metadata = output_nodes
+        .iter()
+        .copied()
+        .filter(|node| {
+            let node = graph.node(*node);
+            node.kind == NodeKind::StorageView
+                && matches!(node.operation.as_str(), "shape" | "strides" | "values")
+        })
+        .collect::<BTreeSet<_>>();
+    let emission_output_nodes = output_nodes
+        .iter()
+        .map(|node| {
+            let node_data = graph.node(*node);
+            if terminal_metadata.contains(node) {
+                node_data.inputs.first().copied().ok_or_else(|| {
+                    invalid(format!(
+                        "terminal storage metadata node {} has no tensor input",
+                        node.0
+                    ))
+                })
+            } else {
+                Ok(*node)
+            }
+        })
+        .collect::<Result<Vec<_>, CompileError>>()?;
     let mut builder = TypeContext::builder();
     severian_universal::install_primitives(&mut builder)
         .map_err(|error| invalid(format!("Tensor-JIT primitive setup failed: {error}")))?;
@@ -515,7 +540,7 @@ pub fn compile_specialized_fusion_cpu(
             })
         })
         .collect::<Result<Vec<_>, CompileError>>()?;
-    let outputs = output_nodes
+    let outputs = emission_output_nodes
         .iter()
         .enumerate()
         .map(|(index, node)| {
@@ -531,7 +556,10 @@ pub fn compile_specialized_fusion_cpu(
     let input_set = input_nodes.iter().copied().collect::<BTreeSet<_>>();
     let mut compile_operations = Vec::new();
     for node in graph.nodes() {
-        if input_set.contains(&node.id) || matches!(node.kind, NodeKind::Parameter) {
+        if input_set.contains(&node.id)
+            || matches!(node.kind, NodeKind::Parameter)
+            || terminal_metadata.contains(&node.id)
+        {
             continue;
         }
         let operation = fusion_tensor_operation(node)?;
@@ -571,7 +599,7 @@ pub fn compile_specialized_fusion_cpu(
         compiler: tensor::compiler_id(),
         operations: Vec::new(),
         compile_operations,
-        output_slots: output_nodes.iter().map(|node| node.0).collect(),
+        output_slots: emission_output_nodes.iter().map(|node| node.0).collect(),
         inputs,
         outputs,
         value_contracts: Vec::new(),
@@ -581,6 +609,61 @@ pub fn compile_specialized_fusion_cpu(
     region
         .rebuild_value_contracts(&types)
         .map_err(|error| invalid(format!("Tensor-JIT contract rebuild failed: {error}")))?;
+    if region.compile_operations.is_empty() {
+        let lowered_inputs = region
+            .inputs
+            .iter()
+            .map(|value| lower_type(value.type_id, &CompileContext { types: &types, target }))
+            .collect::<Result<Vec<_>, _>>()?;
+        let lowered_outputs = region
+            .outputs
+            .iter()
+            .map(|value| lower_type(value.type_id, &CompileContext { types: &types, target }))
+            .collect::<Result<Vec<_>, _>>()?;
+        let parameters = lowered_inputs
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| Ok(format!("%arg{index}: {}", type_spelling(ty)?)))
+            .collect::<Result<Vec<_>, severian_mlir::MlirError>>()
+            .map_err(|error| invalid(error.to_string()))?
+            .join(", ");
+        let result_types = lowered_outputs
+            .iter()
+            .map(type_spelling)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| invalid(error.to_string()))?;
+        let result_signature = match result_types.as_slice() {
+            [] => String::new(),
+            [result] => format!(" -> {result}"),
+            results => format!(" -> ({})", results.join(", ")),
+        };
+        let returned = emission_output_nodes
+            .iter()
+            .map(|node| {
+                input_nodes
+                    .iter()
+                    .position(|input| input == node)
+                    .map(|index| format!("%arg{index}"))
+                    .ok_or_else(|| invalid("empty Tensor-JIT region output is not an input"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let return_operation = if returned.is_empty() {
+            "return".to_owned()
+        } else {
+            format!(
+                "return {} : {}",
+                returned.join(", "),
+                result_types.join(", ")
+            )
+        };
+        return Ok(MlirArtifact {
+            module: format!(
+                "module {{\n  func.func @entry({parameters}){result_signature} attributes {{llvm.emit_c_interface}} {{\n    {return_operation}\n  }}\n}}"
+            ),
+            inputs: lowered_inputs,
+            outputs: lowered_outputs,
+        });
+    }
     let mut artifact = TensorCompiler.compile_cpu(
         &region,
         &CompileContext {
@@ -638,6 +721,7 @@ fn fusion_tensor_operation(
         (NodeKind::Elementwise, "divide") => tensor::TensorOp::Elementwise(ElementwiseOp::Divide),
         (NodeKind::Elementwise, "exp") => tensor::TensorOp::Elementwise(ElementwiseOp::Exp),
         (NodeKind::Elementwise, "log") => tensor::TensorOp::Elementwise(ElementwiseOp::Log),
+        (NodeKind::Elementwise, "sin") => tensor::TensorOp::Elementwise(ElementwiseOp::Sin),
         (NodeKind::Elementwise, "tanh") => tensor::TensorOp::Elementwise(ElementwiseOp::Tanh),
         (NodeKind::Elementwise, "rsqrt") => tensor::TensorOp::Elementwise(ElementwiseOp::Rsqrt),
         (NodeKind::Elementwise, "relu") => tensor::TensorOp::Elementwise(ElementwiseOp::Relu),
@@ -1407,6 +1491,7 @@ fn lower_structured_elementwise(
         }
         tensor::ElementwiseOp::Exp
         | tensor::ElementwiseOp::Log
+        | tensor::ElementwiseOp::Sin
         | tensor::ElementwiseOp::Tanh
         | tensor::ElementwiseOp::Rsqrt => {
             if !is_float(*element) || operands.len() != 1 {
@@ -1417,6 +1502,7 @@ fn lower_structured_elementwise(
             let unary = match operation {
                 tensor::ElementwiseOp::Exp => ScalarUnaryOperation::Exp,
                 tensor::ElementwiseOp::Log => ScalarUnaryOperation::Log,
+                tensor::ElementwiseOp::Sin => ScalarUnaryOperation::Sin,
                 tensor::ElementwiseOp::Tanh => ScalarUnaryOperation::Tanh,
                 tensor::ElementwiseOp::Rsqrt => ScalarUnaryOperation::Rsqrt,
                 _ => unreachable!(),
@@ -2903,6 +2989,7 @@ fn legalize_cpu_operation(
                 elementwise,
                 tensor::ElementwiseOp::Exp
                     | tensor::ElementwiseOp::Log
+                    | tensor::ElementwiseOp::Sin
                     | tensor::ElementwiseOp::Tanh
                     | tensor::ElementwiseOp::Rsqrt
                     | tensor::ElementwiseOp::Scale
@@ -2947,6 +3034,7 @@ fn legalize_cpu_operation(
                 }
                 tensor::ElementwiseOp::Exp
                 | tensor::ElementwiseOp::Log
+                | tensor::ElementwiseOp::Sin
                 | tensor::ElementwiseOp::Tanh
                 | tensor::ElementwiseOp::Rsqrt
                 | tensor::ElementwiseOp::Relu => {
@@ -3823,6 +3911,8 @@ fn lower_operation(
         Some("math.exp")
     } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Log) {
         Some("math.log")
+    } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Sin) {
+        Some("math.sin")
     } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Tanh) {
         Some("math.tanh")
     } else if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Rsqrt) {
@@ -4659,6 +4749,7 @@ mod tests {
     const FLOAT_OPERATIONS: &[(tensor::TensorOp, usize)] = &[
         (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Exp), 1),
         (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Log), 1),
+        (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Sin), 1),
         (
             tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Tanh),
             1,

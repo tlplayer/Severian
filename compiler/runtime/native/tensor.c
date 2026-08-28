@@ -15,6 +15,35 @@ typedef struct {
     uintptr_t *values;
 } sev_list;
 
+/* An MLIR unranked memref points at a ranked descriptor owned by its current
+ * function. Aggregate tensor fields need a stable copy that survives return. */
+typedef struct {
+    int64_t rank;
+    uintptr_t descriptor[];
+} sev_unranked_tensor_box;
+
+void *__sev_tensor_box_unranked(int64_t rank, const void *descriptor) {
+    if (rank < 0 || rank > 64 || descriptor == NULL) abort();
+    size_t words = 3u + 2u * (size_t)rank;
+    if (words > (SIZE_MAX - sizeof(sev_unranked_tensor_box)) / sizeof(uintptr_t)) abort();
+    sev_unranked_tensor_box *box = malloc(
+        sizeof(sev_unranked_tensor_box) + words * sizeof(uintptr_t));
+    if (box == NULL) abort();
+    box->rank = rank;
+    memcpy(box->descriptor, descriptor, words * sizeof(uintptr_t));
+    return box;
+}
+
+int64_t __sev_tensor_box_rank(const void *value) {
+    if (value == NULL) abort();
+    return ((const sev_unranked_tensor_box *)value)->rank;
+}
+
+void *__sev_tensor_box_descriptor(void *value) {
+    if (value == NULL) abort();
+    return ((sev_unranked_tensor_box *)value)->descriptor;
+}
+
 typedef struct {
     unsigned __int128 bits;
 } sev_tensor_cell;

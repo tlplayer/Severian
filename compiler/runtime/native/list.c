@@ -729,6 +729,10 @@ _Bool __sev_list_get_bool(void *storage, int64_t index) {
     return (_Bool)__sev_list_get_i64(storage, index);
 }
 
+uint8_t __sev_list_get_u8(void *storage, int64_t index) {
+    return (uint8_t)__sev_list_get_i64(storage, index);
+}
+
 int64_t __sev_list_index_i64(void *storage, int64_t index) {
     return __sev_list_get_i64(storage, index);
 }

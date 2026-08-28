@@ -1,0 +1,278 @@
+import audio
+import tensor
+
+
+SampleRate = 24000
+Codebooks = 8
+CodebookSize = 1024
+CodebookDimension = 64
+HiddenSize = 256
+DecoderHiddenSize = 1024
+UpsamplingRatios = [8, 5, 4, 2, 3]
+
+def zeros_like[T](shape: list[int], like: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    return tensor.convert_like(tensor.zeros(shape), like)
+
+def linear_last[T](
+    value: tensor.Tensor[T],
+    weight: tensor.Tensor[T],
+    bias: tensor.Tensor[T],
+) -> tensor.Tensor[T]:
+    output = tensor.matmul(value, tensor.transpose(weight))
+    dimensions = tensor.shape(output)
+    assert(size(dimensions) == 3, "Higgs linear projection expects [batch,time,channels]")
+    return tensor.add(output, tensor.reshape(bias, [1, 1, dimensions[2]]))
+
+def conv1d_asymmetric[T](
+    value: tensor.Tensor[T],
+    weight: tensor.Tensor[T],
+    bias: tensor.Tensor[T],
+    stride: int,
+    padding_left: int,
+    padding_right: int,
+    dilation: int,
+) -> tensor.Tensor[T]:
+    dimensions = tensor.shape(value)
+    weight_shape = tensor.shape(weight)
+    assert(size(dimensions) == 3, "conv1d expects [batch,channels,width]")
+    assert(size(weight_shape) == 3, "conv1d weights must be [output,input,kernel]")
+    assert(dimensions[1] == weight_shape[1], "conv1d input channels do not match weights")
+    assert(stride > 0 and dilation > 0 and padding_left >= 0 and padding_right >= 0)
+    batch = dimensions[0]
+    channels = dimensions[1]
+    width = dimensions[2]
+    kernel = weight_shape[2]
+    padded := value
+    if padding_left > 0:
+        padded = tensor.concatenate(zeros_like([batch, channels, padding_left], copy value), padded, [-1])
+    if padding_right > 0:
+        padded = tensor.concatenate(padded, zeros_like([batch, channels, padding_right], copy value), [-1])
+    output_width = int((width + padding_left + padding_right - dilation * (kernel - 1) - 1) / stride) + 1
+    assert(output_width > 0, "conv1d has no valid output positions")
+    end0 = (output_width - 1) * stride + 1
+    first = tensor.slice(copy padded, [0, 0, 0], [batch, channels, end0], [1, 1, stride])
+    patches := tensor.permute(first, [0, 2, 1])
+    for position in range(1, kernel):
+        start = position * dilation
+        finish = start + (output_width - 1) * stride + 1
+        selected = tensor.slice(copy padded, [0, 0, start], [batch, channels, finish], [1, 1, stride])
+        patches = tensor.concatenate(patches, tensor.permute(selected, [0, 2, 1]), [-1])
+    flattened = tensor.reshape(weight, [weight_shape[0], weight_shape[1] * kernel])
+    projected = tensor.matmul(patches, tensor.transpose(flattened))
+    channels_first = tensor.permute(projected, [0, 2, 1])
+    return tensor.add(channels_first, tensor.reshape(bias, [1, weight_shape[0], 1]))
+
+def conv1d[T](
+    value: tensor.Tensor[T],
+    weight: tensor.Tensor[T],
+    bias: tensor.Tensor[T],
+    stride: int,
+    padding: int,
+    dilation: int,
+) -> tensor.Tensor[T]:
+    return conv1d_asymmetric(value, weight, bias, stride + 0, padding + 0, padding + 0, dilation + 0)
+
+def reverse_kernel[T](weight: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    dimensions = tensor.shape(weight)
+    assert(size(dimensions) == 3)
+    kernel = dimensions[2]
+    flipped := tensor.slice(copy weight, [0, 0, kernel - 1], [dimensions[0], dimensions[1], kernel], [1, 1, 1])
+    for position in range(1, kernel):
+        source = kernel - position - 1
+        selected = tensor.slice(copy weight, [0, 0, source], [dimensions[0], dimensions[1], source + 1], [1, 1, 1])
+        flipped = tensor.concatenate(flipped, selected, [-1])
+    return flipped
+
+def conv_transpose1d[T](
+    value: tensor.Tensor[T],
+    weight: tensor.Tensor[T],
+    bias: tensor.Tensor[T],
+    stride: int,
+    padding: int,
+    output_padding: int,
+) -> tensor.Tensor[T]:
+    dimensions = tensor.shape(value)
+    weight_shape = tensor.shape(weight)
+    assert(size(dimensions) == 3 and size(weight_shape) == 3)
+    assert(dimensions[1] == weight_shape[0], "transposed convolution channels do not match")
+    mask_values: list[float] := [1.0]
+    for _position in range(1, stride):
+        mask_values.append(0.0)
+    mask = tensor.convert_like(tensor.ranked(mask_values, [1, 1, 1, stride]), copy value)
+    expanded = tensor.multiply(
+        tensor.reshape(value, [dimensions[0], dimensions[1], dimensions[2], 1]),
+        mask,
+    )
+    upsampled := tensor.reshape(expanded, [dimensions[0], dimensions[1], dimensions[2] * stride])
+    upsampled_width = (dimensions[2] - 1) * stride + 1
+    upsampled = tensor.slice(
+        upsampled,
+        [0, 0, 0],
+        [dimensions[0], dimensions[1], upsampled_width],
+        [1, 1, 1],
+    )
+    kernel = weight_shape[2]
+    regular_weight = reverse_kernel(tensor.permute(weight, [1, 0, 2]))
+    full_padding = kernel - 1 - padding
+    return conv1d_asymmetric(
+        upsampled,
+        regular_weight,
+        bias,
+        1,
+        full_padding,
+        full_padding + output_padding,
+        1,
+    )
+
+def snake[T](value: tensor.Tensor[T], alpha: tensor.Tensor[T]) -> tensor.Tensor[T]:
+    phase = tensor.multiply(copy alpha, copy value)
+    sine = tensor.sin(phase)
+    curved = tensor.divide(tensor.multiply(copy sine, sine), tensor.add_scalar(alpha, f32(0.000000001)))
+    return tensor.add(value, curved)
+
+def parameter(parameters: borrow tensor.SafeTensorStore, name: string) -> tensor.Tensor[f32]:
+    return tensor.load[f32](tensor.entry(copy parameters, name))
+
+def residual_unit(
+    parameters: borrow tensor.SafeTensorStore,
+    prefix: string,
+    value: tensor.Tensor[f32],
+    dilation: int,
+) -> tensor.Tensor[f32]:
+    activated = snake(copy value, parameter(parameters, prefix + ".snake1.alpha"))
+    hidden := conv1d(
+        activated,
+        parameter(parameters, prefix + ".conv1.weight"),
+        parameter(parameters, prefix + ".conv1.bias"),
+        1,
+        3 * dilation,
+        dilation,
+    )
+    hidden = snake(hidden, parameter(parameters, prefix + ".snake2.alpha"))
+    hidden = conv1d(
+        hidden,
+        parameter(parameters, prefix + ".conv2.weight"),
+        parameter(parameters, prefix + ".conv2.bias"),
+        1,
+        0,
+        1,
+    )
+    return tensor.add(value, hidden)
+
+def decoder_block(
+    parameters: borrow tensor.SafeTensorStore,
+    block: int,
+    stride: int,
+    value: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    prefix = "acoustic_decoder.block." + string(block)
+    hidden := snake(value, parameter(parameters, prefix + ".snake1.alpha"))
+    hidden = conv_transpose1d(
+        hidden,
+        parameter(parameters, prefix + ".conv_t1.weight"),
+        parameter(parameters, prefix + ".conv_t1.bias"),
+        stride,
+        int((stride + 1) / 2),
+        stride % 2,
+    )
+    hidden = residual_unit(parameters, prefix + ".res_unit1", hidden, 1)
+    hidden = residual_unit(parameters, prefix + ".res_unit2", hidden, 3)
+    return residual_unit(parameters, prefix + ".res_unit3", hidden, 9)
+
+def decode_codes(
+    parameters: borrow tensor.SafeTensorStore,
+    codes: tensor.Tensor[i64],
+) -> tensor.Tensor[f32]:
+    dimensions = tensor.shape(codes)
+    assert(size(dimensions) == 3, "Higgs codes must be [batch,codebook,time]")
+    assert(dimensions[1] > 0 and dimensions[1] <= Codebooks)
+    batch = dimensions[0]
+    frames = dimensions[2]
+    first_indices = tensor.reshape(
+        tensor.slice(copy codes, [0, 0, 0], [batch, 1, frames], [1, 1, 1]),
+        [batch, frames],
+    )
+    first_prefix = "quantizer.quantizers.0"
+    first_vectors = tensor.gather(parameter(parameters, first_prefix + ".codebook.embed"), first_indices)
+    quantized := linear_last(
+        first_vectors,
+        parameter(parameters, first_prefix + ".project_out.weight"),
+        parameter(parameters, first_prefix + ".project_out.bias"),
+    )
+    for codebook in range(1, dimensions[1]):
+        indices = tensor.reshape(
+            tensor.slice(copy codes, [0, codebook, 0], [batch, codebook + 1, frames], [1, 1, 1]),
+            [batch, frames],
+        )
+        prefix = "quantizer.quantizers." + string(codebook)
+        vectors = tensor.gather(parameter(parameters, prefix + ".codebook.embed"), indices)
+        projected = linear_last(
+            vectors,
+            parameter(parameters, prefix + ".project_out.weight"),
+            parameter(parameters, prefix + ".project_out.bias"),
+        )
+        quantized = tensor.add(quantized, projected)
+    acoustic = linear_last(
+        quantized,
+        parameter(parameters, "fc2.weight"),
+        parameter(parameters, "fc2.bias"),
+    )
+    hidden := tensor.permute(acoustic, [0, 2, 1])
+    hidden = conv1d(
+        hidden,
+        parameter(parameters, "acoustic_decoder.conv1.weight"),
+        parameter(parameters, "acoustic_decoder.conv1.bias"),
+        1,
+        3,
+        1,
+    )
+    for block in range(0, int(size(UpsamplingRatios))):
+        hidden = decoder_block(parameters, block, UpsamplingRatios[block], hidden)
+    hidden = snake(hidden, parameter(parameters, "acoustic_decoder.snake1.alpha"))
+    return conv1d(
+        hidden,
+        parameter(parameters, "acoustic_decoder.conv2.weight"),
+        parameter(parameters, "acoustic_decoder.conv2.bias"),
+        1,
+        3,
+        1,
+    )
+
+class HiggsAudioV2Decoder:
+    parameters: tensor.SafeTensorStore
+
+    def HiggsAudioV2Decoder(root: string):
+        parameters := tensor.open_safetensors(root + "/audio_tokenizer")
+
+    def decode(codes: tensor.Tensor[i64]) -> tensor.Tensor[f32]:
+        return decode_codes(borrow parameters, codes)
+
+    def write(path: string, codes: tensor.Tensor[i64]) -> bool:
+        waveform = decode(codes)
+        output = audio.AudioBuffer(tensor.values(waveform), SampleRate, 1)
+        return audio.write_wav(path, borrow output)
+
+    def close() -> bool:
+        return tensor.close_safetensors(parameters)
+
+
+test "Higgs Audio V2 decoder constants match the pinned OmniVoice config":
+    assert(SampleRate == 24000)
+    assert(Codebooks == 8 and CodebookSize == 1024 and CodebookDimension == 64)
+    assert(HiddenSize == 256 and DecoderHiddenSize == 1024)
+    assert(UpsamplingRatios == [8, 5, 4, 2, 3])
+
+test "conv1d is a tensor-primitive composition":
+    value = tensor.to_f_32(tensor.ranked([1.0, 2.0, 3.0], [1, 1, 3]))
+    weight = tensor.to_f_32(tensor.ranked([1.0], [1, 1, 1]))
+    bias = tensor.to_f_32(tensor.ranked([0.0], [1]))
+    output = conv1d(value, weight, bias, 1, 0, 1)
+    assert(tensor.shape(output) == [1, 1, 3])
+    assert(tensor.values(output) == [1.0, 2.0, 3.0])
+
+test "transposed convolution specializes output width from runtime shape":
+    value = tensor.to_f_32(tensor.ranked([1.0, 2.0], [1, 1, 2]))
+    weight = tensor.to_f_32(tensor.ranked([1.0, 1.0], [1, 1, 2]))
+    bias = tensor.to_f_32(tensor.ranked([0.0], [1]))
+    output = conv_transpose1d(value, weight, bias, 2, 1, 0)
+    assert(tensor.shape(output) == [1, 1, 2])

@@ -471,7 +471,7 @@ fn runtime_operand_data_specializes_every_shape_changing_structural_class() {
             vec![NodeId(0), NodeId(1), NodeId(14)],
             vec![RuntimeOperand {
                 input_index: 2,
-                values: vec![0],
+                values: vec![-1],
             }],
         ),
         runtime_node(
@@ -516,7 +516,7 @@ fn runtime_operand_data_specializes_every_shape_changing_structural_class() {
     assert_eq!(shape(10), [2, 1]);
     assert_eq!(shape(12), [4, 2]);
     assert_eq!(shape(13), [2, 2]);
-    assert_eq!(shape(15), [4, 2]);
+    assert_eq!(shape(15), [2, 4]);
     assert_eq!(shape(16), [2, 2]);
     let slice = specialization
         .strides

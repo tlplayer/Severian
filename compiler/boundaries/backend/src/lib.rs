@@ -792,7 +792,15 @@ fn emit_mlir_binary(
         "c".into(),
     ];
     if shared {
-        clang_arguments.extend(["-shared".into(), "-fPIC".into()]);
+        clang_arguments.extend([
+            "-shared".into(),
+            "-fPIC".into(),
+            // Tensor-JIT libraries intentionally reuse the stable `entry` and
+            // `_mlir_ciface_entry` names. Bind internal calls to this library's
+            // definitions so multiple cached specializations cannot preempt
+            // one another through ELF's global symbol lookup.
+            "-Wl,-Bsymbolic".into(),
+        ]);
     }
     clang_arguments.extend(
         severian_runtime::native_sources()

@@ -54,6 +54,7 @@ pub enum ElementwiseOp {
     Divide,
     Exp,
     Log,
+    Sin,
     Tanh,
     Rsqrt,
     Relu,
@@ -97,13 +98,14 @@ pub enum StorageViewOp {
 }
 
 impl ElementwiseOp {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Add,
         Self::Subtract,
         Self::Multiply,
         Self::Divide,
         Self::Exp,
         Self::Log,
+        Self::Sin,
         Self::Tanh,
         Self::Rsqrt,
         Self::Relu,
@@ -141,13 +143,14 @@ impl StorageViewOp {
 impl TensorOp {
     /// Complete structural operation catalogue. Backend conformance tests use
     /// this instead of maintaining partial, dtype-specific operation lists.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Elementwise(ElementwiseOp::Add),
         Self::Elementwise(ElementwiseOp::Subtract),
         Self::Elementwise(ElementwiseOp::Multiply),
         Self::Elementwise(ElementwiseOp::Divide),
         Self::Elementwise(ElementwiseOp::Exp),
         Self::Elementwise(ElementwiseOp::Log),
+        Self::Elementwise(ElementwiseOp::Sin),
         Self::Elementwise(ElementwiseOp::Tanh),
         Self::Elementwise(ElementwiseOp::Rsqrt),
         Self::Elementwise(ElementwiseOp::Relu),
@@ -201,6 +204,7 @@ impl TensorOp {
             Self::Elementwise(ElementwiseOp::Divide) => "divide",
             Self::Elementwise(ElementwiseOp::Exp) => "exp",
             Self::Elementwise(ElementwiseOp::Log) => "log",
+            Self::Elementwise(ElementwiseOp::Sin) => "sin",
             Self::Elementwise(ElementwiseOp::Tanh) => "tanh",
             Self::Elementwise(ElementwiseOp::Rsqrt) => "rsqrt",
             Self::Elementwise(ElementwiseOp::Relu) => "relu",
@@ -249,6 +253,7 @@ impl TensorOp {
             (ELEMENTWISE, Some("divide")) => Self::Elementwise(ElementwiseOp::Divide),
             (ELEMENTWISE, Some("exp")) => Self::Elementwise(ElementwiseOp::Exp),
             (ELEMENTWISE, Some("log")) => Self::Elementwise(ElementwiseOp::Log),
+            (ELEMENTWISE, Some("sin")) => Self::Elementwise(ElementwiseOp::Sin),
             (ELEMENTWISE, Some("tanh")) => Self::Elementwise(ElementwiseOp::Tanh),
             (ELEMENTWISE, Some("rsqrt")) => Self::Elementwise(ElementwiseOp::Rsqrt),
             (ELEMENTWISE, Some("relu")) => Self::Elementwise(ElementwiseOp::Relu),

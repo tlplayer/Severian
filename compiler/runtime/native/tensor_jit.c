@@ -1,8 +1,10 @@
 #include <pthread.h>
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "tensor_jit.h"
 
@@ -30,8 +32,28 @@ _Static_assert(sizeof(sev_tensor_jit_compiled_abi) == 32, "tensor JIT compiled A
 static void sev_tensor_jit_load_provider_locked(void) {
     if (sev_tensor_jit_compile != NULL || sev_tensor_jit_library != NULL) return;
     const char *path = getenv("SEVERIAN_TENSOR_JIT_LIBRARY");
-    if (path == NULL || *path == '\0') path = "libseverian_tensor_jit_provider.so";
-    void *library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    void *library = NULL;
+    if (path != NULL && *path != '\0') {
+        library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    } else {
+        char executable[PATH_MAX];
+        ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+        if (length > 0) {
+            executable[length] = '\0';
+            char *separator = strrchr(executable, '/');
+            if (separator != NULL) {
+                separator[1] = '\0';
+                const char provider[] = "libseverian_tensor_jit_provider.so";
+                if ((size_t)(separator + 1 - executable) + sizeof(provider) <= sizeof(executable)) {
+                    memcpy(separator + 1, provider, sizeof(provider));
+                    library = dlopen(executable, RTLD_NOW | RTLD_LOCAL);
+                }
+            }
+        }
+        if (library == NULL) {
+            library = dlopen("libseverian_tensor_jit_provider.so", RTLD_NOW | RTLD_LOCAL);
+        }
+    }
     if (library == NULL) return;
     sev_tensor_jit_provider_fn provider =
         (sev_tensor_jit_provider_fn)dlsym(library, "sev_tensor_jit_provider_v1");

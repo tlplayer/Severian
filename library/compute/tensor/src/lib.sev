@@ -153,6 +153,9 @@ def exp[T](value: Tensor[T]) -> Tensor[T]
 def log[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)
+def sin[T](value: Tensor[T]) -> Tensor[T]
+
+@compile(mlir, stablehlo, xla)
 def rsqrt[T](value: Tensor[T]) -> Tensor[T]
 
 @compile(mlir, stablehlo, xla)

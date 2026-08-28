@@ -1,0 +1,92 @@
+import file
+import math
+
+
+class AudioBuffer:
+    samples: list[float]
+    sample_rate: int
+    channels: int
+
+    def AudioBuffer(values: list[float], rate: int, channel_count: int = 1):
+        assert(rate > 0, "audio sample rate must be positive")
+        assert(channel_count > 0, "audio channel count must be positive")
+        assert(int(size(values)) % channel_count == 0, "interleaved audio is not channel aligned")
+        for sample in values:
+            assert(math.isfinite(sample), "audio contains a non-finite sample")
+        samples := values
+        sample_rate := rate
+        channels := channel_count
+
+    def frames() -> int:
+        return int(int(size(samples)) / channels)
+
+def push_u16_le(output: list[u8], value: int):
+    assert(value >= 0 and value <= 65535)
+    output.append(u8(value % 256))
+    output.append(u8(int(value / 256) % 256))
+
+def push_u32_le(output: list[u8], value: int):
+    assert(value >= 0 and value <= 4294967295)
+    output.append(u8(value % 256))
+    output.append(u8(int(value / 256) % 256))
+    output.append(u8(int(value / 65536) % 256))
+    output.append(u8(int(value / 16777216) % 256))
+
+def push_ascii(output: list[u8], text: string):
+    for byte in text.bytes():
+        output.append(byte)
+
+def pcm16(sample: float) -> int:
+    assert(math.isfinite(sample), "WAV sample must be finite")
+    clipped := sample
+    if clipped > 1.0:
+        clipped = 1.0
+    if clipped < -1.0:
+        clipped = -1.0
+    quantized := int(clipped * 32767.0)
+    if quantized < 0:
+        quantized += 65536
+    return quantized
+
+def wav_pcm16(buffer: borrow AudioBuffer) -> list[u8]:
+    data_bytes = int(size(buffer.samples)) * 2
+    assert(data_bytes <= 4294967259, "WAV payload exceeds RIFF32 capacity")
+    byte_rate = buffer.sample_rate * buffer.channels * 2
+    block_align = buffer.channels * 2
+    output: list[u8] := []
+    push_ascii(output, "RIFF")
+    push_u32_le(output, 36 + data_bytes)
+    push_ascii(output, "WAVE")
+    push_ascii(output, "fmt ")
+    push_u32_le(output, 16)
+    push_u16_le(output, 1)
+    push_u16_le(output, buffer.channels)
+    push_u32_le(output, buffer.sample_rate)
+    push_u32_le(output, byte_rate)
+    push_u16_le(output, block_align)
+    push_u16_le(output, 16)
+    push_ascii(output, "data")
+    push_u32_le(output, data_bytes)
+    for sample in buffer.samples:
+        push_u16_le(output, pcm16(sample))
+    return output
+
+def write_wav(path: string, buffer: borrow AudioBuffer) -> bool:
+    return file.write(path, wav_pcm16(buffer)) == 0
+
+
+test "PCM16 WAV has a valid little-endian RIFF contract":
+    buffer = AudioBuffer([0.0, 1.0, -1.0], 24000, 1)
+    encoded = wav_pcm16(borrow buffer)
+    assert(size(encoded) == 50)
+    assert(encoded[0] == u8(82) and encoded[1] == u8(73) and encoded[2] == u8(70) and encoded[3] == u8(70))
+    assert(encoded[8] == u8(87) and encoded[9] == u8(65) and encoded[10] == u8(86) and encoded[11] == u8(69))
+    assert(encoded[22] == u8(1) and encoded[23] == u8(0))
+    assert(encoded[24] == u8(192) and encoded[25] == u8(93))
+    assert(encoded[44] == u8(0) and encoded[45] == u8(0))
+    assert(encoded[46] == u8(255) and encoded[47] == u8(127))
+    assert(encoded[48] == u8(1) and encoded[49] == u8(128))
+
+test "PCM16 conversion clips without wrapping":
+    assert(pcm16(2.0) == 32767)
+    assert(pcm16(-2.0) == 32769)

@@ -123,6 +123,7 @@ pub enum ScalarBinaryOperation {
 pub enum ScalarUnaryOperation {
     Exp,
     Log,
+    Sin,
     Tanh,
     Rsqrt,
 }
@@ -2098,6 +2099,7 @@ fn scalar_unary_name(operation: ScalarUnaryOperation) -> &'static str {
     match operation {
         ScalarUnaryOperation::Exp => "math.exp",
         ScalarUnaryOperation::Log => "math.log",
+        ScalarUnaryOperation::Sin => "math.sin",
         ScalarUnaryOperation::Tanh => "math.tanh",
         ScalarUnaryOperation::Rsqrt => "math.rsqrt",
     }
