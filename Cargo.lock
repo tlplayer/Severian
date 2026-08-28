@@ -287,6 +287,9 @@ dependencies = [
 [[package]]
 name = "severian-runtime"
 version = "0.1.0"
+dependencies = [
+ "severian-fusion",
+]
 
 [[package]]
 name = "severian-semantic"
@@ -333,6 +336,7 @@ name = "severian-triton"
 version = "0.1.0"
 dependencies = [
  "severian-fusion",
+ "severian-runtime",
 ]
 
 [[package]]

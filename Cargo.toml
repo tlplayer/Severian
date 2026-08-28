@@ -124,7 +124,7 @@ severian-compile = [
     "severian-universal",
 ]
 severian-artifact = []
-severian-runtime = []
+severian-runtime = ["severian-fusion"]
 severian-compile-protocol = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
@@ -158,7 +158,7 @@ severian-lowering = [
 severian-abi = ["severian-target"]
 severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
-severian-triton = ["severian-fusion"]
+severian-triton = ["severian-fusion", "severian-runtime"]
 severian-backend = ["severian-lir", "severian-runtime"]
 severian-xxi = [
     "severian-abi",

@@ -21,6 +21,7 @@ pub use native::NativeTritonCompiler;
 pub use ttir::TtirModule;
 
 pub const ABI_VERSION: u32 = 5;
+pub const DONOR_REVISION: &str = "8957b9aac23e526fb1252c7c3b592e6f43c175c8";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -447,7 +448,8 @@ pub struct AbiCompileRequest {
 #[repr(C)]
 pub struct AbiCompiledKernel {
     pub abi_version: u32,
-    pub format: KernelFormat,
+    /// Raw discriminant so an error output initialized by C remains valid Rust.
+    pub format: u32,
     pub entry_point: AbiBytes,
     pub code: AbiBytes,
     pub diagnostics: AbiBytes,

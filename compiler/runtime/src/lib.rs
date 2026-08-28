@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod gpu;
+
 /// Native runtime translation units linked by artifact backends.
 ///
 /// Runtime owns these implementations. Backends only pass the sources to the

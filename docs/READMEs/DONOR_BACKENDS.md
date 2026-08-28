@@ -66,9 +66,30 @@ scheduling, and target lowering. Generated modules are parser-tested with
 `triton-opt` from the exact revision pinned in `compiler/donors.toml`.
 
 The initial pass-order transcription is represented as Rust data in
-`pass_pipeline`. The native C++ bridge will map those names to Triton's pass
-constructors, replacing the orchestration currently performed by AMD and
-NVIDIA `backend/compiler.py`.
+`pass_pipeline`. The native C++ bridge maps the donor passes to Triton's C++
+constructors. Python is not part of the production compilation boundary.
+
+## GPU runtime and specialization cache
+
+`severian-runtime::gpu` owns device discovery, buffers and transfers, kernel
+loading, ABI argument packing, grid calculation, launch events, and dependency
+scheduling across fusion regions. CUDA, HIP, remote, and test executors all
+implement the same `GpuDriver` contract. Triton implements `GpuCompiler`; it
+does not own runtime resources or scheduling.
+
+Fusion-region dependencies are derived from values crossing `FusionPlan`
+region boundaries and emitted in stable topological order. Launches receive
+the precise predecessor events, allowing a driver to schedule asynchronously
+without imposing a global synchronization after every region.
+
+Compiled kernels have a memory cache and an optional persistent cache. A
+deterministic key covers the complete graph and selected region, concrete
+shape and stride specialization, every node's element kind and bit width,
+target architecture, the pinned Triton donor revision, and all compiler
+options. Cached records include binary format, entry point, code, grid policy,
+block shape, warps, CTAs, and shared-memory requirements. Rank and dtype remain
+ordinary graph/ABI data; cache specialization never creates rank- or
+dtype-suffixed source functions.
 
 ## Reproducibility and licenses
 

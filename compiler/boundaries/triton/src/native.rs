@@ -6,8 +6,12 @@
 
 use crate::{
     with_abi_request, AbiCompileFn, AbiCompiledKernel, AbiDestroyKernelFn, AbiStatus, BridgeError,
-    CompileOptions, CompiledKernel, FusionGraph, FusionRegion, KernelSpecialization,
-    LaunchMetadata, TritonCompiler, ABI_VERSION,
+    CompileOptions, CompileTarget, CompiledKernel, FusionGraph, FusionRegion, KernelFormat,
+    KernelSpecialization, LaunchMetadata, TritonCompiler, ABI_VERSION, DONOR_REVISION,
+};
+use severian_runtime::gpu::{
+    CompilerOptions as RuntimeCompilerOptions, GpuCompiler, GridPolicy, KernelArtifact,
+    KernelBinaryFormat, KernelCompileRequest, LaunchRequirements,
 };
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::mem::MaybeUninit;
@@ -136,7 +140,7 @@ fn decode_result(
         BridgeError::DonorCompiler("bridge returned a non-UTF-8 entry point".into())
     })?;
     Ok(CompiledKernel {
-        format: raw.format,
+        format: decode_format(raw.format)?,
         entry_point,
         code: copy_bytes(raw.code.data, raw.code.len),
         launch: LaunchMetadata {
@@ -147,6 +151,101 @@ fn decode_result(
             shared_memory_bytes: raw.launch.shared_memory_bytes,
         },
     })
+}
+
+fn decode_format(format: u32) -> Result<KernelFormat, BridgeError> {
+    match format {
+        1 => Ok(KernelFormat::LlvmIr),
+        2 => Ok(KernelFormat::AmdGcN),
+        3 => Ok(KernelFormat::Hsaco),
+        4 => Ok(KernelFormat::Ptx),
+        5 => Ok(KernelFormat::Cubin),
+        _ => Err(BridgeError::DonorCompiler(format!(
+            "bridge returned unknown kernel format {format}"
+        ))),
+    }
+}
+
+impl GpuCompiler for NativeTritonCompiler {
+    fn donor_revision(&self) -> &str {
+        DONOR_REVISION
+    }
+
+    fn compile(&self, request: &KernelCompileRequest<'_>) -> Result<KernelArtifact, String> {
+        let options = triton_options(request.options)?;
+        let compiled = TritonCompiler::compile(
+            self,
+            request.graph,
+            request.region,
+            request.specialization,
+            &options,
+        )
+        .map_err(|error| error.to_string())?;
+        let output = request
+            .region
+            .outputs
+            .first()
+            .copied()
+            .ok_or_else(|| "fusion region has no output for launch grid".to_owned())?;
+        let threads = compiled
+            .launch
+            .num_warps
+            .checked_mul(compiled.launch.warp_size)
+            .ok_or_else(|| "GPU block size overflows u32".to_owned())?;
+        Ok(KernelArtifact {
+            format: runtime_format(compiled.format),
+            entry_point: compiled.entry_point,
+            code: compiled.code,
+            launch: LaunchRequirements {
+                grid: GridPolicy::Linear {
+                    output,
+                    elements_per_program: 256,
+                },
+                block: [threads, 1, 1],
+                num_warps: compiled.launch.num_warps,
+                warp_size: compiled.launch.warp_size,
+                num_ctas: compiled.launch.num_ctas,
+                shared_memory_bytes: compiled.launch.shared_memory_bytes,
+            },
+        })
+    }
+}
+
+fn triton_options(options: &RuntimeCompilerOptions) -> Result<CompileOptions, String> {
+    let target = match options.target {
+        severian_fusion::GpuTarget::Amd => CompileTarget::AmdGpu,
+        severian_fusion::GpuTarget::Nvidia => CompileTarget::NvidiaGpu,
+    };
+    Ok(CompileOptions {
+        target,
+        architecture: options.architecture.clone(),
+        num_warps: options.num_warps,
+        warp_size: options.warp_size,
+        num_ctas: options.num_ctas,
+        num_stages: options.num_stages,
+        emit: triton_format(options.emit)?,
+        debug: options.debug,
+    })
+}
+
+fn triton_format(format: KernelBinaryFormat) -> Result<KernelFormat, String> {
+    Ok(match format {
+        KernelBinaryFormat::LlvmIr => KernelFormat::LlvmIr,
+        KernelBinaryFormat::AmdGcN => KernelFormat::AmdGcN,
+        KernelBinaryFormat::Hsaco => KernelFormat::Hsaco,
+        KernelBinaryFormat::Ptx => KernelFormat::Ptx,
+        KernelBinaryFormat::Cubin => KernelFormat::Cubin,
+    })
+}
+
+fn runtime_format(format: KernelFormat) -> KernelBinaryFormat {
+    match format {
+        KernelFormat::LlvmIr => KernelBinaryFormat::LlvmIr,
+        KernelFormat::AmdGcN => KernelBinaryFormat::AmdGcN,
+        KernelFormat::Hsaco => KernelBinaryFormat::Hsaco,
+        KernelFormat::Ptx => KernelBinaryFormat::Ptx,
+        KernelFormat::Cubin => KernelBinaryFormat::Cubin,
+    }
 }
 
 fn copy_bytes(data: *const u8, len: usize) -> Vec<u8> {

@@ -269,10 +269,12 @@ fn emit_linear_node(
     match node.kind {
         NodeKind::Elementwise => emit_elementwise(emitter, node, &operands, &tensor, width),
         NodeKind::Convert => emit_convert(emitter, graph, node, &operands, width),
-        NodeKind::Reshape | NodeKind::StorageView => passthrough(node, &operands),
-        NodeKind::Broadcast => passthrough(node, &operands),
-        NodeKind::Permute | NodeKind::Slice => passthrough(node, &operands),
-        NodeKind::Gather => passthrough(node, &operands),
+        NodeKind::Reshape
+        | NodeKind::StorageView
+        | NodeKind::Broadcast
+        | NodeKind::Permute
+        | NodeKind::Slice
+        | NodeKind::Gather => passthrough(node, &operands),
         NodeKind::Concatenate => {
             let [left, right, ..] = operands.as_slice() else {
                 return passthrough(node, &operands);
@@ -1021,10 +1023,9 @@ fn emit_concatenate(
     finish(region, emitter)
 }
 
-fn arguments(
-    graph: &FusionGraph,
-    region: &FusionRegion,
-) -> Result<(String, Vec<(NodeId, usize)>, Vec<(NodeId, usize)>), String> {
+type KernelArguments = (String, Vec<(NodeId, usize)>, Vec<(NodeId, usize)>);
+
+fn arguments(graph: &FusionGraph, region: &FusionRegion) -> Result<KernelArguments, String> {
     let mut declarations = Vec::new();
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
