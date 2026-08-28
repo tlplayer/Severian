@@ -65,12 +65,21 @@ This is native Severian execution. It does not invoke Python, PyTorch, ONNX, or
 an external inference command. Remote artifact acquisition currently uses the
 system download boundary; local inference does not.
 
+The checkpoint is pinned by immutable Hugging Face and donor-source revisions,
+with published SHA-256 identities for both SafeTensor payloads. Prompt packing
+matches the donor's conditional layout, and the reference sampler implements
+classifier-free guidance, mask-token exclusion, codebook-layer penalty,
+top-10% class sampling, and seeded position/class Gumbel selection. A
+versioned, Python-free native tokenizer ABI connects `.sev` to the canonical
+Hugging Face Rust `tokenizers` engine. The pinned real OmniVoice tokenizer has
+an executable known-token-ID acceptance test.
+
 The logits graph is not yet the complete text-to-WAV pipeline. Full OmniVoice
-synthesis additionally requires the tokenizer input builder, the iterative
-masked-codebook update/sampling kernels, and the Higgs Audio V2 codec
-encoder/decoder. Those
-components remain separate architecture modules rather than being hidden
-behind `load_omnivoice`.
+synthesis additionally requires packaging the tokenizer provider beside the
+executable, driver emission of deferred Tensor-JIT region descriptors, a
+CPU/Triton compiler provider installed into the native launcher, and the Higgs
+Audio V2 codec encoder/decoder. Those components remain separate architecture
+modules rather than being hidden behind `load_omnivoice`.
 
 ## Compiler acceptance ladder
 
@@ -95,6 +104,10 @@ Ranked APIs preserve dimensions that are already known by the program.
 Existing `Tensor[T]` model classes intentionally remain valid: when those
 classes erase rank or receive genuinely dynamic storage, they cross the small
 runtime Tensor-JIT boundary instead of pretending an opaque pointer is a
-builtin MLIR tensor. Completing that executable JIT launcher and the
-tokenizer/sampler/codec stages is required before the manifest's WAV quality
-acceptance can run.
+builtin MLIR tensor. The native executable Tensor-JIT launcher now specializes
+and caches concrete rank/shape/stride/element/target contracts behind a
+versioned compiler callback. The remaining compiler work is to serialize
+deferred regions from the driver and install the real CPU MLIR or Triton
+provider in the generated program. That wiring, tokenizer-provider packaging,
+and the codec stage are required before the manifest's WAV quality acceptance
+can run.

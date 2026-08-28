@@ -20,6 +20,7 @@ members = [
     "compiler/boundaries/driver",
     "compiler/boundaries/ffi",
     "compiler/boundaries/interface",
+    "compiler/boundaries/tokenizer",
     "compiler/boundaries/triton",
     "compiler/boundaries/xxi",
 
@@ -89,6 +90,7 @@ severian-lowering = "transform"
 severian-abi = "boundary"
 severian-ffi = "boundary"
 severian-interface = "boundary"
+severian-tokenizer-provider = "boundary"
 severian-triton = "boundary"
 severian-backend = "boundary"
 severian-xxi = "boundary"
@@ -158,6 +160,7 @@ severian-lowering = [
 severian-abi = ["severian-target"]
 severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
+severian-tokenizer-provider = []
 severian-triton = ["severian-fusion", "severian-runtime"]
 severian-backend = ["severian-lir", "severian-runtime"]
 severian-xxi = [

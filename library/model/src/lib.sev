@@ -35,6 +35,48 @@ class LoadedModel:
     def weights_path() -> string:
         return artifact.weights
 
+class TextTokenizer:
+    handle: int
+
+@c(symbol = "__sev_tokenizer_open_v1")
+def tokenizer_open(path: string) -> int
+
+@c(symbol = "__sev_tokenizer_encode_v1")
+def tokenizer_encode(handle: int, text: string) -> int
+
+@c(symbol = "__sev_tokenizer_encoding_length_v1")
+def tokenizer_encoding_length(encoding: int) -> int
+
+@c(symbol = "__sev_tokenizer_encoding_at_v1")
+def tokenizer_encoding_at(encoding: int, index: int) -> int
+
+@c(symbol = "__sev_tokenizer_encoding_release_v1")
+def tokenizer_encoding_release(encoding: int) -> i32
+
+@c(symbol = "__sev_tokenizer_close_v1")
+def tokenizer_close(handle: int) -> i32
+
+def text_tokenizer(selected: Artifact) -> TextTokenizer:
+    handle = tokenizer_open(selected.tokenizer)
+    assert(handle != 0, "no native tokenizer provider could open " + selected.tokenizer)
+    return TextTokenizer(handle)
+
+def encode(tokenizer: borrow TextTokenizer, text: string) -> list[int]:
+    encoding = tokenizer_encode(tokenizer.handle, text)
+    assert(encoding != 0, "text tokenizer failed to encode the prompt")
+    count = tokenizer_encoding_length(encoding)
+    assert(count >= 0)
+    tokens: list[int] := []
+    for index in range(0, count):
+        token = tokenizer_encoding_at(encoding, index)
+        assert(token >= 0)
+        tokens.append(token)
+    assert(tokenizer_encoding_release(encoding) == 0)
+    return tokens
+
+def close(tokenizer: TextTokenizer) -> bool:
+    return tokenizer_close(tokenizer.handle) == 0
+
 def ready(selected: Artifact) -> bool:
     return os.is_file(selected.weights) and os.file_size(selected.weights) > 0B
 
@@ -43,6 +85,17 @@ def ready(loaded: LoadedModel) -> bool:
 
 SmolLm2 = "HuggingFaceTB/SmolLM2-135M-Instruct"
 SmolLm2Revision = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+
+# Immutable donor identity. The revision pins the complete Hugging Face
+# snapshot; the hashes separately pin the two executable model payloads.
+OmniVoiceRepository = "k2-fsa/OmniVoice"
+OmniVoiceRevision = "c5fdb5ccb189668d56333f77ba2629f4cd7535f4"
+OmniVoiceSourceRevision = "08be0b4ccbac3e13e374e86fbfead4b4cac343e2"
+OmniVoiceWeightsSha256 = "730839316de585f4c8298ec0e1712efc10fb19c6fa4e36eb741cb8d51ebcf6aa"
+OmniVoiceAudioTokenizerSha256 = "fe7c5e8785e0a05833e1bfc3e002ec7f55af21e306b2e7154a448c1f54ccfb0d"
+
+def omnivoice_reference() -> Reference:
+    return reference(OmniVoiceRepository, OmniVoiceRevision)
 
 def reference(
     locator: string,
@@ -370,6 +423,208 @@ def omnivoice_unmask_schedule(
         remaining -= count
     assert(remaining == 0)
     return schedule
+
+# Text tokenization and model prompt packing are separate contracts. A
+# tokenizer.json engine supplies the two token lists; this code owns the exact
+# OmniVoice layout consumed by the tensor graph and can therefore be tested
+# without Python or a particular tokenizer implementation.
+class OmniVoicePrompt:
+    input_ids: list[int]
+    audio_mask: list[bool]
+    codebooks: int
+    sequence: int
+    target_start: int
+    target_tokens: int
+
+def omnivoice_style_text(
+    language: string = "None",
+    instruction: string = "None",
+    denoise: bool = false,
+) -> string:
+    prefix = "<|denoise|>" if denoise else ""
+    return prefix + "<|lang_start|>" + language + "<|lang_end|><|instruct_start|>" + instruction + "<|instruct_end|>"
+
+def omnivoice_wrapped_text(text: string, reference_text: string = "") -> string:
+    combined := text.strip()
+    if reference_text.strip() != "":
+        combined = reference_text.strip() + " " + combined
+    combined = combined.replace("\r", "").replace("\n", "")
+    combined = combined.replace("（", "(").replace("）", ")")
+    while "  " in combined:
+        combined = combined.replace("  ", " ")
+    return "<|text_start|>" + combined + "<|text_end|>"
+
+def omnivoice_prompt_from_tokens(
+    style_tokens: list[int],
+    text_tokens: list[int],
+    reference_audio: list[int],
+    reference_tokens: int,
+    target_tokens: int,
+    architecture: borrow OmniVoiceConfig,
+) -> OmniVoicePrompt:
+    assert(target_tokens > 0)
+    assert(reference_tokens >= 0)
+    assert(int(size(reference_audio)) == reference_tokens * architecture.audio_codebooks)
+    prefix = int(size(style_tokens) + size(text_tokens))
+    sequence = prefix + reference_tokens + target_tokens
+    target_start = prefix + reference_tokens
+    ids: list[int] := []
+    for codebook in range(0, architecture.audio_codebooks):
+        for token in style_tokens:
+            ids.append(token)
+        for token in text_tokens:
+            ids.append(token)
+        for position in range(0, reference_tokens):
+            ids.append(reference_audio[codebook * reference_tokens + position])
+        for _position in range(0, target_tokens):
+            ids.append(architecture.audio_mask)
+    audio_mask: list[bool] := []
+    for position in range(0, sequence):
+        audio_mask.append(position >= prefix)
+    return OmniVoicePrompt(
+        ids,
+        audio_mask,
+        architecture.audio_codebooks,
+        sequence,
+        target_start,
+        target_tokens,
+    )
+
+def omnivoice_prompt(
+    tokenizer: borrow TextTokenizer,
+    text: string,
+    reference_text: string,
+    reference_audio: list[int],
+    reference_tokens: int,
+    target_tokens: int,
+    language: string,
+    instruction: string,
+    denoise: bool,
+    architecture: borrow OmniVoiceConfig,
+) -> OmniVoicePrompt:
+    style = encode(tokenizer, omnivoice_style_text(language, instruction, denoise))
+    words = encode(tokenizer, omnivoice_wrapped_text(text, reference_text))
+    return omnivoice_prompt_from_tokens(
+        style,
+        words,
+        reference_audio,
+        reference_tokens,
+        target_tokens,
+        architecture,
+    )
+
+class OmniVoiceSample:
+    tokens: list[int]
+    changed: list[int]
+
+def omnivoice_seeded_gumbel(seed: int, index: int) -> float:
+    # A small deterministic control-plane PRNG. It affects only sampling order;
+    # dtype/rank specialization and tensor operation identity remain unchanged.
+    state = (seed % 2147483646 + (index + 1) * 48271) % 2147483646 + 1
+    uniform = float(state) / 2147483647.0
+    return float(0.0) - float(math.log(float(0.0) - float(math.log(uniform))))
+
+def omnivoice_logsumexp(values: borrow list[float], start: int, count: int, excluded: int) -> float:
+    maximum := float(0.0) - float(1000000000000000000000000000000.0)
+    for index in range(0, count):
+        if index != excluded and values[start + index] > maximum:
+            maximum = values[start + index]
+    total := 0.0
+    for index in range(0, count):
+        if index != excluded:
+            total += float(math.pow(math.e, f64(values[start + index] - maximum)))
+    return maximum + float(math.log(f64(total)))
+
+def omnivoice_sample_step(
+    conditional_logits: borrow list[float],
+    unconditional_logits: borrow list[float],
+    current_tokens: borrow list[int],
+    target_tokens: int,
+    unmask_count: int,
+    step: int,
+    seed: int,
+    architecture: borrow OmniVoiceConfig,
+    generation: borrow OmniVoiceGenerationConfig,
+) -> OmniVoiceSample:
+    positions = architecture.audio_codebooks * target_tokens
+    vocabulary = architecture.audio_vocabulary
+    assert(int(size(conditional_logits)) == positions * vocabulary)
+    assert(int(size(unconditional_logits)) == positions * vocabulary)
+    assert(int(size(current_tokens)) == positions)
+    assert(unmask_count >= 0 and unmask_count <= positions)
+
+    predictions: list[int] := []
+    confidences: list[float] := []
+    for position in range(0, positions):
+        start = position * vocabulary
+        conditional_normalizer = omnivoice_logsumexp(conditional_logits, start, vocabulary, architecture.audio_mask)
+        unconditional_normalizer = omnivoice_logsumexp(unconditional_logits, start, vocabulary, architecture.audio_mask)
+        best_token := 0
+        best_logit := float(0.0) - float(1000000000000000000000000000000.0)
+        guided: list[float] := []
+        for token in range(0, vocabulary):
+            score := float(0.0) - float(1000000000000000000000000000000.0)
+            if token != architecture.audio_mask:
+                conditional = conditional_logits[start + token] - conditional_normalizer
+                unconditional = unconditional_logits[start + token] - unconditional_normalizer
+                score = conditional + float(generation.guidance_scale) * (conditional - unconditional)
+            guided.append(score)
+            if score > best_logit:
+                best_logit = score
+                best_token = token
+        guided_normalizer = omnivoice_logsumexp(borrow guided, 0, vocabulary, architecture.audio_mask)
+        if generation.class_temperature > f32(0.0):
+            top_count = int((vocabulary + 9) / 10)
+            eligible: list[bool] := []
+            for _token in range(0, vocabulary):
+                eligible.append(false)
+            for _selection in range(0, top_count):
+                selected_token := vocabulary
+                selected_score := float(0.0)
+                for token in range(0, vocabulary):
+                    if token != architecture.audio_mask and not eligible[token] and (selected_token == vocabulary or guided[token] > selected_score):
+                        selected_token = token
+                        selected_score = guided[token]
+                if selected_token < vocabulary:
+                    eligible[selected_token] = true
+            sampled_token := vocabulary
+            sampled_score := float(0.0)
+            for token in range(0, vocabulary):
+                if eligible[token]:
+                    noisy = guided[token] / float(generation.class_temperature) + omnivoice_seeded_gumbel(
+                        seed + step * positions * vocabulary + position * vocabulary,
+                        token,
+                    )
+                    if sampled_token == vocabulary or noisy > sampled_score:
+                        sampled_token = token
+                        sampled_score = noisy
+            if sampled_token < vocabulary:
+                best_token = sampled_token
+        predictions.append(best_token)
+        confidence := best_logit - guided_normalizer
+        layer = int(position / target_tokens)
+        confidence -= float(layer) * float(generation.layer_penalty)
+        if generation.position_temperature > f32(0.0):
+            confidence += float(generation.position_temperature) * omnivoice_seeded_gumbel(seed + step * positions, position)
+        confidences.append(confidence)
+
+    tokens = copy current_tokens
+    changed: list[int] := []
+    selected: list[bool] := []
+    for _position in range(0, positions):
+        selected.append(false)
+    for _selection in range(0, unmask_count):
+        best_position := 0 - 1
+        best_score := float(0.0) - float(1000000000000000000000000000000.0)
+        for position in range(0, positions):
+            if not selected[position] and tokens[position] == architecture.audio_mask and confidences[position] > best_score:
+                best_position = position
+                best_score = confidences[position]
+        if best_position >= 0:
+            selected[best_position] = true
+            tokens[best_position] = predictions[best_position]
+            changed.append(best_position)
+    return OmniVoiceSample(tokens, changed)
 
 def parameter[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
     return tensor.load[T](parameters.entry(name))
@@ -730,6 +985,48 @@ test "OmniVoice configuration names the exact cached checkpoint architecture":
     assert(size(schedule) == 32)
     assert(scheduled == 200)
     assert(configuration.sample_rate == 24000)
+
+test "OmniVoice checkpoint prompt packing and masked sampling are deterministic":
+    selected = omnivoice_reference()
+    assert(selected.locator == OmniVoiceRepository)
+    assert(selected.revision == OmniVoiceRevision)
+    assert(size(OmniVoiceRevision) == 40)
+    assert(size(OmniVoiceSourceRevision) == 40)
+    assert(size(OmniVoiceWeightsSha256) == 64)
+    assert(size(OmniVoiceAudioTokenizerSha256) == 64)
+    assert(omnivoice_style_text("en", "calm", true) == "<|denoise|><|lang_start|>en<|lang_end|><|instruct_start|>calm<|instruct_end|>")
+    assert(omnivoice_wrapped_text(" world\n", "hello") == "<|text_start|>hello world<|text_end|>")
+
+    architecture = OmniVoiceConfig(Qwen3Config(4, 8, 1, 1, 1, 4, 0.000001, 10000.0), 2, 4, 3, 24000)
+    prompt = omnivoice_prompt_from_tokens([10], [20, 21], [1, 2], 1, 2, borrow architecture)
+    assert(prompt.codebooks == 2)
+    assert(prompt.sequence == 6)
+    assert(prompt.target_start == 4)
+    assert(prompt.input_ids == [10, 20, 21, 1, 3, 3, 10, 20, 21, 2, 3, 3])
+    assert(prompt.audio_mask == [false, false, false, true, true, true])
+
+    generation = OmniVoiceGenerationConfig(2, f32(0.0), f32(1.0), f32(5.0), f32(0.0), f32(0.0))
+    logits = [
+        1.0, 5.0, 0.0, 100.0,
+        4.0, 1.0, 0.0, 100.0,
+        0.0, 0.0, 6.0, 100.0,
+        0.0, 7.0, 0.0, 100.0,
+    ]
+    sampled = omnivoice_sample_step(
+        borrow logits,
+        borrow logits,
+        borrow [3, 3, 3, 3],
+        2,
+        2,
+        0,
+        3407,
+        borrow architecture,
+        borrow generation,
+    )
+    # The layer penalty makes codebook zero fill before codebook one. The mask
+    # logit is deliberately largest and must still never be sampled.
+    assert(sampled.tokens == [1, 0, 3, 3])
+    assert(sampled.changed == [0, 1])
 
 test "model references are generic and cache paths are deterministic":
     selected = reference("hf://owner/model", "immutable-revision")

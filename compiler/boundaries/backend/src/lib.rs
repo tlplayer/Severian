@@ -826,7 +826,7 @@ pub fn emit_mlir_executable_with_linker_arguments(
     if let Some(linker) = std::env::var_os("SEVERIAN_LINKER") {
         clang_arguments.push(format!("-fuse-ld={}", linker.to_string_lossy()));
     }
-    clang_arguments.extend(["-lm".into(), "-o".into(), output_path]);
+    clang_arguments.extend(["-ldl".into(), "-lm".into(), "-o".into(), output_path]);
     let clang_arguments = clang_arguments
         .iter()
         .map(String::as_str)
