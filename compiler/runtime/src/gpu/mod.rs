@@ -8,8 +8,9 @@ mod cache;
 pub use cache::{CacheKey, KernelCache};
 
 use severian_fusion::{
-    Dimension, ElementKind, FusionGraph, FusionPlan, FusionRegion, GpuTarget, KernelSpecialization,
-    NodeId, NodeKind, Rank, RegionId, RuntimeShape, RuntimeStrides, StorageLayout,
+    Dimension, DimensionExpression, ElementKind, FusionGraph, FusionPlan, FusionRegion, GpuTarget,
+    KernelSpecialization, NodeId, NodeKind, Rank, RegionId, RuntimeShape, RuntimeStrides,
+    StorageLayout,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -169,6 +170,8 @@ pub fn complete_kernel_specialization(
         }
     }
 
+    validate_symbolic_dimensions(graph, &shapes)?;
+
     let specialization = KernelSpecialization {
         shapes: shapes
             .into_iter()
@@ -188,6 +191,114 @@ pub fn complete_kernel_specialization(
         .validate(graph, target)
         .map_err(StorageSpecializationError::InvalidSpecialization)?;
     Ok(specialization)
+}
+
+fn validate_symbolic_dimensions(
+    graph: &FusionGraph,
+    shapes: &BTreeMap<NodeId, Vec<u64>>,
+) -> Result<(), StorageSpecializationError> {
+    let mut symbols = BTreeMap::new();
+    for node in graph.nodes() {
+        let Some(dimensions) = shapes.get(&node.id) else {
+            continue;
+        };
+        if !node.shape.dimension_expressions.is_empty()
+            && node.shape.dimension_expressions.len() != dimensions.len()
+        {
+            return Err(StorageSpecializationError::ShapeInference {
+                node: node.id,
+                message: format!(
+                    "shape contract has {} expressions for runtime rank {}",
+                    node.shape.dimension_expressions.len(),
+                    dimensions.len()
+                ),
+            });
+        }
+        for (expression, extent) in node.shape.dimension_expressions.iter().zip(dimensions) {
+            if let DimensionExpression::Symbol(symbol) = expression {
+                if symbols
+                    .insert(*symbol, *extent)
+                    .is_some_and(|known| known != *extent)
+                {
+                    return Err(StorageSpecializationError::ShapeInference {
+                        node: node.id,
+                        message: format!(
+                            "symbolic dimension {symbol} has conflicting runtime extents"
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    for node in graph.nodes() {
+        let Some(dimensions) = shapes.get(&node.id) else {
+            continue;
+        };
+        for (axis, (expression, extent)) in node
+            .shape
+            .dimension_expressions
+            .iter()
+            .zip(dimensions)
+            .enumerate()
+        {
+            let expected =
+                evaluate_dimension_expression(expression, &symbols).map_err(|message| {
+                    StorageSpecializationError::ShapeInference {
+                        node: node.id,
+                        message,
+                    }
+                })?;
+            if expected.is_some_and(|expected| expected != *extent) {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node: node.id,
+                    message: format!(
+                        "axis {axis} violates its symbolic shape expression: expected {expected:?}, found {extent}"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn evaluate_dimension_expression(
+    expression: &DimensionExpression,
+    symbols: &BTreeMap<u64, u64>,
+) -> Result<Option<u64>, String> {
+    let binary = |left: &DimensionExpression, right: &DimensionExpression| {
+        Ok::<_, String>(
+            evaluate_dimension_expression(left, symbols)?
+                .zip(evaluate_dimension_expression(right, symbols)?),
+        )
+    };
+    match expression {
+        DimensionExpression::Constant(value) => Ok(Some(*value)),
+        DimensionExpression::Symbol(symbol) => Ok(symbols.get(symbol).copied()),
+        DimensionExpression::Dynamic => Ok(None),
+        DimensionExpression::Add(left, right) => binary(left, right)?
+            .map(|(left, right)| {
+                left.checked_add(right)
+                    .ok_or_else(|| "symbolic dimension addition overflowed".to_owned())
+            })
+            .transpose(),
+        DimensionExpression::Multiply(left, right) => binary(left, right)?
+            .map(|(left, right)| {
+                left.checked_mul(right)
+                    .ok_or_else(|| "symbolic dimension multiplication overflowed".to_owned())
+            })
+            .transpose(),
+        DimensionExpression::DivideExact(left, right) => binary(left, right)?
+            .map(|(left, right)| {
+                if right == 0 {
+                    Err("symbolic dimension division by zero".to_owned())
+                } else if left % right != 0 {
+                    Err("symbolic dimension division was not exact".to_owned())
+                } else {
+                    Ok(left / right)
+                }
+            })
+            .transpose(),
+    }
 }
 
 fn concrete_node_shape(
@@ -942,6 +1053,89 @@ pub trait GpuCompiler: Send + Sync {
     fn compile(&self, request: &KernelCompileRequest<'_>) -> Result<KernelArtifact, String>;
 }
 
+/// The complete runtime compiler kept in a Severian executable. It owns no
+/// graph capture, Python state, device state, or shape inference: callers hand
+/// it one already-typed fusion region plus the minimal concrete specialization
+/// that the selected backend still requires.
+pub struct TensorJit<C> {
+    compiler: C,
+    cache: KernelCache,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedKernelArtifact {
+    pub key: CacheKey,
+    pub artifact: KernelArtifact,
+    pub cache_hit: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TensorJitError {
+    Compiler(String),
+    Cache(String),
+}
+
+impl fmt::Display for TensorJitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Compiler(error) => write!(formatter, "tensor JIT compiler failed: {error}"),
+            Self::Cache(error) => write!(formatter, "tensor JIT cache failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for TensorJitError {}
+
+impl<C: GpuCompiler> TensorJit<C> {
+    pub fn new(compiler: C, cache: KernelCache) -> Self {
+        Self { compiler, cache }
+    }
+
+    pub fn resolve(
+        &mut self,
+        request: &KernelCompileRequest<'_>,
+    ) -> Result<ResolvedKernelArtifact, TensorJitError> {
+        request
+            .specialization
+            .validate_region(request.graph, request.region, request.options.target)
+            .map_err(|error| TensorJitError::Compiler(error.to_string()))?;
+        let key = CacheKey::for_kernel(
+            request.graph,
+            request.region,
+            request.specialization,
+            request.options,
+            self.compiler.donor_revision(),
+        );
+        if let Some(artifact) = self
+            .cache
+            .get(&key)
+            .map_err(|error| TensorJitError::Cache(error.to_string()))?
+        {
+            return Ok(ResolvedKernelArtifact {
+                key,
+                artifact,
+                cache_hit: true,
+            });
+        }
+        let artifact = self
+            .compiler
+            .compile(request)
+            .map_err(TensorJitError::Compiler)?;
+        self.cache
+            .insert(key, artifact.clone())
+            .map_err(|error| TensorJitError::Cache(error.to_string()))?;
+        Ok(ResolvedKernelArtifact {
+            key,
+            artifact,
+            cache_hit: false,
+        })
+    }
+
+    pub fn cache(&self) -> &KernelCache {
+        &self.cache
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KernelArgument {
     Buffer { buffer: BufferId, byte_offset: u64 },
@@ -1195,9 +1389,8 @@ pub struct ExecutionResult {
 
 pub struct GpuRuntime<D, C> {
     driver: D,
-    compiler: C,
+    jit: TensorJit<C>,
     devices: Vec<DeviceInfo>,
-    cache: KernelCache,
     loaded: BTreeMap<(DeviceId, CacheKey), KernelId>,
 }
 
@@ -1206,9 +1399,8 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         let devices = driver.discover_devices().map_err(RuntimeError::Driver)?;
         Ok(Self {
             driver,
-            compiler,
+            jit: TensorJit::new(compiler, cache),
             devices,
-            cache,
             loaded: BTreeMap::new(),
         })
     }
@@ -1429,37 +1621,23 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let key = CacheKey::for_kernel(
-                invocation.graph,
-                invocation.region,
-                invocation.specialization,
-                invocation.options,
-                self.compiler.donor_revision(),
-            );
-            let artifact = if let Some(artifact) = self
-                .cache
-                .get(&key)
-                .map_err(|error| RuntimeError::Cache(error.to_string()))?
-            {
+            let request = KernelCompileRequest {
+                graph: invocation.graph,
+                region: invocation.region,
+                specialization: invocation.specialization,
+                options: invocation.options,
+            };
+            let resolved = self.jit.resolve(&request).map_err(|error| match error {
+                TensorJitError::Compiler(error) => RuntimeError::Compiler(error),
+                TensorJitError::Cache(error) => RuntimeError::Cache(error),
+            })?;
+            let key = resolved.key;
+            let artifact = resolved.artifact;
+            if resolved.cache_hit {
                 cache_hits += 1;
-                artifact
             } else {
                 cache_misses += 1;
-                let request = KernelCompileRequest {
-                    graph: invocation.graph,
-                    region: invocation.region,
-                    specialization: invocation.specialization,
-                    options: invocation.options,
-                };
-                let artifact = self
-                    .compiler
-                    .compile(&request)
-                    .map_err(RuntimeError::Compiler)?;
-                self.cache
-                    .insert(key, artifact.clone())
-                    .map_err(|error| RuntimeError::Cache(error.to_string()))?;
-                artifact
-            };
+            }
             let kernel = if let Some(kernel) = self.loaded.get(&(device, key)).copied() {
                 kernel
             } else {

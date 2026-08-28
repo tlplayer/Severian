@@ -27,6 +27,19 @@ pub enum Dimension {
     Known(u64),
 }
 
+/// Language-level dimension identity retained after rank legalization. Dynamic
+/// means an unconstrained runtime extent; Symbol preserves equality across
+/// values; arithmetic expressions preserve reshape/contraction relationships.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DimensionExpression {
+    Constant(u64),
+    Symbol(u64),
+    Dynamic,
+    Add(Box<Self>, Box<Self>),
+    Multiply(Box<Self>, Box<Self>),
+    DivideExact(Box<Self>, Box<Self>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rank {
     Unranked,
@@ -148,14 +161,20 @@ pub enum ElementKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shape {
     pub rank: Rank,
+    pub dimension_expressions: Vec<DimensionExpression>,
     pub element_kind: ElementKind,
     pub element_bits: u16,
 }
 
 impl Shape {
     pub fn ranked(dimensions: impl IntoIterator<Item = u64>, element_bits: u16) -> Self {
+        let dimensions = dimensions.into_iter().collect::<Vec<_>>();
         Self {
-            rank: Rank::Ranked(dimensions.into_iter().map(Dimension::Known).collect()),
+            rank: Rank::Ranked(dimensions.iter().copied().map(Dimension::Known).collect()),
+            dimension_expressions: dimensions
+                .into_iter()
+                .map(DimensionExpression::Constant)
+                .collect(),
             element_kind: ElementKind::Opaque,
             element_bits,
         }
@@ -166,8 +185,16 @@ impl Shape {
         element_kind: ElementKind,
         element_bits: u16,
     ) -> Self {
+        let dimensions = dimensions.into_iter().collect::<Vec<_>>();
         Self {
-            rank: Rank::Ranked(dimensions.into_iter().collect()),
+            rank: Rank::Ranked(dimensions.clone()),
+            dimension_expressions: dimensions
+                .into_iter()
+                .map(|dimension| match dimension {
+                    Dimension::Dynamic => DimensionExpression::Dynamic,
+                    Dimension::Known(value) => DimensionExpression::Constant(value),
+                })
+                .collect(),
             element_kind,
             element_bits,
         }
@@ -176,6 +203,7 @@ impl Shape {
     pub fn unranked(element_kind: ElementKind, element_bits: u16) -> Self {
         Self {
             rank: Rank::Unranked,
+            dimension_expressions: Vec::new(),
             element_kind,
             element_bits,
         }

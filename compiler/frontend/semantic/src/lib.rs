@@ -1995,11 +1995,7 @@ impl Analyzer<'_> {
                                 severian_universal::ShapeTerm::Ranked(dimensions),
                             )
                             .map_err(|error| {
-                                Diagnostic::new(
-                                    "E000204",
-                                    error.to_string(),
-                                    Some(annotation.span),
-                                )
+                                Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
                             });
                     }
                     return self
@@ -12109,8 +12105,7 @@ impl Analyzer<'_> {
                     Some(expected) => expected,
                     None if expected.is_some() => {
                         return Err(semantic_error(
-                            "storage view does not satisfy the expected tensor element type"
-                                .into(),
+                            "storage view does not satisfy the expected tensor element type".into(),
                             span,
                         ));
                     }
@@ -12693,11 +12688,9 @@ impl Analyzer<'_> {
             };
             let source_tensor = self.types.tensor(value.type_id);
             let result = match &source_tensor {
-                Some(source) => self.tensor_type_with_shape(
-                    target_element,
-                    source.source_shape.clone(),
-                    span,
-                )?,
+                Some(source) => {
+                    self.tensor_type_with_shape(target_element, source.source_shape.clone(), span)?
+                }
                 None => self.tensor_type(target_element, span)?,
             };
             let mut attributes = severian_universal::Attrs::new();
@@ -12750,11 +12743,9 @@ impl Analyzer<'_> {
             };
             let source_tensor = self.types.tensor(source.type_id);
             let result = match &source_tensor {
-                Some(source) => self.tensor_type_with_shape(
-                    target_element,
-                    source.source_shape.clone(),
-                    span,
-                )?,
+                Some(source) => {
+                    self.tensor_type_with_shape(target_element, source.source_shape.clone(), span)?
+                }
                 None => self.tensor_type(target_element, span)?,
             };
             let mut attributes = severian_universal::Attrs::new();
@@ -15963,29 +15954,29 @@ fn tensor_shapes_compatible(
     expected: &severian_universal::TensorShape,
 ) -> bool {
     match (inferred, expected) {
-        (
-            severian_universal::TensorShape::Unranked,
-            severian_universal::TensorShape::Ranked(_),
-        ) => true,
+        (severian_universal::TensorShape::Unranked, severian_universal::TensorShape::Ranked(_)) => {
+            true
+        }
         (
             severian_universal::TensorShape::Ranked(inferred),
             severian_universal::TensorShape::Ranked(expected),
-        ) if inferred.len() == expected.len() => inferred.iter().zip(expected).all(
-            |(inferred, expected)| match (inferred, expected) {
-                (
-                    severian_universal::TensorDimension::Known(inferred),
-                    severian_universal::TensorDimension::Known(expected),
-                ) => inferred == expected,
-                _ => true,
-            },
-        ),
+        ) if inferred.len() == expected.len() => {
+            inferred
+                .iter()
+                .zip(expected)
+                .all(|(inferred, expected)| match (inferred, expected) {
+                    (
+                        severian_universal::TensorDimension::Known(inferred),
+                        severian_universal::TensorDimension::Known(expected),
+                    ) => inferred == expected,
+                    _ => true,
+                })
+        }
         _ => false,
     }
 }
 
-fn dynamic_tensor_rank(
-    shape: &severian_universal::TensorShape,
-) -> severian_universal::TensorShape {
+fn dynamic_tensor_rank(shape: &severian_universal::TensorShape) -> severian_universal::TensorShape {
     shape.rank().map_or(
         severian_universal::TensorShape::Unranked,
         severian_universal::TensorShape::dynamic,
@@ -17434,10 +17425,7 @@ fn attach_tensor_runtime_operands(expression: &mut Expression, operands: &[(usiz
     );
 }
 
-fn attach_tensor_result_shape(
-    expression: &mut Expression,
-    shape: severian_universal::TensorShape,
-) {
+fn attach_tensor_result_shape(expression: &mut Expression, shape: severian_universal::TensorShape) {
     let ExpressionKind::Call {
         callee: severian_hir::Callee::Intrinsic { attributes, .. },
         ..

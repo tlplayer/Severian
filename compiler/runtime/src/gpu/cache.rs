@@ -1,7 +1,7 @@
 use super::{CompilerOptions, GridPolicy, KernelArtifact, KernelBinaryFormat, LaunchRequirements};
 use severian_fusion::{
-    AliasKind, Dimension, ElementKind, FusionGraph, FusionRegion, GpuTarget, KernelSpecialization,
-    Mutation, NodeKind, OperandRole, Rank, StorageLayout, Stride,
+    AliasKind, Dimension, DimensionExpression, ElementKind, FusionGraph, FusionRegion, GpuTarget,
+    KernelSpecialization, Mutation, NodeKind, OperandRole, Rank, StorageLayout, Stride,
 };
 use std::collections::BTreeMap;
 use std::fmt;
@@ -172,6 +172,10 @@ fn encode_graph(hash: &mut StableHash, graph: &FusionGraph, region: &FusionRegio
             });
         }
         encode_rank(hash, &node.shape.rank);
+        hash.u64(node.shape.dimension_expressions.len() as u64);
+        for expression in &node.shape.dimension_expressions {
+            encode_dimension_expression(hash, expression);
+        }
         hash.u8(element_kind(node.shape.element_kind));
         hash.u16(node.shape.element_bits);
         encode_layout(hash, &node.layout);
@@ -221,6 +225,35 @@ fn encode_graph(hash: &mut StableHash, graph: &FusionGraph, region: &FusionRegio
     hash.u32s(&region.nodes.iter().map(|node| node.0).collect::<Vec<_>>());
     hash.u32s(&region.inputs.iter().map(|node| node.0).collect::<Vec<_>>());
     hash.u32s(&region.outputs.iter().map(|node| node.0).collect::<Vec<_>>());
+}
+
+fn encode_dimension_expression(hash: &mut StableHash, expression: &DimensionExpression) {
+    match expression {
+        DimensionExpression::Constant(value) => {
+            hash.u8(0);
+            hash.u64(*value);
+        }
+        DimensionExpression::Symbol(symbol) => {
+            hash.u8(1);
+            hash.u64(*symbol);
+        }
+        DimensionExpression::Dynamic => hash.u8(2),
+        DimensionExpression::Add(left, right) => {
+            hash.u8(3);
+            encode_dimension_expression(hash, left);
+            encode_dimension_expression(hash, right);
+        }
+        DimensionExpression::Multiply(left, right) => {
+            hash.u8(4);
+            encode_dimension_expression(hash, left);
+            encode_dimension_expression(hash, right);
+        }
+        DimensionExpression::DivideExact(left, right) => {
+            hash.u8(5);
+            encode_dimension_expression(hash, left);
+            encode_dimension_expression(hash, right);
+        }
+    }
 }
 
 fn encode_specialization(hash: &mut StableHash, specialization: &KernelSpecialization) {

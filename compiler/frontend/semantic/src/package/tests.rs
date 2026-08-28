@@ -17,7 +17,10 @@ fn generic_parameter_kinds_keep_types_dimensions_and_shapes_separate() {
     };
     let parameters = generic_parameters(&function.type_parameters, &function.constraints);
     assert_eq!(parameters.len(), 4);
-    assert_eq!(parameters[0].kind, severian_universal::GenericParamKind::Type);
+    assert_eq!(
+        parameters[0].kind,
+        severian_universal::GenericParamKind::Type
+    );
     assert_eq!(
         parameters[1].kind,
         severian_universal::GenericParamKind::Dimension
@@ -364,7 +367,9 @@ fn complete_generic_body_specialization_rewrites_every_type_application_position
             _ => None,
         })
         .unwrap();
-    let substitution = std::collections::BTreeMap::from([("T".into(), "bf16".into())]);
+    let substitution = [("T".into(), "bf16".into())]
+        .into_iter()
+        .collect::<super::generic::Substitution>();
     let specialized = super::generic::specialize_function(function, &substitution);
 
     assert_eq!(
@@ -507,6 +512,7 @@ fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_
     let severian_hir::Callee::Direct {
         function,
         substitution,
+        ..
     } = callee
     else {
         panic!("tensor.load must be a direct generic call")
@@ -550,6 +556,7 @@ fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_
     let severian_hir::Callee::Direct {
         function,
         substitution,
+        ..
     } = callee
     else {
         panic!("nested relay must remain a direct generic call")
@@ -573,6 +580,7 @@ fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_
                     severian_mir::Callee::Direct {
                         function,
                         substitution,
+                        ..
                     },
                 ..
             } => Some((*function, substitution.clone())),
@@ -656,6 +664,7 @@ fn explicit_type_application_selects_the_matching_generic_arity_and_overload() {
             severian_hir::Callee::Direct {
                 function,
                 substitution,
+                ..
             },
         ..
     } = &call.kind

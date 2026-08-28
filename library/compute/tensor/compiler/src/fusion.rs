@@ -293,8 +293,39 @@ fn decode_runtime_operands(values: &[i128]) -> Result<Vec<RuntimeOperand>, ()> {
 fn shape_from_contract(contract: &TensorValueContract) -> Shape {
     Shape {
         rank: contract.rank.clone(),
+        dimension_expressions: match &contract.source_shape {
+            severian_universal::ShapeTerm::Ranked(dimensions) => {
+                dimensions.iter().map(fusion_dimension_expression).collect()
+            }
+            severian_universal::ShapeTerm::Pack(_) => Vec::new(),
+        },
         element_kind: contract.element_kind,
         element_bits: contract.element_bits,
+    }
+}
+
+fn fusion_dimension_expression(
+    expression: &severian_universal::DimExpr,
+) -> severian_fusion::DimensionExpression {
+    use severian_fusion::DimensionExpression as Target;
+    use severian_universal::DimExpr as Source;
+    match expression {
+        Source::Constant(value) => Target::Constant(*value),
+        Source::Parameter(parameter) => Target::Symbol(u64::from(parameter.0) | (1 << 63)),
+        Source::Runtime(runtime) if runtime.is_anonymous() => Target::Dynamic,
+        Source::Runtime(runtime) => Target::Symbol(u64::from(runtime.0)),
+        Source::Add(left, right) => Target::Add(
+            Box::new(fusion_dimension_expression(left)),
+            Box::new(fusion_dimension_expression(right)),
+        ),
+        Source::Multiply(left, right) => Target::Multiply(
+            Box::new(fusion_dimension_expression(left)),
+            Box::new(fusion_dimension_expression(right)),
+        ),
+        Source::DivideExact(left, right) => Target::DivideExact(
+            Box::new(fusion_dimension_expression(left)),
+            Box::new(fusion_dimension_expression(right)),
+        ),
     }
 }
 

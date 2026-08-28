@@ -1,9 +1,9 @@
 use crate::{
-    BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, GenericParamId,
-    IntegerWidth, LiteralKind, LiteralValue, OperatorSignature, PrimitiveCategory,
-    DimExpr, PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, RuntimeDimId, ShapeTerm,
-    ShapeParameterId, Substitution, TensorDimension, TensorShape, TensorType, TyInterner,
-    TypeConstraint, TypeId, TypeKind, TypePattern, UnaryOperator,
+    BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, DimExpr,
+    GenericParamId, IntegerWidth, LiteralKind, LiteralValue, OperatorSignature, PrimitiveCategory,
+    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, RuntimeDimId, ShapeParameterId,
+    ShapeTerm, Substitution, TensorDimension, TensorShape, TensorType, TyInterner, TypeConstraint,
+    TypeId, TypeKind, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -552,7 +552,7 @@ impl TypeContext {
                     .enumerate()
                     .map(|(axis, dimension)| match dimension {
                         TensorDimension::Known(value) => DimExpr::Constant(*value),
-                        TensorDimension::Dynamic => DimExpr::Runtime(RuntimeDimId(axis as u32)),
+                        TensorDimension::Dynamic => DimExpr::Runtime(RuntimeDimId::anonymous(axis)),
                     })
                     .collect(),
             ),
@@ -1265,10 +1265,7 @@ mod tests {
         assert_eq!(dynamic_rank_two.source_shape.rank(), Some(2));
         assert_eq!(
             dynamic_rank_two.shape,
-            TensorShape::Ranked(vec![
-                TensorDimension::Dynamic,
-                TensorDimension::Known(1024),
-            ])
+            TensorShape::Ranked(vec![TensorDimension::Dynamic, TensorDimension::Known(1024),])
         );
 
         let unknown_rank = types.tensor(unknown_rank).unwrap();

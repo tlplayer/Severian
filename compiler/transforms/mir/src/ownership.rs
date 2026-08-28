@@ -832,6 +832,7 @@ mod tests {
                     statement_spans: vec![None],
                     terminator: Terminator::Call {
                         callee: Callee::Direct {
+                            instance: None,
                             function: DefId {
                                 package: 0,
                                 module: 0,

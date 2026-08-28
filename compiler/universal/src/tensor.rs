@@ -603,9 +603,9 @@ pub struct TensorType {
 
 fn source_shape_from_lowered(shape: &TensorShape) -> crate::ShapeTerm {
     match shape {
-        TensorShape::Unranked => crate::ShapeTerm::Pack(crate::ShapeParameterId(
-            crate::GenericParamId(u32::MAX),
-        )),
+        TensorShape::Unranked => {
+            crate::ShapeTerm::Pack(crate::ShapeParameterId(crate::GenericParamId(u32::MAX)))
+        }
         TensorShape::Ranked(dimensions) => crate::ShapeTerm::Ranked(
             dimensions
                 .iter()
@@ -613,7 +613,7 @@ fn source_shape_from_lowered(shape: &TensorShape) -> crate::ShapeTerm {
                 .map(|(axis, dimension)| match dimension {
                     TensorDimension::Known(value) => crate::DimExpr::Constant(*value),
                     TensorDimension::Dynamic => {
-                        crate::DimExpr::Runtime(crate::RuntimeDimId(axis as u32))
+                        crate::DimExpr::Runtime(crate::RuntimeDimId::anonymous(axis))
                     }
                 })
                 .collect(),

@@ -20,8 +20,9 @@ pub use execution::{
     EXECUTION_PLACEMENT_ATTRIBUTE,
 };
 pub use generic::{
-    DimExpr, GenericArgument, GenericArguments, GenericError, GenericParamKind, GenericParameter,
-    RankedTensorType, RuntimeDimId, ShapeParameterId, ShapeTerm,
+    ConstraintResolution, DimExpr, DimensionBindings, DimensionConstraint, GenericArgument,
+    GenericArguments, GenericError, GenericParamKind, GenericParameter, RankedTensorType,
+    RuntimeDimId, ShapeParameterId, ShapeTerm,
 };
 pub use ids::{
     CompilerId, DeclarationId, DefId, GenericParamId, InferVarId, InstanceId, PrimitiveId,

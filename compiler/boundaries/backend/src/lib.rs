@@ -723,6 +723,11 @@ pub fn emit_mlir_executable_with_linker_arguments(
         "--convert-linalg-to-loops".to_owned(),
         "--lower-affine".to_owned(),
         "--expand-strided-metadata".to_owned(),
+        // Strided metadata expansion may introduce affine.apply after the
+        // tensor/linalg affine lowering above. Eliminate that late affine IR
+        // before translation to LLVM rather than leaking a dialect into the
+        // final physical module.
+        "--lower-affine".to_owned(),
         "--async-to-async-runtime".to_owned(),
         "--async-runtime-ref-counting".to_owned(),
         "--async-runtime-ref-counting-opt".to_owned(),
@@ -771,13 +776,17 @@ pub fn emit_mlir_executable_with_linker_arguments(
     // `-x c` is only for the native runtime sources. Any following positional
     // inputs are linker inputs and must be detected from their file format.
     clang_arguments.extend(["-x".into(), "none".into()]);
+    // One-shot bufferization lowers tensor copies to the standard MLIR
+    // `memrefCopy` C ABI. It is part of the physical host-runtime contract,
+    // independent of the logical tensor operation that required the copy.
+    let mlir_libdir = llvm_config(&["--libdir"])?;
+    clang_arguments.extend([
+        format!("-L{mlir_libdir}"),
+        format!("-Wl,-rpath,{mlir_libdir}"),
+        "-lmlir_c_runner_utils".into(),
+    ]);
     if module.contains("async.") {
-        let libdir = llvm_config(&["--libdir"])?;
-        clang_arguments.extend([
-            format!("-L{libdir}"),
-            format!("-Wl,-rpath,{libdir}"),
-            "-lmlir_async_runtime".into(),
-        ]);
+        clang_arguments.extend(["-lmlir_async_runtime".into()]);
     }
     if gpu_architecture.is_some() {
         clang_arguments.extend([
@@ -822,16 +831,51 @@ pub fn emit_mlir_executable_with_linker_arguments(
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    run_tool(
+    if let Err(error) = run_tool(
         "clang",
         tool("SEVERIAN_CLANG", "clang-21"),
         &clang_arguments,
         &llvm_ir,
-    )?;
+    ) {
+        return Err(attach_llvm_context(error, &llvm_ir));
+    }
     Ok(Artifact {
         path: output.to_owned(),
         kind: ArtifactKind::Executable,
     })
+}
+
+fn attach_llvm_context(error: BackendError, llvm_ir: &[u8]) -> BackendError {
+    let BackendError::ToolFailed { tool, diagnostic } = error else {
+        return error;
+    };
+    let Some(function) = diagnostic
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("In function: "))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return BackendError::ToolFailed { tool, diagnostic };
+    };
+    let llvm_ir = String::from_utf8_lossy(llvm_ir);
+    let quoted_name = format!("@\"{function}\"");
+    let plain_name = format!("@{function}");
+    let Some(start) = llvm_ir.lines().position(|line| {
+        line.trim_start().starts_with("define ")
+            && (line.contains(&quoted_name) || line.contains(&plain_name))
+    }) else {
+        return BackendError::ToolFailed { tool, diagnostic };
+    };
+    let excerpt = llvm_ir
+        .lines()
+        .skip(start)
+        .take(120)
+        .collect::<Vec<_>>()
+        .join("\n");
+    BackendError::ToolFailed {
+        tool,
+        diagnostic: format!("{diagnostic}\n\nLLVM IR for `{function}`:\n{excerpt}"),
+    }
 }
 
 fn llvm_config(arguments: &[&str]) -> Result<String, BackendError> {

@@ -805,13 +805,8 @@ fn resolve_package_type(
         if !arguments.is_empty() {
             if let Some(class) = package_class_for_lookup(classes, module, name) {
                 if class.declaration.name == "Tensor" {
-                    let element = resolve_package_type(
-                        types,
-                        &arguments[0],
-                        module,
-                        classes,
-                        lists,
-                    )?;
+                    let element =
+                        resolve_package_type(types, &arguments[0], module, classes, lists)?;
                     if arguments.len() == 1 {
                         return types
                             .instantiate_tensor(
@@ -820,11 +815,7 @@ fn resolve_package_type(
                                 severian_universal::TensorShape::Unranked,
                             )
                             .map_err(|error| {
-                                Diagnostic::new(
-                                    "E000204",
-                                    error.to_string(),
-                                    Some(annotation.span),
-                                )
+                                Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
                             });
                     }
                     let dimensions = arguments[1..]

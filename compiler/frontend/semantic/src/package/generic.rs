@@ -60,12 +60,16 @@ impl Substitution {
             .types
             .iter()
             .map(|(parameter, value)| (parameter.clone(), value.clone()))
-            .chain(self.dimensions.iter().map(|(parameter, value)| {
-                (parameter.clone(), format_dim_expr(value))
-            }))
-            .chain(self.shapes.iter().map(|(parameter, value)| {
-                (parameter.clone(), format_shape(value))
-            }))
+            .chain(
+                self.dimensions
+                    .iter()
+                    .map(|(parameter, value)| (parameter.clone(), format_dim_expr(value))),
+            )
+            .chain(
+                self.shapes
+                    .iter()
+                    .map(|(parameter, value)| (parameter.clone(), format_shape(value))),
+            )
             .collect::<Vec<_>>();
         bindings.sort();
         bindings
@@ -897,15 +901,44 @@ fn validate_specializations(
                     parameter,
                     bound,
                     span,
-                } = constraint else {
+                } = constraint
+                else {
                     match constraint {
                         severian_ast::GenericConstraint::VariadicPack { .. } => continue,
-                        severian_ast::GenericConstraint::Predicate(_) => {
-                            return Err(Diagnostic::new(
-                                "E000218",
-                                "compile-time value predicates are parsed but are not supported by the initial generic solver",
-                                Some(constraint_span(constraint)),
-                            ));
+                        severian_ast::GenericConstraint::Predicate(predicate) => {
+                            let Some(constraint) =
+                                tensor_dimension_constraint(predicate, substitution)
+                            else {
+                                return Err(Diagnostic::new(
+                                    "E000218",
+                                    "generic value predicate is outside the tensor dimension constraint language",
+                                    Some(predicate.span),
+                                ));
+                            };
+                            match constraint
+                                .resolve(&severian_universal::DimensionBindings::default())
+                            {
+                                Ok(severian_universal::ConstraintResolution::Proven)
+                                | Ok(severian_universal::ConstraintResolution::RuntimeCheck) => {
+                                    continue;
+                                }
+                                Err(error) => {
+                                    return Err(Diagnostic::new(
+                                        "E000217",
+                                        format!(
+                                            "cannot specialize `{}`: tensor dimension constraint failed: {error}",
+                                            index.definitions[definition].name
+                                        ),
+                                        Some(*origin),
+                                    )
+                                    .with_label(*origin, "specialization requested here")
+                                    .with_additional([Diagnostic::new(
+                                        "E000217",
+                                        "tensor dimension constraint declared here",
+                                        Some(predicate.span),
+                                    )]));
+                                }
+                            }
                         }
                         severian_ast::GenericConstraint::Parameter { .. } => unreachable!(),
                     }
@@ -958,6 +991,108 @@ fn validate_specializations(
     Ok(())
 }
 
+fn tensor_dimension_constraint(
+    predicate: &severian_ast::Expression,
+    substitution: &Substitution,
+) -> Option<severian_universal::DimensionConstraint> {
+    use severian_ast::BinaryOperator;
+    use severian_universal::{DimExpr, DimensionConstraint};
+
+    let severian_ast::ExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &predicate.kind
+    else {
+        return None;
+    };
+    let left_dimension = tensor_dimension_expression(left, substitution);
+    let right_dimension = tensor_dimension_expression(right, substitution);
+    match operator {
+        BinaryOperator::Equal => {
+            if let (
+                severian_ast::ExpressionKind::Binary {
+                    operator: BinaryOperator::Remainder,
+                    left: value,
+                    right: factor,
+                },
+                Some(DimExpr::Constant(0)),
+            ) = (&left.kind, right_dimension.as_ref())
+            {
+                let factor = tensor_dimension_expression(factor, substitution)?;
+                let DimExpr::Constant(factor) = factor else {
+                    return None;
+                };
+                return Some(DimensionConstraint::MultipleOf {
+                    value: tensor_dimension_expression(value, substitution)?,
+                    factor,
+                });
+            }
+            Some(DimensionConstraint::Equal(
+                left_dimension?,
+                right_dimension?,
+            ))
+        }
+        BinaryOperator::GreaterEqual | BinaryOperator::Greater => {
+            let DimExpr::Constant(mut minimum) = right_dimension? else {
+                return None;
+            };
+            if *operator == BinaryOperator::Greater {
+                minimum = minimum.checked_add(1)?;
+            }
+            Some(DimensionConstraint::Range {
+                value: left_dimension?,
+                minimum: Some(minimum),
+                maximum: None,
+            })
+        }
+        BinaryOperator::LessEqual | BinaryOperator::Less => {
+            let DimExpr::Constant(mut maximum) = right_dimension? else {
+                return None;
+            };
+            if *operator == BinaryOperator::Less {
+                maximum = maximum.checked_sub(1)?;
+            }
+            Some(DimensionConstraint::Range {
+                value: left_dimension?,
+                minimum: None,
+                maximum: Some(maximum),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn tensor_dimension_expression(
+    expression: &severian_ast::Expression,
+    substitution: &Substitution,
+) -> Option<severian_universal::DimExpr> {
+    use severian_ast::{BinaryOperator, ExpressionKind, Literal};
+    use severian_universal::DimExpr;
+
+    match &expression.kind {
+        ExpressionKind::Literal(Literal::Integer(value)) => {
+            Some(DimExpr::Constant(value.replace('_', "").parse().ok()?))
+        }
+        ExpressionKind::Name(name) => substitution.dimension(name).cloned(),
+        ExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let left = Box::new(tensor_dimension_expression(left, substitution)?);
+            let right = Box::new(tensor_dimension_expression(right, substitution)?);
+            match operator {
+                BinaryOperator::Add => Some(DimExpr::Add(left, right)),
+                BinaryOperator::Multiply => Some(DimExpr::Multiply(left, right)),
+                BinaryOperator::Divide => Some(DimExpr::DivideExact(left, right)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn source_class_satisfies_bound(
     actual_name: &str,
     bound_name: &str,
@@ -1005,14 +1140,6 @@ fn source_trait_extends(
                 })
             }))
     })
-}
-
-fn constraint_span(constraint: &severian_ast::GenericConstraint) -> severian_source::Span {
-    match constraint {
-        severian_ast::GenericConstraint::Parameter { span, .. } => *span,
-        severian_ast::GenericConstraint::VariadicPack { span, .. } => *span,
-        severian_ast::GenericConstraint::Predicate(expression) => expression.span,
-    }
 }
 
 fn satisfies_bound(
@@ -1500,8 +1627,7 @@ fn visit_expression_for_specializations(
                             _ => None,
                         })
                         .collect::<BTreeSet<_>>();
-                    if !arities.is_empty()
-                        && !arities.iter().any(|arity| explicit.len() <= *arity)
+                    if !arities.is_empty() && !arities.iter().any(|arity| explicit.len() <= *arity)
                     {
                         let expected = arities
                             .iter()
@@ -1582,8 +1708,7 @@ fn visit_expression_for_specializations(
                             .err();
                         }
                     }
-                    for (parameter, argument) in
-                        signature.parameters[..fixed].iter().zip(arguments)
+                    for (parameter, argument) in signature.parameters[..fixed].iter().zip(arguments)
                     {
                         if conflict.is_some() {
                             break;
@@ -2124,9 +2249,9 @@ fn infer_substitution(
     if !same_type_constructor(name, actual_name) {
         return Ok(());
     }
-    let spread = arguments.iter().position(
-        |argument| matches!(argument.kind, TypeAnnotationKind::ShapeSpread(_)),
-    );
+    let spread = arguments
+        .iter()
+        .position(|argument| matches!(argument.kind, TypeAnnotationKind::ShapeSpread(_)));
     if let Some(spread) = spread {
         let suffix = arguments.len() - spread - 1;
         if actual_arguments.len() < spread + suffix {
@@ -2177,9 +2302,9 @@ fn parse_dim_expr(actual: &str, axis: usize) -> severian_universal::DimExpr {
     {
         return severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(runtime));
     }
-    severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(
-        super::stable_hash(&format!("dimension:{axis}:{actual}")) as u32,
-    ))
+    severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(super::stable_hash(
+        &format!("dimension:{axis}:{actual}"),
+    ) as u32))
 }
 
 fn same_type_constructor(left: &str, right: &str) -> bool {
@@ -2304,9 +2429,10 @@ fn expression_type_name(
                 }
             }
             let target_element = match operation {
-                "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80"
-                | "f128" | "i8" | "i16" | "i32" | "i64" | "i128" | "u8" | "u16"
-                | "u32" | "u64" | "u128" => Some(operation),
+                "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128" | "i8"
+                | "i16" | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
+                    Some(operation)
+                }
                 "to_f8_e4_m3_fn" => Some("f8e4m3fn"),
                 "to_f8_e5_m2" => Some("f8e5m2"),
                 "to_f_16" => Some("f16"),
@@ -2320,8 +2446,7 @@ fn expression_type_name(
             if let (Some(target), [argument]) = (target_element, arguments.as_slice()) {
                 let source = expression_type_name(module, &argument.value, names, index)?;
                 let (constructor, source_arguments) = type_application_parts(&source)?;
-                if constructor.rsplit('.').next() == Some("Tensor")
-                    && !source_arguments.is_empty()
+                if constructor.rsplit('.').next() == Some("Tensor") && !source_arguments.is_empty()
                 {
                     let shape = source_arguments[1..]
                         .iter()
@@ -2343,14 +2468,13 @@ fn expression_type_name(
                             ..
                         } = &callee.kind
                         {
-                            for ((parameter, argument), metadata) in function
-                                .type_parameters
-                                .iter()
-                                .zip(explicit)
-                                .zip(generic_parameters(
-                                    &function.type_parameters,
-                                    &function.constraints,
-                                ))
+                            for ((parameter, argument), metadata) in
+                                function.type_parameters.iter().zip(explicit).zip(
+                                    generic_parameters(
+                                        &function.type_parameters,
+                                        &function.constraints,
+                                    ),
+                                )
                             {
                                 match metadata.kind {
                                     severian_universal::GenericParamKind::Type => {
@@ -2366,10 +2490,7 @@ fn expression_type_name(
                                     severian_universal::GenericParamKind::Dimension => {
                                         let value = type_annotation_name(argument)?;
                                         substitution
-                                            .bind_dimension(
-                                                parameter,
-                                                parse_dim_expr(&value, 0),
-                                            )
+                                            .bind_dimension(parameter, parse_dim_expr(&value, 0))
                                             .ok()?;
                                     }
                                     severian_universal::GenericParamKind::Shape => {}

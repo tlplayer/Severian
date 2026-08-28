@@ -60,6 +60,24 @@ def fixed_projection(value: Tensor[f32, 2, 128, 1024]) -> Tensor[f32, 2, 128, 10
     return value
 
 
+# Tensor dimension predicates are compiler shape constraints. They are solved
+# from static call-site facts when possible and become narrow launcher checks
+# when the named extent remains dynamic; they are not ordinary monomorphizing
+# type arguments.
+def bounded_sequence[T: tensor.TensorElement, B: tensor.Dim, S: tensor.Dim, D: tensor.Dim](value: Tensor[T, B, S, D]) -> Tensor[T, B, S, D] with {
+    S >= 1,
+    S <= 4096,
+    D % 8 == 0,
+}:
+    return value
+
+
+def constrained_heads[T: tensor.TensorElement, B: tensor.Dim, S: tensor.Dim, D: tensor.Dim, H: tensor.Dim, HeadDim: tensor.Dim](value: Tensor[T, B, S, D], witness: Tensor[T, B, H, S, HeadDim]) -> Tensor[T, B, S, D] with {
+    D == H * HeadDim,
+}:
+    return value
+
+
 def exercise_structural_numeric[T: tensor.TensorElement, *Shape: tensor.Dim, *IndexShape: tensor.Dim](left: Tensor[T, *Shape], right: Tensor[T, *Shape], indices: Tensor[i64, *IndexShape]) -> bool:
     # Elementwise
     added = tensor.add(copy left, copy right)
@@ -294,8 +312,14 @@ test "shape packs and dimension generics specialize rank before lowering":
     arbitrary_rank: Tensor[f32, 2, 2] = preserve_shape(shape_source)
     fixed_rank: Tensor[f32, 2, 2] = preserve_matrix(matrix_source)
 
+    constrained_input: Tensor[f32, 1, 1, 8] = tensor.f32(tensor.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [1, 1, 8]))
+    head_witness: Tensor[f32, 1, 1, 1, 8] = tensor.f32(tensor.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [1, 1, 1, 8]))
+    bounded: Tensor[f32, 1, 1, 8] = bounded_sequence(constrained_input)
+    constrained: Tensor[f32, 1, 1, 8] = constrained_heads(bounded, head_witness)
+
     assert(tensor.shape(arbitrary_rank) == [2, 2])
     assert(tensor.shape(fixed_rank) == [2, 2])
+    assert(tensor.shape(constrained) == [1, 1, 8])
 
 
 test "rank zero, one, two, and four remain data instead of operation identities":

@@ -303,22 +303,42 @@ def sgd[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape], learning_rate: 
 
 @compile(mlir, stablehlo, xla)
 def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
-@compile(mlir, stablehlo, xla)
-def zeros(shape: list[int]) -> Tensor[f64]
-@compile(mlir, stablehlo, xla)
-def ones(shape: list[int]) -> Tensor[f64]
-@compile(mlir, stablehlo, xla)
-def empty(shape: list[int]) -> Tensor[f64]
-@compile(mlir, stablehlo, xla)
-def arange(stop: int) -> Tensor[f64]
+
+def filled(shape: list[int], value: float) -> Tensor[f64]:
+    count := 1
+    for dimension in shape:
+        count *= dimension
+    elements: list[float] := []
+    for _index in range(0, count):
+        elements.append(value)
+    return tensor(elements, shape)
+
+def zeros(shape: list[int]) -> Tensor[f64]:
+    return filled(shape, 0.0)
+
+def ones(shape: list[int]) -> Tensor[f64]:
+    return filled(shape, 1.0)
+
+def empty(shape: list[int]) -> Tensor[f64]:
+    # Empty storage is deterministically initialized until mutation-aware
+    # allocation becomes a StorageView effect boundary.
+    return filled(shape, 0.0)
+
+def arange(stop: int) -> Tensor[f64]:
+    elements: list[float] := []
+    for index in range(0, stop):
+        elements.append(float(index))
+    return tensor(elements, [stop])
 @compile(mlir, stablehlo, xla)
 def reshape[T](value: Tensor[T], shape: list[int]) -> Tensor[T]
-@compile(mlir, stablehlo, xla)
-def mean(value: Tensor[f64]) -> float
-@compile(mlir, stablehlo, xla)
-def maximum(value: Tensor[f64]) -> float
-@compile(mlir, stablehlo, xla)
-def minimum(value: Tensor[f64]) -> float
+def mean(value: Tensor[f64]) -> float:
+    return values(mean_last(value))[0]
+
+def maximum(value: Tensor[f64]) -> float:
+    return values(maximum_last(value))[0]
+
+def minimum(value: Tensor[f64]) -> float:
+    return -values(maximum_last(scale(value, -1.0)))[0]
 def softmax[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     return softmax_last(value)
 

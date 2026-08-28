@@ -113,12 +113,7 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
     let instances = module
         .functions
         .iter()
-        .map(|function| {
-            (
-                function.id,
-                (function.parameters.clone(), function.result),
-            )
-        })
+        .map(|function| (function.id, (function.parameters.clone(), function.result)))
         .collect::<BTreeMap<_, _>>();
     let signatures = CallSignatures {
         definitions,
@@ -398,8 +393,7 @@ fn transfer(
                             .definitions
                             .get(&(*function, substitution.clone()))
                     });
-                let Some((parameters, _)) = signature
-                else {
+                let Some((parameters, _)) = signature else {
                     return Err(VerifyError::CallTarget);
                 };
                 if parameters.len() != arguments.len() {

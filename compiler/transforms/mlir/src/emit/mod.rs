@@ -2659,10 +2659,10 @@ pub(crate) fn mlir_type(ty: &LoweredType) -> Result<String, MlirError> {
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
         LoweredType::Float {
             format: LoweredFloatFormat::Float8E4M3Fn,
-        } => "f8E4M3FN".into(),
-        LoweredType::Float {
+        }
+        | LoweredType::Float {
             format: LoweredFloatFormat::Float8E5M2,
-        } => "f8E5M2".into(),
+        } => "i8".into(),
         LoweredType::Float {
             format: LoweredFloatFormat::Ieee(16),
         } => "f16".into(),
@@ -2801,10 +2801,10 @@ mod tests {
     }
 
     #[test]
-    fn tensor_float_widths_keep_their_mlir_spelling() {
+    fn tensor_float_widths_keep_their_physical_mlir_spelling() {
         let cases = [
-            (LoweredFloatFormat::Float8E4M3Fn, "f8E4M3FN"),
-            (LoweredFloatFormat::Float8E5M2, "f8E5M2"),
+            (LoweredFloatFormat::Float8E4M3Fn, "i8"),
+            (LoweredFloatFormat::Float8E5M2, "i8"),
             (LoweredFloatFormat::Ieee(16), "f16"),
             (LoweredFloatFormat::BrainFloat16, "bf16"),
             (LoweredFloatFormat::Ieee(32), "f32"),
@@ -2820,8 +2820,8 @@ mod tests {
     #[test]
     fn extended_tensor_float_widths_verify_at_the_mlir_boundary() {
         for (format, spelling) in [
-            (LoweredFloatFormat::Float8E4M3Fn, "f8E4M3FN"),
-            (LoweredFloatFormat::Float8E5M2, "f8E5M2"),
+            (LoweredFloatFormat::Float8E4M3Fn, "i8"),
+            (LoweredFloatFormat::Float8E5M2, "i8"),
             (LoweredFloatFormat::Ieee(80), "f80"),
             (LoweredFloatFormat::Ieee(128), "f128"),
         ] {

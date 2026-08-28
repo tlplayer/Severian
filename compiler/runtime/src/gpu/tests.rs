@@ -168,6 +168,7 @@ fn storage_view_metadata_creates_the_kernel_specialization_before_compilation() 
         [],
         Shape {
             rank: Rank::Unranked,
+            dimension_expressions: Vec::new(),
             element_kind: ElementKind::BrainFloat,
             element_bits: 16,
         },
@@ -215,6 +216,41 @@ fn storage_view_metadata_creates_the_kernel_specialization_before_compilation() 
     assert_eq!(specialization.target, GpuTarget::Nvidia);
     let packed = pack_arguments(&MockDriver::default(), &prepared.arguments).unwrap();
     assert_eq!(packed.value(0), Some(0x1000u64.to_ne_bytes().as_slice()));
+}
+
+#[test]
+fn runtime_specialization_enforces_shared_symbolic_dimensions() {
+    let mut left_shape = Shape::typed([Dimension::Dynamic], ElementKind::IeeeFloat, 32);
+    left_shape.dimension_expressions = vec![DimensionExpression::Symbol(41)];
+    let right_shape = left_shape.clone();
+    let graph = FusionGraph::new(vec![
+        FusionNode::structural(0, NodeKind::Parameter, [], left_shape),
+        FusionNode::structural(1, NodeKind::Parameter, [], right_shape),
+    ])
+    .unwrap();
+    let error = complete_kernel_specialization(
+        &graph,
+        KernelSpecialization {
+            shapes: vec![
+                RuntimeShape {
+                    node: NodeId(0),
+                    dimensions: vec![64],
+                },
+                RuntimeShape {
+                    node: NodeId(1),
+                    dimensions: vec![128],
+                },
+            ],
+            strides: Vec::new(),
+            target: GpuTarget::Nvidia,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        StorageSpecializationError::ShapeInference { message, .. }
+            if message.contains("conflicting runtime extents")
+    ));
 }
 
 #[test]
@@ -540,6 +576,40 @@ fn options() -> CompilerOptions {
         emit: KernelBinaryFormat::Ptx,
         debug: false,
     }
+}
+
+#[test]
+fn tensor_jit_is_a_small_typed_region_specializer_and_cache() {
+    let graph = graph(ElementKind::IeeeFloat, 32);
+    let fusion = plan(&graph, DeviceModel::conservative_gpu());
+    let specialization = KernelSpecialization {
+        shapes: Vec::new(),
+        strides: Vec::new(),
+        target: GpuTarget::Nvidia,
+    };
+    let options = options();
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut jit = TensorJit::new(
+        MockCompiler {
+            count: Arc::clone(&count),
+        },
+        KernelCache::memory(),
+    );
+    let request = KernelCompileRequest {
+        graph: &graph,
+        region: &fusion.regions[0],
+        specialization: &specialization,
+        options: &options,
+    };
+
+    let first = jit.resolve(&request).unwrap();
+    let second = jit.resolve(&request).unwrap();
+    assert!(!first.cache_hit);
+    assert!(second.cache_hit);
+    assert_eq!(first.key, second.key);
+    assert_eq!(first.artifact, second.artifact);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(jit.cache().len(), 1);
 }
 
 #[test]

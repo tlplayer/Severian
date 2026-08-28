@@ -49,6 +49,10 @@ pub struct CompileValueContract {
 pub struct TensorValueContract {
     pub element_kind: severian_fusion::ElementKind,
     pub element_bits: u16,
+    /// Symbolic source dimensions survive beside the backend rank view. A
+    /// repeated RuntimeDimId or GenericParamId is an equality constraint; an
+    /// arithmetic expression is validated at specialization time.
+    pub source_shape: severian_universal::ShapeTerm,
     pub rank: severian_fusion::Rank,
     pub layout: severian_fusion::StorageLayout,
     pub aliases: Vec<ValueAlias>,
@@ -117,7 +121,29 @@ pub enum RegionSpecializationError {
         expected: i64,
         found: i64,
     },
+    ShapeConstraint {
+        slot: u32,
+        axis: usize,
+        expected: severian_universal::DimExpr,
+        found: u64,
+    },
+    ShapeConstraintEvaluation(String),
     InvalidType(String),
+}
+
+/// Whether a region can be emitted from its language-level ranked contract or
+/// must cross the deliberately small runtime tensor-JIT boundary first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TensorJitRequirement {
+    None,
+    Required { reasons: Vec<TensorJitReason> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TensorJitReason {
+    UnresolvedRank { slot: u32 },
+    DynamicGpuExtent { slot: u32, axis: usize },
+    RuntimeGpuLayout { slot: u32 },
 }
 
 impl std::fmt::Display for RegionSpecializationError {
@@ -129,6 +155,50 @@ impl std::fmt::Display for RegionSpecializationError {
 impl std::error::Error for RegionSpecializationError {}
 
 impl CompileRegion {
+    /// Classifies specialization without looking at source function names.
+    /// CPU MLIR accepts ranked dynamic extents directly. The current TTIR
+    /// contract still bakes dynamic extents/layout into indexing, so only
+    /// those GPU facts request a cached runtime compilation.
+    pub fn tensor_jit_requirement(&self) -> TensorJitRequirement {
+        let gpu = self.placement == Some(ExecutionPlacement::Gpu);
+        let mut reasons = std::collections::BTreeSet::new();
+        for contract in &self.value_contracts {
+            let Some(tensor) = &contract.tensor else {
+                continue;
+            };
+            match &tensor.rank {
+                severian_fusion::Rank::Unranked => {
+                    reasons.insert(TensorJitReason::UnresolvedRank {
+                        slot: contract.slot,
+                    });
+                }
+                severian_fusion::Rank::Ranked(dimensions) if gpu => {
+                    for (axis, dimension) in dimensions.iter().enumerate() {
+                        if matches!(dimension, severian_fusion::Dimension::Dynamic) {
+                            reasons.insert(TensorJitReason::DynamicGpuExtent {
+                                slot: contract.slot,
+                                axis,
+                            });
+                        }
+                    }
+                }
+                severian_fusion::Rank::Ranked(_) => {}
+            }
+            if gpu && matches!(tensor.layout, severian_fusion::StorageLayout::Runtime) {
+                reasons.insert(TensorJitReason::RuntimeGpuLayout {
+                    slot: contract.slot,
+                });
+            }
+        }
+        if reasons.is_empty() {
+            TensorJitRequirement::None
+        } else {
+            TensorJitRequirement::Required {
+                reasons: reasons.into_iter().collect(),
+            }
+        }
+    }
+
     pub fn rebuild_value_contracts(&mut self, types: &TypeContext) -> Result<(), String> {
         let mut contracts = BTreeMap::new();
         for (slot, value) in self.inputs.iter().enumerate() {
@@ -248,6 +318,21 @@ impl CompileRegion {
         let required = rank_dependent_slots(&region);
         let mut specialized_types = TypeContext::clone(types);
         let mut slot_types = BTreeMap::new();
+        let mut dimension_bindings = severian_universal::DimensionBindings::default();
+        for contract in &region.value_contracts {
+            let Some(tensor) = &contract.tensor else {
+                continue;
+            };
+            let Some(runtime) = runtime_values.get(&contract.slot).copied() else {
+                continue;
+            };
+            bind_direct_dimensions(
+                contract.slot,
+                &tensor.source_shape,
+                runtime,
+                &mut dimension_bindings,
+            )?;
+        }
         for contract in &mut region.value_contracts {
             let Some(tensor) = &mut contract.tensor else {
                 slot_types.insert(contract.slot, contract.type_id);
@@ -267,6 +352,12 @@ impl CompileRegion {
                 continue;
             };
             validate_runtime_value(contract.slot, tensor, runtime)?;
+            validate_source_shape(
+                contract.slot,
+                &tensor.source_shape,
+                runtime,
+                &dimension_bindings,
+            )?;
             let refined_rank = match &tensor.rank {
                 severian_fusion::Rank::Unranked => severian_fusion::Rank::Ranked(vec![
                         severian_fusion::Dimension::Dynamic;
@@ -280,6 +371,15 @@ impl CompileRegion {
                     .refine_tensor_shape(contract.type_id, shape)
                     .map_err(|error| RegionSpecializationError::InvalidType(error.to_string()))?;
                 tensor.rank = refined_rank;
+                tensor.source_shape = severian_universal::ShapeTerm::Ranked(
+                    (0..runtime.dimensions.len())
+                        .map(|axis| {
+                            severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(
+                                contract.slot.wrapping_mul(65_537).wrapping_add(axis as u32),
+                            ))
+                        })
+                        .collect(),
+                );
             }
             tensor.layout = severian_fusion::StorageLayout::Strided {
                 strides: runtime
@@ -359,6 +459,70 @@ fn validate_runtime_value(
                     found: runtime.offset,
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+fn bind_direct_dimensions(
+    slot: u32,
+    shape: &severian_universal::ShapeTerm,
+    runtime: &RuntimeValueSpecialization,
+    bindings: &mut severian_universal::DimensionBindings,
+) -> Result<(), RegionSpecializationError> {
+    let severian_universal::ShapeTerm::Ranked(dimensions) = shape else {
+        return Ok(());
+    };
+    if dimensions.len() != runtime.dimensions.len() {
+        return Err(RegionSpecializationError::RankMismatch {
+            slot,
+            expected: dimensions.len(),
+            found: runtime.dimensions.len(),
+        });
+    }
+    for (dimension, found) in dimensions.iter().zip(&runtime.dimensions) {
+        let result = match dimension {
+            severian_universal::DimExpr::Parameter(parameter) => {
+                bindings.bind_parameter(*parameter, *found)
+            }
+            severian_universal::DimExpr::Runtime(runtime) => {
+                if runtime.is_anonymous() {
+                    Ok(())
+                } else {
+                    bindings.bind_runtime(*runtime, *found)
+                }
+            }
+            _ => Ok(()),
+        };
+        result.map_err(|error| {
+            RegionSpecializationError::ShapeConstraintEvaluation(format!(
+                "slot {slot} has conflicting symbolic dimensions: {error}"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_source_shape(
+    slot: u32,
+    shape: &severian_universal::ShapeTerm,
+    runtime: &RuntimeValueSpecialization,
+    bindings: &severian_universal::DimensionBindings,
+) -> Result<(), RegionSpecializationError> {
+    let severian_universal::ShapeTerm::Ranked(dimensions) = shape else {
+        return Ok(());
+    };
+    for (axis, (expression, found)) in dimensions.iter().zip(&runtime.dimensions).enumerate() {
+        let expected = expression.evaluate(bindings).map_err(|error| {
+            RegionSpecializationError::ShapeConstraintEvaluation(error.to_string())
+        })?;
+        if expected.is_some_and(|expected| expected != *found) {
+            return Err(RegionSpecializationError::ShapeConstraint {
+                slot,
+                axis,
+                expected: expression.clone(),
+                found: *found,
+            });
         }
     }
     Ok(())
@@ -522,6 +686,7 @@ fn compile_value_contract(
             Ok(TensorValueContract {
                 element_kind,
                 element_bits,
+                source_shape: tensor_type.source_shape,
                 rank,
                 layout,
                 aliases: Vec::new(),

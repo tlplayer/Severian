@@ -129,6 +129,17 @@ pub enum ScalarUnaryOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScalarOperation {
+    Constant {
+        result: String,
+        literal: String,
+        ty: LoweredType,
+    },
+    Call {
+        result: String,
+        symbol: String,
+        arguments: Vec<(String, LoweredType)>,
+        result_type: LoweredType,
+    },
     FloatConvert {
         result: String,
         operand: String,
@@ -174,6 +185,7 @@ impl GenericBody {
         captures: Vec<Value>,
         operations: Vec<ScalarOperation>,
     ) -> Result<Self, StructuredError> {
+        let operations = legalize_float8_scalar_operations(operations);
         let mut values = arguments.iter().cloned().collect::<BTreeMap<_, _>>();
         for capture in &captures {
             let ty = capture
@@ -190,6 +202,39 @@ impl GenericBody {
         let mut yielded = false;
         for (index, operation) in operations.iter().enumerate() {
             match operation {
+                ScalarOperation::Constant { result, ty, .. } => {
+                    if yielded || !is_scalar(ty) {
+                        return Err(StructuredError(
+                            "scalar constant has an invalid type or position".into(),
+                        ));
+                    }
+                    if values.insert(result.clone(), ty.clone()).is_some() {
+                        return Err(StructuredError(format!(
+                            "scalar SSA value `%{result}` is defined twice"
+                        )));
+                    }
+                }
+                ScalarOperation::Call {
+                    result,
+                    arguments,
+                    result_type,
+                    ..
+                } => {
+                    if yielded
+                        || arguments
+                            .iter()
+                            .any(|(argument, ty)| values.get(argument) != Some(ty))
+                    {
+                        return Err(StructuredError(
+                            "scalar call has inconsistent SSA operands".into(),
+                        ));
+                    }
+                    if values.insert(result.clone(), result_type.clone()).is_some() {
+                        return Err(StructuredError(format!(
+                            "scalar SSA value `%{result}` is defined twice"
+                        )));
+                    }
+                }
                 ScalarOperation::FloatConvert {
                     result,
                     operand,
@@ -274,6 +319,219 @@ impl GenericBody {
             operations,
         })
     }
+}
+
+fn is_scalar(ty: &LoweredType) -> bool {
+    matches!(
+        ty,
+        LoweredType::Integer { .. } | LoweredType::Float { .. } | LoweredType::Boolean
+    )
+}
+
+fn float8_format(ty: &LoweredType) -> Option<i32> {
+    match ty {
+        LoweredType::Float {
+            format: crate::LoweredFloatFormat::Float8E4M3Fn,
+        } => Some(3),
+        LoweredType::Float {
+            format: crate::LoweredFloatFormat::Float8E5M2,
+        } => Some(4),
+        _ => None,
+    }
+}
+
+fn legalize_float8_scalar_operations(operations: Vec<ScalarOperation>) -> Vec<ScalarOperation> {
+    let f32_type = LoweredType::Float {
+        format: crate::LoweredFloatFormat::Ieee(32),
+    };
+    let i32_type = LoweredType::Integer {
+        bits: 32,
+        signed: true,
+    };
+    let mut legalized = Vec::new();
+    for (ordinal, operation) in operations.into_iter().enumerate() {
+        let prefix = format!("__sev_fp8_{ordinal}");
+        match operation {
+            ScalarOperation::Binary {
+                result,
+                operation,
+                left,
+                right,
+                ty,
+            } if float8_format(&ty).is_some() => {
+                let format = float8_format(&ty).expect("checked above");
+                let format_name = format!("{prefix}_format");
+                let left_wide = format!("{prefix}_left");
+                let right_wide = format!("{prefix}_right");
+                let computed = format!("{prefix}_computed");
+                legalized.extend([
+                    ScalarOperation::Constant {
+                        result: format_name.clone(),
+                        literal: format.to_string(),
+                        ty: i32_type.clone(),
+                    },
+                    ScalarOperation::Call {
+                        result: left_wide.clone(),
+                        symbol: "__sev_float_decode".into(),
+                        arguments: vec![
+                            (left, ty.clone()),
+                            (format_name.clone(), i32_type.clone()),
+                        ],
+                        result_type: f32_type.clone(),
+                    },
+                    ScalarOperation::Call {
+                        result: right_wide.clone(),
+                        symbol: "__sev_float_decode".into(),
+                        arguments: vec![
+                            (right, ty.clone()),
+                            (format_name.clone(), i32_type.clone()),
+                        ],
+                        result_type: f32_type.clone(),
+                    },
+                    ScalarOperation::Binary {
+                        result: computed.clone(),
+                        operation,
+                        left: left_wide,
+                        right: right_wide,
+                        ty: f32_type.clone(),
+                    },
+                    ScalarOperation::Call {
+                        result,
+                        symbol: "__sev_float_encode".into(),
+                        arguments: vec![
+                            (computed, f32_type.clone()),
+                            (format_name, i32_type.clone()),
+                        ],
+                        result_type: ty,
+                    },
+                ]);
+            }
+            ScalarOperation::Unary {
+                result,
+                operation,
+                operand,
+                ty,
+            } if float8_format(&ty).is_some() => {
+                let format = float8_format(&ty).expect("checked above");
+                let format_name = format!("{prefix}_format");
+                let wide = format!("{prefix}_wide");
+                let computed = format!("{prefix}_computed");
+                legalized.extend([
+                    ScalarOperation::Constant {
+                        result: format_name.clone(),
+                        literal: format.to_string(),
+                        ty: i32_type.clone(),
+                    },
+                    ScalarOperation::Call {
+                        result: wide.clone(),
+                        symbol: "__sev_float_decode".into(),
+                        arguments: vec![
+                            (operand, ty.clone()),
+                            (format_name.clone(), i32_type.clone()),
+                        ],
+                        result_type: f32_type.clone(),
+                    },
+                    ScalarOperation::Unary {
+                        result: computed.clone(),
+                        operation,
+                        operand: wide,
+                        ty: f32_type.clone(),
+                    },
+                    ScalarOperation::Call {
+                        result,
+                        symbol: "__sev_float_encode".into(),
+                        arguments: vec![
+                            (computed, f32_type.clone()),
+                            (format_name, i32_type.clone()),
+                        ],
+                        result_type: ty,
+                    },
+                ]);
+            }
+            ScalarOperation::FloatConvert {
+                result,
+                operand,
+                source,
+                target,
+            } if float8_format(&source).is_some() || float8_format(&target).is_some() => {
+                let source_format = float8_format(&source);
+                let target_format = float8_format(&target);
+                let original_operand = operand;
+                let mut wide_name = original_operand.clone();
+                let mut wide_type = source.clone();
+                if let Some(format) = source_format {
+                    let format_name = format!("{prefix}_source_format");
+                    wide_name = if target_format.is_none() && target == f32_type {
+                        result.clone()
+                    } else {
+                        format!("{prefix}_decoded")
+                    };
+                    legalized.push(ScalarOperation::Constant {
+                        result: format_name.clone(),
+                        literal: format.to_string(),
+                        ty: i32_type.clone(),
+                    });
+                    legalized.push(ScalarOperation::Call {
+                        result: wide_name.clone(),
+                        symbol: "__sev_float_decode".into(),
+                        arguments: vec![
+                            (original_operand, source.clone()),
+                            (format_name, i32_type.clone()),
+                        ],
+                        result_type: f32_type.clone(),
+                    });
+                    wide_type = f32_type.clone();
+                }
+                if let Some(format) = target_format {
+                    if wide_type != f32_type {
+                        let converted = format!("{prefix}_f32");
+                        legalized.push(ScalarOperation::FloatConvert {
+                            result: converted.clone(),
+                            operand: wide_name,
+                            source: wide_type,
+                            target: f32_type.clone(),
+                        });
+                        wide_name = converted;
+                    }
+                    let format_name = format!("{prefix}_target_format");
+                    legalized.push(ScalarOperation::Constant {
+                        result: format_name.clone(),
+                        literal: format.to_string(),
+                        ty: i32_type.clone(),
+                    });
+                    legalized.push(ScalarOperation::Call {
+                        result,
+                        symbol: "__sev_float_encode".into(),
+                        arguments: vec![
+                            (wide_name, f32_type.clone()),
+                            (format_name, i32_type.clone()),
+                        ],
+                        result_type: target,
+                    });
+                } else if wide_type == target {
+                    // Decoding FP8 directly to f32 can use the requested SSA
+                    // result name only when no later conversion is necessary.
+                    if wide_name != result {
+                        legalized.push(ScalarOperation::FloatConvert {
+                            result,
+                            operand: wide_name,
+                            source: wide_type,
+                            target,
+                        });
+                    }
+                } else {
+                    legalized.push(ScalarOperation::FloatConvert {
+                        result,
+                        operand: wide_name,
+                        source: wide_type,
+                        target,
+                    });
+                }
+            }
+            operation => legalized.push(operation),
+        }
+    }
+    legalized
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -484,12 +742,18 @@ impl FunctionBuilder {
         source: &Value,
         target: LoweredType,
     ) -> Result<Value, StructuredError> {
-        let Some(LoweredType::Float { format: source_format }) = source.lowered_type() else {
+        let Some(LoweredType::Float {
+            format: source_format,
+        }) = source.lowered_type()
+        else {
             return Err(StructuredError(
                 "floating conversion requires a floating source".into(),
             ));
         };
-        let LoweredType::Float { format: target_format } = &target else {
+        let LoweredType::Float {
+            format: target_format,
+        } = &target
+        else {
             return Err(StructuredError(
                 "floating conversion requires a floating target".into(),
             ));
@@ -901,15 +1165,17 @@ impl FunctionBuilder {
     ) -> Result<Value, StructuredError> {
         let source_rank = tensor_rank(source)?;
         let index_rank = tensor_rank(indices)?;
-        let target_rank = tensor_rank_from_type(&target).ok_or_else(|| {
-            StructuredError("tensor.gather target must have known rank".into())
-        })?;
+        let target_rank = tensor_rank_from_type(&target)
+            .ok_or_else(|| StructuredError("tensor.gather target must have known rank".into()))?;
         if source_rank == 0 || target_rank != index_rank + source_rank - 1 {
             return Err(StructuredError(
                 "tensor.gather result rank must be index rank plus source rank minus one".into(),
             ));
         }
-        if dynamic_sizes.iter().any(|value| value.ty != ValueType::Index) {
+        if dynamic_sizes
+            .iter()
+            .any(|value| value.ty != ValueType::Index)
+        {
             return Err(StructuredError(
                 "tensor.generate dynamic sizes must have index type".into(),
             ));
@@ -1225,11 +1491,17 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             "    %{} = arith.constant {value} : index\n",
             result.name
         )),
-        Operation::ScalarConstant { result, literal } => output.push_str(&format!(
-            "    %{} = arith.constant {literal} : {}\n",
-            result.name,
-            print_value_type(&result.ty)?
-        )),
+        Operation::ScalarConstant { result, literal } => {
+            let literal = match result.lowered_type().and_then(float8_format) {
+                Some(_) if literal == "0.0" => "0",
+                _ => literal,
+            };
+            output.push_str(&format!(
+                "    %{} = arith.constant {literal} : {}\n",
+                result.name,
+                print_value_type(&result.ty)?
+            ));
+        }
         Operation::FloatConvert {
             result,
             source,
@@ -1237,7 +1509,11 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
         } => output.push_str(&format!(
             "    %{} = {} %{} : {} to {}\n",
             result.name,
-            if *extend { "arith.extf" } else { "arith.truncf" },
+            if *extend {
+                "arith.extf"
+            } else {
+                "arith.truncf"
+            },
             source.name,
             print_value_type(&source.ty)?,
             print_value_type(&result.ty)?
@@ -1527,6 +1803,33 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             output.push_str("):\n");
             for scalar in &body.operations {
                 match scalar {
+                    ScalarOperation::Constant {
+                        result,
+                        literal,
+                        ty,
+                    } => output.push_str(&format!(
+                        "      %{result} = arith.constant {literal} : {}\n",
+                        type_spelling(ty)?
+                    )),
+                    ScalarOperation::Call {
+                        result,
+                        symbol,
+                        arguments,
+                        result_type,
+                    } => output.push_str(&format!(
+                        "      %{result} = func.call @{symbol}({}) : ({}) -> {}\n",
+                        arguments
+                            .iter()
+                            .map(|(argument, _)| format!("%{argument}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        arguments
+                            .iter()
+                            .map(|(_, ty)| type_spelling(ty))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .join(", "),
+                        type_spelling(result_type)?
+                    )),
                     ScalarOperation::FloatConvert {
                         result,
                         operand,
@@ -1558,11 +1861,41 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
                         left,
                         right,
                         ty,
-                    } => output.push_str(&format!(
-                        "      %{result} = {} %{left}, %{right} : {}\n",
-                        scalar_binary_name(*operation),
-                        type_spelling(ty)?
-                    )),
+                    } => {
+                        let ty = type_spelling(ty)?;
+                        if *operation == ScalarBinaryOperation::MaximumFloat {
+                            // LLVM lowers llvm.maximum.f128 through an i128
+                            // bitwise zero comparison that its x86 selector
+                            // cannot legalize. Keep maximum as structural
+                            // scalar IR and express its IEEE behavior with
+                            // ordinary comparisons and selects instead.
+                            output.push_str(&format!(
+                                concat!(
+                                    "      %{result}_greater = arith.cmpf ogt, %{left}, %{right} : {ty}\n",
+                                    "      %{result}_ordered = arith.select %{result}_greater, %{left}, %{right} : {ty}\n",
+                                    "      %{result}_zero = arith.constant 0.0 : {ty}\n",
+                                    "      %{result}_left_zero = arith.cmpf oeq, %{left}, %{result}_zero : {ty}\n",
+                                    "      %{result}_right_zero = arith.cmpf oeq, %{right}, %{result}_zero : {ty}\n",
+                                    "      %{result}_both_zero = arith.andi %{result}_left_zero, %{result}_right_zero : i1\n",
+                                    "      %{result}_zero_sum = arith.addf %{left}, %{right} : {ty}\n",
+                                    "      %{result}_finite = arith.select %{result}_both_zero, %{result}_zero_sum, %{result}_ordered : {ty}\n",
+                                    "      %{result}_left_nan = arith.cmpf uno, %{left}, %{left} : {ty}\n",
+                                    "      %{result}_right_nan = arith.cmpf uno, %{right}, %{right} : {ty}\n",
+                                    "      %{result}_right_selected = arith.select %{result}_right_nan, %{right}, %{result}_finite : {ty}\n",
+                                    "      %{result} = arith.select %{result}_left_nan, %{left}, %{result}_right_selected : {ty}\n"
+                                ),
+                                result = result,
+                                left = left,
+                                right = right,
+                                ty = ty,
+                            ));
+                        } else {
+                            output.push_str(&format!(
+                                "      %{result} = {} %{left}, %{right} : {ty}\n",
+                                scalar_binary_name(*operation)
+                            ));
+                        }
+                    }
                     ScalarOperation::Yield { value, ty } => output.push_str(&format!(
                         "      linalg.yield %{value} : {}\n",
                         type_spelling(ty)?
@@ -1595,10 +1928,14 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
                         .ok_or_else(|| StructuredError("func.call returned index".into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            output.push_str(&format!(
-                "    {assignment}func.call @{symbol}({}) : ({arguments_types}){}\n",
-                print_values(arguments),
+            let result_signature = if result_types.is_empty() {
+                " -> ()".to_owned()
+            } else {
                 print_result_signature(&result_types)?
+            };
+            output.push_str(&format!(
+                "    {assignment}func.call @{symbol}({}) : ({arguments_types}){result_signature}\n",
+                print_values(arguments),
             ));
         }
         Operation::Return(values) => {
@@ -1924,5 +2261,43 @@ mod tests {
         assert!(error
             .to_string()
             .contains("incompatible with its element type"));
+    }
+
+    #[test]
+    fn void_runtime_calls_print_a_complete_function_type() {
+        let pointer = LoweredType::Bytes;
+        let integer = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let mut function = FunctionBuilder::new(
+            "entry",
+            false,
+            vec![
+                ("list".into(), pointer.clone()),
+                ("value".into(), integer.clone()),
+            ],
+            vec![],
+        )
+        .unwrap();
+        function
+            .call(
+                vec![],
+                "push",
+                vec![
+                    function.parameter(0).unwrap(),
+                    function.parameter(1).unwrap(),
+                ],
+                vec![],
+            )
+            .unwrap();
+        function.return_values(vec![]).unwrap();
+        let mut module = ModuleBuilder::default();
+        module
+            .declare_function("push", vec![pointer, integer], vec![])
+            .unwrap();
+        module.add_function(function.finish().unwrap()).unwrap();
+        let text = module.print().unwrap();
+        assert!(text.contains("func.call @push(%list, %value) : (!llvm.ptr, i64) -> ()"));
     }
 }

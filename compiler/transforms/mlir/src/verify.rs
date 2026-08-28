@@ -32,7 +32,12 @@ pub fn verify_artifact(
     target: &TargetSpec,
 ) -> Result<VerifiedMlirArtifact, MlirError> {
     let context = Context::new();
-    let module = Module::parse(&context, &artifact.module, "artifact")?;
+    let module = Module::parse(&context, &artifact.module, "artifact").map_err(|error| {
+        MlirError::ParseFailed(format!(
+            "{error}; generated artifact:\n{}",
+            numbered_excerpt(&artifact.module, 80)
+        ))
+    })?;
     let entry = module.sole_entry()?;
     if !module.operation_has_body(entry) {
         return Err(MlirError::EntryFunctionIsDeclaration);
@@ -45,6 +50,16 @@ pub fn verify_artifact(
         module: module.print(),
         target: target.triple.clone(),
     })
+}
+
+fn numbered_excerpt(module: &str, limit: usize) -> String {
+    module
+        .lines()
+        .take(limit)
+        .enumerate()
+        .map(|(line, text)| format!("{:>4}: {text}", line + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn compose(
@@ -141,11 +156,7 @@ fn mismatched_call_signatures(module: &str) -> Vec<String> {
         .filter_map(|line| {
             let tail = line.split("<{callee = @").nth(1)?;
             let symbol = tail.split("}>").next()?;
-            let provided = line
-                .split("}> : ")
-                .nth(1)?
-                .split(" -> ")
-                .next()?;
+            let provided = line.split("}> : ").nth(1)?.split(" -> ").next()?;
             let expected = definitions.get(symbol)?;
             (provided != expected).then(|| {
                 format!(
@@ -524,10 +535,10 @@ fn lowered_type(context: &Context, ty: &LoweredType) -> Result<ffi::MlirType, Ml
             }
             LoweredType::Float {
                 format: LoweredFloatFormat::Float8E4M3Fn,
-            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f8E4M3FN")),
-            LoweredType::Float {
+            }
+            | LoweredType::Float {
                 format: LoweredFloatFormat::Float8E5M2,
-            } => ffi::mlirTypeParseGet(context.raw, ffi::string_ref("f8E5M2")),
+            } => ffi::mlirIntegerTypeGet(context.raw, 8),
             LoweredType::Float {
                 format: LoweredFloatFormat::Ieee(16),
             } => ffi::mlirF16TypeGet(context.raw),

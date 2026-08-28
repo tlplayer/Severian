@@ -8,8 +8,8 @@ mod statement;
 pub use expression::{Callee, TaskOwner};
 pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{
-    CompileRoute, CompilerId, Conversion, ConversionKind, DefId, GenericParamId, OpId,
-    GenericParameter, Substitution, TypeId,
+    CompileRoute, CompilerId, Conversion, ConversionKind, DefId, GenericParamId, GenericParameter,
+    OpId, Substitution, TypeId,
 };
 pub use statement::{Binding, Block, MatchArm, Statement};
 
