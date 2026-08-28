@@ -188,6 +188,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-fusion"
+version = "0.1.0"
+
+[[package]]
 name = "severian-hir"
 version = "0.1.0"
 dependencies = [
@@ -316,9 +320,18 @@ version = "0.1.0"
 dependencies = [
  "severian-artifact",
  "severian-compile",
+ "severian-fusion",
+ "severian-mir",
  "severian-mlir",
  "severian-target",
  "severian-universal",
+]
+
+[[package]]
+name = "severian-triton"
+version = "0.1.0"
+dependencies = [
+ "severian-fusion",
 ]
 
 [[package]]

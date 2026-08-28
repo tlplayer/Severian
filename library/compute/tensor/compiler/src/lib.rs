@@ -1,13 +1,17 @@
 #![forbid(unsafe_code)]
 
+mod fusion;
+
+pub use fusion::{fusion_graph, FusionGraphError};
+
 use severian_compile::{CompileContext, CompileError, CompileHandler, CompileRegion};
 use severian_mlir::{
     type_spelling, LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement,
     LoweredTensorShape, LoweredType, MlirArtifact,
 };
 use severian_universal::{
-    tensor, AttrValue, Attrs, FloatFormat, IntegerWidth, PrimitiveRepresentation,
-    TensorDimension, TensorShape, TypeContext, TypeId,
+    tensor, AttrValue, Attrs, FloatFormat, IntegerWidth, PrimitiveRepresentation, TensorDimension,
+    TensorShape, TypeContext, TypeId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -71,10 +75,12 @@ impl CompileHandler for TensorCompiler {
 
         for (index, operation) in region.compile_operations.iter().enumerate() {
             let operation_kind = tensor::TensorOp::decode(operation.id, &operation.attributes)
-                .ok_or_else(|| invalid(format!(
-                    "tensor operation {:?} has no structural operation kind",
-                    operation.id
-                )))?;
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "tensor operation {:?} has no structural operation kind",
+                        operation.id
+                    ))
+                })?;
             let operation_inputs = operation
                 .operands
                 .iter()
@@ -85,28 +91,28 @@ impl CompileHandler for TensorCompiler {
                 .iter()
                 .map(|ty| lower_type(*ty, context))
                 .collect::<Result<Vec<_>, _>>()?;
-            let operand_slots = if operation.operand_slots.is_empty()
-                && region.compile_operations.len() == 1
-            {
-                (0..operation_inputs.len() as u32).collect::<Vec<_>>()
-            } else {
-                operation.operand_slots.clone()
-            };
-            let result_slots = if operation.result_slots.is_empty()
-                && region.compile_operations.len() == 1
-            {
-                let slots = (inferred_next_slot
-                    ..inferred_next_slot + operation_outputs.len() as u32)
-                    .collect::<Vec<_>>();
-                inferred_next_slot += operation_outputs.len() as u32;
-                slots
-            } else {
-                operation.result_slots.clone()
-            };
+            let operand_slots =
+                if operation.operand_slots.is_empty() && region.compile_operations.len() == 1 {
+                    (0..operation_inputs.len() as u32).collect::<Vec<_>>()
+                } else {
+                    operation.operand_slots.clone()
+                };
+            let result_slots =
+                if operation.result_slots.is_empty() && region.compile_operations.len() == 1 {
+                    let slots = (inferred_next_slot
+                        ..inferred_next_slot + operation_outputs.len() as u32)
+                        .collect::<Vec<_>>();
+                    inferred_next_slot += operation_outputs.len() as u32;
+                    slots
+                } else {
+                    operation.result_slots.clone()
+                };
             if operand_slots.len() != operation_inputs.len()
                 || result_slots.len() != operation_outputs.len()
             {
-                return Err(invalid("tensor region value slots do not match operation arity"));
+                return Err(invalid(
+                    "tensor region value slots do not match operation arity",
+                ));
             }
             for (slot, expected) in operand_slots.iter().zip(&operation_inputs) {
                 if slot_types.get(slot) != Some(expected) {
@@ -117,7 +123,9 @@ impl CompileHandler for TensorCompiler {
             }
             for (slot, ty) in result_slots.iter().zip(&operation_outputs) {
                 if slot_types.insert(*slot, ty.clone()).is_some() {
-                    return Err(invalid(format!("tensor region slot {slot} is defined twice")));
+                    return Err(invalid(format!(
+                        "tensor region slot {slot} is defined twice"
+                    )));
                 }
             }
             inferred_result_slots = result_slots.clone();
@@ -131,13 +139,10 @@ impl CompileHandler for TensorCompiler {
                 .map(type_spelling)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| invalid(error.to_string()))?;
-            for declaration in operation_declarations(
-                operation_kind,
-                &operation_inputs,
-                &operation_outputs,
-            )?
-            .lines()
-            .filter(|line| !line.is_empty())
+            for declaration in
+                operation_declarations(operation_kind, &operation_inputs, &operation_outputs)?
+                    .lines()
+                    .filter(|line| !line.is_empty())
             {
                 declarations.insert(declaration.to_owned());
             }
@@ -189,7 +194,9 @@ impl CompileHandler for TensorCompiler {
             region.output_slots.clone()
         };
         if output_slots.len() != outputs.len() {
-            return Err(invalid("tensor region output slots do not match its result signature"));
+            return Err(invalid(
+                "tensor region output slots do not match its result signature",
+            ));
         }
         let return_values = output_slots
             .iter()
@@ -282,7 +289,9 @@ fn lower_operation(
                 format: LoweredFloatFormat::Ieee(64),
             })
         {
-            return Err(invalid("ranked list construction currently consumes list[float]"));
+            return Err(invalid(
+                "ranked list construction currently consumes list[float]",
+            ));
         }
         let count = static_element_count(shape)
             .map_err(|error| invalid(format!("from_elements: {error}")))?;
@@ -310,18 +319,20 @@ fn lower_operation(
         };
         let scalar = tensor_element_spelling(*element)?;
         if scalar != "f64" {
-            return Err(invalid("values currently returns list[float] and requires f64"));
+            return Err(invalid(
+                "values currently returns list[float] and requires f64",
+            ));
         }
         let shape = effective_shape(shape, attributes);
-        let dimensions = static_dimensions(&shape)
-            .map_err(|error| invalid(format!("values: {error}")))?;
+        let dimensions =
+            static_dimensions(&shape).map_err(|error| invalid(format!("values: {error}")))?;
         let coordinates = tensor_coordinates(&dimensions);
         let input_type = input_spellings
             .first()
             .ok_or_else(|| invalid("values input type is missing"))?;
         let ranked_type = type_spelling(&LoweredType::Tensor {
             element: *element,
-            shape,
+            shape: shape.clone(),
         })
         .map_err(|error| invalid(error.to_string()))?;
         let (operand, cast) = if *input_type == ranked_type {
@@ -332,9 +343,8 @@ fn lower_operation(
                 format!("    %ranked = tensor.cast %arg0 : {input_type} to {ranked_type}\n"),
             )
         };
-        let mut body = format!(
-            "{cast}    %result = func.call @__sev_list_create() : () -> !llvm.ptr\n"
-        );
+        let mut body =
+            format!("{cast}    %result = func.call @__sev_list_create() : () -> !llvm.ptr\n");
         for (ordinal, coordinate) in coordinates.iter().enumerate() {
             let mut indices = Vec::with_capacity(coordinate.len());
             for (axis, index) in coordinate.iter().enumerate() {
@@ -351,7 +361,12 @@ fn lower_operation(
         return Ok(body);
     }
 
-    if matches!(operation, tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape | tensor::StorageViewOp::Strides)) {
+    if matches!(
+        operation,
+        tensor::TensorOp::StorageView(
+            tensor::StorageViewOp::Shape | tensor::StorageViewOp::Strides
+        )
+    ) {
         let [LoweredType::Tensor { shape, .. }] = inputs else {
             return Err(invalid("shape and strides require one tensor operand"));
         };
@@ -371,7 +386,8 @@ fn lower_operation(
             }
             strides
         };
-        let mut body = "    %result = func.call @__sev_list_create() : () -> !llvm.ptr\n".to_owned();
+        let mut body =
+            "    %result = func.call @__sev_list_create() : () -> !llvm.ptr\n".to_owned();
         for (index, value) in values.into_iter().enumerate() {
             body.push_str(&format!(
                 "    %value{index} = arith.constant {value} : i64\n    func.call @__sev_list_push_i64(%result, %value{index}) : (!llvm.ptr, i64) -> ()\n"
@@ -413,29 +429,25 @@ fn lower_operation(
         Some(match result_element {
             LoweredTensorElement::Float { .. } => "arith.divf",
             LoweredTensorElement::Integer { signed: true, .. } => "arith.divsi",
-            LoweredTensorElement::Integer { signed: false, .. }
-            | LoweredTensorElement::Boolean => "arith.divui",
+            LoweredTensorElement::Integer { signed: false, .. } | LoweredTensorElement::Boolean => {
+                "arith.divui"
+            }
         })
     } else {
         None
     };
     if let Some(instruction) = binary {
         if inputs.len() != 2 {
-            return Err(invalid(
-                "binary tensor operations require two operands",
-            ));
+            return Err(invalid("binary tensor operations require two operands"));
         }
         if input_spellings != [output.clone(), output.clone()] {
-            let [
-                LoweredType::Tensor {
-                    element: left_element,
-                    shape: LoweredTensorShape::Ranked(left_shape),
-                },
-                LoweredType::Tensor {
-                    element: right_element,
-                    shape: LoweredTensorShape::Ranked(right_shape),
-                },
-            ] = inputs
+            let [LoweredType::Tensor {
+                element: left_element,
+                shape: LoweredTensorShape::Ranked(left_shape),
+            }, LoweredType::Tensor {
+                element: right_element,
+                shape: LoweredTensorShape::Ranked(right_shape),
+            }] = inputs
             else {
                 return Err(invalid(
                     "broadcasting binary operations require statically ranked tensors",
@@ -451,9 +463,7 @@ fn lower_operation(
                 ));
             };
             if left_element != output_element || right_element != output_element {
-                return Err(invalid(
-                    "binary tensor operands must have one element type",
-                ));
+                return Err(invalid("binary tensor operands must have one element type"));
             }
             let scalar = tensor_element_spelling(*output_element)?;
             let loops = (0..output_shape.len())
@@ -533,9 +543,7 @@ fn lower_operation(
         }
         let rank = input_dimensions.len();
         let scalar = tensor_element_spelling(*element)?;
-        let loop_dimensions = (0..rank)
-            .map(|axis| format!("d{axis}"))
-            .collect::<Vec<_>>();
+        let loop_dimensions = (0..rank).map(|axis| format!("d{axis}")).collect::<Vec<_>>();
         let input_map = loop_dimensions.iter().rev().cloned().collect::<Vec<_>>();
         let iterator_types = vec!["\"parallel\""; rank].join(", ");
         return Ok(format!(
@@ -546,29 +554,36 @@ fn lower_operation(
     }
 
     if operation == tensor::TensorOp::Matmul {
-        let [
-            LoweredType::Tensor {
-                element: left_element,
-                shape: left_shape,
-            },
-            LoweredType::Tensor {
-                element: right_element,
-                shape: right_shape,
-            },
-        ] = inputs
+        let [LoweredType::Tensor {
+            element: left_element,
+            shape: left_shape,
+        }, LoweredType::Tensor {
+            element: right_element,
+            shape: right_shape,
+        }] = inputs
         else {
             return Err(invalid("matmul requires two tensor operands"));
         };
         if left_element != right_element || left_element != &result_element {
-            return Err(invalid("matmul operands and result must have one element type"));
+            return Err(invalid(
+                "matmul operands and result must have one element type",
+            ));
         }
         let left_dimensions = match left_shape {
             LoweredTensorShape::Ranked(dimensions) if dimensions.len() >= 2 => dimensions,
-            _ => return Err(invalid("matmul left operand must have known rank at least two")),
+            _ => {
+                return Err(invalid(
+                    "matmul left operand must have known rank at least two",
+                ))
+            }
         };
         let right_dimensions = match right_shape {
             LoweredTensorShape::Ranked(dimensions) if dimensions.len() >= 2 => dimensions,
-            _ => return Err(invalid("matmul right operand must have known rank at least two")),
+            _ => {
+                return Err(invalid(
+                    "matmul right operand must have known rank at least two",
+                ))
+            }
         };
         let LoweredType::Tensor { element, shape } = result_type else {
             unreachable!();
@@ -590,7 +605,7 @@ fn lower_operation(
         let zero = if is_float(*element) { "0.0" } else { "0" };
         let ranked_type = type_spelling(&LoweredType::Tensor {
             element: *element,
-            shape,
+            shape: shape.clone(),
         })
         .map_err(|error| invalid(error.to_string()))?;
         let output_rank = output_dimensions.len();
@@ -621,8 +636,16 @@ fn lower_operation(
             .collect::<Vec<_>>();
         let mut iterators = vec!["\"parallel\""; output_rank];
         iterators.push("\"reduction\"");
-        let multiply = if is_float(*element) { "arith.mulf" } else { "arith.muli" };
-        let add = if is_float(*element) { "arith.addf" } else { "arith.addi" };
+        let multiply = if is_float(*element) {
+            "arith.mulf"
+        } else {
+            "arith.muli"
+        };
+        let add = if is_float(*element) {
+            "arith.addf"
+        } else {
+            "arith.addi"
+        };
         return Ok(format!(
             "    %empty = tensor.empty() : {ranked_type}\n    %zero = arith.constant {zero} : {scalar}\n    %initialized = linalg.fill ins(%zero : {scalar}) outs(%empty : {ranked_type}) -> {ranked_type}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({output_map})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%initialized : {ranked_type}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %acc: {scalar}):\n      %product = {multiply} %left, %right : {scalar}\n      %sum = {add} %acc, %product : {scalar}\n      linalg.yield %sum : {scalar}\n    }} -> {ranked_type}\n    return %result : {output}\n",
             left_type = input_spellings[0],
@@ -687,6 +710,7 @@ fn lower_tensor_conversion(
     ))
 }
 
+#[allow(dead_code)]
 fn lower_rms_norm(
     inputs: &[LoweredType],
     result_type: &LoweredType,
@@ -694,19 +718,15 @@ fn lower_rms_norm(
     output: &str,
     result_element: LoweredTensorElement,
 ) -> Result<String, CompileError> {
-    let [
-        LoweredType::Tensor {
-            element: input_element,
-            shape: LoweredTensorShape::Ranked(input_shape),
-        },
-        LoweredType::Tensor {
-            element: weight_element,
-            shape: LoweredTensorShape::Ranked(weight_shape),
-        },
-        LoweredType::Float {
-            format: epsilon_format,
-        },
-    ] = inputs
+    let [LoweredType::Tensor {
+        element: input_element,
+        shape: LoweredTensorShape::Ranked(input_shape),
+    }, LoweredType::Tensor {
+        element: weight_element,
+        shape: LoweredTensorShape::Ranked(weight_shape),
+    }, LoweredType::Float {
+        format: epsilon_format,
+    }] = inputs
     else {
         return Err(invalid(
             "RMSNorm requires a ranked input, ranked weights, and floating epsilon",
@@ -728,9 +748,7 @@ fn lower_rms_norm(
         ));
     }
     if input_shape.is_empty() || output_shape != input_shape {
-        return Err(invalid(
-            "RMSNorm must preserve a non-scalar input shape",
-        ));
+        return Err(invalid("RMSNorm must preserve a non-scalar input shape"));
     }
     if weight_shape.len() != 1 || weight_shape[0] != input_shape[input_shape.len() - 1] {
         return Err(invalid(
@@ -751,18 +769,14 @@ fn lower_rms_norm(
     }
     let accumulation_element = rms_accumulation_element(result_element);
     let accumulation_scalar = tensor_element_spelling(accumulation_element)?;
-    let outer_shape = LoweredTensorShape::Ranked(
-        input_shape[..input_shape.len() - 1].to_vec(),
-    );
+    let outer_shape = LoweredTensorShape::Ranked(input_shape[..input_shape.len() - 1].to_vec());
     let outer_type = type_spelling(&LoweredType::Tensor {
         element: accumulation_element,
         shape: outer_shape,
     })
     .map_err(|error| invalid(error.to_string()))?;
     let rank = input_shape.len();
-    let loops = (0..rank)
-        .map(|axis| format!("d{axis}"))
-        .collect::<Vec<_>>();
+    let loops = (0..rank).map(|axis| format!("d{axis}")).collect::<Vec<_>>();
     let outer = loops[..rank - 1].join(", ");
     let identity = loops.join(", ");
     let iterators = (0..rank)
@@ -822,6 +836,7 @@ fn lower_rms_norm(
     ))
 }
 
+#[allow(dead_code)]
 const fn rms_accumulation_element(element: LoweredTensorElement) -> LoweredTensorElement {
     match element {
         LoweredTensorElement::Float {
@@ -854,14 +869,7 @@ fn lower_scalar_conversion(
     result: &str,
 ) -> Result<String, CompileError> {
     if is_fp8(source) || is_fp8(target) {
-        return lower_fp8_conversion(
-            value,
-            source,
-            target,
-            source_type,
-            target_type,
-            result,
-        );
+        return lower_fp8_conversion(value, source, target, source_type, target_type, result);
     }
     if source == target {
         let (zero, add) = if is_float(source) {
@@ -878,7 +886,11 @@ fn lower_scalar_conversion(
             LoweredTensorElement::Float { format: source },
             LoweredTensorElement::Float { format: target },
         ) if float_format_bits(source) == float_format_bits(target) => {
-            let intermediate = if float_format_bits(source) < 16 { "f16" } else { "f32" };
+            let intermediate = if float_format_bits(source) < 16 {
+                "f16"
+            } else {
+                "f32"
+            };
             return Ok(format!(
                 "    {result}_wide = arith.extf {value} : {source_type} to {intermediate}\n    {result} = arith.truncf {result}_wide : {intermediate} to {target_type}\n"
             ));
@@ -901,7 +913,11 @@ fn lower_scalar_conversion(
             LoweredTensorElement::Integer { bits: target, .. },
         ) => {
             if source < target {
-                if signed { "arith.extsi" } else { "arith.extui" }
+                if signed {
+                    "arith.extsi"
+                } else {
+                    "arith.extui"
+                }
             } else if source > target {
                 "arith.trunci"
             } else {
@@ -911,18 +927,22 @@ fn lower_scalar_conversion(
                 ));
             }
         }
-        (LoweredTensorElement::Integer { signed: true, .. }, LoweredTensorElement::Float { .. }) => {
-            "arith.sitofp"
-        }
-        (LoweredTensorElement::Integer { signed: false, .. }, LoweredTensorElement::Float { .. }) => {
-            "arith.uitofp"
-        }
-        (LoweredTensorElement::Float { .. }, LoweredTensorElement::Integer { signed: true, .. }) => {
-            "arith.fptosi"
-        }
-        (LoweredTensorElement::Float { .. }, LoweredTensorElement::Integer { signed: false, .. }) => {
-            "arith.fptoui"
-        }
+        (
+            LoweredTensorElement::Integer { signed: true, .. },
+            LoweredTensorElement::Float { .. },
+        ) => "arith.sitofp",
+        (
+            LoweredTensorElement::Integer { signed: false, .. },
+            LoweredTensorElement::Float { .. },
+        ) => "arith.uitofp",
+        (
+            LoweredTensorElement::Float { .. },
+            LoweredTensorElement::Integer { signed: true, .. },
+        ) => "arith.fptosi",
+        (
+            LoweredTensorElement::Float { .. },
+            LoweredTensorElement::Integer { signed: false, .. },
+        ) => "arith.fptoui",
         _ => return Err(invalid("unsupported scalar tensor conversion")),
     };
     Ok(format!(
@@ -993,9 +1013,7 @@ fn lower_fp8_conversion(
         }
         LoweredTensorElement::Integer { signed: true, .. } => "arith.fptosi",
         LoweredTensorElement::Integer { signed: false, .. } => "arith.fptoui",
-        LoweredTensorElement::Boolean => {
-            return Err(invalid("FP8 cannot be converted to boolean"))
-        }
+        LoweredTensorElement::Boolean => return Err(invalid("FP8 cannot be converted to boolean")),
     };
     body.push_str(&format!(
         "    {result} = {conversion} %{f32_value} : f32 to {target_type}\n"
@@ -1081,21 +1099,24 @@ fn static_dimensions(shape: &LoweredTensorShape) -> Result<Vec<usize>, CompileEr
     dimensions
         .iter()
         .map(|dimension| match dimension {
-            LoweredTensorDimension::Known(value) => usize::try_from(*value)
-                .map_err(|_| invalid("tensor dimension does not fit usize")),
-            LoweredTensorDimension::Dynamic => {
-                Err(invalid("operation requires statically known tensor dimensions"))
+            LoweredTensorDimension::Known(value) => {
+                usize::try_from(*value).map_err(|_| invalid("tensor dimension does not fit usize"))
             }
+            LoweredTensorDimension::Dynamic => Err(invalid(
+                "operation requires statically known tensor dimensions",
+            )),
         })
         .collect()
 }
 
 fn static_element_count(shape: &LoweredTensorShape) -> Result<usize, CompileError> {
-    static_dimensions(shape)?.into_iter().try_fold(1usize, |count, dimension| {
-        count
-            .checked_mul(dimension)
-            .ok_or_else(|| invalid("tensor element count overflow"))
-    })
+    static_dimensions(shape)?
+        .into_iter()
+        .try_fold(1usize, |count, dimension| {
+            count
+                .checked_mul(dimension)
+                .ok_or_else(|| invalid("tensor element count overflow"))
+        })
 }
 
 fn tensor_coordinates(dimensions: &[usize]) -> Vec<Vec<usize>> {
@@ -1233,28 +1254,44 @@ mod tests {
     use super::*;
     use severian_artifact::{ArtifactId, CompiledRegionId};
     use severian_compile::{CompileOperation, EffectSet};
+    use severian_mir::{Value, ValueId};
     use severian_target::TargetSpec;
     use severian_universal::{install_primitives, Attrs, TypeContextBuilder};
 
     const ELEMENTS: &[&str] = &[
-        "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128",
-        "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64", "f80", "f128",
+        "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f8e4m3fn", "f8e5m2",
+        "f16", "bf16", "f32", "f64", "f80", "f128",
     ];
     const FLOAT_ELEMENTS: &[&str] = &[
         "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64", "f80", "f128",
     ];
-    const NUMERIC_OPERATIONS: &[(OpId, usize)] = &[
-        (tensor::ADD, 2),
-        (tensor::SUBTRACT, 2),
-        (tensor::MULTIPLY, 2),
-        (tensor::DIVIDE, 2),
-        (tensor::MATMUL, 2),
+    const NUMERIC_OPERATIONS: &[(tensor::TensorOp, usize)] = &[
+        (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add), 2),
+        (
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Subtract),
+            2,
+        ),
+        (
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Multiply),
+            2,
+        ),
+        (
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Divide),
+            2,
+        ),
+        (tensor::TensorOp::Matmul, 2),
     ];
-    const FLOAT_OPERATIONS: &[(OpId, usize)] = &[
-        (tensor::EXP, 1),
-        (tensor::LOG, 1),
-        (tensor::TANH, 1),
-        (tensor::RSQRT, 1),
+    const FLOAT_OPERATIONS: &[(tensor::TensorOp, usize)] = &[
+        (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Exp), 1),
+        (tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Log), 1),
+        (
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Tanh),
+            1,
+        ),
+        (
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Rsqrt),
+            1,
+        ),
     ];
 
     fn types() -> (TypeContext, TypeId) {
@@ -1268,19 +1305,32 @@ mod tests {
         (types, constructor)
     }
 
-    fn region(tensor_type: TypeId, operation: OpId, operands: usize) -> CompileRegion {
+    fn region(tensor_type: TypeId, operation: tensor::TensorOp, operands: usize) -> CompileRegion {
+        let mut attributes = Attrs::new();
+        let operation_id = operation.apply(&mut attributes);
         CompileRegion {
             id: CompiledRegionId::new(0),
             compiler: tensor::compiler_id(),
             operations: Vec::new(),
             compile_operations: vec![CompileOperation {
-                id: operation,
+                id: operation_id,
                 operands: vec![tensor_type; operands],
                 results: vec![tensor_type],
-                attributes: Attrs::new(),
+                operand_slots: (0..operands as u32).collect(),
+                result_slots: vec![operands as u32],
+                attributes,
             }],
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            output_slots: vec![operands as u32],
+            inputs: (0..operands)
+                .map(|index| Value {
+                    id: ValueId(index as u32),
+                    type_id: tensor_type,
+                })
+                .collect(),
+            outputs: vec![Value {
+                id: ValueId(operands as u32),
+                type_id: tensor_type,
+            }],
             effects: EffectSet::default(),
         }
     }
@@ -1288,7 +1338,7 @@ mod tests {
     fn compile_and_verify(
         types: &TypeContext,
         tensor_type: TypeId,
-        operation: OpId,
+        operation: tensor::TensorOp,
         operands: usize,
     ) -> MlirArtifact {
         let artifact = TensorCompiler
@@ -1335,7 +1385,10 @@ mod tests {
                     artifact.module
                 );
             }
-            for operation in [tensor::MATERIALIZE, tensor::TRANSPOSE] {
+            for operation in [
+                tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Materialize),
+                tensor::TensorOp::Permute(tensor::PermuteOp::Reverse),
+            ] {
                 let artifact = compile_and_verify(&types, tensor_type, operation, 1);
                 assert!(artifact.module.contains(&format!("tensor<2x2x{element}>")));
             }
@@ -1394,8 +1447,14 @@ mod tests {
         let result = types
             .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3]))
             .unwrap();
-        let mut operation = region(result, tensor::ADD, 2);
+        let mut operation = region(
+            result,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            2,
+        );
         operation.compile_operations[0].operands = vec![matrix, row];
+        operation.inputs[0].type_id = matrix;
+        operation.inputs[1].type_id = row;
         let artifact = TensorCompiler
             .compile(
                 &operation,
@@ -1428,8 +1487,10 @@ mod tests {
         let result = types
             .instantiate_tensor(constructor, f64, TensorShape::ranked([2, 4]))
             .unwrap();
-        let mut operation = region(result, tensor::MATMUL, 2);
+        let mut operation = region(result, tensor::TensorOp::Matmul, 2);
         operation.compile_operations[0].operands = vec![left, right];
+        operation.inputs[0].type_id = left;
+        operation.inputs[1].type_id = right;
         let artifact = TensorCompiler
             .compile(
                 &operation,
@@ -1451,36 +1512,32 @@ mod tests {
     }
 
     #[test]
-    fn rms_norm_lowers_end_to_end_for_every_numeric_element_type() {
+    fn rms_norm_is_a_graph_of_primitives_not_a_compiler_operation() {
         let (mut types, constructor) = types();
-        let epsilon = types.resolve_name("float").unwrap();
-        for name in ELEMENTS {
-            let element = types.resolve_name(name).unwrap();
-            let input = types
-                .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
-                .unwrap();
-            let weights = types
-                .instantiate_tensor(constructor, element, TensorShape::ranked([4]))
-                .unwrap();
-            let mut operation = region(input, tensor::RMS_NORM, 3);
-            operation.compile_operations[0].operands = vec![input, weights, epsilon];
-            let artifact = TensorCompiler
-                .compile(
-                    &operation,
-                    &CompileContext {
-                        types: &types,
-                        target: &TargetSpec::host(),
-                    },
-                )
-                .unwrap_or_else(|error| panic!("RMSNorm[{name}] did not lower: {error}"));
-            assert!(artifact.module.contains("linalg.generic"));
-            assert!(artifact.module.contains("math.rsqrt"));
-            severian_mlir::verify_artifact(
-                ArtifactId::for_region(CompiledRegionId::new(0)),
-                artifact,
-                &TargetSpec::host(),
-            )
-            .unwrap_or_else(|error| panic!("RMSNorm[{name}] emitted invalid MLIR: {error}"));
-        }
+        let element = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+            .unwrap();
+        let mut region = region(
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Multiply),
+            2,
+        );
+        let mut rsqrt_attributes = Attrs::new();
+        let rsqrt = tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Rsqrt);
+        region.compile_operations.push(CompileOperation {
+            id: rsqrt.apply(&mut rsqrt_attributes),
+            operands: vec![tensor_type],
+            results: vec![tensor_type],
+            operand_slots: vec![2],
+            result_slots: vec![3],
+            attributes: rsqrt_attributes,
+        });
+        region.output_slots = vec![3];
+        region.outputs[0].type_id = tensor_type;
+        let graph = fusion_graph(&region, &types).unwrap();
+        assert_eq!(graph.nodes().len(), 4);
+        assert_eq!(graph.node(severian_fusion::NodeId(2)).operation, "multiply");
+        assert_eq!(graph.node(severian_fusion::NodeId(3)).operation, "rsqrt");
     }
 }

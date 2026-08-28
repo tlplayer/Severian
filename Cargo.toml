@@ -20,6 +20,7 @@ members = [
     "compiler/boundaries/driver",
     "compiler/boundaries/ffi",
     "compiler/boundaries/interface",
+    "compiler/boundaries/triton",
     "compiler/boundaries/xxi",
 
     # Cross-cutting
@@ -36,6 +37,7 @@ members = [
     "compiler/source",
 
     # Transforms
+    "compiler/transforms/fusion",
     "compiler/transforms/lir",
     "compiler/transforms/lowering",
     "compiler/transforms/mir",
@@ -80,12 +82,14 @@ severian-hir = "semantic"
 severian-semantic = "semantic"
 severian-ownership = "semantic"
 severian-bootstrap = "bootstrap"
+severian-fusion = "transform"
 severian-mir = "transform"
 severian-lir = "transform"
 severian-lowering = "transform"
 severian-abi = "boundary"
 severian-ffi = "boundary"
 severian-interface = "boundary"
+severian-triton = "boundary"
 severian-backend = "boundary"
 severian-xxi = "boundary"
 severian-mlir = "boundary"
@@ -141,6 +145,7 @@ severian-bootstrap = [
     "severian-source",
     "severian-universal",
 ]
+severian-fusion = []
 severian-mir = ["severian-artifact", "severian-hir", "severian-universal"]
 severian-lir = ["severian-artifact"]
 severian-lowering = [
@@ -153,6 +158,7 @@ severian-lowering = [
 severian-abi = ["severian-target"]
 severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
+severian-triton = ["severian-fusion"]
 severian-backend = ["severian-lir", "severian-runtime"]
 severian-xxi = [
     "severian-abi",
@@ -185,6 +191,7 @@ severian-driver = [
 ]
 severian-tensor-compiler = [
     "severian-compile",
+    "severian-fusion",
     "severian-mlir",
     "severian-universal",
 ]

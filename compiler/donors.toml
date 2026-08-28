@@ -1,0 +1,32 @@
+# Donor sources are deliberately checked out beside Severian, not vendored into
+# its source tree. Revisions record the code reviewed when this ABI was defined.
+
+[[donor]]
+name = "OpenXLA"
+url = "https://github.com/openxla/xla.git"
+revision = "94eb25f05a2dc944e3ff14b5c5ed9113d02870de"
+license = "Apache-2.0"
+local-path = "../xla"
+uses = [
+    "xla/backends/gpu/transforms/priority_fusion.*",
+    "xla/service/gpu/gpu_fusible.*",
+    "xla/pjrt/c",
+    "xla/stream_executor/device_description.*",
+]
+
+[[donor]]
+name = "Triton"
+url = "https://github.com/triton-lang/triton.git"
+revision = "8957b9aac23e526fb1252c7c3b592e6f43c175c8"
+license = "MIT"
+local-path = "../triton"
+uses = [
+    "include/triton",
+    "lib",
+    "third_party/amd/backend/compiler.py",
+    "third_party/amd/include",
+    "third_party/amd/lib",
+    "third_party/nvidia/backend/compiler.py",
+    "third_party/nvidia/include",
+    "third_party/nvidia/lib",
+]

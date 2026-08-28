@@ -54,6 +54,18 @@ detect-all = []
 detect-any = ["target/components/bin/severian-stablehlo-opt"]
 
 [[component]]
+id = "compiler.triton-gpu"
+kind = "compiler"
+device = "gpu"
+vendor = "any"
+provides = ["compiler.triton"]
+detect-all = []
+detect-any = [
+    "target/components/lib/libseverian_triton_bridge.so",
+    "target/components/bin/severian-triton-bridge",
+]
+
+[[component]]
 id = "runtime.mlir-rocm"
 kind = "runtime"
 device = "gpu"
@@ -77,6 +89,6 @@ os = ["arch", "manjaro"]
 program = "pacman"
 arguments = ["-S", "--needed", "--noconfirm", "rocmlir"]
 
-# XLA and Triton remain optional consumers. Installing a future component
-# manifest makes it a candidate for eligible tensor graph regions without
-# adding a user-facing flag.
+# XLA and Triton are optional donor-backed consumers. Installing the native
+# Triton bridge makes it a candidate for eligible GPU fusion regions without
+# adding a user-facing backend flag.
