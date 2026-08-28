@@ -1,6 +1,4 @@
-use crate::{
-    DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, TensorShape, TyId, TypeId,
-};
+use crate::{DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, TensorShape, TyId, TypeId};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -305,7 +303,10 @@ impl InferenceContext {
             ) if left_mutable == right_mutable && left_lifetime == right_lifetime => {
                 self.unify(interner, *left, *right)
             }
-            (Some(TypeKind::Nominal(left, left_args)), Some(TypeKind::Nominal(right, right_args)))
+            (
+                Some(TypeKind::Nominal(left, left_args)),
+                Some(TypeKind::Nominal(right, right_args)),
+            )
             | (
                 Some(TypeKind::Resource(left, left_args)),
                 Some(TypeKind::Resource(right, right_args)),
@@ -359,9 +360,7 @@ fn occurs(
                 .values()
                 .any(|ty| occurs(interner, bindings, variable, ty))
         }
-        Some(TypeKind::Tensor { element, .. }) => {
-            occurs(interner, bindings, variable, *element)
-        }
+        Some(TypeKind::Tensor { element, .. }) => occurs(interner, bindings, variable, *element),
         Some(TypeKind::Function(signature)) => signature
             .parameters
             .iter()
@@ -493,7 +492,10 @@ mod tests {
         );
         assert_eq!(substitution.get(GenericParamId(0)), Some(TypeId(10)));
         assert_eq!(substitution.get(GenericParamId(1)), None);
-        assert_eq!(substitution.values().collect::<Vec<_>>(), [TypeId(10), TypeId(20)]);
+        assert_eq!(
+            substitution.values().collect::<Vec<_>>(),
+            [TypeId(10), TypeId(20)]
+        );
     }
 
     #[test]
@@ -502,10 +504,13 @@ mod tests {
         assert!(types.is_empty());
         assert_eq!(types.kind(TypeId(99)), None);
 
-        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(
-            DeclarationId::from_path("core.i32"),
-        )));
-        assert_eq!(types.intern(types.kind(primitive).unwrap().clone()), primitive);
+        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(DeclarationId::from_path(
+            "core.i32",
+        ))));
+        assert_eq!(
+            types.intern(types.kind(primitive).unwrap().clone()),
+            primitive
+        );
         assert_eq!(types.len(), 1);
 
         let parameter = types.parameter(GenericParamId(0));
@@ -550,12 +555,12 @@ mod tests {
     #[test]
     fn inference_unifies_all_matching_structures_and_rejects_mismatches() {
         let mut types = TyInterner::default();
-        let first = types.intern(TypeKind::Primitive(PrimitiveId(
-            DeclarationId::from_path("First"),
-        )));
-        let second = types.intern(TypeKind::Primitive(PrimitiveId(
-            DeclarationId::from_path("Second"),
-        )));
+        let first = types.intern(TypeKind::Primitive(PrimitiveId(DeclarationId::from_path(
+            "First",
+        ))));
+        let second = types.intern(TypeKind::Primitive(PrimitiveId(DeclarationId::from_path(
+            "Second",
+        ))));
         let mut inference = InferenceContext::default();
         assert_eq!(inference.unify(&types, first, first), Ok(()));
 
@@ -582,7 +587,9 @@ mod tests {
             parameters: vec![second],
             result: second,
         }));
-        inference.unify(&types, left_function, right_function).unwrap();
+        inference
+            .unify(&types, left_function, right_function)
+            .unwrap();
 
         let reference_variable = types.fresh_infer();
         let left_reference = types.intern(TypeKind::Reference {
@@ -595,7 +602,9 @@ mod tests {
             mutable: true,
             lifetime: RegionId(1),
         });
-        inference.unify(&types, left_reference, right_reference).unwrap();
+        inference
+            .unify(&types, left_reference, right_reference)
+            .unwrap();
 
         for resource in [false, true] {
             let variable = types.fresh_infer();
@@ -655,9 +664,9 @@ mod tests {
             panic!("fresh inference type");
         };
         let other = types.fresh_infer();
-        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(
-            DeclarationId::from_path("Value"),
-        )));
+        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(DeclarationId::from_path(
+            "Value",
+        ))));
         let def = definition("Recursive");
         let substitution = Substitution::new([(GenericParamId(0), variable)]);
         let structures = [

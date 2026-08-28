@@ -147,9 +147,18 @@ mod tests {
 
     #[test]
     fn unary_spellings_are_total_for_declared_operators() {
-        assert_eq!(UnaryOperator::from_spelling("+"), Some(UnaryOperator::Positive));
-        assert_eq!(UnaryOperator::from_spelling("-"), Some(UnaryOperator::Negative));
-        assert_eq!(UnaryOperator::from_spelling("not"), Some(UnaryOperator::Not));
+        assert_eq!(
+            UnaryOperator::from_spelling("+"),
+            Some(UnaryOperator::Positive)
+        );
+        assert_eq!(
+            UnaryOperator::from_spelling("-"),
+            Some(UnaryOperator::Negative)
+        );
+        assert_eq!(
+            UnaryOperator::from_spelling("not"),
+            Some(UnaryOperator::Not)
+        );
         assert_eq!(UnaryOperator::from_spelling("!"), None);
     }
 }

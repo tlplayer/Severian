@@ -1,5 +1,5 @@
 use crate::{BlockId, CfgBody, CfgStatement, LocalId, Operand, Place, Rvalue, Terminator};
-use severian_universal::{EffectSet, TypeKind, TypeContext};
+use severian_universal::{EffectSet, TypeContext, TypeKind};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
@@ -475,9 +475,7 @@ fn inspect_rvalue(
                 errors,
             );
         }
-        Rvalue::AddressOf(place) => {
-            inspect_operand(&Operand::Copy(place.clone()), state, errors)
-        }
+        Rvalue::AddressOf(place) => inspect_operand(&Operand::Copy(place.clone()), state, errors),
         Rvalue::Aggregate { fields, .. } => {
             for field in fields {
                 inspect_operand(field, state, errors);

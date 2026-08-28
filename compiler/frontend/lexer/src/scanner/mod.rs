@@ -389,17 +389,12 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                     if matches!(bytes.get(exponent_cursor), Some(b'+' | b'-')) {
                         exponent_cursor += 1;
                     }
-                    if bytes
-                        .get(exponent_cursor)
-                        .is_some_and(u8::is_ascii_digit)
-                    {
+                    if bytes.get(exponent_cursor).is_some_and(u8::is_ascii_digit) {
                         cursor = exponent_cursor + 1;
                         while cursor < bytes.len()
                             && (bytes[cursor].is_ascii_digit()
                                 || (bytes[cursor] == b'_'
-                                    && bytes
-                                        .get(cursor + 1)
-                                        .is_some_and(u8::is_ascii_digit)))
+                                    && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)))
                         {
                             cursor += 1;
                         }

@@ -54,11 +54,23 @@ mod tests {
     #[test]
     fn every_literal_reports_its_kind_and_only_textual_values_have_spellings() {
         let cases = [
-            (LiteralValue::Integer("42".into()), LiteralKind::Integer, Some("42")),
-            (LiteralValue::Float("3.5".into()), LiteralKind::Float, Some("3.5")),
+            (
+                LiteralValue::Integer("42".into()),
+                LiteralKind::Integer,
+                Some("42"),
+            ),
+            (
+                LiteralValue::Float("3.5".into()),
+                LiteralKind::Float,
+                Some("3.5"),
+            ),
             (LiteralValue::Boolean(true), LiteralKind::Boolean, None),
             (LiteralValue::Character('x'), LiteralKind::Character, None),
-            (LiteralValue::String("text".into()), LiteralKind::String, Some("text")),
+            (
+                LiteralValue::String("text".into()),
+                LiteralKind::String,
+                Some("text"),
+            ),
             (LiteralValue::Bytes(vec![1, 2]), LiteralKind::Bytes, None),
             (LiteralValue::None, LiteralKind::None, None),
             (LiteralValue::Unit, LiteralKind::Unit, None),

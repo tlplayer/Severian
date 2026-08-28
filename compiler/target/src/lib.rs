@@ -184,11 +184,10 @@ impl TargetSpec {
         match placement {
             ExecutionPlacement::Host => Ok(ExecutionBackend::Native),
             ExecutionPlacement::Simd => Ok(ExecutionBackend::MlirVector),
-            ExecutionPlacement::Gpu => {
-                self.triton_gpu()
-                    .map(|_| ExecutionBackend::Triton)
-                    .ok_or(TargetError::MissingGpuDevice)
-            }
+            ExecutionPlacement::Gpu => self
+                .triton_gpu()
+                .map(|_| ExecutionBackend::Triton)
+                .ok_or(TargetError::MissingGpuDevice),
         }
     }
 

@@ -168,8 +168,8 @@ impl Compiler {
         &self,
         mir: &MirModule,
     ) -> Result<RoutedProgram, CompileError> {
-        let plan = severian_compile::plan(mir, self.types_for(mir))
-            .map_err(CompileError::Compile)?;
+        let plan =
+            severian_compile::plan(mir, self.types_for(mir)).map_err(CompileError::Compile)?;
         self.compile_plan(&plan)
     }
 
@@ -192,8 +192,8 @@ impl Compiler {
             )
             .map_err(CompileError::Compile)?;
         let resumed = plan.resumed_mir();
-        let lir = severian_lowering::lower(&resumed, types, &target)
-            .map_err(CompileError::Lowering)?;
+        let lir =
+            severian_lowering::lower(&resumed, types, &target).map_err(CompileError::Lowering)?;
         let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
         compose_region_artifacts(&ordinary, artifacts, &target)
     }
@@ -264,8 +264,7 @@ impl Compiler {
             .types
             .clone()
             .expect("the in-memory pipeline installed its structural type catalog");
-        severian_mir::run_required_pipeline(&mut mir, &context)
-            .map_err(CompileError::MirPass)?;
+        severian_mir::run_required_pipeline(&mut mir, &context).map_err(CompileError::MirPass)?;
         Ok(mir)
     }
 
@@ -306,17 +305,15 @@ impl Compiler {
             EmitStage::Lir => {
                 let mir = self.check_file_to_mir(source, CompileMode::Build)?;
                 let types = self.types_for(&mir);
-                let plan = severian_compile::plan(&mir, types)
-                    .map_err(CompileError::Compile)?;
+                let plan = severian_compile::plan(&mir, types).map_err(CompileError::Compile)?;
                 let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
-                .map_err(CompileError::Lowering)?;
+                    .map_err(CompileError::Lowering)?;
                 Ok(format!("{lir:#?}\n"))
             }
             EmitStage::Mlir => {
                 let mir = self.check_file_to_mir(source, CompileMode::Build)?;
                 let types = self.types_for(&mir);
-                let plan = severian_compile::plan(&mir, types)
-                    .map_err(CompileError::Compile)?;
+                let plan = severian_compile::plan(&mir, types).map_err(CompileError::Compile)?;
                 let artifacts = self
                     .compile_handlers
                     .compile(
@@ -328,7 +325,7 @@ impl Compiler {
                     )
                     .map_err(CompileError::Compile)?;
                 let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
-                .map_err(CompileError::Lowering)?;
+                    .map_err(CompileError::Lowering)?;
                 let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
                 let text = if artifacts.is_empty() {
                     // Emission is also a debugging boundary: return the
@@ -419,8 +416,8 @@ impl Compiler {
             CompileMode::Build
         };
         let mir = self.check_file_to_mir(source, mode)?;
-        let plan = severian_compile::plan(&mir, self.types_for(&mir))
-            .map_err(CompileError::Compile)?;
+        let plan =
+            severian_compile::plan(&mir, self.types_for(&mir)).map_err(CompileError::Compile)?;
         Ok(self.routes(&plan))
     }
 

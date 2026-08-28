@@ -40,7 +40,10 @@ mod tests {
         let types = TypeContext::default();
         let context = UniversalContext::new(types);
         assert_eq!(context.types.definitions().count(), 0);
-        assert_eq!(format!("{:?}", context.operations), "OperationRegistry { interfaces: 0 }");
+        assert_eq!(
+            format!("{:?}", context.operations),
+            "OperationRegistry { interfaces: 0 }"
+        );
     }
 
     #[test]

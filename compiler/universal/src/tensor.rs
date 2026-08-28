@@ -43,23 +43,52 @@ pub enum TensorOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ElementwiseOp {
-    Add, Subtract, Multiply, Divide, Exp, Log, Tanh, Rsqrt, Relu, Scale, AddScalar,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Exp,
+    Log,
+    Tanh,
+    Rsqrt,
+    Relu,
+    Scale,
+    AddScalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReductionOp { Sum, SumAxis, MeanLast, MaxLast }
+pub enum ReductionOp {
+    Sum,
+    SumAxis,
+    MeanLast,
+    MaxLast,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReshapeViewOp { Reshape, Materialize }
+pub enum ReshapeViewOp {
+    Reshape,
+    Materialize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PermuteOp { Axes, Reverse }
+pub enum PermuteOp {
+    Axes,
+    Reverse,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BroadcastOp { Like, Repeat }
+pub enum BroadcastOp {
+    Like,
+    Repeat,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum StorageViewOp { FromElements, Shape, Strides, Values }
+pub enum StorageViewOp {
+    FromElements,
+    Shape,
+    Strides,
+    Values,
+}
 
 impl TensorOp {
     pub const fn id(self) -> OpId {
@@ -106,8 +135,12 @@ impl TensorOp {
             Self::StorageView(StorageViewOp::Shape) => "shape",
             Self::StorageView(StorageViewOp::Strides) => "strides",
             Self::StorageView(StorageViewOp::Values) => "values",
-            Self::Matmul | Self::Slice | Self::Gather | Self::Scatter
-            | Self::Concatenate | Self::Convert => return None,
+            Self::Matmul
+            | Self::Slice
+            | Self::Gather
+            | Self::Scatter
+            | Self::Concatenate
+            | Self::Convert => return None,
         })
     }
 
@@ -282,12 +315,14 @@ impl OperationInterface for TensorOperationInterface {
         _attributes: &Attrs,
     ) -> Result<Vec<TyId>, OperationDiagnostic> {
         if TYPE_PRESERVING_OPERATIONS.contains(&self.id) {
-            return operands.first().copied().map(|operand| vec![operand]).ok_or_else(|| {
-                OperationDiagnostic {
+            return operands
+                .first()
+                .copied()
+                .map(|operand| vec![operand])
+                .ok_or_else(|| OperationDiagnostic {
                     operation: self.id,
                     message: "type-preserving tensor operation requires a tensor operand".into(),
-                }
-            });
+                });
         }
         Err(OperationDiagnostic {
             operation: self.id,
@@ -308,7 +343,9 @@ impl OperationInterface for TensorOperationInterface {
                 operation: self.id,
                 message: format!(
                     "tensor operation expects {}..={} operand(s) and {} result(s)",
-                    self.operands.start(), self.operands.end(), self.results
+                    self.operands.start(),
+                    self.operands.end(),
+                    self.results
                 ),
             });
         }
@@ -386,12 +423,7 @@ pub enum TensorShape {
 
 impl TensorShape {
     pub fn ranked(dimensions: impl IntoIterator<Item = u64>) -> Self {
-        Self::Ranked(
-            dimensions
-                .into_iter()
-                .map(TensorDimension::Known)
-                .collect(),
-        )
+        Self::Ranked(dimensions.into_iter().map(TensorDimension::Known).collect())
     }
 
     pub fn dynamic(rank: usize) -> Self {
@@ -413,12 +445,14 @@ impl TensorShape {
     }
 
     pub fn element_count(&self) -> Option<u64> {
-        self.dimensions()?.iter().try_fold(1u64, |count, dimension| {
-            let TensorDimension::Known(dimension) = dimension else {
-                return None;
-            };
-            count.checked_mul(*dimension)
-        })
+        self.dimensions()?
+            .iter()
+            .try_fold(1u64, |count, dimension| {
+                let TensorDimension::Known(dimension) = dimension else {
+                    return None;
+                };
+                count.checked_mul(*dimension)
+            })
     }
 
     pub fn broadcast(&self, other: &Self) -> Result<Self, TensorError> {
@@ -466,9 +500,8 @@ impl TensorShape {
                 right_contract,
             ));
         }
-        let batches = TensorShape::Ranked(left[..left.len() - 2].to_vec()).broadcast(
-            &TensorShape::Ranked(right[..right.len() - 2].to_vec()),
-        )?;
+        let batches = TensorShape::Ranked(left[..left.len() - 2].to_vec())
+            .broadcast(&TensorShape::Ranked(right[..right.len() - 2].to_vec()))?;
         let Self::Ranked(mut result) = batches else {
             return Ok(Self::Unranked);
         };
@@ -671,8 +704,18 @@ mod tests {
     #[test]
     fn tensor_operation_ids_are_small_and_backend_independent() {
         let operations = [
-            ELEMENTWISE, REDUCE, MATMUL, RESHAPE_VIEW, PERMUTE, SLICE, BROADCAST,
-            GATHER, SCATTER, CONCATENATE, CONVERT, STORAGE_VIEW,
+            ELEMENTWISE,
+            REDUCE,
+            MATMUL,
+            RESHAPE_VIEW,
+            PERMUTE,
+            SLICE,
+            BROADCAST,
+            GATHER,
+            SCATTER,
+            CONCATENATE,
+            CONVERT,
+            STORAGE_VIEW,
         ];
         assert_eq!(operations.len(), 12);
         assert_eq!(ELEMENTWISE, OpId::named("tensor", "elementwise"));
@@ -680,7 +723,10 @@ mod tests {
         let mut attributes = Attrs::new();
         let id = TensorOp::Elementwise(ElementwiseOp::Add).apply(&mut attributes);
         assert_eq!(id, ELEMENTWISE);
-        assert_eq!(TensorOp::decode(id, &attributes), Some(TensorOp::Elementwise(ElementwiseOp::Add)));
+        assert_eq!(
+            TensorOp::decode(id, &attributes),
+            Some(TensorOp::Elementwise(ElementwiseOp::Add))
+        );
     }
 
     #[test]
@@ -695,8 +741,8 @@ mod tests {
         let mut registry = OperationRegistry::default();
         install_operations(&mut registry).unwrap();
         let element_names = [
-            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128",
-            "f16", "f32", "f64", "f80", "f128",
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f16", "f32",
+            "f64", "f80", "f128",
         ];
         for name in element_names {
             let element = types.resolve_name(name).unwrap();

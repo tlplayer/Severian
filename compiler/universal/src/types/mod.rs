@@ -466,8 +466,10 @@ impl TypeContext {
         let argument_paths = arguments
             .iter()
             .map(|argument| {
-                self.definition(*argument)
-                    .map_or_else(|| format!("type#{}", argument.0), |known| known.path.clone())
+                self.definition(*argument).map_or_else(
+                    || format!("type#{}", argument.0),
+                    |known| known.path.clone(),
+                )
             })
             .collect::<Vec<_>>()
             .join(",");
@@ -531,10 +533,7 @@ impl TypeContext {
         if !self.tensor_constructors.contains(&constructor) {
             return Err(TypeError::NotTensorConstructor(constructor));
         }
-        if let Some(existing) = self
-            .tensors
-            .get(&(constructor, element, shape.clone()))
-        {
+        if let Some(existing) = self.tensors.get(&(constructor, element, shape.clone())) {
             return Ok(*existing);
         }
         let element_path = self

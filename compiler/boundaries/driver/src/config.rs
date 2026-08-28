@@ -476,10 +476,7 @@ impl Manifest {
                     );
                     detail.insert("version".into(), toml::Value::String(version));
                     if let Some(registry) = registry {
-                        detail.insert(
-                            "registry".into(),
-                            toml::Value::String(registry.to_owned()),
-                        );
+                        detail.insert("registry".into(), toml::Value::String(registry.to_owned()));
                     }
                     toml::Value::Table(detail)
                 };
@@ -686,8 +683,7 @@ impl<'a> PackageGraphBuilder<'a> {
         }
         let id = severian_modules::PackageId(self.next_id);
         self.next_id += 1;
-        let dependencies =
-            self.resolve_dependencies(&root, &name, &document.dependencies)?;
+        let dependencies = self.resolve_dependencies(&root, &name, &document.dependencies)?;
         let dev_dependencies =
             self.resolve_dependencies(&root, &name, &document.dev_dependencies)?;
         self.visiting.remove(&manifest_path);
@@ -1082,8 +1078,11 @@ mod tests {
             "[package]\nname = \"actual-dependency\"\nversion = \"2.3.4\"\n\n[lib]\npath = \"src/lib.sev\"\n",
         )
         .unwrap();
-        std::fs::write(dependency.join("src/lib.sev"), "def value() -> int:\n    return 1\n")
-            .unwrap();
+        std::fs::write(
+            dependency.join("src/lib.sev"),
+            "def value() -> int:\n    return 1\n",
+        )
+        .unwrap();
         std::fs::write(
             package.join("package.toml"),
             "[package]\nname = \"root\"\nversion = \"1.0.0\"\ndefault-run = \"root\"\n\n[[bin]]\nname = \"root\"\npath = \"src/main.sev\"\n\n[lib]\npath = \"src/lib.sev\"\n\n[dependencies]\nhelper = { path = \"../dependency\" }\n\n[dev-dependencies]\ntest_helper = { path = \"../dependency\" }\n",
@@ -1092,8 +1091,8 @@ mod tests {
         std::fs::write(package.join("src/lib.sev"), "import helper\n").unwrap();
         std::fs::write(package.join("src/main.sev"), "print(\"root\")\n").unwrap();
 
-        let manifest = Manifest::load(&package.join("package.toml"), &Catalog::load().unwrap())
-            .unwrap();
+        let manifest =
+            Manifest::load(&package.join("package.toml"), &Catalog::load().unwrap()).unwrap();
         let published = manifest.published_source_manifest().unwrap();
         let value = published.parse::<toml::Value>().unwrap();
         let dependency = &value["dependencies"]["helper"];

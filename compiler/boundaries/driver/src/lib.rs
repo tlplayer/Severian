@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-pub mod config;
 mod components;
+pub mod config;
 mod pipeline;
 mod runtime_paths;
 
@@ -13,9 +13,7 @@ pub use pipeline::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_compile::{
-        CompileContext, CompileHandler, CompileRegion, CompiledRegionArtifact,
-    };
+    use severian_compile::{CompileContext, CompileHandler, CompileRegion, CompiledRegionArtifact};
     use severian_mlir::{LoweredType, MlirArtifact};
     use severian_source::SourceFile;
     use severian_target::TargetSpec;
@@ -168,10 +166,8 @@ mod tests {
             "composite-index.sev",
             "nested = [[1, 2], [3, 4]]\nrow = nested[0]\npairs = [(1, 2), (3, 4)]\npair = pairs[0]\n",
         );
-        let output = std::env::temp_dir().join(format!(
-            "severian-composite-index-{}",
-            std::process::id()
-        ));
+        let output =
+            std::env::temp_dir().join(format!("severian-composite-index-{}", std::process::id()));
         let artifact = compile_source(&source, &output).unwrap();
         assert!(std::process::Command::new(&artifact.path)
             .status()

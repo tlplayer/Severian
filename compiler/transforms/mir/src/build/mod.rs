@@ -84,12 +84,12 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
                     id: function.id,
                     definition: function.definition,
                     substitution: function.substitution.clone(),
-                name: function.name.clone(),
-                parameters: function
-                    .parameters
-                    .iter()
-                    .map(|parameter| parameter.contract.ty)
-                    .collect(),
+                    name: function.name.clone(),
+                    parameters: function
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.contract.ty)
+                        .collect(),
                     result: function.result.ty,
                     body: function_bodies.remove(&function.id),
                     call_type: function.call_type.clone(),

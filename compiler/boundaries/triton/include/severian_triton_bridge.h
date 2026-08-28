@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define SEV_TRITON_ABI_VERSION 4u
+#define SEV_TRITON_ABI_VERSION 5u
 
 typedef struct { const uint8_t *data; size_t len; } sev_triton_bytes;
 typedef struct { const uint32_t *data; size_t len; } sev_triton_u32_slice;
@@ -181,12 +181,23 @@ typedef struct {
 } sev_triton_compile_request;
 
 typedef struct {
+  uint64_t grid_x;
+  uint64_t grid_y;
+  uint64_t grid_z;
+  uint32_t num_warps;
+  uint32_t warp_size;
+  uint32_t num_ctas;
+  uint32_t reserved;
+  uint64_t shared_memory_bytes;
+} sev_triton_launch_metadata;
+
+typedef struct {
   uint32_t abi_version;
   sev_triton_kernel_format format;
   sev_triton_bytes entry_point;
   sev_triton_bytes code;
   sev_triton_bytes diagnostics;
-  uint64_t shared_memory_bytes;
+  sev_triton_launch_metadata launch;
   void *owner;
 } sev_triton_compiled_kernel;
 

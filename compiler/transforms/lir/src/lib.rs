@@ -32,8 +32,13 @@ pub enum LoweredTensorShape {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
-    Integer { bits: u16, signed: bool },
-    Float { format: LoweredFloatFormat },
+    Integer {
+        bits: u16,
+        signed: bool,
+    },
+    Float {
+        format: LoweredFloatFormat,
+    },
     Boolean,
     String,
     Bytes,
@@ -50,8 +55,13 @@ pub enum LoweredType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskValueType {
-    Integer { bits: u16, signed: bool },
-    Float { format: LoweredFloatFormat },
+    Integer {
+        bits: u16,
+        signed: bool,
+    },
+    Float {
+        format: LoweredFloatFormat,
+    },
     Boolean,
     String,
     Bytes,

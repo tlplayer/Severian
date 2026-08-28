@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 //! Stable Severian-to-Triton compiler boundary.
 //!
@@ -13,11 +13,14 @@ use severian_fusion::{
 use std::collections::BTreeSet;
 use std::fmt;
 
+#[allow(unsafe_code)]
+mod native;
 mod ttir;
 
+pub use native::NativeTritonCompiler;
 pub use ttir::TtirModule;
 
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -70,7 +73,7 @@ impl CompileOptions {
             warp_size: 32,
             num_ctas: 1,
             num_stages: 3,
-            emit: KernelFormat::Cubin,
+            emit: KernelFormat::Ptx,
             debug: false,
         }
     }
@@ -81,6 +84,21 @@ pub struct CompiledKernel {
     pub format: KernelFormat,
     pub entry_point: String,
     pub code: Vec<u8>,
+    pub launch: LaunchMetadata,
+}
+
+impl CompiledKernel {
+    pub fn shared_memory_bytes(&self) -> u64 {
+        self.launch.shared_memory_bytes
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaunchMetadata {
+    pub grid: [u64; 3],
+    pub num_warps: u32,
+    pub warp_size: u32,
+    pub num_ctas: u32,
     pub shared_memory_bytes: u64,
 }
 
@@ -91,6 +109,7 @@ pub enum BridgeError {
     DonorCompiler(String),
     AbiMismatch { expected: u32, found: u32 },
     InvalidSpecialization(String),
+    NativeUnavailable(String),
 }
 
 impl fmt::Display for BridgeError {
@@ -107,6 +126,9 @@ impl fmt::Display for BridgeError {
             ),
             Self::InvalidSpecialization(message) => {
                 write!(formatter, "invalid kernel specialization: {message}")
+            }
+            Self::NativeUnavailable(message) => {
+                write!(formatter, "native Triton bridge unavailable: {message}")
             }
         }
     }
@@ -429,13 +451,28 @@ pub struct AbiCompiledKernel {
     pub entry_point: AbiBytes,
     pub code: AbiBytes,
     pub diagnostics: AbiBytes,
-    pub shared_memory_bytes: u64,
+    pub launch: AbiLaunchMetadata,
     pub owner: *mut std::ffi::c_void,
 }
 
-pub type AbiCompileFn =
-    extern "C" fn(request: *const AbiCompileRequest, output: *mut AbiCompiledKernel) -> AbiStatus;
-pub type AbiDestroyKernelFn = extern "C" fn(kernel: *mut AbiCompiledKernel);
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct AbiLaunchMetadata {
+    pub grid_x: u64,
+    pub grid_y: u64,
+    pub grid_z: u64,
+    pub num_warps: u32,
+    pub warp_size: u32,
+    pub num_ctas: u32,
+    pub _reserved: u32,
+    pub shared_memory_bytes: u64,
+}
+
+pub type AbiCompileFn = unsafe extern "C" fn(
+    request: *const AbiCompileRequest,
+    output: *mut AbiCompiledKernel,
+) -> AbiStatus;
+pub type AbiDestroyKernelFn = unsafe extern "C" fn(kernel: *mut AbiCompiledKernel);
 
 #[derive(Clone, Copy)]
 #[repr(C)]

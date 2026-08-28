@@ -114,8 +114,14 @@ mod tests {
         let severian_ast::Item::Test(test) = &module.items[0] else {
             panic!("expected a compiler test")
         };
-        assert!(matches!(test.compiler_cases[0].items[0], severian_ast::Item::Class(_)));
-        assert!(matches!(test.compiler_cases[0].items[1], severian_ast::Item::Extension(_)));
+        assert!(matches!(
+            test.compiler_cases[0].items[0],
+            severian_ast::Item::Class(_)
+        ));
+        assert!(matches!(
+            test.compiler_cases[0].items[1],
+            severian_ast::Item::Extension(_)
+        ));
     }
 
     #[test]
@@ -127,7 +133,9 @@ mod tests {
             ),
             (
                 "namespace-extensions.sev",
-                include_str!("../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"),
+                include_str!(
+                    "../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"
+                ),
             ),
         ] {
             let source = SourceFile::virtual_source(name, text);
@@ -484,7 +492,10 @@ output = f"""module {{
         let severian_ast::Item::Trait(data) = &module.items[0] else {
             panic!("expected Data trait")
         };
-        assert_eq!(data.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        assert_eq!(
+            data.operators[0].operator,
+            severian_ast::OperatorSyntax::Index
+        );
         let severian_ast::Item::Class(grid) = &module.items[1] else {
             panic!("expected Grid class")
         };

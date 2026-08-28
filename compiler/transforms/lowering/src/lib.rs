@@ -120,9 +120,9 @@ mod cfg_lowering_entry {
                                         severian_mir::TraitType::Concrete(ty) => context
                                             .lower_mir_type(*ty)
                                             .map(severian_lir::TraitType::Concrete),
-                                        severian_mir::TraitType::Symbolic(name) => Ok(
-                                            severian_lir::TraitType::Symbolic(name.clone()),
-                                        ),
+                                        severian_mir::TraitType::Symbolic(name) => {
+                                            Ok(severian_lir::TraitType::Symbolic(name.clone()))
+                                        }
                                     })
                                     .collect::<Result<Vec<_>, LoweringError>>()?,
                                 result: match &method.result {
@@ -1546,9 +1546,9 @@ mod legacy_structured_lowering {
                                                 lower_type(*ty, types, target)
                                                     .map(severian_lir::TraitType::Concrete)
                                             }
-                                            severian_mir::TraitType::Symbolic(name) => Ok(
-                                                severian_lir::TraitType::Symbolic(name.clone()),
-                                            ),
+                                            severian_mir::TraitType::Symbolic(name) => {
+                                                Ok(severian_lir::TraitType::Symbolic(name.clone()))
+                                            }
                                         })
                                         .collect::<Result<Vec<_>, _>>()?,
                                     result: match &method.result {

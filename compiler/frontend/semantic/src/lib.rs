@@ -144,8 +144,7 @@ pub(crate) fn analyze_with_package_functions(
         let existing = package_classes
             .iter()
             .find(|class| {
-                class.declaration.name == declaration.name
-                    && source_module == Some(class.module)
+                class.declaration.name == declaration.name && source_module == Some(class.module)
             })
             .map(|class| class.ty);
         let constructor = if let Some(existing) = existing {
@@ -162,9 +161,11 @@ pub(crate) fn analyze_with_package_functions(
                 })?
         };
         if declaration.name == "Tensor" {
-            types.mark_tensor_constructor(constructor).map_err(|error| {
-                Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
-            })?;
+            types
+                .mark_tensor_constructor(constructor)
+                .map_err(|error| {
+                    Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                })?;
         }
         local_class_constructors.insert(declaration.name.clone(), constructor);
     }
@@ -390,13 +391,11 @@ pub(crate) fn analyze_with_package_functions(
                 .parameters
                 .iter()
                 .map(|parameter| {
-                    analyzer.resolve_trait_type(
-                        &parameter.annotation,
-                        &declaration.type_parameters,
-                    )
+                    analyzer.resolve_trait_type(&parameter.annotation, &declaration.type_parameters)
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
-            let result = analyzer.resolve_trait_type(&method.result, &declaration.type_parameters)?;
+            let result =
+                analyzer.resolve_trait_type(&method.result, &declaration.type_parameters)?;
             methods.push(HirTraitMethodDeclaration {
                 name: method.name.clone(),
                 parameters,
@@ -7539,10 +7538,18 @@ impl Analyzer<'_> {
                     {
                         let right_value = self.expression(right, Some(left_value.type_id))?;
                         let operation = match operator {
-                            AstBinaryOperator::Add => severian_universal::tensor::ElementwiseOp::Add,
-                            AstBinaryOperator::Subtract => severian_universal::tensor::ElementwiseOp::Subtract,
-                            AstBinaryOperator::Multiply => severian_universal::tensor::ElementwiseOp::Multiply,
-                            AstBinaryOperator::Divide => severian_universal::tensor::ElementwiseOp::Divide,
+                            AstBinaryOperator::Add => {
+                                severian_universal::tensor::ElementwiseOp::Add
+                            }
+                            AstBinaryOperator::Subtract => {
+                                severian_universal::tensor::ElementwiseOp::Subtract
+                            }
+                            AstBinaryOperator::Multiply => {
+                                severian_universal::tensor::ElementwiseOp::Multiply
+                            }
+                            AstBinaryOperator::Divide => {
+                                severian_universal::tensor::ElementwiseOp::Divide
+                            }
                             _ => unreachable!(),
                         };
                         return Ok(self.tensor_operation(
@@ -8754,7 +8761,10 @@ impl Analyzer<'_> {
                     || arguments.len() != actual_arguments.len()
                 {
                     return Err(semantic_error(
-                        format!("expected `{name}` with {} type argument(s)", arguments.len()),
+                        format!(
+                            "expected `{name}` with {} type argument(s)",
+                            arguments.len()
+                        ),
                         annotation.span,
                     ));
                 }
@@ -11693,15 +11703,11 @@ impl Analyzer<'_> {
                 let Some(dimensions) = shape.dimensions() else {
                     return severian_universal::TensorShape::Unranked;
                 };
-                severian_universal::TensorShape::Ranked(
-                    dimensions.iter().copied().rev().collect(),
-                )
+                severian_universal::TensorShape::Ranked(dimensions.iter().copied().rev().collect())
             }),
             severian_universal::tensor::TensorOp::Reduce(
                 severian_universal::tensor::ReductionOp::Sum,
-            ) => Some(
-                severian_universal::TensorShape::ranked([1]),
-            ),
+            ) => Some(severian_universal::TensorShape::ranked([1])),
             severian_universal::tensor::TensorOp::Reduce(
                 severian_universal::tensor::ReductionOp::MeanLast
                 | severian_universal::tensor::ReductionOp::MaxLast,
@@ -11732,9 +11738,7 @@ impl Analyzer<'_> {
             | severian_universal::tensor::TensorOp::Concatenate
             | severian_universal::tensor::TensorOp::Broadcast(
                 severian_universal::tensor::BroadcastOp::Repeat,
-            ) => {
-                Some(severian_universal::TensorShape::Unranked)
-            }
+            ) => Some(severian_universal::TensorShape::Unranked),
             _ => source_shape,
         };
         let result = match (source_tensor, inferred_shape.as_ref()) {
@@ -11842,8 +11846,7 @@ impl Analyzer<'_> {
                 .as_deref()
                 .is_some_and(|path| path.rsplit('.').next() == Some("mapped"))
             {
-                let ([element], [handle, tensor_name]) =
-                    (type_arguments.as_slice(), arguments)
+                let ([element], [handle, tensor_name]) = (type_arguments.as_slice(), arguments)
                 else {
                     return Err(Diagnostic::new(
                         "E000206",
@@ -12036,9 +12039,7 @@ impl Analyzer<'_> {
                 result = self
                     .types
                     .refine_tensor_shape(result, shape.clone())
-                    .map_err(|error| {
-                        Diagnostic::new("E000204", error.to_string(), Some(span))
-                    })?;
+                    .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?;
                 attributes.insert(
                     severian_universal::tensor::RESULT_SHAPE,
                     severian_universal::AttrValue::TensorShape(shape),
@@ -12091,7 +12092,12 @@ impl Analyzer<'_> {
                     resolved.push(self.list_storage_expression(list, span));
                 }
                 return self
-                    .tensor_operation(severian_universal::tensor::TensorOp::Slice, resolved, expected, span)
+                    .tensor_operation(
+                        severian_universal::tensor::TensorOp::Slice,
+                        resolved,
+                        expected,
+                        span,
+                    )
                     .map(Some);
             }
             return Ok(None);
@@ -12236,21 +12242,49 @@ impl Analyzer<'_> {
         }
 
         let operation = match name {
-            "add" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Add)),
-            "subtract" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Subtract)),
-            "multiply" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Multiply)),
-            "divide" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Divide)),
-            "sum" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::Sum)),
+            "add" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Add,
+            )),
+            "subtract" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Subtract,
+            )),
+            "multiply" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Multiply,
+            )),
+            "divide" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Divide,
+            )),
+            "sum" => Some(severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::Sum,
+            )),
             "matmul" => Some(severian_universal::tensor::TensorOp::Matmul),
-            "transpose" => Some(severian_universal::tensor::TensorOp::Permute(severian_universal::tensor::PermuteOp::Reverse)),
-            "materialize" => Some(severian_universal::tensor::TensorOp::ReshapeView(severian_universal::tensor::ReshapeViewOp::Materialize)),
-            "mean_last" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::MeanLast)),
-            "maximum_last" => Some(severian_universal::tensor::TensorOp::Reduce(severian_universal::tensor::ReductionOp::MaxLast)),
-            "rsqrt" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Rsqrt)),
-            "exp" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Exp)),
-            "log" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Log)),
-            "tanh" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Tanh)),
-            "relu" => Some(severian_universal::tensor::TensorOp::Elementwise(severian_universal::tensor::ElementwiseOp::Relu)),
+            "transpose" => Some(severian_universal::tensor::TensorOp::Permute(
+                severian_universal::tensor::PermuteOp::Reverse,
+            )),
+            "materialize" => Some(severian_universal::tensor::TensorOp::ReshapeView(
+                severian_universal::tensor::ReshapeViewOp::Materialize,
+            )),
+            "mean_last" => Some(severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::MeanLast,
+            )),
+            "maximum_last" => Some(severian_universal::tensor::TensorOp::Reduce(
+                severian_universal::tensor::ReductionOp::MaxLast,
+            )),
+            "rsqrt" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Rsqrt,
+            )),
+            "exp" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Exp,
+            )),
+            "log" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Log,
+            )),
+            "tanh" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Tanh,
+            )),
+            "relu" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Relu,
+            )),
             _ => None,
         };
         if let Some(operation) = operation {
@@ -12294,8 +12328,8 @@ impl Analyzer<'_> {
         }
 
         let target_element = match name {
-            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128" | "i8" | "i16"
-            | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
+            "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128" | "i8"
+            | "i16" | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => {
                 self.types.resolve_name(name)
             }
             "to_f8_e4_m3_fn" => self.types.resolve_name("f8e4m3fn"),
@@ -12333,9 +12367,7 @@ impl Analyzer<'_> {
                 result = self
                     .types
                     .refine_tensor_shape(result, source.shape.clone())
-                    .map_err(|error| {
-                        Diagnostic::new("E000204", error.to_string(), Some(span))
-                    })?;
+                    .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?;
                 attributes.insert(
                     severian_universal::tensor::RESULT_SHAPE,
                     severian_universal::AttrValue::TensorShape(source.shape),
@@ -15519,11 +15551,7 @@ impl Analyzer<'_> {
 
 fn tensor_expression_shape(expression: &Expression) -> Option<severian_universal::TensorShape> {
     let ExpressionKind::Call {
-        callee:
-            severian_hir::Callee::Intrinsic {
-                attributes,
-                ..
-            },
+        callee: severian_hir::Callee::Intrinsic { attributes, .. },
         ..
     } = &expression.kind
     else {
@@ -16168,9 +16196,7 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     substitute_type_annotation(&required.result, &trait_substitution);
                 let same_parameters = required_parameters.len() == provided.parameters.len()
                     && required_parameters.iter().zip(&provided.parameters).all(
-                        |(required, provided)| {
-                            same_type_annotation(required, &provided.annotation)
-                        },
+                        |(required, provided)| same_type_annotation(required, &provided.annotation),
                     );
                 if !same_parameters
                     || !(implementation_result_satisfies(&required_result, &provided.result)
@@ -16232,9 +16258,7 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     substitute_type_annotation(&required.result, &trait_substitution);
                 let same_parameters = required_parameters.len() == provided.parameters.len()
                     && required_parameters.iter().zip(&provided.parameters).all(
-                        |(required, provided)| {
-                            same_type_annotation(required, &provided.annotation)
-                        },
+                        |(required, provided)| same_type_annotation(required, &provided.annotation),
                     );
                 if !same_parameters || !same_type_annotation(&required_result, &provided.result) {
                     return Err(Diagnostic::new(

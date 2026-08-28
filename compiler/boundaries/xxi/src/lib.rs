@@ -526,7 +526,10 @@ mod tests {
         let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert!(resolved.imports.is_empty());
         assert_eq!(resolved.declarations.len(), 1);
-        assert_eq!(resolved.declarations[0].function.symbol.name.as_str(), "strlen");
+        assert_eq!(
+            resolved.declarations[0].function.symbol.name.as_str(),
+            "strlen"
+        );
     }
 
     #[test]

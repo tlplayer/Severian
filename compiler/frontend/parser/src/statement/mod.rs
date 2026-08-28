@@ -2414,7 +2414,8 @@ impl Parser<'_> {
                         span: annotation.span,
                     },
                     Some(
-                        "float" | "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80" | "f128",
+                        "float" | "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80"
+                        | "f128",
                     ) => Expression {
                         kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
                         span: annotation.span,
@@ -3132,7 +3133,11 @@ impl Parser<'_> {
                         let span = Span::new(
                             indices[0].span.source,
                             indices[0].span.start,
-                            indices.last().expect("an index tuple is non-empty").span.end,
+                            indices
+                                .last()
+                                .expect("an index tuple is non-empty")
+                                .span
+                                .end,
                         );
                         Some(Box::new(Expression {
                             kind: ExpressionKind::Tuple(indices),
