@@ -159,6 +159,17 @@ impl TargetSpec {
             .find(|device| device.kind == DeviceKind::Gpu && device.features.contains("vendor.amd"))
     }
 
+    pub fn triton_gpu(&self) -> Option<&Device> {
+        self.devices.iter().find(|device| {
+            device.kind == DeviceKind::Gpu
+                && (device.features.contains("vendor.amd")
+                    || device.features.contains("vendor.nvidia")
+                    || device.architecture.starts_with("gfx")
+                    || device.architecture.starts_with("sm_")
+                    || device.architecture.starts_with("compute_"))
+        })
+    }
+
     pub fn rediscover_devices(&self) -> Self {
         let mut refreshed = self.clone();
         refreshed.devices = discover_host_devices(Path::new("/dev"), Path::new("/sys/class/drm"));
@@ -174,13 +185,9 @@ impl TargetSpec {
             ExecutionPlacement::Host => Ok(ExecutionBackend::Native),
             ExecutionPlacement::Simd => Ok(ExecutionBackend::MlirVector),
             ExecutionPlacement::Gpu => {
-                if self.rocm_device().is_some() {
-                    Ok(ExecutionBackend::Rocdl)
-                } else if let Some(device) = self.amd_gpu() {
-                    Err(TargetError::MissingRocmDriver(device.name.clone()))
-                } else {
-                    Err(TargetError::MissingGpuDevice)
-                }
+                self.triton_gpu()
+                    .map(|_| ExecutionBackend::Triton)
+                    .ok_or(TargetError::MissingGpuDevice)
             }
         }
     }
@@ -347,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn discovered_rocm_device_selects_rocdl() {
+    fn discovered_rocm_device_selects_triton() {
         let mut target = TargetSpec::new("x86_64-unknown-linux");
         target.devices.push(Device {
             name: "renderD128".into(),
@@ -359,12 +366,12 @@ mod tests {
             target
                 .select_execution_backend(severian_universal::ExecutionPlacement::Gpu,)
                 .unwrap(),
-            ExecutionBackend::Rocdl
+            ExecutionBackend::Triton
         );
     }
 
     #[test]
-    fn amd_hardware_without_rocm_requests_provisioning() {
+    fn amd_hardware_without_rocm_still_selects_the_triton_compiler() {
         let mut target = TargetSpec::new("x86_64-unknown-linux");
         target.devices.push(Device {
             name: "renderD128".into(),
@@ -373,8 +380,27 @@ mod tests {
             features: FeatureSet::from_names(["vendor.amd"]),
         });
         assert_eq!(
-            target.select_execution_backend(severian_universal::ExecutionPlacement::Gpu),
-            Err(TargetError::MissingRocmDriver("renderD128".into()))
+            target
+                .select_execution_backend(severian_universal::ExecutionPlacement::Gpu)
+                .unwrap(),
+            ExecutionBackend::Triton
+        );
+    }
+
+    #[test]
+    fn nvidia_hardware_selects_the_same_triton_backend() {
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "sm_90".into(),
+            features: FeatureSet::from_names(["vendor.nvidia"]),
+        });
+        assert_eq!(
+            target
+                .select_execution_backend(severian_universal::ExecutionPlacement::Gpu)
+                .unwrap(),
+            ExecutionBackend::Triton
         );
     }
 }

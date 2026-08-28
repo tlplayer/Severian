@@ -7,8 +7,9 @@ mod registry;
 
 pub use error::CompileError;
 pub use model::{
-    CompileContext, CompileOperation, CompilePlan, CompileRegion, EffectSet, PlanSegment,
-    PlannedBlock, PlannedFunction, StandardRegion,
+    CompileContext, CompileOperation, CompilePlan, CompileRegion, CompiledRegionArtifact,
+    EffectSet, GpuKernelBundle, GpuTarget, PlanSegment, PlannedBlock, PlannedFunction,
+    StandardRegion, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
 };
 pub use planner::plan;
 pub use registry::{CompileHandler, CompilerRegistry};
@@ -86,7 +87,7 @@ mod tests {
             &self,
             region: &CompileRegion,
             _: &CompileContext<'_>,
-        ) -> Result<MlirArtifact, CompileError> {
+        ) -> Result<CompiledRegionArtifact, CompileError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let parameters = (0..region.inputs.len())
                 .map(|index| format!("%arg{index}: i32"))
@@ -111,7 +112,7 @@ mod tests {
             } else {
                 format!("    return {return_values} : {return_types}")
             };
-            Ok(MlirArtifact {
+            Ok(CompiledRegionArtifact::CpuMlir(MlirArtifact {
                 module: if self.invalid {
                     "module { func.func @entry() {".into()
                 } else {
@@ -133,7 +134,7 @@ mod tests {
                     };
                     region.outputs.len()
                 ],
-            })
+            }))
         }
     }
 

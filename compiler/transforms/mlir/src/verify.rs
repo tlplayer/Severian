@@ -13,6 +13,13 @@ pub struct VerifiedMlirArtifact {
     target: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuLaunchArtifact {
+    pub id: ArtifactId,
+    pub inputs: Vec<LoweredType>,
+    pub outputs: Vec<LoweredType>,
+}
+
 impl VerifiedMlirArtifact {
     pub const fn id(&self) -> ArtifactId {
         self.id
@@ -101,6 +108,125 @@ pub fn compose(
     module.verify("composed module")?;
     module.verify_allowed_dialects(target)?;
     Ok(module.print())
+}
+
+/// Replaces compiled-region declarations with host functions that call the
+/// Severian GPU launcher ABI. Kernel graphs and binaries remain outside this
+/// host MLIR module; only their stable artifact identity crosses this boundary.
+pub fn compose_gpu_launchers(
+    normal: &str,
+    launchers: &[GpuLaunchArtifact],
+    target: &TargetSpec,
+) -> Result<String, MlirError> {
+    if launchers.is_empty() {
+        return Ok(normal.to_owned());
+    }
+    let context = Context::new();
+    let module = Module::parse(&context, normal, "ordinary module")?;
+    module.verify("ordinary module")?;
+    module.verify_allowed_dialects(target)?;
+    let symbol_table = SymbolTable::new(&module)?;
+    let mut artifact_ids = BTreeSet::new();
+
+    for launcher in launchers {
+        if !artifact_ids.insert(launcher.id) {
+            return Err(MlirError::DuplicateSymbol(artifact_symbol(launcher.id)));
+        }
+        let artifact = artifact_symbol(launcher.id);
+        let Some(declaration) = symbol_table.lookup(&artifact) else {
+            return Err(MlirError::DuplicateSymbol(artifact));
+        };
+        if operation_name(declaration) != "func.func" || module.operation_has_body(declaration) {
+            return Err(MlirError::DuplicateSymbol(artifact));
+        }
+        verify_entry_signature(&context, declaration, &launcher.inputs, &launcher.outputs)?;
+
+        let generated_source = gpu_launcher_module(launcher)?;
+        let generated = Module::parse(&context, &generated_source, "GPU launcher module")?;
+        generated.verify("GPU launcher module")?;
+        let runtime_symbol = gpu_launcher_symbol(launcher.id);
+        let runtime_declaration = symbol_table.lookup(&runtime_symbol);
+
+        let mut current = unsafe { ffi::mlirBlockGetFirstOperation(generated.body()) };
+        while !current.is_null() {
+            let next = unsafe { ffi::mlirOperationGetNextInBlock(current) };
+            let name = operation_symbol_name(current);
+            if name.as_deref() == Some("entry") {
+                let cloned = unsafe { ffi::mlirOperationClone(current) };
+                let symbol_name =
+                    unsafe { ffi::mlirStringAttrGet(context.raw, ffi::string_ref(&artifact)) };
+                unsafe {
+                    ffi::mlirOperationSetAttributeByName(
+                        cloned,
+                        ffi::string_ref("sym_name"),
+                        symbol_name,
+                    );
+                    ffi::mlirBlockAppendOwnedOperation(module.body(), cloned);
+                }
+            } else if name.as_deref() == Some(runtime_symbol.as_str())
+                && runtime_declaration.is_none()
+            {
+                let cloned = unsafe { ffi::mlirOperationClone(current) };
+                unsafe { ffi::mlirBlockAppendOwnedOperation(module.body(), cloned) };
+            }
+            current = next;
+        }
+        unsafe { ffi::mlirSymbolTableErase(symbol_table.raw, declaration) };
+    }
+
+    module.verify("module with GPU launchers")?;
+    module.verify_allowed_dialects(target)?;
+    Ok(module.print())
+}
+
+fn gpu_launcher_module(launcher: &GpuLaunchArtifact) -> Result<String, MlirError> {
+    let input_types = launcher
+        .inputs
+        .iter()
+        .map(crate::emit::mlir_type)
+        .collect::<Result<Vec<_>, _>>()?;
+    let output_types = launcher
+        .outputs
+        .iter()
+        .map(crate::emit::mlir_type)
+        .collect::<Result<Vec<_>, _>>()?;
+    let parameters = input_types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| format!("%arg{index}: {ty}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let arguments = (0..input_types.len())
+        .map(|index| format!("%arg{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let input_signature = input_types.join(", ");
+    let result_signature = match output_types.as_slice() {
+        [] => String::new(),
+        [output] => format!(" -> {output}"),
+        outputs => format!(" -> ({})", outputs.join(", ")),
+    };
+    let (assignment, return_operation) = match output_types.as_slice() {
+        [] => (String::new(), "    return\n".to_owned()),
+        outputs => {
+            let values = (0..outputs.len())
+                .map(|index| format!("%result{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!("{values} = "),
+                format!("    return {values} : {}\n", outputs.join(", ")),
+            )
+        }
+    };
+    let runtime = gpu_launcher_symbol(launcher.id);
+    Ok(format!(
+        "module {{\n  func.func private @{runtime}({input_signature}){result_signature}\n  func.func private @entry({parameters}){result_signature} {{\n    {assignment}func.call @{runtime}({arguments}) : ({input_signature}){result_signature}\n{return_operation}  }}\n}}"
+    ))
+}
+
+fn gpu_launcher_symbol(artifact: ArtifactId) -> String {
+    format!("__sev_gpu_launch_{}", artifact.index())
 }
 
 struct Context {

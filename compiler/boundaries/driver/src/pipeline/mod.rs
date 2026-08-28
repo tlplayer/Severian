@@ -1,5 +1,7 @@
 use severian_backend::{Artifact, BackendError};
-use severian_compile::{CompileContext, CompileHandler, CompilePlan, CompilerRegistry};
+use severian_compile::{
+    CompileContext, CompileHandler, CompilePlan, CompilerRegistry, VerifiedCompiledRegionArtifact,
+};
 use severian_diagnostics::Diagnostic;
 use severian_mir::{CfgStatement, Module as MirModule};
 use severian_source::{SourceFile, SourceId};
@@ -80,6 +82,12 @@ pub struct CompiledTest {
     pub expectations: Vec<severian_mir::TestExpectation>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutedProgram {
+    pub host_mlir: String,
+    pub gpu_kernels: Vec<severian_compile::VerifiedGpuKernelBundle>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestExecution {
     Executable(Artifact),
@@ -152,12 +160,24 @@ impl Compiler {
     /// Orchestrates both MIR routes and returns one verified MLIR module.
     /// Custom handlers never depend on or invoke ordinary lowering directly.
     pub fn compile_mir_to_mlir(&self, mir: &MirModule) -> Result<String, CompileError> {
+        self.compile_mir_to_routed_program(mir)
+            .map(|program| program.host_mlir)
+    }
+
+    pub fn compile_mir_to_routed_program(
+        &self,
+        mir: &MirModule,
+    ) -> Result<RoutedProgram, CompileError> {
         let plan = severian_compile::plan(mir, self.types_for(mir))
             .map_err(CompileError::Compile)?;
-        self.compile_plan_to_mlir(&plan)
+        self.compile_plan(&plan)
     }
 
     fn compile_plan_to_mlir(&self, plan: &CompilePlan) -> Result<String, CompileError> {
+        self.compile_plan(plan).map(|program| program.host_mlir)
+    }
+
+    fn compile_plan(&self, plan: &CompilePlan) -> Result<RoutedProgram, CompileError> {
         let types = self.types_for(&plan.source);
         let target = crate::components::ensure_for_plan(plan, &self.target)
             .map_err(CompileError::Component)?;
@@ -175,7 +195,7 @@ impl Compiler {
         let lir = severian_lowering::lower(&resumed, types, &target)
             .map_err(CompileError::Lowering)?;
         let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
-        severian_mlir::compose(&ordinary, &artifacts, &target).map_err(CompileError::Mlir)
+        compose_region_artifacts(&ordinary, artifacts, &target)
     }
 
     fn types_for<'a>(&'a self, mir: &'a MirModule) -> &'a severian_universal::TypeContext {
@@ -316,8 +336,7 @@ impl Compiler {
                     // is the behavior under investigation.
                     ordinary
                 } else {
-                    severian_mlir::compose(&ordinary, &artifacts, &self.target)
-                        .map_err(CompileError::Mlir)?
+                    compose_region_artifacts(&ordinary, artifacts, &self.target)?.host_mlir
                 };
                 Ok(format!("{}\n", text.trim_end()))
             }
@@ -1035,6 +1054,36 @@ impl Compiler {
             })
             .collect()
     }
+}
+
+fn compose_region_artifacts(
+    ordinary: &str,
+    artifacts: Vec<VerifiedCompiledRegionArtifact>,
+    target: &TargetSpec,
+) -> Result<RoutedProgram, CompileError> {
+    let mut cpu = Vec::new();
+    let mut gpu = Vec::new();
+    let mut gpu_kernels = Vec::new();
+    for artifact in artifacts {
+        match artifact {
+            VerifiedCompiledRegionArtifact::CpuMlir(artifact) => cpu.push(artifact),
+            VerifiedCompiledRegionArtifact::GpuKernel(artifact) => {
+                gpu.push(severian_mlir::GpuLaunchArtifact {
+                    id: artifact.id,
+                    inputs: artifact.bundle.inputs.clone(),
+                    outputs: artifact.bundle.outputs.clone(),
+                });
+                gpu_kernels.push(artifact);
+            }
+        }
+    }
+    let host = severian_mlir::compose(ordinary, &cpu, target).map_err(CompileError::Mlir)?;
+    let host_mlir =
+        severian_mlir::compose_gpu_launchers(&host, &gpu, target).map_err(CompileError::Mlir)?;
+    Ok(RoutedProgram {
+        host_mlir,
+        gpu_kernels,
+    })
 }
 
 fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {

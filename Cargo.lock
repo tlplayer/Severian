@@ -131,6 +131,7 @@ name = "severian-compile"
 version = "0.1.0"
 dependencies = [
  "severian-artifact",
+ "severian-fusion",
  "severian-mir",
  "severian-mlir",
  "severian-target",

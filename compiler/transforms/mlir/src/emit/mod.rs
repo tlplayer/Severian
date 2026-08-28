@@ -2762,7 +2762,7 @@ fn _unary_is_lir(_: UnaryOperation) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compose, verify_artifact};
+    use crate::{compose, compose_gpu_launchers, verify_artifact, GpuLaunchArtifact};
     use severian_artifact::CompiledRegionId;
     use severian_target::TargetSpec;
 
@@ -3247,6 +3247,39 @@ mod tests {
         assert!(ordinary.contains("scf.if %v0"));
         assert!(ordinary.contains("func.call @__sev_artifact_0()"));
         compose(&ordinary, &[], &TargetSpec::new("x86_64-unknown-linux")).unwrap();
+    }
+
+    #[test]
+    fn gpu_artifact_calls_are_backed_only_by_host_launcher_functions() {
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let tensor = LoweredType::Tensor {
+            element: LoweredTensorElement::Float {
+                format: LoweredFloatFormat::Ieee(32),
+            },
+            shape: LoweredTensorShape::Unranked,
+        };
+        let ordinary = "module { func.func private @__sev_artifact_0(tensor<*xf32>) -> tensor<*xf32> func.func @main(%arg0: tensor<*xf32>) -> tensor<*xf32> { %0 = func.call @__sev_artifact_0(%arg0) : (tensor<*xf32>) -> tensor<*xf32> return %0 : tensor<*xf32> } }";
+        let composed = compose_gpu_launchers(
+            &ordinary,
+            &[GpuLaunchArtifact {
+                id: artifact_id(),
+                inputs: vec![tensor.clone()],
+                outputs: vec![tensor],
+            }],
+            &target,
+        )
+        .unwrap();
+
+        assert!(composed.contains("call @__sev_gpu_launch_0"), "{composed}");
+        assert!(
+            composed.contains("func.func private @__sev_gpu_launch_0"),
+            "{composed}"
+        );
+        assert!(
+            composed.contains("func.func private @__sev_artifact_0"),
+            "{composed}"
+        );
+        assert!(!composed.contains("__sev_tensor_op_"));
     }
 
     #[test]

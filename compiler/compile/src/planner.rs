@@ -65,6 +65,7 @@ fn extract_cfg_compile_operations(
 ) -> Result<(), CompileError> {
     let locals = body.locals.clone();
     for block in &mut body.blocks {
+        let placement = block.execution;
         // A constant whose type owns this compile route is itself a compile
         // operation. Normalize it before finding maximal same-compiler runs.
         for statement in &mut block.statements {
@@ -289,6 +290,7 @@ fn extract_cfg_compile_operations(
                     writes_memory: true,
                     may_trap: true,
                 },
+                placement,
             });
             start = end;
         }
@@ -634,6 +636,7 @@ fn build_region(
         inputs,
         outputs,
         effects,
+        placement: None,
     })
 }
 

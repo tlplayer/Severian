@@ -4,7 +4,7 @@ use severian_mir::{
     Value as MirValue,
 };
 use severian_target::TargetSpec;
-use severian_universal::{Attrs, CompilerId, OpId, TypeContext, TypeId};
+use severian_universal::{Attrs, CompilerId, ExecutionPlacement, OpId, TypeContext, TypeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EffectSet {
@@ -25,6 +25,9 @@ pub struct CompileRegion {
     pub inputs: Vec<MirValue>,
     pub outputs: Vec<MirValue>,
     pub effects: EffectSet,
+    /// Source execution intent for the complete region. Backend selection is
+    /// performed before invoking a target-specific emitter.
+    pub placement: Option<ExecutionPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,4 +118,43 @@ pub(crate) fn resume_block(block: &PlannedBlock) -> MirBlock {
 pub struct CompileContext<'a> {
     pub types: &'a TypeContext,
     pub target: &'a TargetSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuTarget {
+    Amd,
+    Nvidia,
+}
+
+/// A device-neutral compiler product for a tensor GPU region. It deliberately
+/// retains the complete Severian graph and fusion decisions; TTIR and target
+/// code are later phases of the Triton bridge.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GpuKernelBundle {
+    pub target: GpuTarget,
+    pub architecture: String,
+    pub graph: severian_fusion::FusionGraph,
+    pub plan: severian_fusion::FusionPlan,
+    pub inputs: Vec<severian_mlir::LoweredType>,
+    pub outputs: Vec<severian_mlir::LoweredType>,
+}
+
+/// Raw custom-compiler result. GPU regions are not represented as MLIR
+/// functions and therefore cannot accidentally enter CPU artifact verification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompiledRegionArtifact {
+    CpuMlir(severian_mlir::MlirArtifact),
+    GpuKernel(GpuKernelBundle),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerifiedGpuKernelBundle {
+    pub id: ArtifactId,
+    pub bundle: GpuKernelBundle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VerifiedCompiledRegionArtifact {
+    CpuMlir(severian_mlir::VerifiedMlirArtifact),
+    GpuKernel(VerifiedGpuKernelBundle),
 }

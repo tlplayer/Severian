@@ -7,13 +7,15 @@ mod runtime_paths;
 
 pub use pipeline::{
     check_file, compile_file, compile_source, CompileError, CompiledTest, Compiler, EmitStage,
-    TestExecution,
+    RoutedProgram, TestExecution,
 };
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_compile::{CompileContext, CompileHandler, CompileRegion};
+    use severian_compile::{
+        CompileContext, CompileHandler, CompileRegion, CompiledRegionArtifact,
+    };
     use severian_mlir::{LoweredType, MlirArtifact};
     use severian_source::SourceFile;
     use severian_target::TargetSpec;
@@ -33,7 +35,7 @@ mod tests {
             &self,
             region: &CompileRegion,
             _: &CompileContext<'_>,
-        ) -> Result<MlirArtifact, severian_compile::CompileError> {
+        ) -> Result<CompiledRegionArtifact, severian_compile::CompileError> {
             if let Some(calls) = &self.calls {
                 calls.fetch_add(1, Ordering::SeqCst);
             }
@@ -53,11 +55,11 @@ mod tests {
                     }],
                 )
             };
-            Ok(MlirArtifact {
+            Ok(CompiledRegionArtifact::CpuMlir(MlirArtifact {
                 module,
                 inputs: vec![],
                 outputs,
-            })
+            }))
         }
     }
 

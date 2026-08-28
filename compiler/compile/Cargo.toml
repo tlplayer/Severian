@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 severian-artifact = { path = "../artifact" }
+severian-fusion = { path = "../transforms/fusion" }
 severian-mir = { path = "../transforms/mir" }
 severian-mlir = { path = "../transforms/mlir" }
 severian-target = { path = "../target" }

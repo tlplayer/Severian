@@ -4,14 +4,18 @@ mod fusion;
 
 pub use fusion::{fusion_graph, FusionGraphError};
 
-use severian_compile::{CompileContext, CompileError, CompileHandler, CompileRegion};
+use severian_compile::{
+    CompileContext, CompileError, CompileHandler, CompileRegion, CompiledRegionArtifact,
+    GpuKernelBundle, GpuTarget,
+};
+use severian_fusion::{plan as plan_fusion, DeviceModel};
 use severian_mlir::{
     type_spelling, LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement,
     LoweredTensorShape, LoweredType, MlirArtifact,
 };
 use severian_universal::{
-    tensor, AttrValue, Attrs, FloatFormat, IntegerWidth, PrimitiveRepresentation, TensorDimension,
-    TensorShape, TypeContext, TypeId,
+    tensor, AttrValue, Attrs, ExecutionPlacement, FloatFormat, IntegerWidth,
+    PrimitiveRepresentation, TensorDimension, TensorShape, TypeContext, TypeId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,6 +27,22 @@ pub struct TensorCompiler;
 
 impl CompileHandler for TensorCompiler {
     fn compile(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+    ) -> Result<CompiledRegionArtifact, CompileError> {
+        if region.placement == Some(ExecutionPlacement::Gpu) {
+            return self
+                .compile_gpu(region, context)
+                .map(CompiledRegionArtifact::GpuKernel);
+        }
+        self.compile_cpu(region, context)
+            .map(CompiledRegionArtifact::CpuMlir)
+    }
+}
+
+impl TensorCompiler {
+    fn compile_cpu(
         &self,
         region: &CompileRegion,
         context: &CompileContext<'_>,
@@ -225,6 +245,60 @@ impl CompileHandler for TensorCompiler {
             module: format!(
                 "module {{\n{declarations}{helpers}  func.func @entry({parameters}){result_signature} {{\n{entry_body}  }}\n}}"
             ),
+            inputs,
+            outputs,
+        })
+    }
+
+    fn compile_gpu(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+    ) -> Result<GpuKernelBundle, CompileError> {
+        if region.compile_operations.is_empty() {
+            return Err(invalid("the tensor compiler requires a non-empty region"));
+        }
+        let device = context
+            .target
+            .triton_gpu()
+            .ok_or_else(|| {
+                CompileError::Target(
+                    "GPU placement requires an AMD or NVIDIA device in the target".into(),
+                )
+            })?;
+        let target = if device.features.contains("vendor.amd")
+            || device.architecture.starts_with("gfx")
+        {
+            GpuTarget::Amd
+        } else if device.features.contains("vendor.nvidia")
+            || device.architecture.starts_with("sm_")
+            || device.architecture.starts_with("compute_")
+        {
+            GpuTarget::Nvidia
+        } else {
+            return Err(CompileError::Target(format!(
+                "GPU `{}` with architecture `{}` is not a Triton AMD/NVIDIA target",
+                device.name, device.architecture
+            )));
+        };
+        let inputs = region
+            .inputs
+            .iter()
+            .map(|value| lower_type(value.type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let outputs = region
+            .outputs
+            .iter()
+            .map(|value| lower_type(value.type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let graph = fusion_graph(region, context.types)
+            .map_err(|error| CompileError::InvalidArtifact(error.to_string()))?;
+        let plan = plan_fusion(&graph, DeviceModel::conservative_gpu());
+        Ok(GpuKernelBundle {
+            target,
+            architecture: device.architecture.clone(),
+            graph,
+            plan,
             inputs,
             outputs,
         })
@@ -1265,7 +1339,7 @@ mod tests {
     use severian_artifact::{ArtifactId, CompiledRegionId};
     use severian_compile::{CompileOperation, EffectSet};
     use severian_mir::{Value, ValueId};
-    use severian_target::TargetSpec;
+    use severian_target::{Device, DeviceKind, FeatureSet, TargetSpec};
     use severian_universal::{install_primitives, Attrs, TypeContextBuilder};
 
     const ELEMENTS: &[&str] = &[
@@ -1342,6 +1416,7 @@ mod tests {
                 type_id: tensor_type,
             }],
             effects: EffectSet::default(),
+            placement: None,
         }
     }
 
@@ -1360,6 +1435,9 @@ mod tests {
                 },
             )
             .unwrap_or_else(|error| panic!("{operation:?} did not lower: {error}"));
+        let CompiledRegionArtifact::CpuMlir(artifact) = artifact else {
+            panic!("host tensor operation unexpectedly selected the GPU route");
+        };
         severian_mlir::verify_artifact(
             ArtifactId::for_region(CompiledRegionId::new(0)),
             artifact.clone(),
@@ -1476,6 +1554,7 @@ mod tests {
                 type_id: storage,
             }],
             effects: EffectSet::default(),
+            placement: None,
         };
         let artifact = TensorCompiler
             .compile(
@@ -1486,6 +1565,9 @@ mod tests {
                 },
             )
             .unwrap();
+        let CompiledRegionArtifact::CpuMlir(artifact) = artifact else {
+            panic!("host tensor operation unexpectedly selected the GPU route");
+        };
         assert!(artifact.module.contains("tensor.rank %arg0"));
         assert!(artifact.module.contains("tensor.dim %arg0, %axis"));
         assert!(artifact.module.contains("scf.for %axis"));
@@ -1521,6 +1603,9 @@ mod tests {
                 },
             )
             .unwrap();
+        let CompiledRegionArtifact::CpuMlir(artifact) = artifact else {
+            panic!("host tensor operation unexpectedly selected the GPU route");
+        };
         assert!(artifact.module.contains("tensor<2x3xf32>"));
         assert!(artifact.module.contains("tensor<3xf32>"));
         severian_mlir::verify_artifact(
@@ -1557,6 +1642,9 @@ mod tests {
                 },
             )
             .unwrap();
+        let CompiledRegionArtifact::CpuMlir(artifact) = artifact else {
+            panic!("host tensor operation unexpectedly selected the GPU route");
+        };
         for spelling in ["tensor<2x3xf64>", "tensor<3x4xf64>", "tensor<2x4xf64>"] {
             assert!(artifact.module.contains(spelling));
         }
@@ -1600,5 +1688,47 @@ mod tests {
         );
         assert_eq!(graph.node(severian_fusion::NodeId(2)).operation, "multiply");
         assert_eq!(graph.node(severian_fusion::NodeId(3)).operation, "rsqrt");
+    }
+
+    #[test]
+    fn gpu_unranked_permute_bypasses_the_cpu_mlir_emitter() {
+        let (mut types, constructor) = types();
+        let element = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, element, TensorShape::Unranked)
+            .unwrap();
+        let mut region = region(
+            tensor_type,
+            tensor::TensorOp::Permute(tensor::PermuteOp::Axes),
+            1,
+        );
+        region.placement = Some(ExecutionPlacement::Gpu);
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "gfx1100".into(),
+            features: FeatureSet::from_names(["vendor.amd"]),
+        });
+
+        let artifact = TensorCompiler
+            .compile(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap();
+        let CompiledRegionArtifact::GpuKernel(bundle) = artifact else {
+            panic!("GPU placement entered the CPU MLIR route");
+        };
+        assert_eq!(bundle.target, GpuTarget::Amd);
+        assert_eq!(bundle.graph.nodes().len(), 2);
+        assert_eq!(bundle.plan.node_regions.len(), bundle.graph.nodes().len());
+        assert_eq!(
+            bundle.graph.node(severian_fusion::NodeId(1)).kind,
+            severian_fusion::NodeKind::Permute
+        );
     }
 }

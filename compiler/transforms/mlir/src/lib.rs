@@ -9,7 +9,9 @@ pub use severian_lir::{
     LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement, LoweredTensorShape,
     LoweredType,
 };
-pub use verify::{compose, verify_artifact, VerifiedMlirArtifact};
+pub use verify::{
+    compose, compose_gpu_launchers, verify_artifact, GpuLaunchArtifact, VerifiedMlirArtifact,
+};
 
 /// Canonical MLIR spelling for a lowered Severian type. Custom compilers use
 /// the same scalar/tensor mapping as ordinary lowering.

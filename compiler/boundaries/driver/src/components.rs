@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use severian_compile::CompilePlan;
-use severian_target::{DeviceKind, TargetSpec};
+use severian_target::TargetSpec;
 use severian_universal::{AttrValue, ExecutionPlacement, EXECUTION_PLACEMENT_ATTRIBUTE};
 use std::path::Path;
 use std::process::Command;
@@ -46,44 +46,16 @@ pub(crate) fn ensure_for_plan(
     if !placements.contains(&ExecutionPlacement::Gpu) {
         return Ok(resolved);
     }
-    ensure_component(&catalog, "compiler", "mlir.rocdl")?;
-    ensure_component(&catalog, "compiler", "mlir.stablehlo")?;
-    resolved.capabilities.insert("mlir.dialect.gpu");
-    resolved.capabilities.insert("mlir.dialect.rocdl");
-    resolved.capabilities.insert("mlir.dialect.stablehlo");
-    if resolved.rocm_device().is_some() {
-        return Ok(resolved);
-    }
-    if resolved.amd_gpu().is_none() {
-        // Placement is portable. A machine without the requested device keeps
-        // the region on the native route; discovering an AMD device is what
-        // turns ROCm into a required component.
-        return Ok(resolved);
-    }
-    let Ok(component) = ensure_component(&catalog, "driver", "driver.rocm") else {
-        // A portable placement remains executable on the host when component
-        // provisioning is unavailable (for example in a restricted build
-        // container). The compiler still attempted the manifest-selected
-        // installation before taking this route.
-        return Ok(resolved);
-    };
-    if ensure_component(&catalog, "runtime", "runtime.mlir-rocm").is_err() {
-        let mut fallback = resolved;
-        fallback
-            .devices
-            .retain(|device| device.kind != DeviceKind::Gpu);
-        return Ok(fallback);
-    }
-    let mut refreshed = resolved.rediscover_devices();
-    refreshed.capabilities.insert("mlir.dialect.gpu");
-    refreshed.capabilities.insert("mlir.dialect.rocdl");
-    if refreshed.rocm_device().is_none() {
-        return Err(format!(
-            "component `{}` was installed, but ROCm did not expose /dev/kfd; a reboot or device permission repair may be required",
-            component.id
-        ));
-    }
-    Ok(refreshed)
+    let device = resolved.triton_gpu().ok_or_else(|| {
+        "GPU placement requires an AMD or NVIDIA device; it cannot fall back to CPU compilation"
+            .to_owned()
+    })?;
+    let architecture = device.architecture.clone();
+    resolved.capabilities.insert("compiler.triton");
+    resolved
+        .capabilities
+        .insert(format!("compiler.triton.{architecture}"));
+    Ok(resolved)
 }
 
 fn ensure_component<'a>(

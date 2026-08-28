@@ -19,6 +19,20 @@ Severian Tensor IR
 
 CPU compilation remains on the existing Linalg/Vector/LLVM route.
 
+## Region artifact routing
+
+`CompileHandler` returns a backend-neutral `CompiledRegionArtifact`. Host and
+SIMD tensor regions produce `CpuMlir`; GPU tensor regions produce a
+`GpuKernelBundle` containing the complete `FusionGraph`, its selected
+`FusionPlan`, target architecture, and typed region signature. The compiler
+registry verifies only the CPU variant as an MLIR artifact. A GPU bundle never
+enters the CPU tensor emitter or MLIR artifact verifier.
+
+The ordinary host module contains a small `__sev_artifact_N` wrapper calling
+`__sev_gpu_launch_N`. `RoutedProgram` retains the corresponding GPU bundles
+beside that host MLIR so later Triton compilation and runtime packaging do not
+have to reconstruct or recover the execution graph from host code.
+
 ## Ownership boundary
 
 `severian-fusion` owns the complete producer/consumer graph, shape and cost

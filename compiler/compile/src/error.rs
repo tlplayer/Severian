@@ -14,6 +14,7 @@ pub enum CompileError {
     PlannerGeneratedOperation(usize),
     CfgCompileType(CompilerId),
     Type(TypeId, String),
+    Target(String),
 }
 
 impl fmt::Display for CompileError {
@@ -48,6 +49,7 @@ impl fmt::Display for CompileError {
                 "CompileType handler {compiler} cannot consume CFG MIR yet"
             ),
             Self::Type(ty, message) => write!(formatter, "cannot route type {ty:?}: {message}"),
+            Self::Target(message) => write!(formatter, "cannot route compiled region: {message}"),
         }
     }
 }
