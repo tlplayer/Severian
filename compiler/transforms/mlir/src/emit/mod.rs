@@ -677,6 +677,19 @@ fn render_cfg_body_function(
                     cfg_local_storage_type(&local.ty)?
                 ));
             }
+            if body.locals.iter().any(|local| {
+                !local.argument && matches!(local.ty, LoweredType::Tensor { .. })
+            }) {
+                output.push_str("    %sev_null_tensor_box = llvm.mlir.zero : !llvm.ptr\n");
+                for local in body.locals.iter().filter(|local| {
+                    !local.argument && matches!(local.ty, LoweredType::Tensor { .. })
+                }) {
+                    output.push_str(&format!(
+                        "    llvm.store %sev_null_tensor_box, %local{} : !llvm.ptr, !llvm.ptr\n",
+                        local.id.0
+                    ));
+                }
+            }
             for (argument, local) in body
                 .locals
                 .iter()
@@ -1394,6 +1407,10 @@ fn render_cfg_operation(
                         &format!("store_tensor_local_b{}_o{}", block.0, operation_index),
                         indent,
                     )?;
+                    output.push_str(&format!(
+                        "{indentation}func.call @__sev_tensor_local_release(%local{}) : (!llvm.ptr) -> ()\n",
+                        local.0
+                    ));
                     output.push_str(&format!(
                         "{indentation}llvm.store {boxed}, %local{} : !llvm.ptr, !llvm.ptr\n",
                         local.0

@@ -1,6 +1,7 @@
 #include <float.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,88 @@ typedef struct {
     uintptr_t descriptor[];
 } sev_unranked_tensor_box;
 
+typedef struct sev_tensor_allocation_ref {
+    void *allocation;
+    size_t references;
+    struct sev_tensor_allocation_ref *next;
+} sev_tensor_allocation_ref;
+
+static pthread_mutex_t sev_tensor_allocation_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sev_tensor_allocation_ref *sev_tensor_allocations = NULL;
+
+static _Bool sev_tensor_ownership_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("SEVERIAN_TENSOR_OWNERSHIP_TRACE");
+        enabled = value != NULL && *value != '\0' && strcmp(value, "0") != 0;
+    }
+    return (_Bool)enabled;
+}
+
+static void sev_tensor_allocation_retain(void *allocated, void *aligned) {
+    /* Foreign/read-only StorageViews use an owner object distinct from their
+     * mapped data. MLIR-owned buffers use the allocation itself. */
+    if (allocated == NULL) return;
+    pthread_mutex_lock(&sev_tensor_allocation_mutex);
+    sev_tensor_allocation_ref *entry = sev_tensor_allocations;
+    while (entry != NULL && entry->allocation != allocated) entry = entry->next;
+    if (entry == NULL) {
+        if (allocated != aligned) {
+            pthread_mutex_unlock(&sev_tensor_allocation_mutex);
+            return;
+        }
+        entry = calloc(1, sizeof(*entry));
+        if (entry == NULL) abort();
+        entry->allocation = allocated;
+        entry->next = sev_tensor_allocations;
+        sev_tensor_allocations = entry;
+    }
+    ++entry->references;
+    if (sev_tensor_ownership_trace_enabled()) {
+        fprintf(
+            stderr,
+            "severian tensor retain allocation=%p aligned=%p references=%zu\n",
+            allocated,
+            aligned,
+            entry->references
+        );
+    }
+    pthread_mutex_unlock(&sev_tensor_allocation_mutex);
+}
+
+static void sev_tensor_allocation_release(void *allocated, void *aligned) {
+    (void)aligned;
+    if (allocated == NULL) return;
+    pthread_mutex_lock(&sev_tensor_allocation_mutex);
+    sev_tensor_allocation_ref **link = &sev_tensor_allocations;
+    while (*link != NULL && (*link)->allocation != allocated) link = &(*link)->next;
+    if (*link == NULL) {
+        pthread_mutex_unlock(&sev_tensor_allocation_mutex);
+        return;
+    }
+    if ((*link)->references == 0) {
+        pthread_mutex_unlock(&sev_tensor_allocation_mutex);
+        abort();
+    }
+    sev_tensor_allocation_ref *entry = *link;
+    --entry->references;
+    if (sev_tensor_ownership_trace_enabled()) {
+        fprintf(
+            stderr,
+            "severian tensor release allocation=%p aligned=%p references=%zu\n",
+            allocated,
+            aligned,
+            entry->references
+        );
+    }
+    if (entry->references == 0) {
+        *link = entry->next;
+        free(entry);
+        free(allocated);
+    }
+    pthread_mutex_unlock(&sev_tensor_allocation_mutex);
+}
+
 void *__sev_tensor_box_unranked(int64_t rank, const void *descriptor) {
     if (rank < 0 || rank > 64 || descriptor == NULL) abort();
     size_t words = 3u + 2u * (size_t)rank;
@@ -31,6 +114,10 @@ void *__sev_tensor_box_unranked(int64_t rank, const void *descriptor) {
     if (box == NULL) abort();
     box->rank = rank;
     memcpy(box->descriptor, descriptor, words * sizeof(uintptr_t));
+    sev_tensor_allocation_retain(
+        (void *)box->descriptor[0],
+        (void *)box->descriptor[1]
+    );
     return box;
 }
 
@@ -42,6 +129,19 @@ int64_t __sev_tensor_box_rank(const void *value) {
 void *__sev_tensor_box_descriptor(void *value) {
     if (value == NULL) abort();
     return ((sev_unranked_tensor_box *)value)->descriptor;
+}
+
+void __sev_tensor_local_release(void *local) {
+    if (local == NULL) return;
+    sev_unranked_tensor_box **slot = local;
+    sev_unranked_tensor_box *box = *slot;
+    if (box == NULL) return;
+    sev_tensor_allocation_release(
+        (void *)box->descriptor[0],
+        (void *)box->descriptor[1]
+    );
+    free(box);
+    *slot = NULL;
 }
 
 typedef struct {

@@ -307,7 +307,19 @@ impl CfgLowering<'_> {
                 });
             }
             severian_mir::CfgStatement::Drop(place) => {
-                if self.place_type(body, place)? == LoweredType::String {
+                let ty = self.place_type(body, place)?;
+                if matches!(ty, LoweredType::Tensor { .. }) && place.projection.is_empty() {
+                    let address = self.new_value(LoweredType::Bytes);
+                    operations.push(LirOperation::AddressOf {
+                        place: self.lower_place(place),
+                        result: address,
+                    });
+                    operations.push(LirOperation::RuntimeCall {
+                        symbol: "__sev_tensor_local_release".into(),
+                        arguments: vec![address],
+                        result: None,
+                    });
+                } else if ty == LoweredType::String {
                     let value = self.load_place(body, place, operations)?;
                     operations.push(LirOperation::RuntimeCall {
                         symbol: "__sev_string_release".into(),

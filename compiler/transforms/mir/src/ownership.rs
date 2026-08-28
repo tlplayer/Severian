@@ -126,11 +126,33 @@ pub fn analyze_ownership(
 }
 
 pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Vec<OwnershipError>> {
+    let resources = resource_locals(body, types);
+    let resource_set = resources.iter().copied().collect::<BTreeSet<_>>();
+    for block in &mut body.blocks {
+        let operand = match &mut block.terminator {
+            Terminator::Return(Some(operand)) | Terminator::Throw(operand) => Some(operand),
+            _ => None,
+        };
+        if let Some(operand) = operand {
+            let transferred = match operand {
+                Operand::Copy(place)
+                    if place
+                        .local_id()
+                        .is_some_and(|local| resource_set.contains(&local)) =>
+                {
+                    Some(place.clone())
+                }
+                _ => None,
+            };
+            if let Some(place) = transferred {
+                *operand = Operand::Move(place);
+            }
+        }
+    }
     let (_, outputs, errors, _) = solve(body);
     if !errors.is_empty() {
         return Err(errors.into_iter().collect());
     }
-    let resources = resource_locals(body, types);
     for block in &mut body.blocks {
         if !matches!(
             block.terminator,
@@ -149,10 +171,17 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
                 _ => None,
             })
             .collect::<BTreeSet<_>>();
+        let transferred = match &block.terminator {
+            Terminator::Return(Some(operand)) | Terminator::Throw(operand) => {
+                operand_local(operand)
+            }
+            _ => None,
+        };
         for local in resources.iter().rev() {
             if state.initialized.contains(local)
                 && !state.consumed_resources.contains(local)
                 && !already_dropped.contains(local)
+                && transferred != Some(*local)
             {
                 block
                     .statements
@@ -552,7 +581,12 @@ fn inspect_operand(
 fn resource_locals(body: &CfgBody, types: &TypeContext) -> Vec<LocalId> {
     body.locals
         .iter()
-        .filter(|local| matches!(types.kind(local.ty), Some(TypeKind::Resource(_, _))))
+        .filter(|local| {
+            matches!(
+                types.kind(local.ty),
+                Some(TypeKind::Resource(_, _) | TypeKind::Tensor { .. })
+            )
+        })
         .map(|local| local.id)
         .collect()
 }
