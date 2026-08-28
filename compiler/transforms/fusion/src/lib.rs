@@ -27,6 +27,12 @@ pub enum Dimension {
     Known(u64),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rank {
+    Unranked,
+    Ranked(Vec<Dimension>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementKind {
     SignedInteger,
@@ -41,7 +47,7 @@ pub enum ElementKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shape {
-    pub dimensions: Vec<Dimension>,
+    pub rank: Rank,
     pub element_kind: ElementKind,
     pub element_bytes: u16,
 }
@@ -49,7 +55,7 @@ pub struct Shape {
 impl Shape {
     pub fn ranked(dimensions: impl IntoIterator<Item = u64>, element_bytes: u16) -> Self {
         Self {
-            dimensions: dimensions.into_iter().map(Dimension::Known).collect(),
+            rank: Rank::Ranked(dimensions.into_iter().map(Dimension::Known).collect()),
             element_kind: ElementKind::Opaque,
             element_bytes,
         }
@@ -61,14 +67,29 @@ impl Shape {
         element_bytes: u16,
     ) -> Self {
         Self {
-            dimensions: dimensions.into_iter().collect(),
+            rank: Rank::Ranked(dimensions.into_iter().collect()),
             element_kind,
             element_bytes,
         }
     }
 
+    pub fn unranked(element_kind: ElementKind, element_bytes: u16) -> Self {
+        Self {
+            rank: Rank::Unranked,
+            element_kind,
+            element_bytes,
+        }
+    }
+
+    pub fn dimensions(&self) -> Option<&[Dimension]> {
+        match &self.rank {
+            Rank::Unranked => None,
+            Rank::Ranked(dimensions) => Some(dimensions),
+        }
+    }
+
     pub fn byte_size(&self) -> Option<u64> {
-        self.dimensions
+        self.dimensions()?
             .iter()
             .try_fold(u64::from(self.element_bytes), |bytes, dimension| {
                 let Dimension::Known(dimension) = dimension else {

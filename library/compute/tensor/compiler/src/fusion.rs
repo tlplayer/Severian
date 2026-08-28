@@ -180,14 +180,14 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
             .map(tensor::TensorElementKind::byte_width)
             .ok_or(FusionGraphError::UnsupportedType(tensor.element))?;
         let dimensions = match tensor.shape {
-            TensorShape::Unranked => Vec::new(),
-            TensorShape::Ranked(dimensions) => dimensions
+            TensorShape::Unranked => None,
+            TensorShape::Ranked(dimensions) => Some(dimensions
                 .into_iter()
                 .map(|dimension| match dimension {
                     TensorDimension::Dynamic => Dimension::Dynamic,
                     TensorDimension::Known(value) => Dimension::Known(value),
                 })
-                .collect(),
+                .collect::<Vec<_>>()),
         };
         let element_kind = match tensor::TensorElementKind::from_type(types, tensor.element)
             .ok_or(FusionGraphError::UnsupportedType(tensor.element))?
@@ -199,11 +199,12 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
             tensor::TensorElementKind::IeeeFloat(_) => ElementKind::IeeeFloat,
             tensor::TensorElementKind::BrainFloat16 => ElementKind::BrainFloat,
         };
-        return Ok(Shape::typed(
-            dimensions,
-            element_kind,
-            u16::from(element_bytes),
-        ));
+        return Ok(match dimensions {
+            Some(dimensions) => {
+                Shape::typed(dimensions, element_kind, u16::from(element_bytes))
+            }
+            None => Shape::unranked(element_kind, u16::from(element_bytes)),
+        });
     }
     let primitive = types
         .primitive(type_id)

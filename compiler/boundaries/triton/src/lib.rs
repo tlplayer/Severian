@@ -331,7 +331,8 @@ pub fn with_abi_request<R>(
             graph
                 .node(*id)
                 .shape
-                .dimensions
+                .dimensions()
+                .unwrap_or_default()
                 .iter()
                 .map(|dimension| match dimension {
                     severian_fusion::Dimension::Dynamic => -1,
