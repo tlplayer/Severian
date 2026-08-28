@@ -34,6 +34,100 @@ pub enum Rank {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stride {
+    Dynamic,
+    Known(i64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageLayout {
+    /// Physical strides and offset are supplied when a kernel is specialized.
+    Runtime,
+    Dense {
+        minor_to_major: Vec<u32>,
+    },
+    Strided {
+        strides: Vec<Stride>,
+        offset: Stride,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperandRole {
+    Data,
+    RuntimeShape,
+    RuntimeStrides,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AliasKind {
+    View,
+    InPlace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputAlias {
+    pub input_index: u16,
+    pub kind: AliasKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mutation {
+    None,
+    WritesInput(u16),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuTarget {
+    Amd,
+    Nvidia,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeShape {
+    pub node: NodeId,
+    pub dimensions: Vec<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStrides {
+    pub node: NodeId,
+    pub strides: Vec<i64>,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelSpecialization {
+    pub shapes: Vec<RuntimeShape>,
+    pub strides: Vec<RuntimeStrides>,
+    pub target: GpuTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatchDimension {
+    pub result: u32,
+    pub lhs: Option<u32>,
+    pub rhs: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractionDimension {
+    pub lhs: u32,
+    pub rhs: u32,
+}
+
+/// Rank-generic contraction metadata. Rank and dtype remain ordinary data;
+/// this record never changes the `Matmul` operation identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Matmul {
+    pub lhs_shape: Rank,
+    pub rhs_shape: Rank,
+    pub result_shape: Rank,
+    pub batch_dimensions: Vec<BatchDimension>,
+    pub contraction_dimensions: Vec<ContractionDimension>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementKind {
     SignedInteger,
     UnsignedInteger,
@@ -49,35 +143,35 @@ pub enum ElementKind {
 pub struct Shape {
     pub rank: Rank,
     pub element_kind: ElementKind,
-    pub element_bytes: u16,
+    pub element_bits: u16,
 }
 
 impl Shape {
-    pub fn ranked(dimensions: impl IntoIterator<Item = u64>, element_bytes: u16) -> Self {
+    pub fn ranked(dimensions: impl IntoIterator<Item = u64>, element_bits: u16) -> Self {
         Self {
             rank: Rank::Ranked(dimensions.into_iter().map(Dimension::Known).collect()),
             element_kind: ElementKind::Opaque,
-            element_bytes,
+            element_bits,
         }
     }
 
     pub fn typed(
         dimensions: impl IntoIterator<Item = Dimension>,
         element_kind: ElementKind,
-        element_bytes: u16,
+        element_bits: u16,
     ) -> Self {
         Self {
             rank: Rank::Ranked(dimensions.into_iter().collect()),
             element_kind,
-            element_bytes,
+            element_bits,
         }
     }
 
-    pub fn unranked(element_kind: ElementKind, element_bytes: u16) -> Self {
+    pub fn unranked(element_kind: ElementKind, element_bits: u16) -> Self {
         Self {
             rank: Rank::Unranked,
             element_kind,
-            element_bytes,
+            element_bits,
         }
     }
 
@@ -91,12 +185,25 @@ impl Shape {
     pub fn byte_size(&self) -> Option<u64> {
         self.dimensions()?
             .iter()
-            .try_fold(u64::from(self.element_bytes), |bytes, dimension| {
+            .try_fold(u64::from(self.element_bytes()), |bytes, dimension| {
                 let Dimension::Known(dimension) = dimension else {
                     return None;
                 };
                 bytes.checked_mul(*dimension)
             })
+    }
+
+    pub const fn element_bytes(&self) -> u16 {
+        self.element_bits.div_ceil(8)
+    }
+
+    pub fn default_layout(&self) -> StorageLayout {
+        match &self.rank {
+            Rank::Unranked => StorageLayout::Runtime,
+            Rank::Ranked(dimensions) => StorageLayout::Dense {
+                minor_to_major: (0..dimensions.len() as u32).rev().collect(),
+            },
+        }
     }
 }
 
@@ -157,15 +264,18 @@ pub struct FusionNode {
     /// Operation-specific integral data such as axes or a permutation.
     pub attributes: Vec<i64>,
     pub inputs: Vec<NodeId>,
+    pub operand_roles: Vec<OperandRole>,
     pub shape: Shape,
+    pub layout: StorageLayout,
     pub bytes_read: u64,
     pub bytes_written: u64,
     pub flops: u64,
     pub shared_memory_bytes: u64,
     pub unnested_reductions: u16,
     pub has_side_effects: bool,
-    /// Operand index updated in-place, when the operation aliases an input.
-    pub writes_input: Option<u16>,
+    pub aliases: Vec<InputAlias>,
+    pub mutation: Mutation,
+    pub matmul: Option<Matmul>,
 }
 
 impl FusionNode {
@@ -176,21 +286,41 @@ impl FusionNode {
         shape: Shape,
     ) -> Self {
         let bytes = shape.byte_size().unwrap_or(0);
+        let inputs = inputs.into_iter().collect::<Vec<_>>();
+        let layout = shape.default_layout();
         Self {
             id: NodeId(id),
             kind,
             operation: format!("{kind:?}").to_ascii_lowercase(),
             attributes: Vec::new(),
-            inputs: inputs.into_iter().collect(),
+            operand_roles: vec![OperandRole::Data; inputs.len()],
+            inputs,
             shape,
+            layout,
             bytes_read: bytes,
             bytes_written: bytes,
             flops: 0,
             shared_memory_bytes: 0,
             unnested_reductions: u16::from(kind.is_reduction()),
             has_side_effects: false,
-            writes_input: None,
+            aliases: Vec::new(),
+            mutation: Mutation::None,
+            matmul: None,
         }
+    }
+
+    pub fn runtime_shape_inputs(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.inputs
+            .iter()
+            .copied()
+            .zip(&self.operand_roles)
+            .filter_map(|(input, role)| {
+                matches!(
+                    role,
+                    OperandRole::RuntimeShape | OperandRole::RuntimeStrides
+                )
+                .then_some(input)
+            })
     }
 }
 
@@ -198,6 +328,11 @@ impl FusionNode {
 pub enum GraphError {
     NonContiguousId { expected: NodeId, found: NodeId },
     ForwardReference { node: NodeId, input: NodeId },
+    OperandRoleCount { node: NodeId },
+    InvalidLayout { node: NodeId },
+    InvalidAliasInput { node: NodeId, input_index: u16 },
+    InvalidMutationInput { node: NodeId, input_index: u16 },
+    InvalidMatmulContract { node: NodeId },
 }
 
 impl fmt::Display for GraphError {
@@ -212,6 +347,33 @@ impl fmt::Display for GraphError {
                 formatter,
                 "fusion node {} references non-preceding node {}",
                 node.0, input.0
+            ),
+            Self::OperandRoleCount { node } => write!(
+                formatter,
+                "fusion node {} has a different number of inputs and operand roles",
+                node.0
+            ),
+            Self::InvalidLayout { node } => {
+                write!(
+                    formatter,
+                    "fusion node {} has a layout incompatible with its rank",
+                    node.0
+                )
+            }
+            Self::InvalidAliasInput { node, input_index } => write!(
+                formatter,
+                "fusion node {} aliases missing input {}",
+                node.0, input_index
+            ),
+            Self::InvalidMutationInput { node, input_index } => write!(
+                formatter,
+                "fusion node {} mutates missing input {}",
+                node.0, input_index
+            ),
+            Self::InvalidMatmulContract { node } => write!(
+                formatter,
+                "fusion node {} has invalid rank-generic matmul metadata",
+                node.0
             ),
         }
     }
@@ -236,6 +398,88 @@ impl FusionGraph {
                     found: node.id,
                 });
             }
+            if node.inputs.len() != node.operand_roles.len() {
+                return Err(GraphError::OperandRoleCount { node: node.id });
+            }
+            let valid_layout = match (&node.shape.rank, &node.layout) {
+                (Rank::Unranked, StorageLayout::Runtime) => true,
+                (Rank::Unranked, StorageLayout::Dense { .. } | StorageLayout::Strided { .. }) => {
+                    false
+                }
+                (Rank::Ranked(_), StorageLayout::Runtime) => true,
+                (Rank::Ranked(dimensions), StorageLayout::Dense { minor_to_major }) => {
+                    minor_to_major.len() == dimensions.len()
+                        && minor_to_major
+                            .iter()
+                            .copied()
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == dimensions.len()
+                        && minor_to_major
+                            .iter()
+                            .all(|axis| (*axis as usize) < dimensions.len())
+                }
+                (Rank::Ranked(dimensions), StorageLayout::Strided { strides, .. }) => {
+                    strides.len() == dimensions.len()
+                }
+            };
+            if !valid_layout {
+                return Err(GraphError::InvalidLayout { node: node.id });
+            }
+            for alias in &node.aliases {
+                if usize::from(alias.input_index) >= node.inputs.len() {
+                    return Err(GraphError::InvalidAliasInput {
+                        node: node.id,
+                        input_index: alias.input_index,
+                    });
+                }
+            }
+            if let Mutation::WritesInput(input_index) = node.mutation {
+                if usize::from(input_index) >= node.inputs.len() {
+                    return Err(GraphError::InvalidMutationInput {
+                        node: node.id,
+                        input_index,
+                    });
+                }
+            }
+            let valid_matmul = match (node.kind, node.matmul.as_ref()) {
+                (NodeKind::Contraction, Some(contract))
+                    if node.inputs.len() >= 2
+                        && (node.inputs[0].0 as usize) < index
+                        && (node.inputs[1].0 as usize) < index =>
+                {
+                    let rank = |rank: &Rank| match rank {
+                        Rank::Unranked => None,
+                        Rank::Ranked(dimensions) => Some(dimensions.len()),
+                    };
+                    let lhs_rank = rank(&contract.lhs_shape);
+                    let rhs_rank = rank(&contract.rhs_shape);
+                    let result_rank = rank(&contract.result_shape);
+                    contract.lhs_shape == nodes[node.inputs[0].0 as usize].shape.rank
+                        && contract.rhs_shape == nodes[node.inputs[1].0 as usize].shape.rank
+                        && contract.result_shape == node.shape.rank
+                        && !contract.contraction_dimensions.is_empty()
+                        && contract.contraction_dimensions.iter().all(|dimension| {
+                            lhs_rank.is_none_or(|rank| (dimension.lhs as usize) < rank)
+                                && rhs_rank.is_none_or(|rank| (dimension.rhs as usize) < rank)
+                        })
+                        && contract.batch_dimensions.iter().all(|dimension| {
+                            result_rank.is_none_or(|rank| (dimension.result as usize) < rank)
+                                && dimension.lhs.is_none_or(|axis| {
+                                    lhs_rank.is_none_or(|rank| (axis as usize) < rank)
+                                })
+                                && dimension.rhs.is_none_or(|axis| {
+                                    rhs_rank.is_none_or(|rank| (axis as usize) < rank)
+                                })
+                        })
+                }
+                (NodeKind::Contraction, None) => false,
+                (_, None) => true,
+                (_, Some(_)) => false,
+            };
+            if !valid_matmul {
+                return Err(GraphError::InvalidMatmulContract { node: node.id });
+            }
             for input in &node.inputs {
                 if input.0 as usize >= index {
                     return Err(GraphError::ForwardReference {
@@ -259,6 +503,203 @@ impl FusionGraph {
 
     pub fn users(&self, id: NodeId) -> &[NodeId] {
         &self.users[id.0 as usize]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecializationError {
+    TargetMismatch {
+        expected: GpuTarget,
+        found: GpuTarget,
+    },
+    UnknownNode(NodeId),
+    DuplicateShape(NodeId),
+    DuplicateStrides(NodeId),
+    MissingShape(NodeId),
+    MissingStrides(NodeId),
+    RankMismatch {
+        node: NodeId,
+        expected: usize,
+        found: usize,
+    },
+    DimensionMismatch {
+        node: NodeId,
+        axis: usize,
+        expected: u64,
+        found: u64,
+    },
+    StrideMismatch {
+        node: NodeId,
+        axis: usize,
+        expected: i64,
+        found: i64,
+    },
+    OffsetMismatch {
+        node: NodeId,
+        expected: i64,
+        found: i64,
+    },
+}
+
+impl fmt::Display for SpecializationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for SpecializationError {}
+
+impl KernelSpecialization {
+    pub fn validate(
+        &self,
+        graph: &FusionGraph,
+        expected_target: GpuTarget,
+    ) -> Result<(), SpecializationError> {
+        self.validate_nodes(
+            graph,
+            expected_target,
+            graph.nodes().iter().map(|node| node.id),
+        )
+    }
+
+    /// Validates a single compiled kernel. Nodes outside the selected region
+    /// do not impose runtime-shape requirements on this kernel instance.
+    pub fn validate_region(
+        &self,
+        graph: &FusionGraph,
+        region: &FusionRegion,
+        expected_target: GpuTarget,
+    ) -> Result<(), SpecializationError> {
+        self.validate_nodes(
+            graph,
+            expected_target,
+            region.inputs.iter().chain(&region.nodes).copied(),
+        )
+    }
+
+    fn validate_nodes(
+        &self,
+        graph: &FusionGraph,
+        expected_target: GpuTarget,
+        nodes: impl IntoIterator<Item = NodeId>,
+    ) -> Result<(), SpecializationError> {
+        if self.target != expected_target {
+            return Err(SpecializationError::TargetMismatch {
+                expected: expected_target,
+                found: self.target,
+            });
+        }
+        let mut shapes = BTreeMap::new();
+        for shape in &self.shapes {
+            if shape.node.0 as usize >= graph.nodes().len() {
+                return Err(SpecializationError::UnknownNode(shape.node));
+            }
+            if shapes
+                .insert(shape.node, shape.dimensions.as_slice())
+                .is_some()
+            {
+                return Err(SpecializationError::DuplicateShape(shape.node));
+            }
+        }
+        let mut strides = BTreeMap::new();
+        for layout in &self.strides {
+            if layout.node.0 as usize >= graph.nodes().len() {
+                return Err(SpecializationError::UnknownNode(layout.node));
+            }
+            if strides.insert(layout.node, layout).is_some() {
+                return Err(SpecializationError::DuplicateStrides(layout.node));
+            }
+        }
+
+        for id in nodes.into_iter().collect::<BTreeSet<_>>() {
+            let node = graph.node(id);
+            let provided_shape = shapes.get(&node.id).copied();
+            let concrete_rank = match &node.shape.rank {
+                Rank::Unranked => provided_shape
+                    .ok_or(SpecializationError::MissingShape(node.id))?
+                    .len(),
+                Rank::Ranked(dimensions) => {
+                    if let Some(provided) = provided_shape {
+                        if dimensions.len() != provided.len() {
+                            return Err(SpecializationError::RankMismatch {
+                                node: node.id,
+                                expected: dimensions.len(),
+                                found: provided.len(),
+                            });
+                        }
+                        for (axis, (expected, found)) in dimensions.iter().zip(provided).enumerate()
+                        {
+                            if let Dimension::Known(expected) = expected {
+                                if expected != found {
+                                    return Err(SpecializationError::DimensionMismatch {
+                                        node: node.id,
+                                        axis,
+                                        expected: *expected,
+                                        found: *found,
+                                    });
+                                }
+                            }
+                        }
+                    } else if dimensions
+                        .iter()
+                        .any(|dimension| matches!(dimension, Dimension::Dynamic))
+                    {
+                        return Err(SpecializationError::MissingShape(node.id));
+                    }
+                    dimensions.len()
+                }
+            };
+
+            let provided_strides = strides.get(&node.id).copied();
+            let requires_runtime_strides = match &node.layout {
+                StorageLayout::Runtime => true,
+                StorageLayout::Dense { .. } => false,
+                StorageLayout::Strided { strides, offset } => {
+                    strides
+                        .iter()
+                        .any(|stride| matches!(stride, Stride::Dynamic))
+                        || matches!(offset, Stride::Dynamic)
+                }
+            };
+            if requires_runtime_strides && provided_strides.is_none() {
+                return Err(SpecializationError::MissingStrides(node.id));
+            }
+            if let Some(provided) = provided_strides {
+                if provided.strides.len() != concrete_rank {
+                    return Err(SpecializationError::RankMismatch {
+                        node: node.id,
+                        expected: concrete_rank,
+                        found: provided.strides.len(),
+                    });
+                }
+                if let StorageLayout::Strided { strides, offset } = &node.layout {
+                    for (axis, (expected, found)) in
+                        strides.iter().zip(&provided.strides).enumerate()
+                    {
+                        if let Stride::Known(expected) = expected {
+                            if expected != found {
+                                return Err(SpecializationError::StrideMismatch {
+                                    node: node.id,
+                                    axis,
+                                    expected: *expected,
+                                    found: *found,
+                                });
+                            }
+                        }
+                    }
+                    if let Stride::Known(expected) = offset {
+                        if *expected != provided.offset {
+                            return Err(SpecializationError::OffsetMismatch {
+                                node: node.id,
+                                expected: *expected,
+                                found: provided.offset,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -464,7 +905,7 @@ fn decide(
         .nodes
         .iter()
         .chain(&consumer.nodes)
-        .any(|node| graph.node(*node).writes_input.is_some())
+        .any(|node| !matches!(graph.node(*node).mutation, Mutation::None))
     {
         return FusionDecision::Forbid(FusionRejection::InPlaceAliasing);
     }
@@ -628,7 +1069,7 @@ mod tests {
             id,
             kind,
             inputs.iter().copied().map(NodeId),
-            Shape::ranked([2, 4], 4),
+            Shape::ranked([2, 4], 32),
         );
         node.flops = 8;
         node
@@ -703,5 +1144,107 @@ mod tests {
         let plan = plan(&graph, DeviceModel::conservative_gpu());
         assert_eq!(plan.regions.len(), 3);
         assert_ne!(plan.node_regions[2], plan.node_regions[3]);
+    }
+
+    #[test]
+    fn rank_zero_and_unranked_are_distinct_graph_types() {
+        let scalar = Shape::typed([], ElementKind::IeeeFloat, 32);
+        let unranked = Shape::unranked(ElementKind::IeeeFloat, 32);
+        assert_eq!(scalar.rank, Rank::Ranked(Vec::new()));
+        assert_eq!(unranked.rank, Rank::Unranked);
+        assert_ne!(scalar, unranked);
+    }
+
+    #[test]
+    fn specialization_resolves_dynamic_shape_stride_and_target_data() {
+        let mut parameter = FusionNode::structural(
+            0,
+            NodeKind::Parameter,
+            [],
+            Shape::typed(
+                [Dimension::Dynamic, Dimension::Known(4)],
+                ElementKind::BrainFloat,
+                16,
+            ),
+        );
+        parameter.layout = StorageLayout::Strided {
+            strides: vec![Stride::Known(4), Stride::Dynamic],
+            offset: Stride::Known(2),
+        };
+        let graph = FusionGraph::new(vec![parameter]).unwrap();
+        let specialization = KernelSpecialization {
+            shapes: vec![RuntimeShape {
+                node: NodeId(0),
+                dimensions: vec![3, 4],
+            }],
+            strides: vec![RuntimeStrides {
+                node: NodeId(0),
+                strides: vec![4, 1],
+                offset: 2,
+            }],
+            target: GpuTarget::Amd,
+        };
+        assert_eq!(specialization.validate(&graph, GpuTarget::Amd), Ok(()));
+        assert!(matches!(
+            specialization.validate(&graph, GpuTarget::Nvidia),
+            Err(SpecializationError::TargetMismatch { .. })
+        ));
+
+        let mut wrong_stride = specialization.clone();
+        wrong_stride.strides[0].strides[0] = 8;
+        assert!(matches!(
+            wrong_stride.validate(&graph, GpuTarget::Amd),
+            Err(SpecializationError::StrideMismatch { axis: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn region_specialization_does_not_require_unrelated_graph_nodes() {
+        let mut dynamic_input = node(0, NodeKind::Parameter, &[]);
+        dynamic_input.shape = Shape::unranked(ElementKind::IeeeFloat, 32);
+        dynamic_input.layout = StorageLayout::Runtime;
+        let mut consumer = node(1, NodeKind::Elementwise, &[0]);
+        consumer.shape = Shape::typed(
+            [Dimension::Dynamic, Dimension::Known(4)],
+            ElementKind::IeeeFloat,
+            32,
+        );
+        consumer.layout = consumer.shape.default_layout();
+        let mut unrelated = node(2, NodeKind::Parameter, &[]);
+        unrelated.shape = Shape::unranked(ElementKind::IeeeFloat, 32);
+        unrelated.layout = StorageLayout::Runtime;
+        let graph = FusionGraph::new(vec![dynamic_input, consumer, unrelated]).unwrap();
+        let fusion_plan = plan(&graph, DeviceModel::conservative_gpu());
+        let region = fusion_plan
+            .regions
+            .iter()
+            .find(|region| region.nodes.contains(&NodeId(1)))
+            .unwrap();
+        let specialization = KernelSpecialization {
+            shapes: vec![
+                RuntimeShape {
+                    node: NodeId(0),
+                    dimensions: vec![2, 4],
+                },
+                RuntimeShape {
+                    node: NodeId(1),
+                    dimensions: vec![2, 4],
+                },
+            ],
+            strides: vec![RuntimeStrides {
+                node: NodeId(0),
+                strides: vec![4, 1],
+                offset: 0,
+            }],
+            target: GpuTarget::Amd,
+        };
+        assert_eq!(
+            specialization.validate_region(&graph, region, GpuTarget::Amd),
+            Ok(())
+        );
+        assert_eq!(
+            specialization.validate(&graph, GpuTarget::Amd),
+            Err(SpecializationError::MissingShape(NodeId(2)))
+        );
     }
 }

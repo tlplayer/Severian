@@ -258,29 +258,25 @@ impl TensorCompiler {
         if region.compile_operations.is_empty() {
             return Err(invalid("the tensor compiler requires a non-empty region"));
         }
-        let device = context
-            .target
-            .triton_gpu()
-            .ok_or_else(|| {
-                CompileError::Target(
-                    "GPU placement requires an AMD or NVIDIA device in the target".into(),
-                )
-            })?;
-        let target = if device.features.contains("vendor.amd")
-            || device.architecture.starts_with("gfx")
-        {
-            GpuTarget::Amd
-        } else if device.features.contains("vendor.nvidia")
-            || device.architecture.starts_with("sm_")
-            || device.architecture.starts_with("compute_")
-        {
-            GpuTarget::Nvidia
-        } else {
-            return Err(CompileError::Target(format!(
-                "GPU `{}` with architecture `{}` is not a Triton AMD/NVIDIA target",
-                device.name, device.architecture
-            )));
-        };
+        let device = context.target.triton_gpu().ok_or_else(|| {
+            CompileError::Target(
+                "GPU placement requires an AMD or NVIDIA device in the target".into(),
+            )
+        })?;
+        let target =
+            if device.features.contains("vendor.amd") || device.architecture.starts_with("gfx") {
+                GpuTarget::Amd
+            } else if device.features.contains("vendor.nvidia")
+                || device.architecture.starts_with("sm_")
+                || device.architecture.starts_with("compute_")
+            {
+                GpuTarget::Nvidia
+            } else {
+                return Err(CompileError::Target(format!(
+                    "GPU `{}` with architecture `{}` is not a Triton AMD/NVIDIA target",
+                    device.name, device.architecture
+                )));
+            };
         let inputs = region
             .inputs
             .iter()
@@ -1730,5 +1726,139 @@ mod tests {
             bundle.graph.node(severian_fusion::NodeId(1)).kind,
             severian_fusion::NodeKind::Permute
         );
+    }
+
+    #[test]
+    fn gpu_graph_dtype_is_data_not_an_operation_identity_or_symbol_suffix() {
+        let (mut types, constructor) = types();
+        let expected = [
+            ("f16", severian_fusion::ElementKind::IeeeFloat, 16),
+            ("bf16", severian_fusion::ElementKind::BrainFloat, 16),
+            ("f32", severian_fusion::ElementKind::IeeeFloat, 32),
+        ];
+        let mut identities = Vec::new();
+        for (name, element_kind, element_bits) in expected {
+            let element = types.resolve_name(name).unwrap();
+            let tensor_type = types
+                .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+                .unwrap();
+            let region = region(
+                tensor_type,
+                tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+                2,
+            );
+            identities.push(region.compile_operations[0].id);
+            let graph = fusion_graph(&region, &types).unwrap();
+            let add = graph.node(severian_fusion::NodeId(2));
+            assert_eq!(add.operation, "add");
+            assert_eq!(add.shape.element_kind, element_kind);
+            assert_eq!(add.shape.element_bits, element_bits);
+            assert!(!add.operation.contains(name));
+        }
+        assert!(identities
+            .iter()
+            .all(|identity| *identity == tensor::ELEMENTWISE));
+    }
+
+    #[test]
+    fn gpu_graph_matmul_rank_is_data_not_an_operation_identity() {
+        let (mut types, constructor) = types();
+        let element = types.resolve_name("f16").unwrap();
+        let shapes = [
+            TensorShape::ranked([4, 4]),
+            TensorShape::ranked([2, 3, 4, 4]),
+        ];
+        let mut identities = Vec::new();
+        for (expected_rank, shape) in [2, 4].into_iter().zip(shapes) {
+            let tensor_type = types
+                .instantiate_tensor(constructor, element, shape)
+                .unwrap();
+            let region = region(tensor_type, tensor::TensorOp::Matmul, 2);
+            identities.push(region.compile_operations[0].id);
+            let graph = fusion_graph(&region, &types).unwrap();
+            let matmul = graph.node(severian_fusion::NodeId(2));
+            assert_eq!(matmul.kind, severian_fusion::NodeKind::Contraction);
+            assert_eq!(matmul.operation, "matmul");
+            assert_eq!(matmul.shape.dimensions().unwrap().len(), expected_rank);
+            assert!(!matmul.operation.contains(&format!("rank{expected_rank}")));
+            let contract = matmul.matmul.as_ref().unwrap();
+            assert_eq!(contract.contraction_dimensions.len(), 1);
+            assert_eq!(
+                contract.contraction_dimensions[0],
+                severian_fusion::ContractionDimension {
+                    lhs: (expected_rank - 1) as u32,
+                    rhs: (expected_rank - 2) as u32,
+                }
+            );
+            assert_eq!(contract.batch_dimensions.len(), expected_rank - 2);
+            assert!(contract.batch_dimensions.iter().enumerate().all(
+                |(axis, dimension)| dimension.result == axis as u32
+                    && dimension.lhs == Some(axis as u32)
+                    && dimension.rhs == Some(axis as u32)
+            ));
+        }
+        assert_eq!(identities, [tensor::MATMUL, tensor::MATMUL]);
+    }
+
+    #[test]
+    fn gpu_graph_preserves_runtime_shape_alias_and_mutation_contracts() {
+        let (mut types, constructor) = types();
+        let element = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+            .unwrap();
+
+        let reshape_region = region(
+            tensor_type,
+            tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Reshape),
+            2,
+        );
+        let reshape_graph = fusion_graph(&reshape_region, &types).unwrap();
+        let reshape = reshape_graph.node(severian_fusion::NodeId(2));
+        assert_eq!(
+            reshape.operand_roles,
+            [
+                severian_fusion::OperandRole::Data,
+                severian_fusion::OperandRole::RuntimeShape,
+            ]
+        );
+        assert_eq!(
+            reshape.runtime_shape_inputs().collect::<Vec<_>>(),
+            [severian_fusion::NodeId(1)]
+        );
+        assert_eq!(
+            reshape.aliases,
+            [severian_fusion::InputAlias {
+                input_index: 0,
+                kind: severian_fusion::AliasKind::View,
+            }]
+        );
+        assert_eq!(reshape.layout, severian_fusion::StorageLayout::Runtime);
+
+        let slice_region = region(tensor_type, tensor::TensorOp::Slice, 4);
+        let slice_graph = fusion_graph(&slice_region, &types).unwrap();
+        let slice = slice_graph.node(severian_fusion::NodeId(4));
+        assert_eq!(
+            slice.operand_roles,
+            [
+                severian_fusion::OperandRole::Data,
+                severian_fusion::OperandRole::RuntimeShape,
+                severian_fusion::OperandRole::RuntimeShape,
+                severian_fusion::OperandRole::RuntimeShape,
+            ]
+        );
+        assert_eq!(slice.aliases[0].kind, severian_fusion::AliasKind::View);
+        assert!(matches!(
+            &slice.layout,
+            severian_fusion::StorageLayout::Strided { strides, offset }
+                if strides == &[severian_fusion::Stride::Dynamic; 2]
+                    && *offset == severian_fusion::Stride::Dynamic
+        ));
+
+        let scatter_region = region(tensor_type, tensor::TensorOp::Scatter, 3);
+        let scatter_graph = fusion_graph(&scatter_region, &types).unwrap();
+        let scatter = scatter_graph.node(severian_fusion::NodeId(3));
+        assert_eq!(scatter.aliases[0].kind, severian_fusion::AliasKind::InPlace);
+        assert_eq!(scatter.mutation, severian_fusion::Mutation::WritesInput(0));
     }
 }

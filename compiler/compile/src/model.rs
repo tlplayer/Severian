@@ -120,23 +120,26 @@ pub struct CompileContext<'a> {
     pub target: &'a TargetSpec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GpuTarget {
-    Amd,
-    Nvidia,
-}
-
 /// A device-neutral compiler product for a tensor GPU region. It deliberately
 /// retains the complete Severian graph and fusion decisions; TTIR and target
 /// code are later phases of the Triton bridge.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GpuKernelBundle {
-    pub target: GpuTarget,
+    pub target: severian_fusion::GpuTarget,
     pub architecture: String,
     pub graph: severian_fusion::FusionGraph,
     pub plan: severian_fusion::FusionPlan,
     pub inputs: Vec<severian_mlir::LoweredType>,
     pub outputs: Vec<severian_mlir::LoweredType>,
+}
+
+impl GpuKernelBundle {
+    pub fn validate_specialization(
+        &self,
+        specialization: &severian_fusion::KernelSpecialization,
+    ) -> Result<(), severian_fusion::SpecializationError> {
+        specialization.validate(&self.graph, self.target)
+    }
 }
 
 /// Raw custom-compiler result. GPU regions are not represented as MLIR

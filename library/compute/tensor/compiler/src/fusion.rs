@@ -1,6 +1,8 @@
 use severian_compile::CompileRegion;
 use severian_fusion::{
-    Dimension, ElementKind, FusionGraph, FusionNode, GraphError, NodeId, NodeKind, Shape,
+    AliasKind, BatchDimension, ContractionDimension, Dimension, ElementKind, FusionGraph,
+    FusionNode, GraphError, InputAlias, Matmul, Mutation, NodeId, NodeKind, OperandRole, Rank,
+    Shape, StorageLayout,
 };
 use severian_universal::{
     tensor, FloatFormat, IntegerWidth, PrimitiveRepresentation, TensorDimension, TensorShape,
@@ -67,6 +69,9 @@ pub fn fusion_graph(
             fusion_shape(value.type_id, types)?,
         );
         node.operation = "parameter".into();
+        if types.tensor(value.type_id).is_some() {
+            node.layout = StorageLayout::Runtime;
+        }
         nodes.push(node);
         slots.insert(slot as u32, id);
     }
@@ -111,6 +116,7 @@ pub fn fusion_graph(
         let kind = node_kind(structural);
         let id = NodeId(nodes.len() as u32);
         let mut node = FusionNode::structural(id.0, kind, inputs, shape);
+        node.operand_roles = operand_roles(structural, node.inputs.len());
         node.operation = structural
             .kind()
             .unwrap_or_else(|| operation_name(structural))
@@ -127,15 +133,43 @@ pub fn fusion_graph(
             &node.shape,
             types,
         );
+        if structural == tensor::TensorOp::Matmul {
+            node.matmul = Some(matmul_contract(&nodes, &node));
+        }
         if matches!(structural, tensor::TensorOp::Reduce(_)) {
             // Mirrors XLA's conservative column-reduction cache estimate:
             // 32 * (maximum vector width * 32 + 1) elements.
-            node.shared_memory_bytes = 32 * (4 * 32 + 1) * u64::from(node.shape.element_bytes);
+            node.shared_memory_bytes = 32 * (4 * 32 + 1) * u64::from(node.shape.element_bytes());
             node.unnested_reductions = 1;
         }
         if structural == tensor::TensorOp::Scatter {
             node.has_side_effects = true;
-            node.writes_input = Some(0);
+            node.aliases.push(InputAlias {
+                input_index: 0,
+                kind: AliasKind::InPlace,
+            });
+            node.mutation = Mutation::WritesInput(0);
+            node.layout = nodes[node.inputs[0].0 as usize].layout.clone();
+        } else if structural == tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Reshape) {
+            node.aliases.push(InputAlias {
+                input_index: 0,
+                kind: AliasKind::View,
+            });
+            // A reshape aliases storage, but its physical strides depend on
+            // both the source layout and the runtime result shape.
+            node.layout = StorageLayout::Runtime;
+        } else if structural == tensor::TensorOp::Slice {
+            node.aliases.push(InputAlias {
+                input_index: 0,
+                kind: AliasKind::View,
+            });
+            node.layout = match &node.shape.rank {
+                severian_fusion::Rank::Unranked => StorageLayout::Runtime,
+                severian_fusion::Rank::Ranked(dimensions) => StorageLayout::Strided {
+                    strides: vec![severian_fusion::Stride::Dynamic; dimensions.len()],
+                    offset: severian_fusion::Stride::Dynamic,
+                },
+            };
         }
         if slots.insert(result_slot, id).is_some() {
             return Err(FusionGraphError::DuplicateValueSlot(result_slot));
@@ -143,6 +177,71 @@ pub fn fusion_graph(
         nodes.push(node);
     }
     FusionGraph::new(nodes).map_err(FusionGraphError::InvalidGraph)
+}
+
+fn matmul_contract(nodes: &[FusionNode], node: &FusionNode) -> Matmul {
+    let lhs_shape = node
+        .inputs
+        .first()
+        .map(|id| nodes[id.0 as usize].shape.rank.clone())
+        .unwrap_or(Rank::Unranked);
+    let rhs_shape = node
+        .inputs
+        .get(1)
+        .map(|id| nodes[id.0 as usize].shape.rank.clone())
+        .unwrap_or(Rank::Unranked);
+    let result_shape = node.shape.rank.clone();
+    let (mut batch_dimensions, mut contraction_dimensions) = (Vec::new(), Vec::new());
+    if let (Rank::Ranked(lhs), Rank::Ranked(rhs), Rank::Ranked(result)) =
+        (&lhs_shape, &rhs_shape, &result_shape)
+    {
+        if lhs.len() >= 2 && rhs.len() >= 2 && result.len() >= 2 {
+            let result_batch = result.len() - 2;
+            let lhs_batch = lhs.len() - 2;
+            let rhs_batch = rhs.len() - 2;
+            for result_axis in 0..result_batch {
+                batch_dimensions.push(BatchDimension {
+                    result: result_axis as u32,
+                    lhs: result_axis
+                        .checked_sub(result_batch.saturating_sub(lhs_batch))
+                        .map(|axis| axis as u32),
+                    rhs: result_axis
+                        .checked_sub(result_batch.saturating_sub(rhs_batch))
+                        .map(|axis| axis as u32),
+                });
+            }
+            contraction_dimensions.push(ContractionDimension {
+                lhs: (lhs.len() - 1) as u32,
+                rhs: (rhs.len() - 2) as u32,
+            });
+        }
+    }
+    Matmul {
+        lhs_shape,
+        rhs_shape,
+        result_shape,
+        batch_dimensions,
+        contraction_dimensions,
+    }
+}
+
+fn operand_roles(operation: tensor::TensorOp, count: usize) -> Vec<OperandRole> {
+    let mut roles = vec![OperandRole::Data; count];
+    let shape_operands: &[usize] = match operation {
+        tensor::TensorOp::Reduce(_) => &[1],
+        tensor::TensorOp::ReshapeView(_) | tensor::TensorOp::Permute(_) => &[1],
+        tensor::TensorOp::Slice => &[1, 2, 3],
+        tensor::TensorOp::Broadcast(_) => &[1],
+        tensor::TensorOp::Concatenate => &[2],
+        tensor::TensorOp::StorageView(tensor::StorageViewOp::FromElements) => &[1],
+        _ => &[],
+    };
+    for &index in shape_operands {
+        if let Some(role) = roles.get_mut(index) {
+            *role = OperandRole::RuntimeShape;
+        }
+    }
+    roles
 }
 
 fn node_kind(operation: tensor::TensorOp) -> NodeKind {
@@ -176,18 +275,20 @@ const fn operation_name(operation: tensor::TensorOp) -> &'static str {
 
 fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGraphError> {
     if let Some(tensor) = types.tensor(type_id) {
-        let element_bytes = tensor::TensorElementKind::from_type(types, tensor.element)
-            .map(tensor::TensorElementKind::byte_width)
+        let element_bits = tensor::TensorElementKind::from_type(types, tensor.element)
+            .map(tensor::TensorElementKind::bits)
             .ok_or(FusionGraphError::UnsupportedType(tensor.element))?;
         let dimensions = match tensor.shape {
             TensorShape::Unranked => None,
-            TensorShape::Ranked(dimensions) => Some(dimensions
-                .into_iter()
-                .map(|dimension| match dimension {
-                    TensorDimension::Dynamic => Dimension::Dynamic,
-                    TensorDimension::Known(value) => Dimension::Known(value),
-                })
-                .collect::<Vec<_>>()),
+            TensorShape::Ranked(dimensions) => Some(
+                dimensions
+                    .into_iter()
+                    .map(|dimension| match dimension {
+                        TensorDimension::Dynamic => Dimension::Dynamic,
+                        TensorDimension::Known(value) => Dimension::Known(value),
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         };
         let element_kind = match tensor::TensorElementKind::from_type(types, tensor.element)
             .ok_or(FusionGraphError::UnsupportedType(tensor.element))?
@@ -200,10 +301,8 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
             tensor::TensorElementKind::BrainFloat16 => ElementKind::BrainFloat,
         };
         return Ok(match dimensions {
-            Some(dimensions) => {
-                Shape::typed(dimensions, element_kind, u16::from(element_bytes))
-            }
-            None => Shape::unranked(element_kind, u16::from(element_bytes)),
+            Some(dimensions) => Shape::typed(dimensions, element_kind, element_bits),
+            None => Shape::unranked(element_kind, element_bits),
         });
     }
     let primitive = types
@@ -231,8 +330,12 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
         PrimitiveRepresentation::Float {
             format: FloatFormat::Machine,
         } => 64,
-        PrimitiveRepresentation::Boolean => 8,
-        _ => return Err(FusionGraphError::UnsupportedType(type_id)),
+        PrimitiveRepresentation::Boolean => 1,
+        PrimitiveRepresentation::Character => 32,
+        PrimitiveRepresentation::String
+        | PrimitiveRepresentation::Bytes
+        | PrimitiveRepresentation::Arguments => 64,
+        PrimitiveRepresentation::None | PrimitiveRepresentation::Unit => 8,
     };
     let element_kind = match primitive.representation {
         PrimitiveRepresentation::Integer { signed: true, .. } => ElementKind::SignedInteger,
@@ -249,9 +352,14 @@ fn fusion_shape(type_id: TypeId, types: &TypeContext) -> Result<Shape, FusionGra
         } => ElementKind::BrainFloat,
         PrimitiveRepresentation::Float { .. } => ElementKind::IeeeFloat,
         PrimitiveRepresentation::Boolean => ElementKind::Boolean,
-        _ => return Err(FusionGraphError::UnsupportedType(type_id)),
+        PrimitiveRepresentation::Character
+        | PrimitiveRepresentation::String
+        | PrimitiveRepresentation::Bytes
+        | PrimitiveRepresentation::None
+        | PrimitiveRepresentation::Unit
+        | PrimitiveRepresentation::Arguments => ElementKind::Opaque,
     };
-    Ok(Shape::typed([], element_kind, bits.div_ceil(8)))
+    Ok(Shape::typed([], element_kind, bits))
 }
 
 fn estimate_flops(
@@ -272,12 +380,12 @@ fn estimate_flops(
         };
         return result
             .byte_size()
-            .map(|bytes| bytes / u64::from(result.element_bytes) * k * 2)
+            .map(|bytes| bytes / u64::from(result.element_bytes()) * k * 2)
             .unwrap_or(0);
     }
     let elements = result
         .byte_size()
-        .map(|bytes| bytes / u64::from(result.element_bytes))
+        .map(|bytes| bytes / u64::from(result.element_bytes()))
         .unwrap_or(0);
     match operation {
         tensor::TensorOp::Elementwise(
@@ -292,7 +400,7 @@ fn estimate_flops(
             .and_then(|shape| {
                 shape
                     .byte_size()
-                    .map(|bytes| bytes / u64::from(shape.element_bytes))
+                    .map(|bytes| bytes / u64::from(shape.element_bytes()))
             })
             .unwrap_or(0),
         _ => elements,

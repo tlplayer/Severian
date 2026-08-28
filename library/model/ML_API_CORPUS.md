@@ -6,7 +6,7 @@ lowering, and tests; empty compatibility stubs do not count as coverage.
 
 ## Model lifecycle
 
-`load`, `save`, `fit`, `train`, `eval`, `predict`, `predict_proba`, `score`,
+`load`, `save`, `fit`, `train`, `eval`, `predict`, `probability (predict probability)`, `score`,
 `evaluate`, `compile`, `forward`, `parameters`, `weights`, `state`,
 `load_state`, and `summary`.
 

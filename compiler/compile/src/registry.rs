@@ -124,12 +124,12 @@ mod tests {
             _: &CompileContext<'_>,
         ) -> Result<CompiledRegionArtifact, CompileError> {
             let graph = FusionGraph::new(vec![
-                FusionNode::structural(0, NodeKind::Parameter, [], Shape::ranked([8], 4)),
+                FusionNode::structural(0, NodeKind::Parameter, [], Shape::ranked([8], 32)),
                 FusionNode::structural(
                     1,
                     NodeKind::Elementwise,
                     [NodeId(0)],
-                    Shape::ranked([8], 4),
+                    Shape::ranked([8], 32),
                 ),
             ])
             .unwrap();

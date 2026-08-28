@@ -8,11 +8,12 @@ mod registry;
 pub use error::CompileError;
 pub use model::{
     CompileContext, CompileOperation, CompilePlan, CompileRegion, CompiledRegionArtifact,
-    EffectSet, GpuKernelBundle, GpuTarget, PlanSegment, PlannedBlock, PlannedFunction,
-    StandardRegion, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
+    EffectSet, GpuKernelBundle, PlanSegment, PlannedBlock, PlannedFunction, StandardRegion,
+    VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
 };
 pub use planner::plan;
 pub use registry::{CompileHandler, CompilerRegistry};
+pub use severian_fusion::{GpuTarget, KernelSpecialization, RuntimeShape, RuntimeStrides};
 
 // These tests exercise the retired structured-MIR CompileType planner. Keep
 // them with that implementation until CompileType routing is migrated to CFG.
