@@ -21,6 +21,7 @@ members = [
     "compiler/boundaries/ffi",
     "compiler/boundaries/interface",
     "compiler/boundaries/tokenizer",
+    "compiler/boundaries/tensor-jit-provider",
     "compiler/boundaries/triton",
     "compiler/boundaries/xxi",
 
@@ -91,6 +92,7 @@ severian-abi = "boundary"
 severian-ffi = "boundary"
 severian-interface = "boundary"
 severian-tokenizer-provider = "boundary"
+severian-tensor-jit-provider = "boundary"
 severian-triton = "boundary"
 severian-backend = "boundary"
 severian-xxi = "boundary"
@@ -161,6 +163,15 @@ severian-abi = ["severian-target"]
 severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
 severian-tokenizer-provider = []
+severian-tensor-jit-provider = [
+    "severian-backend",
+    "severian-fusion",
+    "severian-mlir",
+    "severian-runtime",
+    "severian-target",
+    "severian-tensor-compiler",
+    "severian-triton",
+]
 severian-triton = ["severian-fusion", "severian-runtime"]
 severian-backend = ["severian-lir", "severian-runtime"]
 severian-xxi = [
@@ -177,6 +188,7 @@ severian-driver = [
     "severian-bootstrap",
     "severian-compile",
     "severian-diagnostics",
+    "severian-fusion",
     "severian-lexer",
     "severian-hir",
     "severian-modules",
@@ -187,14 +199,17 @@ severian-driver = [
     "severian-parser",
     "severian-semantic",
     "severian-source",
+    "severian-runtime",
     "severian-target",
     "severian-universal",
     "severian-xxi",
     "severian-tensor-compiler",
 ]
 severian-tensor-compiler = [
+    "severian-artifact",
     "severian-compile",
     "severian-fusion",
+    "severian-mir",
     "severian-mlir",
     "severian-universal",
 ]

@@ -857,6 +857,21 @@ pub struct GpuKernelBundle {
     pub outputs: Vec<severian_mlir::LoweredType>,
 }
 
+/// Backend-neutral program retained for runtime rank/shape specialization.
+/// The executable carries this structural graph as versioned data and calls a
+/// provider only after concrete StorageView metadata is available.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TensorJitBundle {
+    pub graph: severian_fusion::FusionGraph,
+    pub value_nodes: BTreeMap<u32, severian_fusion::NodeId>,
+    pub input_nodes: Vec<severian_fusion::NodeId>,
+    pub output_nodes: Vec<severian_fusion::NodeId>,
+    pub inputs: Vec<severian_mlir::LoweredType>,
+    pub outputs: Vec<severian_mlir::LoweredType>,
+    pub placement: Option<ExecutionPlacement>,
+    pub architecture: String,
+}
+
 impl GpuKernelBundle {
     pub fn validate_specialization(
         &self,
@@ -904,6 +919,7 @@ impl GpuKernelBundle {
 pub enum CompiledRegionArtifact {
     CpuMlir(severian_mlir::MlirArtifact),
     GpuKernel(GpuKernelBundle),
+    TensorJit(TensorJitBundle),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -913,7 +929,14 @@ pub struct VerifiedGpuKernelBundle {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VerifiedTensorJitBundle {
+    pub id: ArtifactId,
+    pub bundle: TensorJitBundle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum VerifiedCompiledRegionArtifact {
     CpuMlir(severian_mlir::VerifiedMlirArtifact),
     GpuKernel(VerifiedGpuKernelBundle),
+    TensorJit(VerifiedTensorJitBundle),
 }

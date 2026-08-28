@@ -128,7 +128,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         let fields = declaration
             .fields
             .iter()
-            .map(|field| mlir_type(&field.ty))
+            .map(|field| aggregate_field_type(&field.ty))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         output.push_str(&format!(
@@ -233,7 +233,8 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         let symbol = artifact_symbol(artifact);
         let inputs = inputs
             .into_iter()
-            .map(|ty| mlir_type(&ty))
+            .enumerate()
+            .map(|(index, ty)| artifact_parameter(index, &ty))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let outputs = outputs
@@ -403,7 +404,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         let fields = declaration
             .fields
             .iter()
-            .map(|field| mlir_type(&field.ty))
+            .map(|field| aggregate_field_type(&field.ty))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         output.push_str(&format!(
@@ -496,7 +497,8 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     for (artifact, (inputs, outputs)) in artifact_signatures {
         let inputs = inputs
             .into_iter()
-            .map(|ty| mlir_type(&ty))
+            .enumerate()
+            .map(|(index, ty)| artifact_parameter(index, &ty))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let outputs = outputs
@@ -625,6 +627,7 @@ fn render_cfg_body_function(
     };
     output.push_str(&format!("  func.func @{symbol}({parameters}){result} {{\n"));
     let mut ssa_locals = BTreeMap::new();
+    let ssa_live_ins = cfg_ssa_live_ins(body);
     let gpu_regions = gpu_regions(body)?;
     let gpu_blocks = gpu_regions
         .values()
@@ -635,7 +638,20 @@ fn render_cfg_body_function(
             continue;
         }
         if block.id != body.entry {
-            output.push_str(&format!("  ^bb{}:\n", block.id.0));
+            ssa_locals.clear();
+            let arguments = ssa_live_ins
+                .get(&block.id)
+                .into_iter()
+                .flatten()
+                .map(|local| {
+                    let name = format!("%local{}_bb{}", local.0, block.id.0);
+                    ssa_locals.insert(*local, name.clone());
+                    let ty = &body.locals[local.0 as usize].ty;
+                    Ok(format!("{name}: {}", mlir_type(ty)?))
+                })
+                .collect::<Result<Vec<_>, MlirError>>()?
+                .join(", ");
+            output.push_str(&format!("  ^bb{}({arguments}):\n", block.id.0));
         }
         if block.id == body.entry {
             output.push_str("    %sev_one = arith.constant 1 : i64\n");
@@ -687,11 +703,22 @@ fn render_cfg_body_function(
         if let severian_lir::Terminator::Goto(target) = block.terminator {
             if let Some(region) = gpu_regions.get(&target) {
                 render_gpu_region(output, module, body, region, &mut ssa_locals)?;
-                output.push_str(&format!("    cf.br ^bb{}\n", region.exit.0));
+                output.push_str(&format!(
+                    "    cf.br {}\n",
+                    cfg_branch_target(region.exit, &ssa_live_ins, &ssa_locals, body)?
+                ));
                 continue;
             }
         }
-        render_cfg_terminator(output, module, body, &block.terminator, 4, &mut ssa_locals)?;
+        render_cfg_terminator(
+            output,
+            module,
+            body,
+            &block.terminator,
+            4,
+            &mut ssa_locals,
+            &ssa_live_ins,
+        )?;
     }
     output.push_str("  }\n");
     Ok(())
@@ -699,6 +726,125 @@ fn render_cfg_body_function(
 
 fn is_ssa_local_type(ty: &LoweredType) -> bool {
     matches!(ty, LoweredType::Task(_) | LoweredType::Tensor { .. })
+}
+
+fn cfg_ssa_live_ins(
+    body: &severian_lir::CfgBody,
+) -> BTreeMap<severian_lir::BlockId, Vec<severian_lir::LocalId>> {
+    let mut uses = BTreeMap::new();
+    let mut definitions = BTreeMap::new();
+    for block in &body.blocks {
+        let mut used = BTreeSet::new();
+        let mut defined = BTreeSet::new();
+        for operation in &block.operations {
+            match operation {
+                Operation::Load { place, .. } => {
+                    if let severian_lir::PlaceBase::Local(local) = place.base {
+                        if place.projection.is_empty()
+                            && is_ssa_local_type(&body.locals[local.0 as usize].ty)
+                            && !defined.contains(&local)
+                        {
+                            used.insert(local);
+                        }
+                    }
+                }
+                Operation::Store { place, .. } => {
+                    if let severian_lir::PlaceBase::Local(local) = place.base {
+                        if place.projection.is_empty()
+                            && is_ssa_local_type(&body.locals[local.0 as usize].ty)
+                        {
+                            defined.insert(local);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let severian_lir::Terminator::Call {
+            destination: Some(destination),
+            ..
+        } = &block.terminator
+        {
+            if let severian_lir::PlaceBase::Local(local) = destination.base {
+                if destination.projection.is_empty()
+                    && is_ssa_local_type(&body.locals[local.0 as usize].ty)
+                {
+                    defined.insert(local);
+                }
+            }
+        }
+        uses.insert(block.id, used);
+        definitions.insert(block.id, defined);
+    }
+    let mut live_in = body
+        .blocks
+        .iter()
+        .map(|block| (block.id, BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    loop {
+        let mut changed = false;
+        for block in body.blocks.iter().rev() {
+            let mut next = uses[&block.id].clone();
+            for successor in cfg_successors(&block.terminator) {
+                for local in &live_in[&successor] {
+                    if !definitions[&block.id].contains(local) {
+                        next.insert(*local);
+                    }
+                }
+            }
+            if next != live_in[&block.id] {
+                live_in.insert(block.id, next);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    live_in
+        .into_iter()
+        .map(|(block, locals)| (block, locals.into_iter().collect()))
+        .collect()
+}
+
+fn cfg_branch_target(
+    target: severian_lir::BlockId,
+    live_ins: &BTreeMap<severian_lir::BlockId, Vec<severian_lir::LocalId>>,
+    values: &BTreeMap<severian_lir::LocalId, String>,
+    body: &severian_lir::CfgBody,
+) -> Result<String, MlirError> {
+    let arguments = live_ins
+        .get(&target)
+        .into_iter()
+        .flatten()
+        .map(|local| {
+            let value = values.get(local).ok_or_else(|| {
+                MlirError::UnsupportedOperation(format!(
+                    "SSA local {} reaches block {} without a value",
+                    local.0, target.0
+                ))
+            })?;
+            Ok((
+                value.clone(),
+                mlir_type(&body.locals[local.0 as usize].ty)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, MlirError>>()?;
+    if arguments.is_empty() {
+        Ok(format!("^bb{}", target.0))
+    } else {
+        let values = arguments
+            .iter()
+            .map(|(value, _)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let types = arguments
+            .iter()
+            .map(|(_, ty)| ty.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(format!("^bb{}({values} : {types})", target.0))
+    }
 }
 
 #[derive(Debug)]
@@ -895,14 +1041,51 @@ fn render_gpu_terminator(
             target,
         } => {
             let callee = function(module, *callee)?;
-            let argument_values = arguments
+            if arguments.len() != callee.parameter_types.len() {
+                return Err(MlirError::UnsupportedOperation(format!(
+                    "call to {} has {} arguments for {} parameters",
+                    function_symbol(callee),
+                    arguments.len(),
+                    callee.parameter_types.len()
+                )));
+            }
+            let mut lowered_arguments = Vec::with_capacity(arguments.len());
+            for (index, (value, target_type)) in arguments
                 .iter()
-                .map(|value| format!("%v{}", value.0))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let argument_types = arguments
+                .zip(&callee.parameter_types)
+                .enumerate()
+            {
+                let source_type = value_type(module, *value)?;
+                let source = format!("%v{}", value.0);
+                let result = format!("%call_arg_{}_{}", target.0, index);
+                let lowered = if source_type == *target_type {
+                    source
+                } else if matches!(source_type, LoweredType::Tensor { .. })
+                    && matches!(target_type, LoweredType::Tensor { .. })
+                {
+                    output.push_str(&format!(
+                        "{indentation}{result} = tensor.cast {source} : {} to {}\n",
+                        mlir_type(&source_type)?,
+                        mlir_type(target_type)?
+                    ));
+                    result
+                } else {
+                    render_named_conversion(
+                        output,
+                        &source,
+                        &source_type,
+                        target_type,
+                        &result,
+                        indent,
+                    )?
+                };
+                lowered_arguments.push(lowered);
+            }
+            let argument_values = lowered_arguments.join(", ");
+            let argument_types = callee
+                .parameter_types
                 .iter()
-                .map(|value| value_type(module, *value).and_then(|ty| mlir_type(&ty)))
+                .map(mlir_type)
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ");
             let result_type = mlir_type(&callee.result)?;
@@ -1002,7 +1185,8 @@ fn render_cfg_operation(
             fields,
             result,
         } => {
-            let ty = mlir_type(&value_type(module, *result)?)?;
+            let aggregate_type = value_type(module, *result)?;
+            let ty = mlir_type(&aggregate_type)?;
             if fields.is_empty() {
                 output.push_str(&format!(
                     "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
@@ -1020,9 +1204,52 @@ fn render_cfg_operation(
                     } else {
                         format!("%aggregate_{}_{}", result.0, index + 1)
                     };
+                    let field_type = value_type(module, *field)?;
+                    let target_type = aggregate_declaration_field_type(module, &aggregate_type, index)?;
+                    let field_value = if tensor_aggregate_abi_type(&target_type).is_some() {
+                        let source = if matches!(
+                            field_type,
+                            LoweredType::Tensor {
+                                shape: LoweredTensorShape::Ranked(_),
+                                ..
+                            }
+                        ) {
+                            let unranked = unranked_tensor_type(&target_type)?;
+                            let cast = format!("%aggregate_unranked_{}_{}", result.0, index);
+                            output.push_str(&format!(
+                                "{indentation}{cast} = tensor.cast %v{} : {} to {unranked}\n",
+                                field.0,
+                                mlir_type(&field_type)?
+                            ));
+                            cast
+                        } else {
+                            format!("%v{}", field.0)
+                        };
+                        let buffer = format!("%aggregate_buffer_{}_{}", result.0, index);
+                        output.push_str(&format!(
+                            "{indentation}{buffer} = bufferization.to_buffer {source} read_only : {} to {}\n",
+                            unranked_tensor_type(&target_type)?,
+                            unranked_memref_type(&target_type)?
+                        ));
+                        let converted = format!("%aggregate_field_{}_{}", result.0, index);
+                        output.push_str(&format!(
+                            "{indentation}{converted} = builtin.unrealized_conversion_cast {buffer} : {} to {}\n",
+                            unranked_memref_type(&target_type)?,
+                            aggregate_field_type(&target_type)?
+                        ));
+                        converted
+                    } else {
+                        render_named_conversion(
+                            output,
+                            &format!("%v{}", field.0),
+                            &field_type,
+                            &target_type,
+                            &format!("%aggregate_scalar_{}_{}", result.0, index),
+                            indent,
+                        )?
+                    };
                     output.push_str(&format!(
-                        "{indentation}{output_value} = llvm.insertvalue %v{}, {input}[{index}] : {ty}\n",
-                        field.0
+                        "{indentation}{output_value} = llvm.insertvalue {field_value}, {input}[{index}] : {ty}\n"
                     ));
                 }
             }
@@ -1030,7 +1257,12 @@ fn render_cfg_operation(
         Operation::Load { place, result } => {
             let ty = value_type(module, *result)?;
             if let severian_lir::PlaceBase::Local(local) = place.base {
-                if is_ssa_local_type(&ty) {
+                if place.projection.is_empty()
+                    && body
+                        .locals
+                        .get(local.0 as usize)
+                        .is_some_and(|local| is_ssa_local_type(&local.ty))
+                {
                     let source = ssa_locals.get(&local).cloned().ok_or_else(|| {
                         MlirError::UnsupportedOperation(format!(
                             "SSA local {} ({ty:?}) is loaded before its value is stored in block {}",
@@ -1048,16 +1280,71 @@ fn render_cfg_operation(
             }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
                 let base_type = mlir_type(&cfg_place_base_type(module, body, place)?)?;
+                let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
                 output.push_str(&format!(
                     "{indentation}%load_base_b{}_o{} = llvm.load {} : !llvm.ptr -> {base_type}\n",
                     block.0,
                     operation_index,
                     cfg_place_base_address(place)
                 ));
-                output.push_str(&format!(
-                    "{indentation}%v{} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
-                    result.0, block.0, operation_index, field
-                ));
+                if tensor_aggregate_abi_type(&stored_type).is_some() {
+                    output.push_str(&format!(
+                        "{indentation}%load_tensor_b{}_o{} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
+                        block.0, operation_index, block.0, operation_index, field
+                    ));
+                    let unranked = unranked_tensor_type(&stored_type)?;
+                    let unranked_memref = unranked_memref_type(&stored_type)?;
+                    let buffer = format!("%load_buffer_b{}_o{}", block.0, operation_index);
+                    output.push_str(&format!(
+                        "{indentation}{buffer} = builtin.unrealized_conversion_cast %load_tensor_b{}_o{} : {} to {unranked_memref}\n",
+                        block.0,
+                        operation_index,
+                        aggregate_field_type(&stored_type)?
+                    ));
+                    let loaded = if matches!(
+                        ty,
+                        LoweredType::Tensor {
+                            shape: LoweredTensorShape::Ranked(_),
+                            ..
+                        }
+                    ) {
+                        format!("%load_unranked_b{}_o{}", block.0, operation_index)
+                    } else {
+                        format!("%v{}", result.0)
+                    };
+                    output.push_str(&format!(
+                        "{indentation}{loaded} = bufferization.to_tensor {buffer} restrict writable : {unranked_memref} to {unranked}\n"
+                    ));
+                    if loaded != format!("%v{}", result.0) {
+                        output.push_str(&format!(
+                            "{indentation}%v{} = tensor.cast {loaded} : {unranked} to {}\n",
+                            result.0,
+                            mlir_type(&ty)?
+                        ));
+                    }
+                } else {
+                    let extracted = format!("%load_field_b{}_o{}", block.0, operation_index);
+                    output.push_str(&format!(
+                        "{indentation}{extracted} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
+                        block.0, operation_index, field
+                    ));
+                    let converted = render_named_conversion(
+                        output,
+                        &extracted,
+                        &stored_type,
+                        &ty,
+                        &format!("%v{}", result.0),
+                        indent,
+                    )?;
+                    if converted == extracted {
+                        output.push_str(&format!(
+                            "{indentation}%v{} = builtin.unrealized_conversion_cast {extracted} : {} to {}\n",
+                            result.0,
+                            mlir_type(&ty)?,
+                            mlir_type(&ty)?
+                        ));
+                    }
+                }
             } else {
                 output.push_str(&format!(
                     "{indentation}%v{} = llvm.load {} : !llvm.ptr -> {}\n",
@@ -1077,21 +1364,94 @@ fn render_cfg_operation(
         Operation::Store { place, value } => {
             let ty = value_type(module, *value)?;
             if let severian_lir::PlaceBase::Local(local) = place.base {
-                if is_ssa_local_type(&ty) {
-                    ssa_locals.insert(local, format!("%v{}", value.0));
+                if place.projection.is_empty()
+                    && body
+                        .locals
+                        .get(local.0 as usize)
+                        .is_some_and(|local| is_ssa_local_type(&local.ty))
+                {
+                    let target_type = &body.locals[local.0 as usize].ty;
+                    let source = format!("%v{}", value.0);
+                    let converted = format!("%ssa_store_b{}_o{}", block.0, operation_index);
+                    let stored = if ty == *target_type {
+                        source
+                    } else if matches!(ty, LoweredType::Tensor { .. })
+                        && matches!(target_type, LoweredType::Tensor { .. })
+                    {
+                        output.push_str(&format!(
+                            "{indentation}{converted} = tensor.cast {source} : {} to {}\n",
+                            mlir_type(&ty)?,
+                            mlir_type(target_type)?
+                        ));
+                        converted
+                    } else {
+                        render_named_conversion(
+                            output,
+                            &source,
+                            &ty,
+                            target_type,
+                            &converted,
+                            indent,
+                        )?
+                    };
+                    ssa_locals.insert(local, stored);
                     return Ok(());
                 }
             }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
                 let base_type = mlir_type(&cfg_place_base_type(module, body, place)?)?;
                 let address = cfg_place_base_address(place);
+                let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
                 output.push_str(&format!(
                     "{indentation}%store_base_b{}_o{} = llvm.load {address} : !llvm.ptr -> {base_type}\n",
                     block.0, operation_index
                 ));
+                let stored = if tensor_aggregate_abi_type(&stored_type).is_some() {
+                    let source = if matches!(
+                        ty,
+                        LoweredType::Tensor {
+                            shape: LoweredTensorShape::Ranked(_),
+                            ..
+                        }
+                    ) {
+                        let name = format!("%store_unranked_b{}_o{}", block.0, operation_index);
+                        output.push_str(&format!(
+                            "{indentation}{name} = tensor.cast %v{} : {} to {}\n",
+                            value.0,
+                            mlir_type(&ty)?,
+                            unranked_tensor_type(&stored_type)?
+                        ));
+                        name
+                    } else {
+                        format!("%v{}", value.0)
+                    };
+                    let buffer = format!("%store_buffer_b{}_o{}", block.0, operation_index);
+                    output.push_str(&format!(
+                        "{indentation}{buffer} = bufferization.to_buffer {source} read_only : {} to {}\n",
+                        unranked_tensor_type(&stored_type)?,
+                        unranked_memref_type(&stored_type)?
+                    ));
+                    output.push_str(&format!(
+                        "{indentation}%store_tensor_b{}_o{} = builtin.unrealized_conversion_cast {buffer} : {} to {}\n",
+                        block.0,
+                        operation_index,
+                        unranked_memref_type(&stored_type)?,
+                        aggregate_field_type(&stored_type)?
+                    ));
+                    format!("%store_tensor_b{}_o{}", block.0, operation_index)
+                } else {
+                    render_named_conversion(
+                        output,
+                        &format!("%v{}", value.0),
+                        &ty,
+                        &stored_type,
+                        &format!("%store_scalar_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?
+                };
                 output.push_str(&format!(
-                    "{indentation}%store_value_b{}_o{} = llvm.insertvalue %v{}, %store_base_b{}_o{}[{}] : {base_type}\n",
-                    block.0, operation_index, value.0, block.0, operation_index, field
+                    "{indentation}%store_value_b{}_o{} = llvm.insertvalue {stored}, %store_base_b{}_o{}[{}] : {base_type}\n",
+                    block.0, operation_index, block.0, operation_index, field
                 ));
                 output.push_str(&format!(
                     "{indentation}llvm.store %store_value_b{}_o{}, {address} : {base_type}, !llvm.ptr\n",
@@ -1368,19 +1728,25 @@ fn render_cfg_terminator(
     terminator: &severian_lir::Terminator,
     indent: usize,
     ssa_locals: &mut BTreeMap<severian_lir::LocalId, String>,
+    ssa_live_ins: &BTreeMap<severian_lir::BlockId, Vec<severian_lir::LocalId>>,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
     match terminator {
         severian_lir::Terminator::Goto(target) => {
-            output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+            output.push_str(&format!(
+                "{indentation}cf.br {}\n",
+                cfg_branch_target(*target, ssa_live_ins, ssa_locals, body)?
+            ));
         }
         severian_lir::Terminator::Branch {
             condition,
             then_block,
             else_block,
         } => output.push_str(&format!(
-            "{indentation}cf.cond_br %v{}, ^bb{}, ^bb{}\n",
-            condition.0, then_block.0, else_block.0
+            "{indentation}cf.cond_br %v{}, {}, {}\n",
+            condition.0,
+            cfg_branch_target(*then_block, ssa_live_ins, ssa_locals, body)?,
+            cfg_branch_target(*else_block, ssa_live_ins, ssa_locals, body)?
         )),
         severian_lir::Terminator::Switch {
             discriminant,
@@ -1395,14 +1761,23 @@ fn render_cfg_terminator(
                         severian_lir::Case::Boolean(value) => u8::from(*value).to_string(),
                         severian_lir::Case::Variant(value) => value.to_string(),
                     };
-                    format!("{value}: ^bb{}", target.0)
+                    Ok(format!(
+                        "{value}: {}",
+                        cfg_branch_target(*target, ssa_live_ins, ssa_locals, body)?
+                    ))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, MlirError>>()?
                 .join(", ");
             let targets = if targets.is_empty() {
-                format!("default: ^bb{}", fallback.0)
+                format!(
+                    "default: {}",
+                    cfg_branch_target(*fallback, ssa_live_ins, ssa_locals, body)?
+                )
             } else {
-                format!("default: ^bb{}, {targets}", fallback.0)
+                format!(
+                    "default: {}, {targets}",
+                    cfg_branch_target(*fallback, ssa_live_ins, ssa_locals, body)?
+                )
             };
             output.push_str(&format!(
                 "{indentation}cf.switch %v{} : {}, [{targets}]\n",
@@ -1417,14 +1792,51 @@ fn render_cfg_terminator(
             target,
         } => {
             let callee = function(module, *callee)?;
-            let argument_values = arguments
+            if arguments.len() != callee.parameter_types.len() {
+                return Err(MlirError::UnsupportedOperation(format!(
+                    "call to {} has {} arguments for {} parameters",
+                    function_symbol(callee),
+                    arguments.len(),
+                    callee.parameter_types.len()
+                )));
+            }
+            let mut lowered_arguments = Vec::with_capacity(arguments.len());
+            for (index, (value, target_type)) in arguments
                 .iter()
-                .map(|value| format!("%v{}", value.0))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let argument_types = arguments
+                .zip(&callee.parameter_types)
+                .enumerate()
+            {
+                let source_type = value_type(module, *value)?;
+                let source = format!("%v{}", value.0);
+                let converted = format!("%call_arg_{}_{}", target.0, index);
+                let lowered = if source_type == *target_type {
+                    source
+                } else if matches!(source_type, LoweredType::Tensor { .. })
+                    && matches!(target_type, LoweredType::Tensor { .. })
+                {
+                    output.push_str(&format!(
+                        "{indentation}{converted} = tensor.cast {source} : {} to {}\n",
+                        mlir_type(&source_type)?,
+                        mlir_type(target_type)?
+                    ));
+                    converted
+                } else {
+                    render_named_conversion(
+                        output,
+                        &source,
+                        &source_type,
+                        target_type,
+                        &converted,
+                        indent,
+                    )?
+                };
+                lowered_arguments.push(lowered);
+            }
+            let argument_values = lowered_arguments.join(", ");
+            let argument_types = callee
+                .parameter_types
                 .iter()
-                .map(|value| value_type(module, *value).and_then(|ty| mlir_type(&ty)))
+                .map(mlir_type)
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ");
             if callee.result == LoweredType::Unit {
@@ -1432,7 +1844,10 @@ fn render_cfg_terminator(
                     "{indentation}func.call @{}({argument_values}) : ({argument_types}) -> ()\n",
                     function_symbol(callee)
                 ));
-                output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+                output.push_str(&format!(
+                    "{indentation}cf.br {}\n",
+                    cfg_branch_target(*target, ssa_live_ins, ssa_locals, body)?
+                ));
                 return Ok(());
             }
             if let Some(destination) = destination {
@@ -1453,8 +1868,31 @@ fn render_cfg_terminator(
                             "tensor call result cannot target a projected place".into(),
                         ));
                     }
-                    let _ = body;
-                    ssa_locals.insert(local, format!("%call_result_{}", target.0));
+                    let local_type = &body.locals[local.0 as usize].ty;
+                    let result_value = format!("%call_result_{}", target.0);
+                    let stored = if callee.result == *local_type {
+                        result_value
+                    } else if matches!(callee.result, LoweredType::Tensor { .. })
+                        && matches!(local_type, LoweredType::Tensor { .. })
+                    {
+                        let converted = format!("%call_result_cast_{}", target.0);
+                        output.push_str(&format!(
+                            "{indentation}{converted} = tensor.cast {result_value} : {} to {}\n",
+                            mlir_type(&callee.result)?,
+                            mlir_type(local_type)?
+                        ));
+                        converted
+                    } else {
+                        render_named_conversion(
+                            output,
+                            &result_value,
+                            &callee.result,
+                            local_type,
+                            &format!("%call_result_cast_{}", target.0),
+                            indent,
+                        )?
+                    };
+                    ssa_locals.insert(local, stored);
                 } else {
                     output.push_str(&format!(
                         "{indentation}llvm.store %call_result_{}, {} : {result_type}, !llvm.ptr\n",
@@ -1468,7 +1906,10 @@ fn render_cfg_terminator(
                     function_symbol(callee)
                 ));
             }
-            output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+            output.push_str(&format!(
+                "{indentation}cf.br {}\n",
+                cfg_branch_target(*target, ssa_live_ins, ssa_locals, body)?
+            ));
         }
         severian_lir::Terminator::Return(value) => {
             if let Some(value) = value {
@@ -1671,6 +2112,60 @@ fn render_conversion(
         result.0, operand.0
     ));
     Ok(())
+}
+
+fn render_named_conversion(
+    output: &mut String,
+    source_value: &str,
+    source: &LoweredType,
+    target: &LoweredType,
+    result_value: &str,
+    indent: usize,
+) -> Result<String, MlirError> {
+    if source == target {
+        return Ok(source_value.to_owned());
+    }
+    let instruction = match (source, target) {
+        (
+            LoweredType::Integer {
+                bits: source_bits,
+                signed,
+            },
+            LoweredType::Integer {
+                bits: target_bits, ..
+            },
+        ) if target_bits > source_bits => {
+            if *signed { "arith.extsi" } else { "arith.extui" }
+        }
+        (
+            LoweredType::Integer { bits: source_bits, .. },
+            LoweredType::Integer { bits: target_bits, .. },
+        ) if target_bits < source_bits => "arith.trunci",
+        (LoweredType::Integer { signed: true, .. }, LoweredType::Float { .. }) => "arith.sitofp",
+        (LoweredType::Integer { signed: false, .. }, LoweredType::Float { .. }) => "arith.uitofp",
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: true, .. }) => "arith.fptosi",
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: false, .. }) => "arith.fptoui",
+        (
+            LoweredType::Float { format: source },
+            LoweredType::Float { format: target },
+        ) if float_bits(*target) > float_bits(*source) => "arith.extf",
+        (
+            LoweredType::Float { format: source },
+            LoweredType::Float { format: target },
+        ) if float_bits(*target) < float_bits(*source) => "arith.truncf",
+        _ => {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "aggregate conversion from {source:?} to {target:?}"
+            )))
+        }
+    };
+    output.push_str(&format!(
+        "{}{result_value} = {instruction} {source_value} : {} to {}\n",
+        " ".repeat(indent),
+        mlir_type(source)?,
+        mlir_type(target)?
+    ));
+    Ok(result_value.to_owned())
 }
 
 fn float_bits(format: LoweredFloatFormat) -> u16 {
@@ -2117,11 +2612,47 @@ fn render_block(
                 result,
             } => {
                 let target = function(module, *target)?;
-                let arguments = arguments
+                if arguments.len() != target.parameter_types.len() {
+                    return Err(MlirError::UnsupportedOperation(format!(
+                        "call to {} has {} arguments for {} parameters",
+                        function_symbol(target),
+                        arguments.len(),
+                        target.parameter_types.len()
+                    )));
+                }
+                let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                for (index, (value, target_type)) in arguments
                     .iter()
-                    .map(|value| format!("%v{}", value.0))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .zip(&target.parameter_types)
+                    .enumerate()
+                {
+                    let source_type = value_type(module, *value)?;
+                    let source = format!("%v{}", value.0);
+                    let converted = format!("%call_arg_{}_{}", result.0, index);
+                    let lowered = if source_type == *target_type {
+                        source
+                    } else if matches!(source_type, LoweredType::Tensor { .. })
+                        && matches!(target_type, LoweredType::Tensor { .. })
+                    {
+                        output.push_str(&format!(
+                            "{indentation}{converted} = tensor.cast {source} : {} to {}\n",
+                            mlir_type(&source_type)?,
+                            mlir_type(target_type)?
+                        ));
+                        converted
+                    } else {
+                        render_named_conversion(
+                            output,
+                            &source,
+                            &source_type,
+                            target_type,
+                            &converted,
+                            indent,
+                        )?
+                    };
+                    lowered_arguments.push(lowered);
+                }
+                let arguments = lowered_arguments.join(", ");
                 let argument_types = argument_types(module, target)?;
                 if target.result == LoweredType::Unit {
                     output.push_str(&format!(
@@ -2721,6 +3252,85 @@ pub(crate) fn mlir_type(ty: &LoweredType) -> Result<String, MlirError> {
             }
         }
     })
+}
+
+fn tensor_aggregate_abi_type(ty: &LoweredType) -> Option<&'static str> {
+    matches!(
+        ty,
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Unranked,
+            ..
+        }
+    )
+    .then_some("!llvm.struct<(i64, !llvm.ptr)>")
+}
+
+fn artifact_parameter(index: usize, ty: &LoweredType) -> Result<String, MlirError> {
+    let spelling = mlir_type(ty)?;
+    if matches!(ty, LoweredType::Tensor { .. }) {
+        Ok(format!(
+            "%arg{index}: {spelling} {{bufferization.access = \"read\"}}"
+        ))
+    } else {
+        Ok(format!("%arg{index}: {spelling}"))
+    }
+}
+
+fn aggregate_field_type(ty: &LoweredType) -> Result<String, MlirError> {
+    tensor_aggregate_abi_type(ty)
+        .map(str::to_owned)
+        .map_or_else(|| mlir_type(ty), Ok)
+}
+
+fn unranked_tensor_type(ty: &LoweredType) -> Result<String, MlirError> {
+    let LoweredType::Tensor { element, .. } = ty else {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "aggregate field {ty:?} is not a tensor"
+        )));
+    };
+    Ok(format!("tensor<*x{}>", mlir_tensor_element(*element)?))
+}
+
+fn unranked_memref_type(ty: &LoweredType) -> Result<String, MlirError> {
+    let LoweredType::Tensor { element, .. } = ty else {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "aggregate field {ty:?} is not a tensor"
+        )));
+    };
+    Ok(format!("memref<*x{}>", mlir_tensor_element(*element)?))
+}
+
+fn aggregate_declaration_field_type<'a>(
+    module: &'a Module,
+    aggregate: &LoweredType,
+    field: usize,
+) -> Result<&'a LoweredType, MlirError> {
+    let LoweredType::Aggregate(id) = aggregate else {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "projected value {aggregate:?} is not an aggregate"
+        )));
+    };
+    module
+        .classes
+        .iter()
+        .find(|class| class.id == *id)
+        .and_then(|class| class.fields.get(field))
+        .map(|field| &field.ty)
+        .ok_or_else(|| {
+            MlirError::UnsupportedOperation(format!(
+                "aggregate {id} has no field {field}"
+            ))
+        })
+}
+
+fn cfg_aggregate_field_type<'a>(
+    module: &'a Module,
+    body: &severian_lir::CfgBody,
+    place: &severian_lir::Place,
+    field: u32,
+) -> Result<&'a LoweredType, MlirError> {
+    let base = cfg_place_base_type(module, body, place)?;
+    aggregate_declaration_field_type(module, &base, field as usize)
 }
 
 fn mlir_tensor_element(element: LoweredTensorElement) -> Result<String, MlirError> {

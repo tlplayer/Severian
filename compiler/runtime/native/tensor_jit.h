@@ -32,6 +32,30 @@ typedef struct {
     void *owner;
 } sev_jit_storage_view_abi;
 
+enum {
+    SEV_TENSOR_JIT_VALUE_STORAGE = 1,
+    SEV_TENSOR_JIT_VALUE_POINTER = 2,
+    SEV_TENSOR_JIT_VALUE_SIGNED = 3,
+    SEV_TENSOR_JIT_VALUE_UNSIGNED = 4,
+    SEV_TENSOR_JIT_VALUE_FLOAT = 5,
+};
+
+typedef union {
+    sev_jit_storage_view_abi *storage;
+    void *pointer;
+    int64_t signed_integer;
+    uint64_t unsigned_integer;
+    double floating;
+} sev_tensor_jit_value_payload_abi;
+
+typedef struct {
+    uint32_t abi_version;
+    uint32_t byte_size;
+    uint32_t kind;
+    uint32_t bits;
+    sev_tensor_jit_value_payload_abi value;
+} sev_tensor_jit_value_abi;
+
 typedef struct {
     uint64_t magic;
     uint32_t abi_version;
@@ -50,9 +74,9 @@ typedef struct {
 
 typedef int32_t (*sev_tensor_jit_launch_fn)(
     void *instance,
-    const sev_jit_storage_view_abi *const *inputs,
+    const sev_tensor_jit_value_abi *inputs,
     uint32_t input_count,
-    sev_jit_storage_view_abi **outputs,
+    sev_tensor_jit_value_abi *outputs,
     uint32_t output_count
 );
 typedef void (*sev_tensor_jit_destroy_fn)(void *instance);
@@ -68,7 +92,7 @@ typedef struct {
 typedef int32_t (*sev_tensor_jit_compile_fn)(
     void *context,
     const sev_tensor_jit_region_abi *region,
-    const sev_jit_storage_view_abi *const *inputs,
+    const sev_tensor_jit_value_abi *inputs,
     uint32_t input_count,
     sev_tensor_jit_compiled_abi *compiled
 );
@@ -92,9 +116,9 @@ enum {
 int32_t __sev_tensor_jit_install_v1(sev_tensor_jit_compile_fn compile, void *context);
 int32_t __sev_tensor_jit_launch_v1(
     const sev_tensor_jit_region_abi *region,
-    const sev_jit_storage_view_abi *const *inputs,
+    const sev_tensor_jit_value_abi *inputs,
     uint32_t input_count,
-    sev_jit_storage_view_abi **outputs,
+    sev_tensor_jit_value_abi *outputs,
     uint32_t output_count
 );
 uint64_t __sev_tensor_jit_cache_entries_v1(void);

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub mod gpu;
 pub mod storage_view;
+pub mod tensor_jit;
 
 pub use storage_view::{
     StorageElementKind, StorageElementRepresentationAbi, StorageFloatFormat, StorageOwnership,

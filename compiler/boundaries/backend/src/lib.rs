@@ -14,6 +14,7 @@ use std::process::{Command, Stdio};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     Executable,
+    SharedLibrary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -705,6 +706,28 @@ pub fn emit_mlir_executable_with_linker_arguments(
     output: &Path,
     linker_arguments: &[String],
 ) -> Result<Artifact, BackendError> {
+    emit_mlir_binary(module, target_triple, output, linker_arguments, false)
+}
+
+/// Lowers a verified MLIR module to a process-loadable shared object. Extra
+/// C/object inputs are linked after the MLIR runtime so callers can supply a
+/// stable launcher ABI around the generated entry function.
+pub fn emit_mlir_shared_library_with_linker_arguments(
+    module: &str,
+    target_triple: &str,
+    output: &Path,
+    linker_arguments: &[String],
+) -> Result<Artifact, BackendError> {
+    emit_mlir_binary(module, target_triple, output, linker_arguments, true)
+}
+
+fn emit_mlir_binary(
+    module: &str,
+    target_triple: &str,
+    output: &Path,
+    linker_arguments: &[String],
+    shared: bool,
+) -> Result<Artifact, BackendError> {
     let gpu_architecture = module
         .split_once("severian.gpu.architecture = \"")
         .and_then(|(_, suffix)| suffix.split_once('"').map(|(value, _)| value));
@@ -768,6 +791,9 @@ pub fn emit_mlir_executable_with_linker_arguments(
         "-x".into(),
         "c".into(),
     ];
+    if shared {
+        clang_arguments.extend(["-shared".into(), "-fPIC".into()]);
+    }
     clang_arguments.extend(
         severian_runtime::native_sources()
             .into_iter()
@@ -841,7 +867,11 @@ pub fn emit_mlir_executable_with_linker_arguments(
     }
     Ok(Artifact {
         path: output.to_owned(),
-        kind: ArtifactKind::Executable,
+        kind: if shared {
+            ArtifactKind::SharedLibrary
+        } else {
+            ArtifactKind::Executable
+        },
     })
 }
 

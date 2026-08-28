@@ -1,0 +1,22 @@
+[package]
+name = "severian-tensor-jit-provider"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+severian-backend = { path = "../backend" }
+severian-fusion = { path = "../../transforms/fusion" }
+severian-mlir = { path = "../../transforms/mlir" }
+severian-runtime = { path = "../../runtime" }
+severian-target = { path = "../../target" }
+severian-tensor-compiler = { path = "../../../library/compute/tensor/compiler" }
+severian-triton = { path = "../triton" }
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]

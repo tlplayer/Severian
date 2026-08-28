@@ -5,10 +5,16 @@ mod fusion;
 pub use fusion::{fusion_graph, fusion_graph_with_slots, FusionGraphError};
 
 use severian_compile::{
-    CompileContext, CompileError, CompileHandler, CompileRegion, CompileRegionSpecialization,
-    CompiledRegionArtifact, GpuKernelBundle, GpuTarget, TensorJitRequirement,
+    CompileContext, CompileError, CompileHandler, CompileOperation, CompileRegion,
+    CompileRegionSpecialization, CompiledRegionArtifact, EffectSet, GpuKernelBundle, GpuTarget,
+    TensorJitBundle, TensorJitRequirement,
 };
-use severian_fusion::{plan as plan_fusion, DeviceModel};
+use severian_artifact::CompiledRegionId;
+use severian_fusion::{
+    plan as plan_fusion, DeviceModel, ElementKind, FusionGraph, KernelSpecialization, NodeId,
+    NodeKind,
+};
+use severian_mir::{Value as MirValue, ValueId as MirValueId};
 use severian_mlir::{
     structured::{
         AffineExpression, AffineMap, FunctionBuilder as StructuredFunctionBuilder, GenericBody,
@@ -37,31 +43,10 @@ impl CompileHandler for TensorCompiler {
         context: &CompileContext<'_>,
     ) -> Result<CompiledRegionArtifact, CompileError> {
         if let TensorJitRequirement::Required { reasons } = region.tensor_jit_requirement() {
-            let operations = region
-                .compile_operations
-                .iter()
-                .filter_map(|operation| {
-                    tensor::TensorOp::decode(operation.id, &operation.attributes)
-                })
-                .collect::<Vec<_>>();
-            let contracts = region
-                .value_contracts
-                .iter()
-                .filter(|contract| {
-                    reasons.iter().any(|reason| match reason {
-                        severian_compile::TensorJitReason::UnresolvedRank { slot }
-                        | severian_compile::TensorJitReason::RuntimeGpuLayout { slot }
-                        | severian_compile::TensorJitReason::DynamicGpuExtent { slot, .. } => {
-                            *slot == contract.slot
-                        }
-                    })
-                })
-                .map(|contract| (contract.slot, contract.type_id, contract.tensor.clone()))
-                .collect::<Vec<_>>();
-            return Err(invalid(format!(
-                "runtime tensor specialization is required before backend emission for region {:?} {operations:?}: {reasons:?}; unresolved contracts: {contracts:?}",
-                region.id,
-            )));
+            let _ = reasons;
+            return self
+                .compile_tensor_jit(region, context)
+                .map(CompiledRegionArtifact::TensorJit);
         }
         if region.placement == Some(ExecutionPlacement::Gpu) {
             return self
@@ -100,6 +85,79 @@ impl CompileHandler for TensorCompiler {
 }
 
 impl TensorCompiler {
+    fn compile_tensor_jit(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+    ) -> Result<TensorJitBundle, CompileError> {
+        if region.compile_operations.is_empty() {
+            return Err(invalid("the tensor compiler requires a non-empty region"));
+        }
+        let (graph, value_nodes) = fusion_graph_with_slots(region, context.types)
+            .map_err(|error| CompileError::InvalidArtifact(error.to_string()))?;
+        let input_nodes = (0..region.inputs.len() as u32)
+            .map(|slot| {
+                value_nodes.get(&slot).copied().ok_or_else(|| {
+                    CompileError::InvalidArtifact(format!(
+                        "Tensor-JIT graph has no node for input slot {slot}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let output_slots = if region.output_slots.is_empty() {
+            region
+                .compile_operations
+                .last()
+                .map(|operation| operation.result_slots.clone())
+                .unwrap_or_default()
+        } else {
+            region.output_slots.clone()
+        };
+        let output_nodes = output_slots
+            .iter()
+            .map(|slot| {
+                value_nodes.get(slot).copied().ok_or_else(|| {
+                    CompileError::InvalidArtifact(format!(
+                        "Tensor-JIT graph has no node for output slot {slot}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let inputs = region
+            .inputs
+            .iter()
+            .map(|value| lower_type(value.type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let outputs = region
+            .outputs
+            .iter()
+            .map(|value| lower_type(value.type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let architecture = if region.placement == Some(ExecutionPlacement::Gpu) {
+            context
+                .target
+                .triton_gpu()
+                .map(|device| device.architecture.clone())
+                .ok_or_else(|| {
+                    CompileError::Target(
+                        "GPU Tensor-JIT placement requires an AMD or NVIDIA target".into(),
+                    )
+                })?
+        } else {
+            context.target.triple.clone()
+        };
+        Ok(TensorJitBundle {
+            graph,
+            value_nodes,
+            input_nodes,
+            output_nodes,
+            inputs,
+            outputs,
+            placement: region.placement,
+            architecture,
+        })
+    }
+
     /// Runtime/JIT entry point for a CPU region whose source contract may be
     /// unranked. The region is refined from explicit shape/stride metadata
     /// before the ordinary MLIR builder is entered.
@@ -387,6 +445,239 @@ impl TensorCompiler {
             outputs,
         })
     }
+}
+
+/// Rebuilds one serialized fusion program as an ordinary ranked TensorCompiler
+/// region after the runtime has supplied concrete shape and stride metadata.
+/// This is the CPU half of the executable Tensor-JIT boundary: graph identity
+/// remains structural, while rank and element representation remain type data.
+pub fn compile_specialized_fusion_cpu(
+    graph: &FusionGraph,
+    input_nodes: &[NodeId],
+    output_nodes: &[NodeId],
+    specialization: &KernelSpecialization,
+    target: &severian_target::TargetSpec,
+) -> Result<MlirArtifact, CompileError> {
+    let mut builder = TypeContext::builder();
+    severian_universal::install_primitives(&mut builder)
+        .map_err(|error| invalid(format!("Tensor-JIT primitive setup failed: {error}")))?;
+    let mut types = builder.build();
+    let tensor_constructor = types
+        .register_source_declaration("tensor.jit.Tensor", "TensorJitTensor", 1)
+        .map_err(|error| invalid(format!("Tensor-JIT tensor setup failed: {error}")))?;
+    types
+        .mark_tensor_constructor(tensor_constructor)
+        .map_err(|error| invalid(format!("Tensor-JIT tensor setup failed: {error}")))?;
+
+    let runtime_shapes = specialization
+        .shapes
+        .iter()
+        .map(|shape| (shape.node, shape.dimensions.as_slice()))
+        .collect::<BTreeMap<_, _>>();
+    let mut node_types = BTreeMap::new();
+    for node in graph.nodes() {
+        let primitive = fusion_primitive_type(&types, node.shape.element_kind, node.shape.element_bits)?;
+        let type_id = if fusion_node_is_tensor(node) {
+            let dimensions = runtime_shapes.get(&node.id).ok_or_else(|| {
+                invalid(format!(
+                    "Tensor-JIT specialization has no shape for node {}",
+                    node.id.0
+                ))
+            })?;
+            types
+                .instantiate_tensor(
+                    tensor_constructor,
+                    primitive,
+                    TensorShape::Ranked(
+                        dimensions
+                            .iter()
+                            .copied()
+                            .map(TensorDimension::Known)
+                            .collect(),
+                    ),
+                )
+                .map_err(|error| invalid(format!("Tensor-JIT tensor type failed: {error}")))?
+        } else {
+            primitive
+        };
+        node_types.insert(node.id, type_id);
+    }
+
+    let inputs = input_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            Ok(MirValue {
+                id: MirValueId(index as u32),
+                type_id: *node_types.get(node).ok_or_else(|| {
+                    invalid(format!("Tensor-JIT input references unknown node {}", node.0))
+                })?,
+            })
+        })
+        .collect::<Result<Vec<_>, CompileError>>()?;
+    let outputs = output_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            Ok(MirValue {
+                id: MirValueId(index as u32),
+                type_id: *node_types.get(node).ok_or_else(|| {
+                    invalid(format!("Tensor-JIT output references unknown node {}", node.0))
+                })?,
+            })
+        })
+        .collect::<Result<Vec<_>, CompileError>>()?;
+
+    let input_set = input_nodes.iter().copied().collect::<BTreeSet<_>>();
+    let mut compile_operations = Vec::new();
+    for node in graph.nodes() {
+        if input_set.contains(&node.id) || matches!(node.kind, NodeKind::Parameter) {
+            continue;
+        }
+        let operation = fusion_tensor_operation(node)?;
+        let mut attributes = Attrs::default();
+        let id = operation.apply(&mut attributes);
+        if !node.attributes.is_empty() {
+            attributes.insert(
+                tensor::REDUCTION_AXES,
+                AttrValue::Integers(node.attributes.iter().copied().map(i128::from).collect()),
+            );
+        }
+        if !node.runtime_operands.is_empty() {
+            let mut encoded = Vec::new();
+            for operand in &node.runtime_operands {
+                encoded.push(i128::from(operand.input_index));
+                encoded.push(operand.values.len() as i128);
+                encoded.extend(operand.values.iter().copied().map(i128::from));
+            }
+            attributes.insert(tensor::RUNTIME_OPERANDS, AttrValue::Integers(encoded));
+        }
+        compile_operations.push(CompileOperation {
+            id,
+            operands: node
+                .inputs
+                .iter()
+                .map(|input| node_types[input])
+                .collect(),
+            results: vec![node_types[&node.id]],
+            operand_slots: node.inputs.iter().map(|input| input.0).collect(),
+            result_slots: vec![node.id.0],
+            attributes,
+        });
+    }
+
+    let mut region = CompileRegion {
+        id: CompiledRegionId::new(0),
+        compiler: tensor::compiler_id(),
+        operations: Vec::new(),
+        compile_operations,
+        output_slots: output_nodes.iter().map(|node| node.0).collect(),
+        inputs,
+        outputs,
+        value_contracts: Vec::new(),
+        effects: EffectSet::default(),
+        placement: Some(ExecutionPlacement::Host),
+    };
+    region
+        .rebuild_value_contracts(&types)
+        .map_err(|error| invalid(format!("Tensor-JIT contract rebuild failed: {error}")))?;
+    let mut artifact = TensorCompiler.compile_cpu(
+        &region,
+        &CompileContext {
+            types: &types,
+            target,
+        },
+    )?;
+    add_c_interface_attribute(&mut artifact.module)?;
+    Ok(artifact)
+}
+
+fn fusion_node_is_tensor(node: &severian_fusion::FusionNode) -> bool {
+    match node.kind {
+        NodeKind::StorageView
+            if matches!(node.operation.as_str(), "shape" | "strides" | "values") => false,
+        NodeKind::Parameter => !matches!(node.shape.rank, severian_fusion::Rank::Ranked(ref axes) if axes.is_empty()),
+        NodeKind::Constant => false,
+        _ => node.shape.element_kind != ElementKind::Opaque,
+    }
+}
+
+fn fusion_primitive_type(
+    types: &TypeContext,
+    kind: ElementKind,
+    bits: u16,
+) -> Result<TypeId, CompileError> {
+    let name = match kind {
+        ElementKind::SignedInteger => format!("i{bits}"),
+        ElementKind::UnsignedInteger => format!("u{bits}"),
+        ElementKind::IeeeFloat => format!("f{bits}"),
+        ElementKind::BrainFloat if bits == 16 => "bf16".into(),
+        ElementKind::Float8E4M3Fn if bits == 8 => "f8e4m3fn".into(),
+        ElementKind::Float8E5M2 if bits == 8 => "f8e5m2".into(),
+        ElementKind::Boolean => "bool".into(),
+        ElementKind::Opaque => "bytes".into(),
+        _ => {
+            return Err(invalid(format!(
+                "unsupported Tensor-JIT element representation {kind:?}/{bits}"
+            )))
+        }
+    };
+    types
+        .resolve_name(&name)
+        .ok_or_else(|| invalid(format!("Tensor-JIT primitive `{name}` is not installed")))
+}
+
+fn fusion_tensor_operation(
+    node: &severian_fusion::FusionNode,
+) -> Result<tensor::TensorOp, CompileError> {
+    use tensor::{BroadcastOp, ElementwiseOp, PermuteOp, ReductionOp, ReshapeViewOp, StorageViewOp};
+    let operation = match (node.kind, node.operation.as_str()) {
+        (NodeKind::Elementwise, "add") => tensor::TensorOp::Elementwise(ElementwiseOp::Add),
+        (NodeKind::Elementwise, "subtract") => tensor::TensorOp::Elementwise(ElementwiseOp::Subtract),
+        (NodeKind::Elementwise, "multiply") => tensor::TensorOp::Elementwise(ElementwiseOp::Multiply),
+        (NodeKind::Elementwise, "divide") => tensor::TensorOp::Elementwise(ElementwiseOp::Divide),
+        (NodeKind::Elementwise, "exp") => tensor::TensorOp::Elementwise(ElementwiseOp::Exp),
+        (NodeKind::Elementwise, "log") => tensor::TensorOp::Elementwise(ElementwiseOp::Log),
+        (NodeKind::Elementwise, "tanh") => tensor::TensorOp::Elementwise(ElementwiseOp::Tanh),
+        (NodeKind::Elementwise, "rsqrt") => tensor::TensorOp::Elementwise(ElementwiseOp::Rsqrt),
+        (NodeKind::Elementwise, "relu") => tensor::TensorOp::Elementwise(ElementwiseOp::Relu),
+        (NodeKind::Elementwise, "scale") => tensor::TensorOp::Elementwise(ElementwiseOp::Scale),
+        (NodeKind::Elementwise, "add_scalar") => tensor::TensorOp::Elementwise(ElementwiseOp::AddScalar),
+        (NodeKind::Reduction, "sum") => tensor::TensorOp::Reduce(ReductionOp::Sum),
+        (NodeKind::Reduction, "sum_axis") => tensor::TensorOp::Reduce(ReductionOp::SumAxis),
+        (NodeKind::Reduction, "mean_last") => tensor::TensorOp::Reduce(ReductionOp::MeanLast),
+        (NodeKind::Reduction, "max_last") => tensor::TensorOp::Reduce(ReductionOp::MaxLast),
+        (NodeKind::Contraction, "matmul") => tensor::TensorOp::Matmul,
+        (NodeKind::Reshape, "reshape") => tensor::TensorOp::ReshapeView(ReshapeViewOp::Reshape),
+        (NodeKind::Reshape, "materialize") => tensor::TensorOp::ReshapeView(ReshapeViewOp::Materialize),
+        (NodeKind::Permute, "axes") => tensor::TensorOp::Permute(PermuteOp::Axes),
+        (NodeKind::Permute, "reverse") => tensor::TensorOp::Permute(PermuteOp::Reverse),
+        (NodeKind::Slice, "slice") => tensor::TensorOp::Slice,
+        (NodeKind::Broadcast, "like") => tensor::TensorOp::Broadcast(BroadcastOp::Like),
+        (NodeKind::Broadcast, "repeat") => tensor::TensorOp::Broadcast(BroadcastOp::Repeat),
+        (NodeKind::Gather, "gather") => tensor::TensorOp::Gather,
+        (NodeKind::Scatter, "scatter") => tensor::TensorOp::Scatter,
+        (NodeKind::Concatenate, "concatenate") => tensor::TensorOp::Concatenate,
+        (NodeKind::Convert, "convert") => tensor::TensorOp::Convert,
+        (NodeKind::StorageView, "from_elements") => tensor::TensorOp::StorageView(StorageViewOp::FromElements),
+        (NodeKind::StorageView, "shape") => tensor::TensorOp::StorageView(StorageViewOp::Shape),
+        (NodeKind::StorageView, "strides") => tensor::TensorOp::StorageView(StorageViewOp::Strides),
+        (NodeKind::StorageView, "values") => tensor::TensorOp::StorageView(StorageViewOp::Values),
+        _ => return Err(invalid(format!("unsupported serialized Tensor-JIT operation {:?}.{}", node.kind, node.operation))),
+    };
+    Ok(operation)
+}
+
+fn add_c_interface_attribute(module: &mut String) -> Result<(), CompileError> {
+    let entry = module
+        .find("func.func @entry(")
+        .ok_or_else(|| invalid("Tensor-JIT MLIR has no entry function"))?;
+    let body = module[entry..]
+        .find(" {")
+        .map(|offset| entry + offset)
+        .ok_or_else(|| invalid("Tensor-JIT MLIR entry has no body"))?;
+    module.insert_str(body, " attributes {llvm.emit_c_interface}");
+    Ok(())
 }
 
 fn legalize_cpu_region_before_emission(

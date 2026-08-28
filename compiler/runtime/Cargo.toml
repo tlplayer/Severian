@@ -9,6 +9,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
 severian-fusion = { path = "../transforms/fusion" }
 
 [lib]

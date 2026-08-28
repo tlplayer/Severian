@@ -23,6 +23,7 @@ typedef const sev_tensor_jit_provider_abi *(*sev_tensor_jit_provider_fn)(void);
 
 _Static_assert(sizeof(sev_jit_element_abi) == 24, "storage element ABI drift");
 _Static_assert(sizeof(sev_jit_storage_view_abi) == 104, "storage view ABI drift");
+_Static_assert(sizeof(sev_tensor_jit_value_abi) == 24, "tensor JIT value ABI drift");
 _Static_assert(sizeof(sev_tensor_jit_region_abi) == 112, "tensor JIT region ABI drift");
 _Static_assert(sizeof(sev_tensor_jit_compiled_abi) == 32, "tensor JIT compiled ABI drift");
 
@@ -84,7 +85,7 @@ static int32_t sev_tensor_jit_validate_view(const sev_jit_storage_view_abi *view
 
 static int32_t sev_tensor_jit_key(
     const sev_tensor_jit_region_abi *region,
-    const sev_jit_storage_view_abi *const *inputs,
+    const sev_tensor_jit_value_abi *inputs,
     uint32_t input_count,
     uint64_t key[4]
 ) {
@@ -103,14 +104,23 @@ static int32_t sev_tensor_jit_key(
     sev_tensor_jit_hash_bytes(key, region->compiler_hash, sizeof(region->compiler_hash));
     sev_tensor_jit_hash_bytes(key, &region->target, sizeof(region->target));
     for (uint32_t input = 0; input < input_count; ++input) {
-        const sev_jit_storage_view_abi *view = inputs[input];
-        int32_t status = sev_tensor_jit_validate_view(view);
-        if (status != SEV_TENSOR_JIT_OK) return status;
-        sev_tensor_jit_hash_bytes(key, &view->element, sizeof(view->element));
-        sev_tensor_jit_hash_bytes(key, &view->rank, sizeof(view->rank));
-        sev_tensor_jit_hash_bytes(key, view->dimensions, (size_t)view->rank * sizeof(*view->dimensions));
-        sev_tensor_jit_hash_bytes(key, view->strides, (size_t)view->rank * sizeof(*view->strides));
-        sev_tensor_jit_hash_bytes(key, &view->offset, sizeof(view->offset));
+        const sev_tensor_jit_value_abi *value = &inputs[input];
+        if (value->abi_version != SEV_TENSOR_JIT_ABI_VERSION ||
+            value->byte_size != sizeof(*value)) return SEV_TENSOR_JIT_INVALID_ARGUMENT;
+        sev_tensor_jit_hash_bytes(key, &value->kind, sizeof(value->kind));
+        sev_tensor_jit_hash_bytes(key, &value->bits, sizeof(value->bits));
+        if (value->kind == SEV_TENSOR_JIT_VALUE_STORAGE) {
+            const sev_jit_storage_view_abi *view = value->value.storage;
+            int32_t status = sev_tensor_jit_validate_view(view);
+            if (status != SEV_TENSOR_JIT_OK) return status;
+            sev_tensor_jit_hash_bytes(key, &view->element, sizeof(view->element));
+            sev_tensor_jit_hash_bytes(key, &view->rank, sizeof(view->rank));
+            sev_tensor_jit_hash_bytes(key, view->dimensions, (size_t)view->rank * sizeof(*view->dimensions));
+            sev_tensor_jit_hash_bytes(key, view->strides, (size_t)view->rank * sizeof(*view->strides));
+            sev_tensor_jit_hash_bytes(key, &view->offset, sizeof(view->offset));
+        } else {
+            sev_tensor_jit_hash_bytes(key, &value->value, sizeof(value->value));
+        }
     }
     return SEV_TENSOR_JIT_OK;
 }
@@ -137,9 +147,9 @@ int32_t __sev_tensor_jit_install_v1(sev_tensor_jit_compile_fn compile, void *con
 
 int32_t __sev_tensor_jit_launch_v1(
     const sev_tensor_jit_region_abi *region,
-    const sev_jit_storage_view_abi *const *inputs,
+    const sev_tensor_jit_value_abi *inputs,
     uint32_t input_count,
-    sev_jit_storage_view_abi **outputs,
+    sev_tensor_jit_value_abi *outputs,
     uint32_t output_count
 ) {
     uint64_t key[4];

@@ -46,6 +46,7 @@ pub type MlirStringCallback = unsafe extern "C" fn(MlirStringRef, *mut c_void);
 )]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIIR", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIArith", kind = "static"))]
+#[cfg_attr(target_os = "macos", link(name = "MLIRCAPIRegisterEverything", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIAsync", kind = "static"))]
 #[cfg_attr(
     target_os = "macos",
@@ -65,6 +66,7 @@ unsafe extern "C" {
     pub fn mlirDialectRegistryDestroy(registry: MlirDialectRegistry);
     pub fn mlirGetDialectHandle__arith__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__async__() -> MlirDialectHandle;
+    pub fn mlirRegisterAllDialects(registry: MlirDialectRegistry);
     pub fn mlirGetDialectHandle__cf__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__func__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__gpu__() -> MlirDialectHandle;

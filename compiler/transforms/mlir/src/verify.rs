@@ -68,7 +68,12 @@ pub fn compose(
     target: &TargetSpec,
 ) -> Result<String, MlirError> {
     let context = Context::new();
-    let module = Module::parse(&context, normal, "ordinary module")?;
+    let module = Module::parse(&context, normal, "ordinary module").map_err(|error| {
+        MlirError::ParseFailed(format!(
+            "{error}; generated ordinary module:\n{}",
+            numbered_excerpt(normal, 800)
+        ))
+    })?;
     module.verify("ordinary module")?;
     module.verify_allowed_dialects(target)?;
 
@@ -181,7 +186,12 @@ pub fn compose_gpu_launchers(
         return Ok(normal.to_owned());
     }
     let context = Context::new();
-    let module = Module::parse(&context, normal, "ordinary module")?;
+    let module = Module::parse(&context, normal, "ordinary module").map_err(|error| {
+        MlirError::ParseFailed(format!(
+            "{error}; generated ordinary module:\n{}",
+            numbered_excerpt(normal, 800)
+        ))
+    })?;
     module.verify("ordinary module")?;
     module.verify_allowed_dialects(target)?;
     let symbol_table = SymbolTable::new(&module)?;
@@ -296,6 +306,7 @@ impl Context {
     fn new() -> Self {
         unsafe {
             let registry = ffi::mlirDialectRegistryCreate();
+            ffi::mlirRegisterAllDialects(registry);
             for dialect in [
                 ffi::mlirGetDialectHandle__arith__(),
                 ffi::mlirGetDialectHandle__async__(),
@@ -400,7 +411,7 @@ impl<'context> Module<'context> {
 
     fn verify_allowed_dialects(&self, target: &TargetSpec) -> Result<(), MlirError> {
         let mut allowed = [
-            "builtin", "arith", "async", "cf", "func", "linalg", "llvm", "math", "scf", "tensor",
+            "builtin", "arith", "async", "bufferization", "cf", "func", "linalg", "llvm", "math", "scf", "tensor",
         ]
         .into_iter()
         .map(str::to_owned)

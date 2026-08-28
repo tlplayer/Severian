@@ -17,6 +17,7 @@ severian-bootstrap = { path = "../../bootstrap" }
 severian-compile = { path = "../../compile" }
 severian-diagnostics = { path = "../../diagnostics" }
 severian-ffi = { path = "../ffi" }
+severian-fusion = { path = "../../transforms/fusion" }
 severian-lexer = { path = "../../frontend/lexer" }
 severian-hir = { path = "../../frontend/hir" }
 severian-modules = { path = "../../frontend/modules" }
@@ -27,6 +28,7 @@ severian-ownership = { path = "../../frontend/ownership" }
 severian-parser = { path = "../../frontend/parser" }
 severian-semantic = { path = "../../frontend/semantic" }
 severian-source = { path = "../../source" }
+severian-runtime = { path = "../../runtime" }
 severian-target = { path = "../../target" }
 severian-tensor-compiler = { path = "../../../library/compute/tensor/compiler" }
 severian-universal = { path = "../../universal" }

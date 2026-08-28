@@ -12,16 +12,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct NodeId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct RegionId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dimension {
     Dynamic,
     Known(u64),
@@ -30,7 +31,7 @@ pub enum Dimension {
 /// Language-level dimension identity retained after rank legalization. Dynamic
 /// means an unconstrained runtime extent; Symbol preserves equality across
 /// values; arithmetic expressions preserve reshape/contraction relationships.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DimensionExpression {
     Constant(u64),
     Symbol(u64),
@@ -40,19 +41,19 @@ pub enum DimensionExpression {
     DivideExact(Box<Self>, Box<Self>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Rank {
     Unranked,
     Ranked(Vec<Dimension>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stride {
     Dynamic,
     Known(i64),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorageLayout {
     /// Physical strides and offset are supplied when a kernel is specialized.
     Runtime,
@@ -65,71 +66,71 @@ pub enum StorageLayout {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OperandRole {
     Data,
     RuntimeShape,
     RuntimeStrides,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AliasKind {
     View,
     InPlace,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputAlias {
     pub input_index: u16,
     pub kind: AliasKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mutation {
     None,
     WritesInput(u16),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuTarget {
     Amd,
     Nvidia,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeShape {
     pub node: NodeId,
     pub dimensions: Vec<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeStrides {
     pub node: NodeId,
     pub strides: Vec<i64>,
     pub offset: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeOperand {
     pub input_index: u16,
     pub values: Vec<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KernelSpecialization {
     pub shapes: Vec<RuntimeShape>,
     pub strides: Vec<RuntimeStrides>,
     pub target: GpuTarget,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchDimension {
     pub result: u32,
     pub lhs: Option<u32>,
     pub rhs: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractionDimension {
     pub lhs: u32,
     pub rhs: u32,
@@ -137,7 +138,7 @@ pub struct ContractionDimension {
 
 /// Rank-generic contraction metadata. Rank and dtype remain ordinary data;
 /// this record never changes the `Matmul` operation identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Matmul {
     pub lhs_shape: Rank,
     pub rhs_shape: Rank,
@@ -146,7 +147,7 @@ pub struct Matmul {
     pub contraction_dimensions: Vec<ContractionDimension>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ElementKind {
     SignedInteger,
     UnsignedInteger,
@@ -158,7 +159,7 @@ pub enum ElementKind {
     Opaque,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Shape {
     pub rank: Rank,
     pub dimension_expressions: Vec<DimensionExpression>,
@@ -241,7 +242,7 @@ impl Shape {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeKind {
     Parameter,
     Constant,
@@ -288,7 +289,7 @@ impl NodeKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FusionNode {
     pub id: NodeId,
     pub kind: NodeKind,
@@ -504,7 +505,10 @@ impl FusionGraph {
                     contract.lhs_shape == nodes[node.inputs[0].0 as usize].shape.rank
                         && contract.rhs_shape == nodes[node.inputs[1].0 as usize].shape.rank
                         && contract.result_shape == node.shape.rank
-                        && !contract.contraction_dimensions.is_empty()
+                        && (!contract.contraction_dimensions.is_empty()
+                            || lhs_rank.is_none()
+                            || rhs_rank.is_none()
+                            || result_rank.is_none())
                         && contract.contraction_dimensions.iter().all(|dimension| {
                             lhs_rank.is_none_or(|rank| (dimension.lhs as usize) < rank)
                                 && rhs_rank.is_none_or(|rank| (dimension.rhs as usize) < rank)

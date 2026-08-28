@@ -86,6 +86,7 @@ pub struct CompiledTest {
 pub struct RoutedProgram {
     pub host_mlir: String,
     pub gpu_kernels: Vec<severian_compile::VerifiedGpuKernelBundle>,
+    pub tensor_jit_source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,10 +172,6 @@ impl Compiler {
         let plan =
             severian_compile::plan(mir, self.types_for(mir)).map_err(CompileError::Compile)?;
         self.compile_plan(&plan)
-    }
-
-    fn compile_plan_to_mlir(&self, plan: &CompilePlan) -> Result<String, CompileError> {
-        self.compile_plan(plan).map(|program| program.host_mlir)
     }
 
     fn compile_plan(&self, plan: &CompilePlan) -> Result<RoutedProgram, CompileError> {
@@ -753,9 +750,20 @@ impl Compiler {
                     .map_err(CompileError::Backend);
             }
         }
-        let mlir = self.compile_plan_to_mlir(&plan)?;
+        let program = self.compile_plan(&plan)?;
+        let mut linker_arguments = linker_arguments;
+        if !program.tensor_jit_source.is_empty() {
+            let source = output.with_extension("tensor-jit.c");
+            std::fs::write(&source, &program.tensor_jit_source).map_err(|error| {
+                CompileError::NativeLink(format!(
+                    "could not write Tensor-JIT launcher {}: {error}",
+                    source.display()
+                ))
+            })?;
+            linker_arguments.push(source.to_string_lossy().into_owned());
+        }
         severian_backend::emit_mlir_executable_with_linker_arguments(
-            &mlir,
+            &program.host_mlir,
             &self.target.triple,
             output,
             &linker_arguments,
@@ -1068,6 +1076,7 @@ fn compose_region_artifacts(
     let mut cpu = Vec::new();
     let mut gpu = Vec::new();
     let mut gpu_kernels = Vec::new();
+    let mut tensor_jit = Vec::new();
     for artifact in artifacts {
         match artifact {
             VerifiedCompiledRegionArtifact::CpuMlir(artifact) => cpu.push(artifact),
@@ -1079,15 +1088,353 @@ fn compose_region_artifacts(
                 });
                 gpu_kernels.push(artifact);
             }
+            VerifiedCompiledRegionArtifact::TensorJit(artifact) => tensor_jit.push(artifact),
         }
     }
     let host = severian_mlir::compose(ordinary, &cpu, target).map_err(CompileError::Mlir)?;
     let host_mlir =
         severian_mlir::compose_gpu_launchers(&host, &gpu, target).map_err(CompileError::Mlir)?;
+    let tensor_jit_source = render_tensor_jit_launchers(&tensor_jit)?;
     Ok(RoutedProgram {
         host_mlir,
         gpu_kernels,
+        tensor_jit_source,
     })
+}
+
+fn render_tensor_jit_launchers(
+    launchers: &[severian_compile::VerifiedTensorJitBundle],
+) -> Result<String, CompileError> {
+    if launchers.is_empty() {
+        return Ok(String::new());
+    }
+    let header = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("driver crate is nested below the repository root")
+        .join("runtime/native/tensor_jit.h");
+    let mut source = format!(
+        "#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include \"{}\"\n\ntypedef struct {{ int64_t rank; void *descriptor; }} sev_unranked_memref;\nstatic sev_jit_storage_view_abi __sev_jit_memref_view(int64_t rank, void *descriptor, uint32_t kind, uint32_t bits, uint32_t float_format) {{\n  int64_t *fields = (int64_t *)descriptor;\n  sev_jit_storage_view_abi view;\n  memset(&view, 0, sizeof(view));\n  view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; view.byte_size = sizeof(view);\n  view.data = ((const uint8_t **)descriptor)[1]; view.rank = (uint64_t)rank; view.offset = fields[2];\n  view.dimensions = fields + 3; view.strides = fields + 3 + rank;\n  view.element.abi_version = 1; view.element.byte_size = sizeof(view.element); view.element.kind = kind; view.element.bits = bits; view.element.float_format = float_format;\n  uint64_t elements = 1; for (int64_t axis = 0; axis < rank; ++axis) elements *= (uint64_t)view.dimensions[axis];\n  view.byte_length = elements * ((bits + 7) / 8);\n  return view;\n}}\nstatic sev_unranked_memref __sev_jit_unranked_result(sev_jit_storage_view_abi *view) {{\n  size_t words = (size_t)(3 + 2 * view->rank);\n  int64_t *descriptor = (int64_t *)malloc(words * sizeof(int64_t));\n  if (descriptor == NULL) abort();\n  ((void **)descriptor)[0] = view->owner != NULL ? view->owner : (void *)view->data;\n  ((void **)descriptor)[1] = (void *)view->data; descriptor[2] = view->offset;\n  memcpy(descriptor + 3, view->dimensions, view->rank * sizeof(int64_t));\n  memcpy(descriptor + 3 + view->rank, view->strides, view->rank * sizeof(int64_t));\n  sev_unranked_memref result = {{(int64_t)view->rank, descriptor}}; return result;\n}}\n",
+        header.display()
+    );
+    let ranked_abis = launchers
+        .iter()
+        .flat_map(|launcher| {
+            launcher
+                .bundle
+                .inputs
+                .iter()
+                .chain(&launcher.bundle.outputs)
+        })
+        .filter_map(tensor_jit_rank)
+        .collect::<BTreeSet<_>>();
+    for rank in ranked_abis {
+        source.push_str(&format!(
+            "typedef struct {{ void *allocated; void *aligned; int64_t offset; int64_t sizes[{rank}]; int64_t strides[{rank}]; }} sev_ranked_memref_{rank};\n"
+        ));
+    }
+    for launcher in launchers {
+        let bundle = &launcher.bundle;
+        if bundle.outputs.is_empty() {
+            return Err(CompileError::NativeLink(format!(
+                "Tensor-JIT artifact {} has no outputs",
+                launcher.id.index()
+            )));
+        }
+        let target = match bundle.placement {
+            Some(severian_universal::ExecutionPlacement::Gpu)
+                if bundle.architecture.starts_with("gfx") => 1u32,
+            Some(severian_universal::ExecutionPlacement::Gpu) => 2u32,
+            _ => 0u32,
+        };
+        let program = severian_runtime::tensor_jit::TensorJitProgram {
+            target: match target {
+                1 => severian_runtime::tensor_jit::TensorJitTarget::Amd,
+                2 => severian_runtime::tensor_jit::TensorJitTarget::Nvidia,
+                _ => severian_runtime::tensor_jit::TensorJitTarget::Cpu,
+            },
+            architecture: bundle.architecture.clone(),
+            nodes: bundle.graph.nodes().to_vec(),
+            inputs: bundle.input_nodes.clone(),
+            outputs: bundle.output_nodes.clone(),
+        }
+        .encode()
+        .map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        source.push_str(&render_tensor_jit_launcher(launcher, &program, target)?);
+    }
+    Ok(source)
+}
+
+fn render_tensor_jit_launcher(
+    launcher: &severian_compile::VerifiedTensorJitBundle,
+    program: &[u8],
+    target: u32,
+) -> Result<String, CompileError> {
+    let id = launcher.id.index();
+    let bundle = &launcher.bundle;
+    let parameters = bundle
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| c_tensor_jit_parameter(index, ty))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let result_types = bundle
+        .outputs
+        .iter()
+        .map(c_tensor_jit_type)
+        .collect::<Result<Vec<_>, _>>()?;
+    let result = if result_types.len() == 1 {
+        result_types[0].clone()
+    } else {
+        format!("sev_jit_results_{id}")
+    };
+    let bytes = program
+        .iter()
+        .map(|byte| byte.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let graph_hash = stable_tensor_jit_hash(program);
+    let mut compiler_identity = bundle.architecture.as_bytes().to_vec();
+    compiler_identity.extend_from_slice(b"|severian-tensor-jit-v1|triton-08be0b4ccbac3e13e374e86fbfead4b4cac343e2");
+    let compiler_hash = stable_tensor_jit_hash(&compiler_identity);
+    let result_declaration = if result_types.len() == 1 {
+        String::new()
+    } else {
+        format!(
+            "typedef struct {{ {} }} sev_jit_results_{id};\n",
+            result_types
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| format!("{ty} field{index};"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    let mut body = format!(
+        "\n{result_declaration}static const uint8_t __sev_jit_program_{id}[] = {{{bytes}}};\nstatic const sev_tensor_jit_region_abi __sev_jit_region_{id} = {{\n  SEV_TENSOR_JIT_ABI_MAGIC, SEV_TENSOR_JIT_ABI_VERSION, sizeof(sev_tensor_jit_region_abi),\n  {{{},{},{},{}}}, {{{},{},{},{}}},\n  __sev_jit_program_{id}, sizeof(__sev_jit_program_{id}), {target}, {}, {}, 0\n}};\n{result} __sev_artifact_{id}({parameters}) {{\n  sev_tensor_jit_value_abi inputs[{}] = {{0}};\n  sev_tensor_jit_value_abi outputs[{}] = {{0}};\n",
+        graph_hash[0], graph_hash[1], graph_hash[2], graph_hash[3],
+        compiler_hash[0], compiler_hash[1], compiler_hash[2], compiler_hash[3],
+        bundle.inputs.len(), bundle.outputs.len(), bundle.inputs.len(), bundle.outputs.len()
+    );
+    for (index, (ty, node)) in bundle.inputs.iter().zip(&bundle.input_nodes).enumerate() {
+        let graph_node = bundle.graph.node(*node);
+        body.push_str(&render_tensor_jit_input(index, ty, graph_node.shape.element_kind)?);
+    }
+    for (index, (ty, node)) in bundle.outputs.iter().zip(&bundle.output_nodes).enumerate() {
+        body.push_str(&format!(
+            "  outputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION;\n  outputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi);\n  outputs[{index}].kind = {};\n",
+            tensor_jit_value_kind(ty, bundle.graph.node(*node).shape.element_kind)?
+        ));
+    }
+    body.push_str(&format!(
+        "  int32_t status = __sev_tensor_jit_launch_v1(&__sev_jit_region_{id}, inputs, {}, outputs, {});\n  if (status != SEV_TENSOR_JIT_OK) abort();\n",
+        bundle.inputs.len(), bundle.outputs.len()
+    ));
+    if bundle.outputs.len() == 1 {
+        body.push_str(&format!(
+            "  return {};\n",
+            tensor_jit_result_expression(&bundle.outputs[0], 0)?
+        ));
+    } else {
+        body.push_str(&format!("  sev_jit_results_{id} result;\n"));
+        for (index, ty) in bundle.outputs.iter().enumerate() {
+            body.push_str(&format!(
+                "  result.field{index} = {};\n",
+                tensor_jit_result_expression(ty, index)?
+            ));
+        }
+        body.push_str("  return result;\n");
+    }
+    body.push_str("}\n");
+    Ok(body)
+}
+
+fn c_tensor_jit_type(ty: &severian_mlir::LoweredType) -> Result<String, CompileError> {
+    use severian_mlir::{LoweredFloatFormat, LoweredTensorShape, LoweredType};
+    match ty {
+        LoweredType::Tensor { shape: LoweredTensorShape::Unranked, .. } => Ok("sev_unranked_memref".into()),
+        LoweredType::Tensor { shape: LoweredTensorShape::Ranked(dimensions), .. } => Ok(format!("sev_ranked_memref_{}", dimensions.len())),
+        LoweredType::Bytes | LoweredType::String => Ok("void *".into()),
+        LoweredType::Integer { bits: 1..=8, signed: true } => Ok("int8_t".into()),
+        LoweredType::Integer { bits: 1..=8, signed: false } | LoweredType::Boolean => Ok("uint8_t".into()),
+        LoweredType::Integer { bits: 9..=16, signed: true } => Ok("int16_t".into()),
+        LoweredType::Integer { bits: 9..=16, signed: false } => Ok("uint16_t".into()),
+        LoweredType::Integer { bits: 17..=32, signed: true } => Ok("int32_t".into()),
+        LoweredType::Integer { bits: 17..=32, signed: false } => Ok("uint32_t".into()),
+        LoweredType::Integer { bits: 33..=64, signed: true } => Ok("int64_t".into()),
+        LoweredType::Integer { bits: 33..=64, signed: false } => Ok("uint64_t".into()),
+        LoweredType::Float { format: LoweredFloatFormat::Ieee(32) } => Ok("float".into()),
+        LoweredType::Float { format: LoweredFloatFormat::Ieee(64) } => Ok("double".into()),
+        unsupported => Err(CompileError::NativeLink(format!(
+            "Tensor-JIT host ABI does not support {unsupported:?}"
+        ))),
+    }
+}
+
+fn c_tensor_jit_parameter(
+    index: usize,
+    ty: &severian_mlir::LoweredType,
+) -> Result<String, CompileError> {
+    if matches!(
+        ty,
+        severian_mlir::LoweredType::Tensor {
+            shape: severian_mlir::LoweredTensorShape::Unranked,
+            ..
+        }
+    ) {
+        Ok(format!("int64_t arg{index}_rank, void *arg{index}_descriptor"))
+    } else if let severian_mlir::LoweredType::Tensor {
+        shape: severian_mlir::LoweredTensorShape::Ranked(dimensions),
+        ..
+    } = ty
+    {
+        let mut fields = vec![
+            format!("void *arg{index}_allocated"),
+            format!("void *arg{index}_aligned"),
+            format!("int64_t arg{index}_offset"),
+        ];
+        fields.extend((0..dimensions.len()).map(|axis| format!("int64_t arg{index}_size{axis}")));
+        fields.extend((0..dimensions.len()).map(|axis| format!("int64_t arg{index}_stride{axis}")));
+        Ok(fields.join(", "))
+    } else {
+        c_tensor_jit_type(ty).map(|ty| format!("{ty} arg{index}"))
+    }
+}
+
+fn tensor_jit_value_kind(
+    ty: &severian_mlir::LoweredType,
+    element: severian_fusion::ElementKind,
+) -> Result<&'static str, CompileError> {
+    use severian_mlir::LoweredType;
+    Ok(match ty {
+        LoweredType::Tensor { .. } => "SEV_TENSOR_JIT_VALUE_STORAGE",
+        LoweredType::Bytes | LoweredType::String
+            if element != severian_fusion::ElementKind::Opaque => "SEV_TENSOR_JIT_VALUE_STORAGE",
+        LoweredType::Bytes | LoweredType::String => "SEV_TENSOR_JIT_VALUE_POINTER",
+        LoweredType::Integer { signed: true, .. } => "SEV_TENSOR_JIT_VALUE_SIGNED",
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => "SEV_TENSOR_JIT_VALUE_UNSIGNED",
+        LoweredType::Float { .. } => "SEV_TENSOR_JIT_VALUE_FLOAT",
+        unsupported => return Err(CompileError::NativeLink(format!("unsupported Tensor-JIT value {unsupported:?}"))),
+    })
+}
+
+fn render_tensor_jit_input(
+    index: usize,
+    ty: &severian_mlir::LoweredType,
+    element: severian_fusion::ElementKind,
+) -> Result<String, CompileError> {
+    use severian_mlir::LoweredType;
+    let kind = tensor_jit_value_kind(ty, element)?;
+    if let LoweredType::Tensor {
+        element: tensor_element,
+        shape: severian_mlir::LoweredTensorShape::Unranked,
+    } = ty
+    {
+        let (element_kind, bits, float_format) = tensor_element_abi(*tensor_element)?;
+        return Ok(format!(
+            "  sev_jit_storage_view_abi arg{index}_view = __sev_jit_memref_view(arg{index}_rank, arg{index}_descriptor, {element_kind}, {bits}, {float_format});\n  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION;\n  inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi);\n  inputs[{index}].kind = SEV_TENSOR_JIT_VALUE_STORAGE;\n  inputs[{index}].bits = {bits};\n  inputs[{index}].value.storage = &arg{index}_view;\n"
+        ));
+    }
+    if let LoweredType::Tensor {
+        element: tensor_element,
+        shape: severian_mlir::LoweredTensorShape::Ranked(dimensions),
+    } = ty
+    {
+        let (element_kind, bits, float_format) = tensor_element_abi(*tensor_element)?;
+        let rank = dimensions.len();
+        let sizes = (0..rank).map(|axis| format!("arg{index}_size{axis}")).collect::<Vec<_>>().join(",");
+        let strides = (0..rank).map(|axis| format!("arg{index}_stride{axis}")).collect::<Vec<_>>().join(",");
+        return Ok(format!(
+            "  int64_t arg{index}_dimensions[{rank}] = {{{sizes}}};\n  int64_t arg{index}_strides[{rank}] = {{{strides}}};\n  sev_jit_storage_view_abi arg{index}_view; memset(&arg{index}_view, 0, sizeof(arg{index}_view));\n  arg{index}_view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; arg{index}_view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; arg{index}_view.byte_size = sizeof(arg{index}_view);\n  arg{index}_view.data = (const uint8_t *)arg{index}_aligned; arg{index}_view.rank = {rank}; arg{index}_view.offset = arg{index}_offset; arg{index}_view.dimensions = arg{index}_dimensions; arg{index}_view.strides = arg{index}_strides;\n  arg{index}_view.element.abi_version = 1; arg{index}_view.element.byte_size = sizeof(arg{index}_view.element); arg{index}_view.element.kind = {element_kind}; arg{index}_view.element.bits = {bits}; arg{index}_view.element.float_format = {float_format};\n  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION; inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi); inputs[{index}].kind = SEV_TENSOR_JIT_VALUE_STORAGE; inputs[{index}].bits = {bits}; inputs[{index}].value.storage = &arg{index}_view;\n"
+        ));
+    }
+    let field = match ty {
+        LoweredType::Bytes | LoweredType::String if element != severian_fusion::ElementKind::Opaque => "storage",
+        LoweredType::Bytes | LoweredType::String => "pointer",
+        LoweredType::Integer { signed: true, .. } => "signed_integer",
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => "unsigned_integer",
+        LoweredType::Float { .. } => "floating",
+        _ => unreachable!("validated by tensor_jit_value_kind"),
+    };
+    let cast = if field == "storage" { "(sev_jit_storage_view_abi *)" } else { "" };
+    Ok(format!(
+        "  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION;\n  inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi);\n  inputs[{index}].kind = {kind};\n  inputs[{index}].bits = {};\n  inputs[{index}].value.{field} = {cast}arg{index};\n",
+        tensor_jit_bits(ty)
+    ))
+}
+
+fn tensor_jit_bits(ty: &severian_mlir::LoweredType) -> u16 {
+    match ty {
+        severian_mlir::LoweredType::Integer { bits, .. } => *bits,
+        severian_mlir::LoweredType::Float { format: severian_mlir::LoweredFloatFormat::Ieee(bits) } => *bits,
+        severian_mlir::LoweredType::Boolean => 1,
+        severian_mlir::LoweredType::Tensor { element, .. } => tensor_element_abi(*element).map(|(_, bits, _)| bits as u16).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn tensor_jit_result_expression(
+    ty: &severian_mlir::LoweredType,
+    index: usize,
+) -> Result<String, CompileError> {
+    use severian_mlir::LoweredType;
+    Ok(match ty {
+        LoweredType::Tensor { shape: severian_mlir::LoweredTensorShape::Unranked, .. } => format!("__sev_jit_unranked_result(outputs[{index}].value.storage)"),
+        LoweredType::Tensor { shape: severian_mlir::LoweredTensorShape::Ranked(dimensions), .. } => {
+            let rank = dimensions.len();
+            let sizes = (0..rank).map(|axis| format!("outputs[{index}].value.storage->dimensions[{axis}]")).collect::<Vec<_>>().join(",");
+            let strides = (0..rank).map(|axis| format!("outputs[{index}].value.storage->strides[{axis}]")).collect::<Vec<_>>().join(",");
+            format!("(sev_ranked_memref_{rank}){{outputs[{index}].value.storage->owner != NULL ? outputs[{index}].value.storage->owner : (void *)outputs[{index}].value.storage->data, (void *)outputs[{index}].value.storage->data, outputs[{index}].value.storage->offset, {{{sizes}}}, {{{strides}}}}}")
+        }
+        LoweredType::Bytes | LoweredType::String => format!("outputs[{index}].value.pointer"),
+        LoweredType::Integer { signed: true, .. } => format!("outputs[{index}].value.signed_integer"),
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => format!("outputs[{index}].value.unsigned_integer"),
+        LoweredType::Float { .. } => format!("outputs[{index}].value.floating"),
+        unsupported => return Err(CompileError::NativeLink(format!("unsupported Tensor-JIT result {unsupported:?}"))),
+    })
+}
+
+fn tensor_jit_rank(ty: &severian_mlir::LoweredType) -> Option<usize> {
+    match ty {
+        severian_mlir::LoweredType::Tensor {
+            shape: severian_mlir::LoweredTensorShape::Ranked(dimensions),
+            ..
+        } => Some(dimensions.len()),
+        _ => None,
+    }
+}
+
+fn tensor_element_abi(
+    element: severian_mlir::LoweredTensorElement,
+) -> Result<(u32, u32, u32), CompileError> {
+    use severian_mlir::{LoweredFloatFormat, LoweredTensorElement};
+    Ok(match element {
+        LoweredTensorElement::Integer { bits, signed: true } => (1, u32::from(bits), 0),
+        LoweredTensorElement::Integer { bits, signed: false } => (2, u32::from(bits), 0),
+        LoweredTensorElement::Boolean => (2, 1, 0),
+        LoweredTensorElement::Float { format: LoweredFloatFormat::Ieee(bits) } => (3, u32::from(bits), 1),
+        LoweredTensorElement::Float { format: LoweredFloatFormat::BrainFloat16 } => (3, 16, 2),
+        LoweredTensorElement::Float { format: LoweredFloatFormat::Float8E4M3Fn } => (3, 8, 3),
+        LoweredTensorElement::Float { format: LoweredFloatFormat::Float8E5M2 } => (3, 8, 4),
+    })
+}
+
+fn stable_tensor_jit_hash(bytes: &[u8]) -> [u64; 4] {
+    let mut hash = [
+        1469598103934665603u64,
+        7809847782465536322,
+        9659303129496669493,
+        2870177450012600261,
+    ];
+    let primes = [1099511628211u64, 14029467366897019727, 1609587929392839161, 9650029242287828579];
+    for byte in bytes {
+        for lane in 0..4 {
+            hash[lane] ^= u64::from(*byte) + lane as u64 * 0x9d;
+            hash[lane] = hash[lane].wrapping_mul(primes[lane]);
+        }
+    }
+    hash
 }
 
 fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {

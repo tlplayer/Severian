@@ -9,8 +9,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+severian-artifact = { path = "../../../../compiler/artifact" }
 severian-compile = { path = "../../../../compiler/compile" }
 severian-fusion = { path = "../../../../compiler/transforms/fusion" }
+severian-mir = { path = "../../../../compiler/transforms/mir" }
 severian-mlir = { path = "../../../../compiler/transforms/mlir" }
 severian-target = { path = "../../../../compiler/target" }
 severian-universal = { path = "../../../../compiler/universal" }
@@ -19,5 +21,3 @@ severian-universal = { path = "../../../../compiler/universal" }
 path = "src/lib.rs"
 
 [dev-dependencies]
-severian-artifact = { path = "../../../../compiler/artifact" }
-severian-mir = { path = "../../../../compiler/transforms/mir" }

@@ -32,6 +32,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -640,6 +649,7 @@ dependencies = [
  "severian-compile",
  "severian-diagnostics",
  "severian-ffi",
+ "severian-fusion",
  "severian-hir",
  "severian-lexer",
  "severian-lowering",
@@ -648,6 +658,7 @@ dependencies = [
  "severian-modules",
  "severian-ownership",
  "severian-parser",
+ "severian-runtime",
  "severian-semantic",
  "severian-source",
  "severian-target",
@@ -670,6 +681,9 @@ dependencies = [
 [[package]]
 name = "severian-fusion"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "severian-hir"
@@ -767,6 +781,8 @@ dependencies = [
 name = "severian-runtime"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "serde",
  "severian-fusion",
 ]
 
@@ -808,6 +824,19 @@ dependencies = [
  "severian-mlir",
  "severian-target",
  "severian-universal",
+]
+
+[[package]]
+name = "severian-tensor-jit-provider"
+version = "0.1.0"
+dependencies = [
+ "severian-backend",
+ "severian-fusion",
+ "severian-mlir",
+ "severian-runtime",
+ "severian-target",
+ "severian-tensor-compiler",
+ "severian-triton",
 ]
 
 [[package]]

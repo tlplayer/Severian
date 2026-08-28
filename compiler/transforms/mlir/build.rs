@@ -29,6 +29,7 @@ fn main() {
         println!("cargo:rustc-link-search=native={libdir}");
         println!("cargo:rustc-link-lib=static=MLIRCAPIIR");
         println!("cargo:rustc-link-lib=static=MLIRCAPIArith");
+        println!("cargo:rustc-link-lib=static=MLIRCAPIRegisterEverything");
         println!("cargo:rustc-link-lib=static=MLIRCAPIControlFlow");
         println!("cargo:rustc-link-lib=static=MLIRCAPIFunc");
         println!("cargo:rustc-link-lib=static=MLIRCAPIGPU");
@@ -61,6 +62,7 @@ fn build_linux_bridge(libdir: &str, llvm_library: &str) {
     let capi_archives = [
         "libMLIRCAPIIR.a",
         "libMLIRCAPIArith.a",
+        "libMLIRCAPIRegisterEverything.a",
         "libMLIRCAPIAsync.a",
         "libMLIRCAPIControlFlow.a",
         "libMLIRCAPIFunc.a",

@@ -1,6 +1,7 @@
 use crate::{
     CompileContext, CompileError, CompilePlan, CompileRegion, CompileRegionSpecialization,
     CompiledRegionArtifact, PlanSegment, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
+    VerifiedTensorJitBundle,
 };
 use severian_artifact::ArtifactId;
 use severian_mlir::verify_artifact;
@@ -136,6 +137,17 @@ fn verify_compiled_region(
             }
             Ok(VerifiedCompiledRegionArtifact::GpuKernel(
                 VerifiedGpuKernelBundle { id, bundle },
+            ))
+        }
+        CompiledRegionArtifact::TensorJit(bundle) => {
+            validate_arity(region, bundle.inputs.len(), bundle.outputs.len())?;
+            if bundle.graph.nodes().is_empty() {
+                return Err(CompileError::InvalidArtifact(
+                    "Tensor-JIT program has an empty fusion graph".into(),
+                ));
+            }
+            Ok(VerifiedCompiledRegionArtifact::TensorJit(
+                VerifiedTensorJitBundle { id, bundle },
             ))
         }
     }
