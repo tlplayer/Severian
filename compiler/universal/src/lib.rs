@@ -3,6 +3,7 @@
 mod context;
 mod conversion;
 mod execution;
+mod generic;
 mod ids;
 mod literal;
 mod operation_registry;
@@ -17,6 +18,10 @@ pub use conversion::{Constructor, Conversion, ConversionKind};
 pub use execution::{
     ExecutionPlacement, EXECUTION_BACKEND_ATTRIBUTE, EXECUTION_DEVICE_ATTRIBUTE,
     EXECUTION_PLACEMENT_ATTRIBUTE,
+};
+pub use generic::{
+    DimExpr, GenericArgument, GenericArguments, GenericError, GenericParamKind, GenericParameter,
+    RankedTensorType, RuntimeDimId, ShapeParameterId, ShapeTerm,
 };
 pub use ids::{
     CompilerId, DeclarationId, DefId, GenericParamId, InferVarId, InstanceId, PrimitiveId,

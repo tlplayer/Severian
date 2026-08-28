@@ -97,6 +97,12 @@ pub struct RuntimeStrides {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeOperand {
+    pub input_index: u16,
+    pub values: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelSpecialization {
     pub shapes: Vec<RuntimeShape>,
     pub strides: Vec<RuntimeStrides>,
@@ -263,6 +269,10 @@ pub struct FusionNode {
     pub operation: String,
     /// Operation-specific integral data such as axes or a permutation.
     pub attributes: Vec<i64>,
+    /// Concrete values for shape/index operands that were available before
+    /// runtime specialization. Dynamic launchers may supply equivalent data
+    /// alongside StorageView descriptors.
+    pub runtime_operands: Vec<RuntimeOperand>,
     pub inputs: Vec<NodeId>,
     pub operand_roles: Vec<OperandRole>,
     pub shape: Shape,
@@ -293,6 +303,7 @@ impl FusionNode {
             kind,
             operation: format!("{kind:?}").to_ascii_lowercase(),
             attributes: Vec::new(),
+            runtime_operands: Vec::new(),
             operand_roles: vec![OperandRole::Data; inputs.len()],
             inputs,
             shape,
@@ -399,6 +410,13 @@ impl FusionGraph {
                 });
             }
             if node.inputs.len() != node.operand_roles.len() {
+                return Err(GraphError::OperandRoleCount { node: node.id });
+            }
+            if node
+                .runtime_operands
+                .iter()
+                .any(|operand| usize::from(operand.input_index) >= node.inputs.len())
+            {
                 return Err(GraphError::OperandRoleCount { node: node.id });
             }
             let valid_layout = match (&node.shape.rank, &node.layout) {

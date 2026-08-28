@@ -1,7 +1,8 @@
 use super::*;
 use severian_fusion::{
     plan, ContractionDimension, DeviceModel, ElementKind, FusionGraph, FusionNode,
-    KernelSpecialization, Matmul, NodeKind, Rank, RuntimeShape, Shape, StorageLayout,
+    KernelSpecialization, Matmul, NodeKind, OperandRole, Rank, RuntimeOperand, RuntimeShape, Shape,
+    StorageLayout,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -123,6 +124,32 @@ fn f32_storage_view(dimensions: Vec<u64>) -> crate::StorageView {
             kind: crate::StorageElementKind::Float,
             bits: 32,
             float_format: crate::StorageFloatFormat::Ieee,
+            reserved: 0,
+        },
+        dimensions,
+        strides,
+        0,
+        crate::StorageOwnership::Borrowed,
+    )
+    .unwrap()
+}
+
+fn i64_storage_view(dimensions: Vec<u64>) -> crate::StorageView {
+    let mut stride = 1i64;
+    let mut strides = vec![0; dimensions.len()];
+    for axis in (0..dimensions.len()).rev() {
+        strides[axis] = stride;
+        stride *= dimensions[axis] as i64;
+    }
+    crate::StorageView::new(
+        0x2000,
+        dimensions.iter().product::<u64>() * 8,
+        crate::StorageElementRepresentationAbi {
+            abi_version: crate::STORAGE_VIEW_ABI_VERSION,
+            byte_size: core::mem::size_of::<crate::StorageElementRepresentationAbi>() as u32,
+            kind: crate::StorageElementKind::SignedInteger,
+            bits: 64,
+            float_format: crate::StorageFloatFormat::None,
             reserved: 0,
         },
         dimensions,
@@ -299,6 +326,169 @@ fn storage_specialization_propagates_rank_generic_batched_matmul() {
             .dimensions,
         [2, 3, 4, 16]
     );
+}
+
+#[test]
+fn runtime_operand_data_specializes_every_shape_changing_structural_class() {
+    let parameter = |id, kind, bits| {
+        let mut node =
+            FusionNode::structural(id, NodeKind::Parameter, [], Shape::unranked(kind, bits));
+        node.layout = StorageLayout::Runtime;
+        node
+    };
+    let constant = |id| {
+        FusionNode::structural(
+            id,
+            NodeKind::Constant,
+            [],
+            Shape::typed([], ElementKind::Opaque, 64),
+        )
+    };
+    let runtime_node =
+        |id, kind, operation: &str, inputs: Vec<NodeId>, operands: Vec<RuntimeOperand>| {
+            let mut node = FusionNode::structural(
+                id,
+                kind,
+                inputs,
+                Shape::unranked(ElementKind::IeeeFloat, 32),
+            );
+            node.operation = operation.into();
+            node.runtime_operands = operands;
+            for operand in &node.runtime_operands {
+                node.operand_roles[usize::from(operand.input_index)] = OperandRole::RuntimeShape;
+            }
+            node.layout = StorageLayout::Runtime;
+            node
+        };
+    let graph = FusionGraph::new(vec![
+        parameter(0, ElementKind::IeeeFloat, 32),
+        parameter(1, ElementKind::IeeeFloat, 32),
+        parameter(2, ElementKind::SignedInteger, 64),
+        constant(3),
+        runtime_node(
+            4,
+            NodeKind::Reshape,
+            "reshape",
+            vec![NodeId(0), NodeId(3)],
+            vec![RuntimeOperand {
+                input_index: 1,
+                values: vec![1, 4],
+            }],
+        ),
+        constant(5),
+        runtime_node(
+            6,
+            NodeKind::Permute,
+            "axes",
+            vec![NodeId(0), NodeId(5)],
+            vec![RuntimeOperand {
+                input_index: 1,
+                values: vec![1, 0],
+            }],
+        ),
+        constant(7),
+        constant(8),
+        constant(9),
+        runtime_node(
+            10,
+            NodeKind::Slice,
+            "slice",
+            vec![NodeId(0), NodeId(7), NodeId(8), NodeId(9)],
+            vec![
+                RuntimeOperand {
+                    input_index: 1,
+                    values: vec![0, 1],
+                },
+                RuntimeOperand {
+                    input_index: 2,
+                    values: vec![2, 2],
+                },
+                RuntimeOperand {
+                    input_index: 3,
+                    values: vec![1, 1],
+                },
+            ],
+        ),
+        constant(11),
+        runtime_node(
+            12,
+            NodeKind::Broadcast,
+            "repeat",
+            vec![NodeId(0), NodeId(11)],
+            vec![RuntimeOperand {
+                input_index: 1,
+                values: vec![0, 2],
+            }],
+        ),
+        runtime_node(
+            13,
+            NodeKind::Gather,
+            "gather",
+            vec![NodeId(0), NodeId(2)],
+            Vec::new(),
+        ),
+        constant(14),
+        runtime_node(
+            15,
+            NodeKind::Concatenate,
+            "concatenate",
+            vec![NodeId(0), NodeId(1), NodeId(14)],
+            vec![RuntimeOperand {
+                input_index: 2,
+                values: vec![0],
+            }],
+        ),
+        runtime_node(
+            16,
+            NodeKind::Broadcast,
+            "like",
+            vec![NodeId(0), NodeId(1)],
+            Vec::new(),
+        ),
+    ])
+    .unwrap();
+    let specialization = specialize_storage_views(
+        &graph,
+        GpuTarget::Nvidia,
+        &[
+            StorageSpecializationBinding {
+                node: NodeId(0),
+                view: f32_storage_view(vec![2, 2]),
+            },
+            StorageSpecializationBinding {
+                node: NodeId(1),
+                view: f32_storage_view(vec![2, 2]),
+            },
+            StorageSpecializationBinding {
+                node: NodeId(2),
+                view: i64_storage_view(vec![2]),
+            },
+        ],
+    )
+    .unwrap();
+    let shape = |node| {
+        specialization
+            .shapes
+            .iter()
+            .find(|shape| shape.node == NodeId(node))
+            .unwrap()
+            .dimensions
+            .clone()
+    };
+    assert_eq!(shape(4), [1, 4]);
+    assert_eq!(shape(6), [2, 2]);
+    assert_eq!(shape(10), [2, 1]);
+    assert_eq!(shape(12), [4, 2]);
+    assert_eq!(shape(13), [2, 2]);
+    assert_eq!(shape(15), [4, 2]);
+    assert_eq!(shape(16), [2, 2]);
+    let slice = specialization
+        .strides
+        .iter()
+        .find(|strides| strides.node == NodeId(10))
+        .unwrap();
+    assert_eq!(slice.strides, [2, 1]);
+    assert_eq!(slice.offset, 1);
 }
 
 impl GpuCompiler for MockCompiler {

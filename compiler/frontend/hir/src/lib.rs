@@ -9,7 +9,7 @@ pub use expression::{Callee, TaskOwner};
 pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{
     CompileRoute, CompilerId, Conversion, ConversionKind, DefId, GenericParamId, OpId,
-    Substitution, TypeId,
+    GenericParameter, Substitution, TypeId,
 };
 pub use statement::{Binding, Block, MatchArm, Statement};
 
@@ -85,6 +85,11 @@ pub struct FunctionDeclaration {
     pub definition: DefId,
     pub substitution: Substitution,
     pub name: String,
+    /// Kinded source generics. Dimension and shape parameters are deliberately
+    /// absent from `substitution`, whose values are ordinary types only.
+    pub generic_parameters: Vec<GenericParameter>,
+    /// Legacy type-only parameter identities retained while MIR consumers move
+    /// to `generic_parameters`.
     pub type_parameters: Vec<GenericParamId>,
     pub parameters: Vec<FunctionParameter>,
     pub result: BoundaryType,

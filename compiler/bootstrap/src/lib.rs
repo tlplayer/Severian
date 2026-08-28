@@ -266,6 +266,18 @@ fn substitute_type(
             },
             span: annotation.span,
         },
+        TypeAnnotationKind::DimensionConstant(value) => TypeAnnotation {
+            kind: TypeAnnotationKind::DimensionConstant(*value),
+            span: annotation.span,
+        },
+        TypeAnnotationKind::DimensionRuntime(runtime) => TypeAnnotation {
+            kind: TypeAnnotationKind::DimensionRuntime(*runtime),
+            span: annotation.span,
+        },
+        TypeAnnotationKind::ShapeSpread(name) => TypeAnnotation {
+            kind: TypeAnnotationKind::ShapeSpread(name.clone()),
+            span: annotation.span,
+        },
         TypeAnnotationKind::Function { parameters, result } => TypeAnnotation {
             kind: TypeAnnotationKind::Function {
                 parameters: parameters

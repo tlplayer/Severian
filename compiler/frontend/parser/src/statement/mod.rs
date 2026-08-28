@@ -1961,9 +1961,16 @@ impl Parser<'_> {
         let mut constraints = Vec::new();
         if self.take(&TokenKind::LeftBracket).is_some() {
             loop {
+                let variadic = self.take(&TokenKind::Star).is_some();
                 let (parameter, parameter_span) =
                     self.identifier("expected a generic parameter")?;
                 type_parameters.push(parameter.clone());
+                if variadic {
+                    constraints.push(GenericConstraint::VariadicPack {
+                        parameter: parameter.clone(),
+                        span: parameter_span,
+                    });
+                }
                 if self.take(&TokenKind::Colon).is_some() {
                     loop {
                         let bound = self.type_annotation()?;
@@ -3848,7 +3855,31 @@ impl Parser<'_> {
                 Span::new(open.span.source, open.span.start, close.span.end),
             ));
         }
-        let (mut name, start) = self.identifier("expected a type")?;
+        let token = self.next();
+        let (mut name, start) = match token.kind {
+            TokenKind::Identifier(name) => (name, token.span),
+            TokenKind::Integer(value) => {
+                let normalized = value.replace('_', "");
+                let Ok(value) = normalized.parse::<u64>() else {
+                    return Err(Diagnostic::new(
+                        "E000110",
+                        "a tensor dimension constant must fit in an unsigned 64-bit integer",
+                        Some(token.span),
+                    ));
+                };
+                return Ok(TypeAnnotation {
+                    kind: TypeAnnotationKind::DimensionConstant(value),
+                    span: token.span,
+                });
+            }
+            _ => {
+                return Err(Diagnostic::new(
+                    "E000110",
+                    "expected a type",
+                    Some(token.span),
+                ))
+            }
+        };
         let mut name_end = start.end;
         while self.take(&TokenKind::Dot).is_some() {
             let (member, member_span) = self.identifier("expected a type name after `.`")?;
@@ -3861,7 +3892,7 @@ impl Parser<'_> {
         if self.take(&TokenKind::LeftBracket).is_some() {
             if !self.at(&TokenKind::RightBracket) {
                 loop {
-                    arguments.push(self.type_annotation()?);
+                    arguments.push(self.type_argument_annotation()?);
                     if self.take(&TokenKind::Comma).is_none() {
                         break;
                     }
@@ -3880,6 +3911,17 @@ impl Parser<'_> {
             arguments,
             Span::new(start.source, start.start, end),
         ))
+    }
+
+    fn type_argument_annotation(&mut self) -> Result<TypeAnnotation, Diagnostic> {
+        if let Some(star) = self.take(&TokenKind::Star) {
+            let (name, name_span) = self.identifier("expected a shape parameter after `*`")?;
+            return Ok(TypeAnnotation {
+                kind: TypeAnnotationKind::ShapeSpread(name),
+                span: Span::new(star.span.source, star.span.start, name_span.end),
+            });
+        }
+        self.type_annotation()
     }
 
     fn separators(&mut self) {

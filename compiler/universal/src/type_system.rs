@@ -1,4 +1,6 @@
-use crate::{DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, TensorShape, TyId, TypeId};
+use crate::{
+    DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, ShapeTerm, TensorShape, TyId, TypeId,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -39,6 +41,7 @@ pub enum TypeKind {
     Tensor {
         constructor: DefId,
         element: TyId,
+        source_shape: ShapeTerm,
         shape: TensorShape,
     },
     Parameter(GenericParamId),
@@ -130,12 +133,14 @@ impl TyInterner {
             TypeKind::Tensor {
                 constructor,
                 element,
+                source_shape,
                 shape,
             } => {
                 let element = self.substitute(element, substitution);
                 self.intern(TypeKind::Tensor {
                     constructor,
                     element,
+                    source_shape,
                     shape,
                 })
             }
@@ -263,11 +268,13 @@ impl InferenceContext {
                     constructor: left_constructor,
                     element: left_element,
                     shape: left_shape,
+                    ..
                 }),
                 Some(TypeKind::Tensor {
                     constructor: right_constructor,
                     element: right_element,
                     shape: right_shape,
+                    ..
                 }),
             ) if left_constructor == right_constructor && left_shape == right_shape => {
                 self.unify(interner, *left_element, *right_element)

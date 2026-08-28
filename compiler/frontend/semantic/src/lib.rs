@@ -88,6 +88,7 @@ pub(crate) struct PackageFunction {
     pub id: FunctionId,
     pub definition: DefId,
     pub substitution: severian_universal::Substitution,
+    pub generic_parameters: Vec<severian_universal::GenericParameter>,
     pub type_parameters: Vec<severian_universal::GenericParamId>,
     pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeId>,
@@ -523,6 +524,14 @@ pub(crate) fn analyze_with_package_functions(
                 .map(|function| function.substitution.clone())
                 .unwrap_or_default(),
             name: ast_function.name.clone(),
+            generic_parameters: package_function
+                .map(|function| function.generic_parameters.clone())
+                .unwrap_or_else(|| {
+                    crate::package::generic_parameters(
+                        &ast_function.type_parameters,
+                        &ast_function.constraints,
+                    )
+                }),
             type_parameters: package_function
                 .map(|function| function.type_parameters.clone())
                 .unwrap_or_default(),
@@ -573,6 +582,7 @@ pub(crate) fn analyze_with_package_functions(
                     context.module_name
                 ),
                 parameters: Vec::new(),
+                generic_parameters: Vec::new(),
                 type_parameters: Vec::new(),
                 result: universal_boundary(unit),
                 compile_route: severian_universal::CompileRoute::Standard,
@@ -1913,6 +1923,85 @@ impl Analyzer<'_> {
                 });
             if !arguments.is_empty() {
                 if let Some(visible_name) = visible_name {
+                    if visible_name.rsplit('.').next() == Some("Tensor") {
+                        let constructor = self
+                            .generic_class_constructors
+                            .get(&visible_name)
+                            .copied()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    "E000204",
+                                    "Tensor has no registered type constructor",
+                                    Some(annotation.span),
+                                )
+                            })?;
+                        let element = self.resolve_source_type(&arguments[0])?;
+                        if arguments.len() == 1 {
+                            return self
+                                .types
+                                .instantiate_tensor(
+                                    constructor,
+                                    element,
+                                    severian_universal::TensorShape::Unranked,
+                                )
+                                .map_err(|error| {
+                                    Diagnostic::new(
+                                        "E000204",
+                                        error.to_string(),
+                                        Some(annotation.span),
+                                    )
+                                });
+                        }
+                        let dimensions = arguments[1..]
+                            .iter()
+                            .map(|argument| match &argument.kind {
+                                severian_ast::TypeAnnotationKind::DimensionConstant(value) => {
+                                    Ok(severian_universal::DimExpr::Constant(*value))
+                                }
+                                severian_ast::TypeAnnotationKind::DimensionRuntime(runtime) => {
+                                    Ok(severian_universal::DimExpr::Runtime(
+                                        severian_universal::RuntimeDimId(*runtime),
+                                    ))
+                                }
+                                severian_ast::TypeAnnotationKind::ShapeSpread(name) => {
+                                    Err(Diagnostic::new(
+                                        "E000204",
+                                        format!(
+                                            "shape pack `*{name}` must be inferred or specialized before tensor type resolution"
+                                        ),
+                                        Some(argument.span),
+                                    ))
+                                }
+                                severian_ast::TypeAnnotationKind::Named { name, arguments }
+                                    if arguments.is_empty() => Err(Diagnostic::new(
+                                        "E000204",
+                                        format!(
+                                            "dimension `{name}` must be bound before tensor type resolution"
+                                        ),
+                                        Some(argument.span),
+                                    )),
+                                _ => Err(Diagnostic::new(
+                                    "E000204",
+                                    "tensor shape arguments must be dimension values or shape packs",
+                                    Some(argument.span),
+                                )),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        return self
+                            .types
+                            .instantiate_symbolic_tensor(
+                                constructor,
+                                element,
+                                severian_universal::ShapeTerm::Ranked(dimensions),
+                            )
+                            .map_err(|error| {
+                                Diagnostic::new(
+                                    "E000204",
+                                    error.to_string(),
+                                    Some(annotation.span),
+                                )
+                            });
+                    }
                     return self
                         .instantiate_class(&visible_name, arguments, annotation.span)
                         .map(|class| class.ty);
@@ -7304,6 +7393,7 @@ impl Analyzer<'_> {
                     type_id: *result,
                     kind: ExpressionKind::Call {
                         callee: severian_hir::Callee::Direct {
+                            instance: Some(*function),
                             function: self.function_definitions[function],
                             substitution: self.function_substitutions[function].clone(),
                         },
@@ -8824,7 +8914,8 @@ impl Analyzer<'_> {
                 Some(span),
             ));
         };
-        if declaration.type_parameters.len() != arguments.len() {
+        let tensor_element_only = name.rsplit('.').next() == Some("Tensor") && arguments.len() == 1;
+        if declaration.type_parameters.len() != arguments.len() && !tensor_element_only {
             return Err(Diagnostic::new(
                 "E000204",
                 format!(
@@ -8855,7 +8946,8 @@ impl Analyzer<'_> {
                 Some(span),
             )
         })?;
-        if declaration.type_parameters.len() != concrete.len() {
+        let tensor_element_only = name.rsplit('.').next() == Some("Tensor") && concrete.len() == 1;
+        if declaration.type_parameters.len() != concrete.len() && !tensor_element_only {
             return Err(Diagnostic::new(
                 "E000204",
                 format!(
@@ -11494,6 +11586,7 @@ impl Analyzer<'_> {
             type_id: result_type,
             kind: ExpressionKind::Call {
                 callee: severian_hir::Callee::Direct {
+                    instance: None,
                     function: definition,
                     substitution: severian_universal::Substitution::default(),
                 },
@@ -11625,6 +11718,31 @@ impl Analyzer<'_> {
         })?;
         self.instantiate_class_types(&name, &[element], span)
             .map(|instance| instance.ty)
+    }
+
+    fn tensor_type_with_shape(
+        &mut self,
+        element: TypeId,
+        shape: severian_universal::ShapeTerm,
+        span: severian_source::Span,
+    ) -> Result<TypeId, Diagnostic> {
+        let name = self.tensor_class_name().ok_or_else(|| {
+            Diagnostic::new("E000204", "tensor package is not visible", Some(span))
+        })?;
+        let constructor = self
+            .generic_class_constructors
+            .get(&name)
+            .copied()
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    "Tensor has no registered type constructor",
+                    Some(span),
+                )
+            })?;
+        self.types
+            .instantiate_symbolic_tensor(constructor, element, shape)
+            .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))
     }
 
     fn tensor_class_name(&self) -> Option<String> {
@@ -11778,13 +11896,11 @@ impl Analyzer<'_> {
                 let Some(dimensions) = shape.dimensions() else {
                     return severian_universal::TensorShape::Unranked;
                 };
-                if dimensions.len() <= 1 {
-                    severian_universal::TensorShape::ranked([1])
-                } else {
-                    severian_universal::TensorShape::Ranked(
-                        dimensions[..dimensions.len() - 1].to_vec(),
-                    )
+                let mut dimensions = dimensions.to_vec();
+                if let Some(last) = dimensions.last_mut() {
+                    *last = severian_universal::TensorDimension::Known(1);
                 }
+                severian_universal::TensorShape::Ranked(dimensions)
             }),
             severian_universal::tensor::TensorOp::Reduce(
                 severian_universal::tensor::ReductionOp::SumAxis,
@@ -11813,37 +11929,63 @@ impl Analyzer<'_> {
             }),
             severian_universal::tensor::TensorOp::ReshapeView(
                 severian_universal::tensor::ReshapeViewOp::Reshape,
-            )
-            | severian_universal::tensor::TensorOp::Permute(
+            ) => Some(severian_universal::TensorShape::Unranked),
+            severian_universal::tensor::TensorOp::Permute(
                 severian_universal::tensor::PermuteOp::Axes,
             )
             | severian_universal::tensor::TensorOp::Slice
-            | severian_universal::tensor::TensorOp::Gather
             | severian_universal::tensor::TensorOp::Concatenate
             | severian_universal::tensor::TensorOp::Broadcast(
                 severian_universal::tensor::BroadcastOp::Repeat,
-            ) => Some(severian_universal::TensorShape::Unranked),
+            ) => source_shape.as_ref().map(dynamic_tensor_rank),
+            severian_universal::tensor::TensorOp::Gather => source_shape
+                .as_ref()
+                .zip(right_shape.as_ref())
+                .map(|(source, indices)| {
+                    let rank = source
+                        .rank()
+                        .zip(indices.rank())
+                        .map(|(source, indices)| indices + source.saturating_sub(1));
+                    rank.map_or(
+                        severian_universal::TensorShape::Unranked,
+                        severian_universal::TensorShape::dynamic,
+                    )
+                }),
             severian_universal::tensor::TensorOp::Broadcast(
                 severian_universal::tensor::BroadcastOp::Like,
             ) => right_shape,
             severian_universal::tensor::TensorOp::Scatter => source_shape,
             _ => source_shape,
         };
-        let result = match (source_tensor, inferred_shape.as_ref()) {
+        let mut result = match (source_tensor, inferred_shape.as_ref()) {
             (Some(_), Some(shape)) => self
                 .types
                 .refine_tensor_shape(source, shape.clone())
                 .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?,
             _ => source,
         };
-        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
-            return Err(semantic_error(
-                "tensor operation does not satisfy the expected type".into(),
-                span,
-            ));
+        if let Some(expected) = expected {
+            if !self.types.assignable(result, expected) {
+                let compatible_ranked_contract = self
+                    .types
+                    .tensor(result)
+                    .zip(self.types.tensor(expected))
+                    .is_some_and(|(actual, expected)| {
+                        actual.element == expected.element
+                            && tensor_shapes_compatible(&actual.shape, &expected.shape)
+                    });
+                if compatible_ranked_contract {
+                    result = expected;
+                } else {
+                    return Err(semantic_error(
+                        "tensor operation does not satisfy the expected type".into(),
+                        span,
+                    ));
+                }
+            }
         }
         let mut attributes = severian_universal::Attrs::new();
-        if let Some(shape) = inferred_shape {
+        if let Some(shape) = self.types.tensor(result).map(|tensor| tensor.shape) {
             attributes.insert(
                 severian_universal::tensor::RESULT_SHAPE,
                 severian_universal::AttrValue::TensorShape(shape),
@@ -11957,21 +12099,42 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("bytes")
                     .expect("bootstrap defines bytes");
-                let result = self.tensor_type(element, span)?;
-                if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
-                    return Err(semantic_error(
-                        "storage view does not satisfy the expected tensor type".into(),
-                        span,
-                    ));
-                }
+                let inferred = self.tensor_type(element, span)?;
+                let result = match expected.and_then(|expected| {
+                    self.types
+                        .tensor(expected)
+                        .filter(|tensor| tensor.element == element)
+                        .map(|_| expected)
+                }) {
+                    Some(expected) => expected,
+                    None if expected.is_some() => {
+                        return Err(semantic_error(
+                            "storage view does not satisfy the expected tensor element type"
+                                .into(),
+                            span,
+                        ));
+                    }
+                    None => inferred,
+                };
                 let descriptor = self.expression(&descriptor.value, Some(bytes))?;
+                let mut attributes = severian_universal::Attrs::new();
+                attributes.insert(
+                    severian_universal::tensor::ELEMENT_TYPE,
+                    severian_universal::AttrValue::Type(element),
+                );
+                if let Some(tensor) = self.types.tensor(result) {
+                    attributes.insert(
+                        severian_universal::tensor::RESULT_SHAPE,
+                        severian_universal::AttrValue::TensorShape(tensor.shape),
+                    );
+                }
                 return Ok(Some(self.tensor_intrinsic(
                     severian_universal::tensor::TensorOp::StorageView(
                         severian_universal::tensor::StorageViewOp::FromAbi,
                     ),
                     vec![descriptor],
                     result,
-                    severian_universal::Attrs::new(),
+                    attributes,
                     span,
                 )));
             }
@@ -12054,6 +12217,14 @@ impl Analyzer<'_> {
                             )
                             .map(Some),
                         ("slice", [starts, ends, steps]) => {
+                            let runtime_operands = [starts, ends, steps]
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(index, argument)| {
+                                    tensor_literal_integers(&argument.value)
+                                        .map(|values| (index + 1, values))
+                                })
+                                .collect::<Vec<_>>();
                             let integer = self
                                 .types
                                 .resolve_name("int")
@@ -12065,13 +12236,14 @@ impl Analyzer<'_> {
                             let starts = self.list_storage_expression(starts, span);
                             let ends = self.list_storage_expression(ends, span);
                             let steps = self.list_storage_expression(steps, span);
-                            self.tensor_operation(
+                            let mut result = self.tensor_operation(
                                 severian_universal::tensor::TensorOp::Slice,
                                 vec![receiver, starts, ends, steps],
                                 expected,
                                 span,
-                            )
-                            .map(Some)
+                            )?;
+                            attach_tensor_runtime_operands(&mut result, &runtime_operands);
+                            Ok(Some(result))
                         }
                         _ => Ok(None),
                     };
@@ -12120,6 +12292,12 @@ impl Analyzer<'_> {
                     severian_universal::AttrValue::TensorShape(shape),
                 );
             }
+            if let Some(shape) = tensor_literal_integers(&arguments[1].value) {
+                attributes.insert(
+                    severian_universal::tensor::RUNTIME_OPERANDS,
+                    severian_universal::AttrValue::Integers(encode_runtime_operands(&[(1, shape)])),
+                );
+            }
             return Ok(Some(self.tensor_intrinsic(
                 severian_universal::tensor::TensorOp::StorageView(
                     severian_universal::tensor::StorageViewOp::FromElements,
@@ -12156,6 +12334,13 @@ impl Analyzer<'_> {
                 .resolve_tensor_element_type(value.type_id, span)
                 .is_some()
             {
+                let runtime_operands = arguments[1..]
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, argument)| {
+                        tensor_literal_integers(&argument.value).map(|values| (index + 1, values))
+                    })
+                    .collect::<Vec<_>>();
                 let integer = self
                     .types
                     .resolve_name("int")
@@ -12166,14 +12351,14 @@ impl Analyzer<'_> {
                     let list = self.expression(&argument.value, Some(list))?;
                     resolved.push(self.list_storage_expression(list, span));
                 }
-                return self
-                    .tensor_operation(
-                        severian_universal::tensor::TensorOp::Slice,
-                        resolved,
-                        expected,
-                        span,
-                    )
-                    .map(Some);
+                let mut result = self.tensor_operation(
+                    severian_universal::tensor::TensorOp::Slice,
+                    resolved,
+                    expected,
+                    span,
+                )?;
+                attach_tensor_runtime_operands(&mut result, &runtime_operands);
+                return Ok(Some(result));
             }
             return Ok(None);
         }
@@ -12191,6 +12376,7 @@ impl Analyzer<'_> {
             _ => None,
         };
         if let (Some(operation), [value, specification]) = (list_spec_operation, arguments) {
+            let runtime_values = tensor_literal_integers(&specification.value);
             let value = self.expression(&value.value, None)?;
             if self
                 .resolve_tensor_element_type(value.type_id, span)
@@ -12203,14 +12389,42 @@ impl Analyzer<'_> {
                 let list = self.instantiate_list_type(integer);
                 let specification = self.expression(&specification.value, Some(list))?;
                 let specification = self.list_storage_expression(specification, span);
-                return self
-                    .tensor_operation(operation, vec![value, specification], expected, span)
-                    .map(Some);
+                let mut result =
+                    self.tensor_operation(operation, vec![value, specification], expected, span)?;
+                if let Some(values) = runtime_values {
+                    if operation
+                        == severian_universal::tensor::TensorOp::ReshapeView(
+                            severian_universal::tensor::ReshapeViewOp::Reshape,
+                        )
+                    {
+                        let shape = severian_universal::TensorShape::Ranked(
+                            values
+                                .iter()
+                                .map(|dimension| {
+                                    u64::try_from(*dimension).map_or(
+                                        severian_universal::TensorDimension::Dynamic,
+                                        severian_universal::TensorDimension::Known,
+                                    )
+                                })
+                                .collect(),
+                        );
+                        result.type_id = self
+                            .types
+                            .refine_tensor_shape(result.type_id, shape.clone())
+                            .map_err(|error| {
+                                Diagnostic::new("E000204", error.to_string(), Some(span))
+                            })?;
+                        attach_tensor_result_shape(&mut result, shape);
+                    }
+                    attach_tensor_runtime_operands(&mut result, &[(1, values)]);
+                }
+                return Ok(Some(result));
             }
             return Ok(None);
         }
 
         if name == "concatenate" && arguments.len() == 3 {
+            let runtime_axis = tensor_literal_integers(&arguments[2].value);
             let left = self.expression(&arguments[0].value, None)?;
             if let Some(left_element) = self.resolve_tensor_element_type(left.type_id, span) {
                 let right = self.expression(&arguments[1].value, None)?;
@@ -12227,14 +12441,16 @@ impl Analyzer<'_> {
                 let list = self.instantiate_list_type(integer);
                 let axis = self.expression(&arguments[2].value, Some(list))?;
                 let axis = self.list_storage_expression(axis, span);
-                return self
-                    .tensor_operation(
-                        severian_universal::tensor::TensorOp::Concatenate,
-                        vec![left, right, axis],
-                        expected,
-                        span,
-                    )
-                    .map(Some);
+                let mut result = self.tensor_operation(
+                    severian_universal::tensor::TensorOp::Concatenate,
+                    vec![left, right, axis],
+                    expected,
+                    span,
+                )?;
+                if let Some(axis) = runtime_axis {
+                    attach_tensor_runtime_operands(&mut result, &[(2, axis)]);
+                }
+                return Ok(Some(result));
             }
             return Ok(None);
         }
@@ -12475,13 +12691,15 @@ impl Analyzer<'_> {
             let Some(source_element) = self.resolve_tensor_element_type(value.type_id, span) else {
                 return Ok(None);
             };
-            let mut result = self.tensor_type(target_element, span)?;
-            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
-                return Err(semantic_error(
-                    "tensor conversion does not satisfy the expected type".into(),
+            let source_tensor = self.types.tensor(value.type_id);
+            let result = match &source_tensor {
+                Some(source) => self.tensor_type_with_shape(
+                    target_element,
+                    source.source_shape.clone(),
                     span,
-                ));
-            }
+                )?,
+                None => self.tensor_type(target_element, span)?,
+            };
             let mut attributes = severian_universal::Attrs::new();
             attributes.insert(
                 severian_universal::tensor::ELEMENT_TYPE,
@@ -12491,15 +12709,17 @@ impl Analyzer<'_> {
                 severian_universal::tensor::TARGET_ELEMENT_TYPE,
                 severian_universal::AttrValue::Type(target_element),
             );
-            if let Some(source) = self.types.tensor(value.type_id) {
-                result = self
-                    .types
-                    .refine_tensor_shape(result, source.shape.clone())
-                    .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?;
+            if let Some(source) = source_tensor {
                 attributes.insert(
                     severian_universal::tensor::RESULT_SHAPE,
                     severian_universal::AttrValue::TensorShape(source.shape),
                 );
+            }
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+                return Err(semantic_error(
+                    "tensor conversion does not satisfy the expected type".into(),
+                    span,
+                ));
             }
             return Ok(Some(self.tensor_intrinsic(
                 severian_universal::tensor::TensorOp::Convert,
@@ -12528,7 +12748,15 @@ impl Analyzer<'_> {
             else {
                 return Ok(None);
             };
-            let mut result = self.tensor_type(target_element, span)?;
+            let source_tensor = self.types.tensor(source.type_id);
+            let result = match &source_tensor {
+                Some(source) => self.tensor_type_with_shape(
+                    target_element,
+                    source.source_shape.clone(),
+                    span,
+                )?,
+                None => self.tensor_type(target_element, span)?,
+            };
             let mut attributes = severian_universal::Attrs::new();
             attributes.insert(
                 severian_universal::tensor::ELEMENT_TYPE,
@@ -12538,11 +12766,7 @@ impl Analyzer<'_> {
                 severian_universal::tensor::TARGET_ELEMENT_TYPE,
                 severian_universal::AttrValue::Type(target_element),
             );
-            if let Some(source) = self.types.tensor(source.type_id) {
-                result = self
-                    .types
-                    .refine_tensor_shape(result, source.shape.clone())
-                    .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?;
+            if let Some(source) = source_tensor {
                 attributes.insert(
                     severian_universal::tensor::RESULT_SHAPE,
                     severian_universal::AttrValue::TensorShape(source.shape),
@@ -13048,6 +13272,7 @@ impl Analyzer<'_> {
                 type_id: callable.signature.result,
                 kind: ExpressionKind::Call {
                     callee: severian_hir::Callee::Direct {
+                        instance: Some(function),
                         function: self.function_definitions[&function],
                         substitution: self.function_substitutions[&function].clone(),
                     },
@@ -13778,6 +14003,7 @@ impl Analyzer<'_> {
             definition,
             substitution: severian_universal::Substitution::default(),
             name: symbol.into(),
+            generic_parameters: Vec::new(),
             type_parameters: Vec::new(),
             parameters,
             result: universal_boundary(result_type),
@@ -14163,6 +14389,7 @@ impl Analyzer<'_> {
                     extension.namespace,
                     internal_name_part(path)
                 ),
+                generic_parameters: Vec::new(),
                 type_parameters: Vec::new(),
                 parameters,
                 result: universal_boundary(result),
@@ -14176,6 +14403,7 @@ impl Analyzer<'_> {
             type_id: result,
             kind: ExpressionKind::Call {
                 callee: severian_hir::Callee::Direct {
+                    instance: Some(function_id),
                     function: definition,
                     substitution: severian_universal::Substitution::default(),
                 },
@@ -15730,6 +15958,40 @@ impl Analyzer<'_> {
     }
 }
 
+fn tensor_shapes_compatible(
+    inferred: &severian_universal::TensorShape,
+    expected: &severian_universal::TensorShape,
+) -> bool {
+    match (inferred, expected) {
+        (
+            severian_universal::TensorShape::Unranked,
+            severian_universal::TensorShape::Ranked(_),
+        ) => true,
+        (
+            severian_universal::TensorShape::Ranked(inferred),
+            severian_universal::TensorShape::Ranked(expected),
+        ) if inferred.len() == expected.len() => inferred.iter().zip(expected).all(
+            |(inferred, expected)| match (inferred, expected) {
+                (
+                    severian_universal::TensorDimension::Known(inferred),
+                    severian_universal::TensorDimension::Known(expected),
+                ) => inferred == expected,
+                _ => true,
+            },
+        ),
+        _ => false,
+    }
+}
+
+fn dynamic_tensor_rank(
+    shape: &severian_universal::TensorShape,
+) -> severian_universal::TensorShape {
+    shape.rank().map_or(
+        severian_universal::TensorShape::Unranked,
+        severian_universal::TensorShape::dynamic,
+    )
+}
+
 fn tensor_expression_shape(expression: &Expression) -> Option<severian_universal::TensorShape> {
     let ExpressionKind::Call {
         callee: severian_hir::Callee::Intrinsic { attributes, .. },
@@ -15752,6 +16014,9 @@ fn type_annotation_mentions(annotation: &TypeAnnotation, names: &[String]) -> bo
                     .iter()
                     .any(|argument| type_annotation_mentions(argument, names))
         }
+        severian_ast::TypeAnnotationKind::DimensionConstant(_) => false,
+        severian_ast::TypeAnnotationKind::DimensionRuntime(_) => false,
+        severian_ast::TypeAnnotationKind::ShapeSpread(name) => names.contains(name),
         severian_ast::TypeAnnotationKind::Function { parameters, result } => {
             parameters
                 .iter()
@@ -15778,6 +16043,9 @@ fn render_type_annotation(annotation: &TypeAnnotation) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        severian_ast::TypeAnnotationKind::DimensionConstant(value) => value.to_string(),
+        severian_ast::TypeAnnotationKind::DimensionRuntime(runtime) => format!("?{runtime}"),
+        severian_ast::TypeAnnotationKind::ShapeSpread(name) => format!("*{name}"),
         severian_ast::TypeAnnotationKind::Function { parameters, result } => format!(
             "({}) -> {}",
             parameters
@@ -16478,6 +16746,15 @@ fn substitute_type_annotation(
                     .collect(),
             }
         }
+        severian_ast::TypeAnnotationKind::DimensionConstant(value) => {
+            severian_ast::TypeAnnotationKind::DimensionConstant(*value)
+        }
+        severian_ast::TypeAnnotationKind::DimensionRuntime(runtime) => {
+            severian_ast::TypeAnnotationKind::DimensionRuntime(*runtime)
+        }
+        severian_ast::TypeAnnotationKind::ShapeSpread(name) => {
+            severian_ast::TypeAnnotationKind::ShapeSpread(name.clone())
+        }
         severian_ast::TypeAnnotationKind::Function { parameters, result } => {
             severian_ast::TypeAnnotationKind::Function {
                 parameters: parameters
@@ -17113,19 +17390,65 @@ fn operator_namespaces(decorators: &[severian_ast::Decorator]) -> BTreeMap<Strin
 }
 
 fn tensor_literal_shape(expression: &AstExpression) -> Option<severian_universal::TensorShape> {
-    let AstExpressionKind::List(dimensions) = &expression.kind else {
-        return None;
-    };
-    dimensions
-        .iter()
-        .map(|dimension| {
-            let AstExpressionKind::Literal(AstLiteral::Integer(value)) = &dimension.kind else {
-                return None;
-            };
-            value.parse::<u64>().ok()
-        })
+    tensor_literal_integers(expression)?
+        .into_iter()
+        .map(|dimension| u64::try_from(dimension).ok())
         .collect::<Option<Vec<_>>>()
         .map(severian_universal::TensorShape::ranked)
+}
+
+fn tensor_literal_integers(expression: &AstExpression) -> Option<Vec<i128>> {
+    let AstExpressionKind::List(values) = &expression.kind else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| constant_integer_expression(value).map(i128::from))
+        .collect()
+}
+
+fn encode_runtime_operands(operands: &[(usize, Vec<i128>)]) -> Vec<i128> {
+    let mut encoded = Vec::new();
+    for (index, values) in operands {
+        encoded.push(*index as i128);
+        encoded.push(values.len() as i128);
+        encoded.extend(values);
+    }
+    encoded
+}
+
+fn attach_tensor_runtime_operands(expression: &mut Expression, operands: &[(usize, Vec<i128>)]) {
+    if operands.is_empty() {
+        return;
+    }
+    let ExpressionKind::Call {
+        callee: severian_hir::Callee::Intrinsic { attributes, .. },
+        ..
+    } = &mut expression.kind
+    else {
+        return;
+    };
+    attributes.insert(
+        severian_universal::tensor::RUNTIME_OPERANDS,
+        severian_universal::AttrValue::Integers(encode_runtime_operands(operands)),
+    );
+}
+
+fn attach_tensor_result_shape(
+    expression: &mut Expression,
+    shape: severian_universal::TensorShape,
+) {
+    let ExpressionKind::Call {
+        callee: severian_hir::Callee::Intrinsic { attributes, .. },
+        ..
+    } = &mut expression.kind
+    else {
+        return;
+    };
+    attributes.insert(
+        severian_universal::tensor::RESULT_SHAPE,
+        severian_universal::AttrValue::TensorShape(shape),
+    );
 }
 
 fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {

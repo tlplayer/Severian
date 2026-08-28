@@ -784,10 +784,26 @@ impl CfgLowering<'_> {
     }
 
     fn resolve_callee(&self, callee: &severian_mir::Callee) -> Result<FunctionId, LoweringError> {
+        if let severian_mir::Callee::Direct {
+            instance: Some(instance),
+            ..
+        } = callee
+        {
+            return self
+                .mir
+                .functions
+                .iter()
+                .find(|function| function.id == *instance)
+                .map(|function| FunctionId(function.id.0))
+                .ok_or_else(|| {
+                    LoweringError::UnsupportedCfgOperation(format!("callee {callee:?}"))
+                });
+        }
         let (definition, substitution) = match callee {
             severian_mir::Callee::Direct {
                 function,
                 substitution,
+                ..
             } => (*function, substitution),
             severian_mir::Callee::Method {
                 implementation,

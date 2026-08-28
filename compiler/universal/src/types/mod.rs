@@ -1,8 +1,9 @@
 use crate::{
     BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, GenericParamId,
     IntegerWidth, LiteralKind, LiteralValue, OperatorSignature, PrimitiveCategory,
-    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, Substitution, TensorShape,
-    TensorType, TyInterner, TypeConstraint, TypeId, TypeKind, TypePattern, UnaryOperator,
+    DimExpr, PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, RuntimeDimId, ShapeTerm,
+    ShapeParameterId, Substitution, TensorDimension, TensorShape, TensorType, TyInterner,
+    TypeConstraint, TypeId, TypeKind, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -18,6 +19,7 @@ pub enum TypeDefinitionKind {
     Tensor {
         constructor: TypeId,
         element: TypeId,
+        source_shape: ShapeTerm,
         shape: TensorShape,
     },
 }
@@ -59,7 +61,8 @@ pub struct TypeContext {
     compile_routes: BTreeMap<TypeId, CompilerId>,
     applications: BTreeMap<(TypeId, Vec<TypeId>), TypeId>,
     tensor_constructors: BTreeSet<TypeId>,
-    tensors: BTreeMap<(TypeId, TypeId, TensorShape), TypeId>,
+    tensors: BTreeMap<(TypeId, TypeId, ShapeTerm), TypeId>,
+    next_shape_parameter: u32,
     capabilities: BTreeMap<TypeId, BTreeSet<TypeId>>,
     trait_binary: BTreeMap<TypeId, BTreeSet<BinaryOperator>>,
     trait_unary: BTreeMap<TypeId, BTreeSet<UnaryOperator>>,
@@ -259,7 +262,7 @@ impl TypeContext {
         let definition = self
             .definition(constructor)
             .ok_or(TypeError::UnknownTypeId(constructor))?;
-        if definition.parameter_count != 1 {
+        if definition.parameter_count == 0 {
             return Err(TypeError::GenericArity {
                 constructor,
                 expected: 1,
@@ -447,18 +450,28 @@ impl TypeContext {
         let definition = self
             .definition(constructor)
             .ok_or(TypeError::UnknownTypeId(constructor))?;
+        if self.tensor_constructors.contains(&constructor) {
+            let [element] = arguments.as_slice() else {
+                return Err(TypeError::GenericArity {
+                    constructor,
+                    expected: 1,
+                    actual: arguments.len(),
+                });
+            };
+            let parameter = ShapeParameterId(GenericParamId(self.next_shape_parameter));
+            self.next_shape_parameter = self.next_shape_parameter.wrapping_add(1);
+            return self.instantiate_symbolic_tensor(
+                constructor,
+                *element,
+                ShapeTerm::Pack(parameter),
+            );
+        }
         if definition.parameter_count != arguments.len() {
             return Err(TypeError::GenericArity {
                 constructor,
                 expected: definition.parameter_count,
                 actual: arguments.len(),
             });
-        }
-        if self.tensor_constructors.contains(&constructor) {
-            let [element] = arguments.as_slice() else {
-                unreachable!("tensor constructor arity was validated");
-            };
-            return self.instantiate_tensor(constructor, *element, TensorShape::Unranked);
         }
         if let Some(existing) = self.applications.get(&(constructor, arguments.clone())) {
             return Ok(*existing);
@@ -527,19 +540,49 @@ impl TypeContext {
         element: TypeId,
         shape: TensorShape,
     ) -> Result<TypeId, TypeError> {
+        let source_shape = match &shape {
+            TensorShape::Unranked => {
+                let parameter = ShapeParameterId(GenericParamId(self.next_shape_parameter));
+                self.next_shape_parameter = self.next_shape_parameter.wrapping_add(1);
+                ShapeTerm::Pack(parameter)
+            }
+            TensorShape::Ranked(dimensions) => ShapeTerm::Ranked(
+                dimensions
+                    .iter()
+                    .enumerate()
+                    .map(|(axis, dimension)| match dimension {
+                        TensorDimension::Known(value) => DimExpr::Constant(*value),
+                        TensorDimension::Dynamic => DimExpr::Runtime(RuntimeDimId(axis as u32)),
+                    })
+                    .collect(),
+            ),
+        };
+        self.instantiate_symbolic_tensor(constructor, element, source_shape)
+    }
+
+    pub fn instantiate_symbolic_tensor(
+        &mut self,
+        constructor: TypeId,
+        element: TypeId,
+        source_shape: ShapeTerm,
+    ) -> Result<TypeId, TypeError> {
         let definition = self
             .definition(constructor)
             .ok_or(TypeError::UnknownTypeId(constructor))?;
         if !self.tensor_constructors.contains(&constructor) {
             return Err(TypeError::NotTensorConstructor(constructor));
         }
-        if let Some(existing) = self.tensors.get(&(constructor, element, shape.clone())) {
+        if let Some(existing) = self
+            .tensors
+            .get(&(constructor, element, source_shape.clone()))
+        {
             return Ok(*existing);
         }
+        let shape = tensor_shape_from_term(&source_shape);
         let element_path = self
             .definition(element)
             .map_or_else(|| format!("type#{}", element.0), |known| known.path.clone());
-        let shape_path = tensor_shape_path(&shape);
+        let shape_path = shape_term_path(&source_shape);
         let path = format!("{}[{element_path};{shape_path}]", definition.path);
         let name = format!("{}[{element_path};{shape_path}]", definition.name);
         let declaration = DeclarationId::from_path(&path);
@@ -551,6 +594,7 @@ impl TypeContext {
                 declaration: constructor_definition,
             },
             element,
+            source_shape: source_shape.clone(),
             shape: shape.clone(),
         });
         self.definitions.insert(
@@ -564,19 +608,27 @@ impl TypeContext {
                 kind: TypeDefinitionKind::Tensor {
                     constructor,
                     element,
+                    source_shape: source_shape.clone(),
                     shape: shape.clone(),
                 },
             },
         );
         self.by_declaration.insert(declaration, id);
-        self.tensors.insert((constructor, element, shape), id);
+        self.tensors
+            .insert((constructor, element, source_shape), id);
         Ok(id)
     }
 
     pub fn tensor(&self, type_id: TypeId) -> Option<TensorType> {
         match &self.definition(type_id)?.kind {
-            TypeDefinitionKind::Tensor { element, shape, .. } => Some(TensorType {
+            TypeDefinitionKind::Tensor {
+                element,
+                source_shape,
+                shape,
+                ..
+            } => Some(TensorType {
                 element: *element,
+                source_shape: source_shape.clone(),
                 shape: shape.clone(),
             }),
             _ => None,
@@ -860,17 +912,50 @@ fn exact(pattern: TypePattern) -> Option<TypeId> {
     }
 }
 
-fn tensor_shape_path(shape: &TensorShape) -> String {
+fn tensor_shape_from_term(shape: &ShapeTerm) -> TensorShape {
     match shape {
-        TensorShape::Unranked => "*".into(),
-        TensorShape::Ranked(dimensions) => dimensions
+        ShapeTerm::Pack(_) => TensorShape::Unranked,
+        ShapeTerm::Ranked(dimensions) => TensorShape::Ranked(
+            dimensions
+                .iter()
+                .map(|dimension| match dimension {
+                    DimExpr::Constant(value) => TensorDimension::Known(*value),
+                    DimExpr::Parameter(_)
+                    | DimExpr::Runtime(_)
+                    | DimExpr::Add(_, _)
+                    | DimExpr::Multiply(_, _)
+                    | DimExpr::DivideExact(_, _) => TensorDimension::Dynamic,
+                })
+                .collect(),
+        ),
+    }
+}
+
+fn shape_term_path(shape: &ShapeTerm) -> String {
+    match shape {
+        ShapeTerm::Pack(parameter) => format!("*p{}", (parameter.0).0),
+        ShapeTerm::Ranked(dimensions) => dimensions
             .iter()
-            .map(|dimension| match dimension {
-                crate::TensorDimension::Dynamic => "?".into(),
-                crate::TensorDimension::Known(value) => value.to_string(),
-            })
+            .map(dim_expr_path)
             .collect::<Vec<_>>()
             .join("x"),
+    }
+}
+
+fn dim_expr_path(dimension: &DimExpr) -> String {
+    match dimension {
+        DimExpr::Constant(value) => value.to_string(),
+        DimExpr::Parameter(parameter) => format!("p{}", parameter.0),
+        DimExpr::Runtime(runtime) => format!("r{}", runtime.0),
+        DimExpr::Add(left, right) => {
+            format!("({}+{})", dim_expr_path(left), dim_expr_path(right))
+        }
+        DimExpr::Multiply(left, right) => {
+            format!("({}*{})", dim_expr_path(left), dim_expr_path(right))
+        }
+        DimExpr::DivideExact(left, right) => {
+            format!("({}/{})", dim_expr_path(left), dim_expr_path(right))
+        }
     }
 }
 
@@ -1140,5 +1225,54 @@ mod tests {
         assert_eq!(types.definition(first).unwrap().name, "First");
         assert_eq!(types.definition(second).unwrap().name, "Second");
         assert!(matches!(types.kind(union), Some(TypeKind::Union(_))));
+    }
+
+    #[test]
+    fn symbolic_tensor_shapes_distinguish_rank_zero_dynamic_rank_and_unknown_rank() {
+        let mut types = TypeContext::default();
+        let tensor = types
+            .register_declaration("compute.tensor.Tensor", "Tensor", 2)
+            .unwrap();
+        types.mark_tensor_constructor(tensor).unwrap();
+        let f32 = types.register_declaration("core.f32", "f32", 0).unwrap();
+
+        let scalar = types
+            .instantiate_symbolic_tensor(tensor, f32, ShapeTerm::Ranked(Vec::new()))
+            .unwrap();
+        let dynamic_rank_two = types
+            .instantiate_symbolic_tensor(
+                tensor,
+                f32,
+                ShapeTerm::Ranked(vec![
+                    DimExpr::Parameter(GenericParamId(0)),
+                    DimExpr::Constant(1024),
+                ]),
+            )
+            .unwrap();
+        let unknown_rank = types
+            .instantiate_symbolic_tensor(
+                tensor,
+                f32,
+                ShapeTerm::Pack(ShapeParameterId(GenericParamId(1))),
+            )
+            .unwrap();
+
+        let scalar = types.tensor(scalar).unwrap();
+        assert_eq!(scalar.source_shape.rank(), Some(0));
+        assert_eq!(scalar.shape, TensorShape::Ranked(Vec::new()));
+
+        let dynamic_rank_two = types.tensor(dynamic_rank_two).unwrap();
+        assert_eq!(dynamic_rank_two.source_shape.rank(), Some(2));
+        assert_eq!(
+            dynamic_rank_two.shape,
+            TensorShape::Ranked(vec![
+                TensorDimension::Dynamic,
+                TensorDimension::Known(1024),
+            ])
+        );
+
+        let unknown_rank = types.tensor(unknown_rank).unwrap();
+        assert_eq!(unknown_rank.source_shape.rank(), None);
+        assert_eq!(unknown_rank.shape, TensorShape::Unranked);
     }
 }

@@ -259,6 +259,13 @@ fn infer_node_shape(
             .filter_map(|(input, _)| shapes.get(input).cloned())
             .collect::<Vec<_>>()
     };
+    let runtime_operand = |index: usize| {
+        node_data
+            .runtime_operands
+            .iter()
+            .find(|operand| usize::from(operand.input_index) == index)
+            .map(|operand| operand.values.as_slice())
+    };
     let inferred = match node_data.kind {
         NodeKind::Parameter | NodeKind::Constant => None,
         NodeKind::Elementwise => {
@@ -340,6 +347,12 @@ fn infer_node_shape(
         },
         NodeKind::Reshape => match node_data.operation.as_str() {
             "materialize" => input(0),
+            "reshape" => match (input(0), runtime_operand(1)) {
+                (Some(source), Some(specification)) => {
+                    Some(reshape_runtime_shape(node, &source, specification)?)
+                }
+                _ => None,
+            },
             _ => None,
         },
         NodeKind::Permute => match node_data.operation.as_str() {
@@ -347,30 +360,278 @@ fn infer_node_shape(
                 shape.reverse();
                 shape
             }),
+            "axes" => match (input(0), runtime_operand(1)) {
+                (Some(source), Some(axes)) => Some(permute_runtime_shape(node, &source, axes)?),
+                _ => None,
+            },
             _ => None,
         },
-        NodeKind::Broadcast => {
-            let mut inputs = node_data
-                .inputs
-                .iter()
-                .filter_map(|input| shapes.get(input));
-            let Some(mut result) = inputs.next().cloned() else {
-                return Ok(None);
-            };
-            for shape in inputs {
-                result = broadcast_runtime_shape(&result, shape).ok_or_else(|| {
-                    StorageSpecializationError::ShapeInference {
-                        node,
-                        message: "broadcast operands are incompatible".into(),
-                    }
-                })?;
+        NodeKind::Broadcast => match node_data.operation.as_str() {
+            "like" => input(1),
+            "repeat" => match (input(0), runtime_operand(1)) {
+                (Some(source), Some(specification)) => {
+                    Some(repeat_runtime_shape(node, &source, specification)?)
+                }
+                _ => None,
+            },
+            _ => None,
+        },
+        NodeKind::Slice => match (
+            input(0),
+            runtime_operand(1),
+            runtime_operand(2),
+            runtime_operand(3),
+        ) {
+            (Some(source), Some(starts), Some(ends), Some(steps)) => {
+                Some(slice_runtime_shape(node, &source, starts, ends, steps)?)
             }
-            Some(result)
-        }
-        NodeKind::Scatter | NodeKind::Convert | NodeKind::StorageView => input(0),
-        NodeKind::Slice | NodeKind::Gather | NodeKind::Concatenate => None,
+            _ => None,
+        },
+        NodeKind::Gather => match (input(0), input(1)) {
+            (Some(source), Some(indices)) => {
+                if source.is_empty() {
+                    return Err(StorageSpecializationError::ShapeInference {
+                        node,
+                        message: "gather source requires rank at least one".into(),
+                    });
+                }
+                Some(
+                    indices
+                        .into_iter()
+                        .chain(source.into_iter().skip(1))
+                        .collect(),
+                )
+            }
+            _ => None,
+        },
+        NodeKind::Concatenate => match (input(0), input(1), runtime_operand(2)) {
+            (Some(left), Some(right), Some([axis])) => {
+                Some(concatenate_runtime_shape(node, &left, &right, *axis)?)
+            }
+            (Some(_), Some(_), Some(_)) => {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node,
+                    message: "concatenate requires exactly one axis".into(),
+                })
+            }
+            _ => None,
+        },
+        NodeKind::Scatter | NodeKind::Convert => input(0),
+        NodeKind::StorageView => match node_data.operation.as_str() {
+            "from_elements" => runtime_operand(1)
+                .map(|shape| nonnegative_dimensions(node, shape))
+                .transpose()?,
+            _ => None,
+        },
     };
     Ok(inferred)
+}
+
+fn nonnegative_dimensions(
+    node: NodeId,
+    values: &[i64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    values
+        .iter()
+        .map(|value| {
+            u64::try_from(*value).map_err(|_| StorageSpecializationError::ShapeInference {
+                node,
+                message: format!("negative tensor dimension {value}"),
+            })
+        })
+        .collect()
+}
+
+fn reshape_runtime_shape(
+    node: NodeId,
+    source: &[u64],
+    specification: &[i64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    let source_elements = source
+        .iter()
+        .try_fold(1u64, |size, dimension| size.checked_mul(*dimension));
+    let source_elements =
+        source_elements.ok_or_else(|| StorageSpecializationError::ShapeInference {
+            node,
+            message: "reshape source element count overflowed".into(),
+        })?;
+    let mut result = Vec::with_capacity(specification.len());
+    let mut inferred_axis = None;
+    let mut known_elements = 1u64;
+    for (axis, dimension) in specification.iter().copied().enumerate() {
+        if dimension == -1 {
+            if inferred_axis.replace(axis).is_some() {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node,
+                    message: "reshape contains more than one inferred dimension".into(),
+                });
+            }
+            result.push(1);
+            continue;
+        }
+        let dimension =
+            u64::try_from(dimension).map_err(|_| StorageSpecializationError::ShapeInference {
+                node,
+                message: format!("reshape contains negative dimension {dimension}"),
+            })?;
+        known_elements = known_elements.checked_mul(dimension).ok_or_else(|| {
+            StorageSpecializationError::ShapeInference {
+                node,
+                message: "reshape result element count overflowed".into(),
+            }
+        })?;
+        result.push(dimension);
+    }
+    if let Some(axis) = inferred_axis {
+        if known_elements == 0 || source_elements % known_elements != 0 {
+            return Err(StorageSpecializationError::ShapeInference {
+                node,
+                message: "reshape inferred dimension is not integral".into(),
+            });
+        }
+        result[axis] = source_elements / known_elements;
+    } else if known_elements != source_elements {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "reshape changes the element count".into(),
+        });
+    }
+    Ok(result)
+}
+
+fn permute_runtime_shape(
+    node: NodeId,
+    source: &[u64],
+    axes: &[i64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    if axes.len() != source.len() {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "permutation rank does not match its source".into(),
+        });
+    }
+    let mut seen = BTreeSet::new();
+    axes.iter()
+        .map(|axis| {
+            let axis =
+                usize::try_from(*axis).map_err(|_| StorageSpecializationError::ShapeInference {
+                    node,
+                    message: format!("invalid permutation axis {axis}"),
+                })?;
+            if axis >= source.len() || !seen.insert(axis) {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node,
+                    message: format!("invalid permutation axis {axis}"),
+                });
+            }
+            Ok(source[axis])
+        })
+        .collect()
+}
+
+fn slice_runtime_shape(
+    node: NodeId,
+    source: &[u64],
+    starts: &[i64],
+    ends: &[i64],
+    steps: &[i64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    if starts.len() != source.len() || ends.len() != source.len() || steps.len() != source.len() {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "slice specification rank does not match its source".into(),
+        });
+    }
+    (0..source.len())
+        .map(|axis| {
+            let (start, end, step) = (starts[axis], ends[axis], steps[axis]);
+            if start < 0 || end < start || step <= 0 || end as u64 > source[axis] {
+                return Err(StorageSpecializationError::ShapeInference {
+                    node,
+                    message: format!("invalid slice bounds on axis {axis}"),
+                });
+            }
+            Ok(((end - start + step - 1) / step) as u64)
+        })
+        .collect()
+}
+
+fn repeat_runtime_shape(
+    node: NodeId,
+    source: &[u64],
+    specification: &[i64],
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    let [axis, repeats] = specification else {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "repeat requires [axis, copies]".into(),
+        });
+    };
+    let axis = usize::try_from(*axis).map_err(|_| StorageSpecializationError::ShapeInference {
+        node,
+        message: format!("invalid repeat axis {axis}"),
+    })?;
+    let repeats = u64::try_from(*repeats)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| StorageSpecializationError::ShapeInference {
+            node,
+            message: format!("invalid repeat count {repeats}"),
+        })?;
+    if axis >= source.len() {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: format!(
+                "repeat axis {axis} is outside runtime rank {}",
+                source.len()
+            ),
+        });
+    }
+    let mut result = source.to_vec();
+    result[axis] = result[axis].checked_mul(repeats).ok_or_else(|| {
+        StorageSpecializationError::ShapeInference {
+            node,
+            message: "repeat dimension overflowed".into(),
+        }
+    })?;
+    Ok(result)
+}
+
+fn concatenate_runtime_shape(
+    node: NodeId,
+    left: &[u64],
+    right: &[u64],
+    axis: i64,
+) -> Result<Vec<u64>, StorageSpecializationError> {
+    let axis = usize::try_from(axis).map_err(|_| StorageSpecializationError::ShapeInference {
+        node,
+        message: format!("invalid concatenate axis {axis}"),
+    })?;
+    if left.len() != right.len() || axis >= left.len() {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "concatenate ranks or axis are incompatible".into(),
+        });
+    }
+    if left
+        .iter()
+        .zip(right)
+        .enumerate()
+        .any(|(candidate, (left, right))| candidate != axis && left != right)
+    {
+        return Err(StorageSpecializationError::ShapeInference {
+            node,
+            message: "concatenate non-axis dimensions differ".into(),
+        });
+    }
+    let mut result = left.to_vec();
+    result[axis] = result[axis].checked_add(right[axis]).ok_or_else(|| {
+        StorageSpecializationError::ShapeInference {
+            node,
+            message: "concatenate dimension overflowed".into(),
+        }
+    })?;
+    Ok(result)
 }
 
 fn broadcast_runtime_shape(left: &[u64], right: &[u64]) -> Option<Vec<u64>> {
@@ -446,14 +707,87 @@ fn infer_node_strides(
             return Ok(input.clone());
         }
     }
-    if node_data.kind == NodeKind::Permute && node_data.operation == "reverse" {
-        if let Some((mut strides, offset)) = node_data
+    let source_layout = || {
+        node_data
             .inputs
             .first()
             .and_then(|input| known.get(input))
             .cloned()
-        {
+    };
+    if node_data.kind == NodeKind::Permute {
+        if let Some((mut strides, offset)) = source_layout() {
+            if node_data.operation == "axes" {
+                let axes = node_data
+                    .runtime_operands
+                    .iter()
+                    .find(|operand| operand.input_index == 1)
+                    .map(|operand| operand.values.as_slice())
+                    .ok_or_else(|| StorageSpecializationError::StrideInference {
+                        node,
+                        message: "permutation has no runtime axes".into(),
+                    })?;
+                let source = strides.clone();
+                strides = axes
+                    .iter()
+                    .map(|axis| {
+                        usize::try_from(*axis)
+                            .ok()
+                            .and_then(|axis| source.get(axis).copied())
+                            .ok_or_else(|| StorageSpecializationError::StrideInference {
+                                node,
+                                message: format!("invalid permutation axis {axis}"),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok((strides, offset));
+            }
             strides.reverse();
+            return Ok((strides, offset));
+        }
+    }
+    if node_data.kind == NodeKind::Slice {
+        if let Some((source_strides, mut offset)) = source_layout() {
+            let operand = |index| {
+                node_data
+                    .runtime_operands
+                    .iter()
+                    .find(|operand| usize::from(operand.input_index) == index)
+                    .map(|operand| operand.values.as_slice())
+            };
+            let (Some(starts), Some(steps)) = (operand(1), operand(3)) else {
+                return Err(StorageSpecializationError::StrideInference {
+                    node,
+                    message: "slice has no runtime starts/steps".into(),
+                });
+            };
+            if starts.len() != source_strides.len() || steps.len() != source_strides.len() {
+                return Err(StorageSpecializationError::StrideInference {
+                    node,
+                    message: "slice layout rank does not match its source".into(),
+                });
+            }
+            let mut strides = Vec::with_capacity(source_strides.len());
+            for axis in 0..source_strides.len() {
+                offset = offset
+                    .checked_add(starts[axis].checked_mul(source_strides[axis]).ok_or_else(
+                        || StorageSpecializationError::StrideInference {
+                            node,
+                            message: "slice offset overflowed".into(),
+                        },
+                    )?)
+                    .ok_or_else(|| StorageSpecializationError::StrideInference {
+                        node,
+                        message: "slice offset overflowed".into(),
+                    })?;
+                strides.push(
+                    steps[axis]
+                        .checked_mul(source_strides[axis])
+                        .ok_or_else(|| StorageSpecializationError::StrideInference {
+                            node,
+                            message: "slice stride overflowed".into(),
+                        })?,
+                );
+            }
             return Ok((strides, offset));
         }
     }

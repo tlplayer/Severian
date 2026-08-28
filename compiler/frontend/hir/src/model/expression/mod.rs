@@ -1,4 +1,4 @@
-use crate::{BindingId, DefId, HirId, OpId, Substitution, TypeId, VariantId};
+use crate::{BindingId, DefId, FunctionId, HirId, OpId, Substitution, TypeId, VariantId};
 use severian_source::Span;
 use severian_universal::{BinaryOperator, Conversion, LiteralValue, UnaryOperator};
 
@@ -78,6 +78,10 @@ pub enum ExpressionKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callee {
     Direct {
+        /// Concrete analyzed function instance. Shape and dimension
+        /// specializations are represented by this identity rather than being
+        /// forced into the type-only substitution.
+        instance: Option<FunctionId>,
         function: DefId,
         substitution: Substitution,
     },

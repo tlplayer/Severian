@@ -1,7 +1,164 @@
 use super::*;
 use std::collections::BTreeSet;
 
-pub(super) type Substitution = BTreeMap<String, String>;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub(super) struct Substitution {
+    kinds: BTreeMap<String, severian_universal::GenericParamKind>,
+    types: BTreeMap<String, String>,
+    dimensions: BTreeMap<String, severian_universal::DimExpr>,
+    shapes: BTreeMap<String, Vec<severian_universal::DimExpr>>,
+}
+
+impl Substitution {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn for_declaration(function: &FunctionDecl) -> Self {
+        let kinds = generic_parameters(&function.type_parameters, &function.constraints)
+            .into_iter()
+            .map(|parameter| (parameter.name, parameter.kind))
+            .collect();
+        Self {
+            kinds,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn get(&self, parameter: &str) -> Option<&String> {
+        self.types.get(parameter)
+    }
+
+    fn dimension(&self, parameter: &str) -> Option<&severian_universal::DimExpr> {
+        self.dimensions.get(parameter)
+    }
+
+    fn shape(&self, parameter: &str) -> Option<&[severian_universal::DimExpr]> {
+        self.shapes.get(parameter).map(Vec::as_slice)
+    }
+
+    fn contains_key(&self, parameter: &str) -> bool {
+        self.types.contains_key(parameter)
+            || self.dimensions.contains_key(parameter)
+            || self.shapes.contains_key(parameter)
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.types.is_empty() && self.dimensions.is_empty() && self.shapes.is_empty()
+    }
+
+    fn insert_type(&mut self, parameter: String, value: String) -> Option<String> {
+        self.types.insert(parameter, value)
+    }
+
+    fn insert(&mut self, parameter: String, value: String) -> Option<String> {
+        self.insert_type(parameter, value)
+    }
+
+    pub(super) fn bindings(&self) -> Vec<(String, String)> {
+        let mut bindings = self
+            .types
+            .iter()
+            .map(|(parameter, value)| (parameter.clone(), value.clone()))
+            .chain(self.dimensions.iter().map(|(parameter, value)| {
+                (parameter.clone(), format_dim_expr(value))
+            }))
+            .chain(self.shapes.iter().map(|(parameter, value)| {
+                (parameter.clone(), format_shape(value))
+            }))
+            .collect::<Vec<_>>();
+        bindings.sort();
+        bindings
+    }
+
+    fn bind_dimension(
+        &mut self,
+        parameter: &str,
+        dimension: severian_universal::DimExpr,
+    ) -> Result<(), InferenceConflict> {
+        if let Some(known) = self.dimensions.get(parameter) {
+            if known == &dimension {
+                return Ok(());
+            }
+            return Err(InferenceConflict {
+                parameter: parameter.to_owned(),
+                known: format_dim_expr(known),
+                inferred: format_dim_expr(&dimension),
+            });
+        }
+        self.dimensions.insert(parameter.to_owned(), dimension);
+        Ok(())
+    }
+
+    fn bind_shape(
+        &mut self,
+        parameter: &str,
+        dimensions: Vec<severian_universal::DimExpr>,
+    ) -> Result<(), InferenceConflict> {
+        if let Some(known) = self.shapes.get(parameter) {
+            if known == &dimensions {
+                return Ok(());
+            }
+            return Err(InferenceConflict {
+                parameter: parameter.to_owned(),
+                known: format_shape(known),
+                inferred: format_shape(&dimensions),
+            });
+        }
+        self.shapes.insert(parameter.to_owned(), dimensions);
+        Ok(())
+    }
+
+    fn kind(&self, parameter: &str) -> severian_universal::GenericParamKind {
+        self.kinds
+            .get(parameter)
+            .copied()
+            .unwrap_or(severian_universal::GenericParamKind::Type)
+    }
+}
+
+impl FromIterator<(String, String)> for Substitution {
+    fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
+        Self {
+            types: iter.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+}
+
+impl Extend<(String, String)> for Substitution {
+    fn extend<T: IntoIterator<Item = (String, String)>>(&mut self, iter: T) {
+        self.types.extend(iter);
+    }
+}
+
+fn format_dim_expr(dimension: &severian_universal::DimExpr) -> String {
+    match dimension {
+        severian_universal::DimExpr::Constant(value) => value.to_string(),
+        severian_universal::DimExpr::Parameter(parameter) => format!("p{}", parameter.0),
+        severian_universal::DimExpr::Runtime(runtime) => format!("?{}", runtime.0),
+        severian_universal::DimExpr::Add(left, right) => {
+            format!("({}+{})", format_dim_expr(left), format_dim_expr(right))
+        }
+        severian_universal::DimExpr::Multiply(left, right) => {
+            format!("({}*{})", format_dim_expr(left), format_dim_expr(right))
+        }
+        severian_universal::DimExpr::DivideExact(left, right) => {
+            format!("({}/{})", format_dim_expr(left), format_dim_expr(right))
+        }
+    }
+}
+
+fn format_shape(shape: &[severian_universal::DimExpr]) -> String {
+    format!(
+        "[{}]",
+        shape
+            .iter()
+            .map(format_dim_expr)
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
 /// Concrete generic instances and the first source call that requested each
 /// one. Keeping the origin beside the substitution lets later constraint
 /// validation report the call site instead of only the declaration.
@@ -734,19 +891,31 @@ fn validate_specializations(
             continue;
         };
         for (substitution, origin) in instances {
+            let parameters = generic_parameters(&function.type_parameters, &function.constraints);
             for constraint in &function.constraints {
                 let severian_ast::GenericConstraint::Parameter {
                     parameter,
                     bound,
                     span,
-                } = constraint
-                else {
-                    return Err(Diagnostic::new(
-                        "E000218",
-                        "compile-time value predicates are parsed but are not supported by the initial generic solver",
-                        Some(constraint_span(constraint)),
-                    ));
+                } = constraint else {
+                    match constraint {
+                        severian_ast::GenericConstraint::VariadicPack { .. } => continue,
+                        severian_ast::GenericConstraint::Predicate(_) => {
+                            return Err(Diagnostic::new(
+                                "E000218",
+                                "compile-time value predicates are parsed but are not supported by the initial generic solver",
+                                Some(constraint_span(constraint)),
+                            ));
+                        }
+                        severian_ast::GenericConstraint::Parameter { .. } => unreachable!(),
+                    }
                 };
+                if parameters.iter().any(|known| {
+                    known.name == *parameter
+                        && known.kind != severian_universal::GenericParamKind::Type
+                }) {
+                    continue;
+                }
                 let Some(actual_name) = substitution.get(parameter) else {
                     continue;
                 };
@@ -841,6 +1010,7 @@ fn source_trait_extends(
 fn constraint_span(constraint: &severian_ast::GenericConstraint) -> severian_source::Span {
     match constraint {
         severian_ast::GenericConstraint::Parameter { span, .. } => *span,
+        severian_ast::GenericConstraint::VariadicPack { span, .. } => *span,
         severian_ast::GenericConstraint::Predicate(expression) => expression.span,
     }
 }
@@ -855,7 +1025,7 @@ fn satisfies_bound(
         return types.implements(actual, bound);
     }
     index.definitions.values().any(|definition| {
-        definition.name == bound_name
+        definition.name.rsplit('.').next() == bound_name.rsplit('.').next()
             && matches!(&definition.kind, DefKind::Trait(trait_decl) if trait_is_structurally_satisfied(actual, trait_decl, index, types, &mut BTreeSet::new()))
     })
 }
@@ -931,7 +1101,8 @@ fn specialization_count(specializations: &Specializations) -> usize {
 
 fn format_substitution(substitution: &Substitution) -> String {
     substitution
-        .iter()
+        .bindings()
+        .into_iter()
         .map(|(parameter, actual)| format!("{parameter}={actual}"))
         .collect::<Vec<_>>()
         .join(", ")
@@ -1329,7 +1500,9 @@ fn visit_expression_for_specializations(
                             _ => None,
                         })
                         .collect::<BTreeSet<_>>();
-                    if !arities.is_empty() && !arities.contains(&explicit.len()) {
+                    if !arities.is_empty()
+                        && !arities.iter().any(|arity| explicit.len() <= *arity)
+                    {
                         let expected = arities
                             .iter()
                             .map(usize::to_string)
@@ -1362,21 +1535,43 @@ fn visit_expression_for_specializations(
                     {
                         continue;
                     }
-                    let mut substitution = Substitution::new();
+                    let mut substitution = Substitution::for_declaration(signature);
                     let mut conflict = None;
                     if let Some(explicit) = &explicit_arguments {
-                        if explicit.len() != signature.type_parameters.len() {
+                        if explicit.len() > signature.type_parameters.len() {
                             continue;
                         }
-                        substitution.extend(
-                            signature
-                                .type_parameters
-                                .iter()
-                                .cloned()
-                                .zip(explicit.iter().cloned()),
-                        );
+                        for ((parameter, value), metadata) in signature
+                            .type_parameters
+                            .iter()
+                            .zip(explicit)
+                            .zip(generic_parameters(
+                                &signature.type_parameters,
+                                &signature.constraints,
+                            ))
+                        {
+                            match metadata.kind {
+                                severian_universal::GenericParamKind::Type => {
+                                    substitution.insert_type(parameter.clone(), value.clone());
+                                }
+                                severian_universal::GenericParamKind::Dimension => {
+                                    substitution
+                                        .bind_dimension(parameter, parse_dim_expr(value, 0))
+                                        .map_err(|conflict| {
+                                            inference_conflict_diagnostic(
+                                                &index.definitions[&definition].name,
+                                                &conflict,
+                                                expression.span,
+                                            )
+                                        })?;
+                                }
+                                severian_universal::GenericParamKind::Shape => {
+                                    continue;
+                                }
+                            }
+                        }
                     }
-                    if explicit_arguments.is_none() && !variadic {
+                    if !variadic {
                         if let Some(expected) = expected {
                             conflict = infer_substitution(
                                 &signature.result,
@@ -1387,27 +1582,25 @@ fn visit_expression_for_specializations(
                             .err();
                         }
                     }
-                    if explicit_arguments.is_none() {
-                        for (parameter, argument) in
-                            signature.parameters[..fixed].iter().zip(arguments)
+                    for (parameter, argument) in
+                        signature.parameters[..fixed].iter().zip(arguments)
+                    {
+                        if conflict.is_some() {
+                            break;
+                        }
+                        if let Some(actual) =
+                            expression_type_name(module, &argument.value, names, index)
                         {
-                            if conflict.is_some() {
-                                break;
-                            }
-                            if let Some(actual) =
-                                expression_type_name(module, &argument.value, names, index)
-                            {
-                                conflict = infer_substitution(
-                                    parameter,
-                                    &actual,
-                                    &signature.type_parameters,
-                                    &mut substitution,
-                                )
-                                .err();
-                            }
+                            conflict = infer_substitution(
+                                parameter,
+                                &actual,
+                                &signature.type_parameters,
+                                &mut substitution,
+                            )
+                            .err();
                         }
                     }
-                    if explicit_arguments.is_none() && variadic && conflict.is_none() {
+                    if variadic && conflict.is_none() {
                         let parameter = &signature.parameters[fixed];
                         for argument in &arguments[fixed..] {
                             if let Some(mut actual) =
@@ -1450,7 +1643,7 @@ fn visit_expression_for_specializations(
                             }
                         }
                     }
-                    if explicit_arguments.is_none() && variadic && conflict.is_none() {
+                    if variadic && conflict.is_none() {
                         if let Some(expected) = expected {
                             conflict = infer_substitution(
                                 &signature.result,
@@ -1883,10 +2076,30 @@ fn infer_substitution(
     parameters: &[String],
     substitution: &mut Substitution,
 ) -> Result<(), InferenceConflict> {
+    match &pattern.kind {
+        TypeAnnotationKind::DimensionConstant(expected) => {
+            if parse_dim_expr(actual, 0) == severian_universal::DimExpr::Constant(*expected) {
+                return Ok(());
+            }
+            return Err(InferenceConflict {
+                parameter: "dimension".into(),
+                known: expected.to_string(),
+                inferred: actual.to_owned(),
+            });
+        }
+        TypeAnnotationKind::DimensionRuntime(_) => return Ok(()),
+        TypeAnnotationKind::ShapeSpread(parameter) => {
+            return substitution.bind_shape(parameter, vec![parse_dim_expr(actual, 0)]);
+        }
+        _ => {}
+    }
     let Some((name, arguments)) = pattern.named_parts() else {
         return Ok(());
     };
     if arguments.is_empty() && parameters.iter().any(|parameter| parameter == name) {
+        if substitution.kind(name) == severian_universal::GenericParamKind::Dimension {
+            return substitution.bind_dimension(name, parse_dim_expr(actual, 0));
+        }
         if let Some(known) = substitution.get(name) {
             if known == actual || default_numeric_matches(actual, known) {
                 return Ok(());
@@ -1908,13 +2121,65 @@ fn infer_substitution(
     let Some((actual_name, actual_arguments)) = type_application_parts(actual) else {
         return Ok(());
     };
-    if !same_type_constructor(name, actual_name) || arguments.len() != actual_arguments.len() {
+    if !same_type_constructor(name, actual_name) {
         return Ok(());
     }
-    for (pattern, actual) in arguments.iter().zip(actual_arguments) {
-        infer_substitution(pattern, actual, parameters, substitution)?;
+    let spread = arguments.iter().position(
+        |argument| matches!(argument.kind, TypeAnnotationKind::ShapeSpread(_)),
+    );
+    if let Some(spread) = spread {
+        let suffix = arguments.len() - spread - 1;
+        if actual_arguments.len() < spread + suffix {
+            return Ok(());
+        }
+        for (axis, (pattern, actual)) in arguments[..spread]
+            .iter()
+            .zip(&actual_arguments[..spread])
+            .enumerate()
+        {
+            infer_substitution(pattern, actual, parameters, substitution)?;
+            let _ = axis;
+        }
+        let TypeAnnotationKind::ShapeSpread(parameter) = &arguments[spread].kind else {
+            unreachable!()
+        };
+        let pack_end = actual_arguments.len() - suffix;
+        let shape = actual_arguments[spread..pack_end]
+            .iter()
+            .enumerate()
+            .map(|(axis, dimension)| parse_dim_expr(dimension, spread + axis))
+            .collect();
+        substitution.bind_shape(parameter, shape)?;
+        for (pattern, actual) in arguments[spread + 1..]
+            .iter()
+            .zip(&actual_arguments[pack_end..])
+        {
+            infer_substitution(pattern, actual, parameters, substitution)?;
+        }
+    } else {
+        if arguments.len() != actual_arguments.len() {
+            return Ok(());
+        }
+        for (pattern, actual) in arguments.iter().zip(actual_arguments) {
+            infer_substitution(pattern, actual, parameters, substitution)?;
+        }
     }
     Ok(())
+}
+
+fn parse_dim_expr(actual: &str, axis: usize) -> severian_universal::DimExpr {
+    if let Ok(value) = actual.parse::<u64>() {
+        return severian_universal::DimExpr::Constant(value);
+    }
+    if let Some(runtime) = actual
+        .strip_prefix('?')
+        .and_then(|runtime| runtime.parse::<u32>().ok())
+    {
+        return severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(runtime));
+    }
+    severian_universal::DimExpr::Runtime(severian_universal::RuntimeDimId(
+        super::stable_hash(&format!("dimension:{axis}:{actual}")) as u32,
+    ))
 }
 
 fn same_type_constructor(left: &str, right: &str) -> bool {
@@ -2026,6 +2291,45 @@ fn expression_type_name(
         ),
         severian_ast::ExpressionKind::Call { callee, arguments } => {
             let path = ast_callable_path(callee)?;
+            let operation = path.rsplit('.').next().unwrap_or(&path);
+            if matches!(operation, "tensor" | "ranked") && arguments.len() == 2 {
+                if let Some(shape) = source_integer_list(&arguments[1].value) {
+                    return Some(format!(
+                        "Tensor[f64{}]",
+                        shape
+                            .iter()
+                            .map(|dimension| format!(", {dimension}"))
+                            .collect::<String>()
+                    ));
+                }
+            }
+            let target_element = match operation {
+                "f8e4m3fn" | "f8e5m2" | "f16" | "bf16" | "f32" | "f64" | "f80"
+                | "f128" | "i8" | "i16" | "i32" | "i64" | "i128" | "u8" | "u16"
+                | "u32" | "u64" | "u128" => Some(operation),
+                "to_f8_e4_m3_fn" => Some("f8e4m3fn"),
+                "to_f8_e5_m2" => Some("f8e5m2"),
+                "to_f_16" => Some("f16"),
+                "to_bf_16" => Some("bf16"),
+                "to_f_32" => Some("f32"),
+                "to_f_64" => Some("f64"),
+                "to_f_80" => Some("f80"),
+                "to_i_64" => Some("i64"),
+                _ => None,
+            };
+            if let (Some(target), [argument]) = (target_element, arguments.as_slice()) {
+                let source = expression_type_name(module, &argument.value, names, index)?;
+                let (constructor, source_arguments) = type_application_parts(&source)?;
+                if constructor.rsplit('.').next() == Some("Tensor")
+                    && !source_arguments.is_empty()
+                {
+                    let shape = source_arguments[1..]
+                        .iter()
+                        .map(|dimension| format!(", {dimension}"))
+                        .collect::<String>();
+                    return Some(format!("Tensor[{target}{shape}]"));
+                }
+            }
             let direct = resolve_path(module, &path, index)
                 .into_iter()
                 .find_map(|definition| match &index.definitions[&definition].kind {
@@ -2033,7 +2337,45 @@ fn expression_type_name(
                         type_annotation_name(&function.result)
                     }
                     DefKind::Function(function) => {
-                        let mut substitution = Substitution::new();
+                        let mut substitution = Substitution::for_declaration(function);
+                        if let severian_ast::ExpressionKind::TypeApplication {
+                            arguments: explicit,
+                            ..
+                        } = &callee.kind
+                        {
+                            for ((parameter, argument), metadata) in function
+                                .type_parameters
+                                .iter()
+                                .zip(explicit)
+                                .zip(generic_parameters(
+                                    &function.type_parameters,
+                                    &function.constraints,
+                                ))
+                            {
+                                match metadata.kind {
+                                    severian_universal::GenericParamKind::Type => {
+                                        let value = type_annotation_name(argument)?;
+                                        substitution.insert_type(
+                                            parameter.clone(),
+                                            names
+                                                .get(&format!("$type:{value}"))
+                                                .cloned()
+                                                .unwrap_or(value),
+                                        );
+                                    }
+                                    severian_universal::GenericParamKind::Dimension => {
+                                        let value = type_annotation_name(argument)?;
+                                        substitution
+                                            .bind_dimension(
+                                                parameter,
+                                                parse_dim_expr(&value, 0),
+                                            )
+                                            .ok()?;
+                                    }
+                                    severian_universal::GenericParamKind::Shape => {}
+                                }
+                            }
+                        }
                         for (parameter, argument) in function.parameters.iter().zip(arguments) {
                             let Some(actual) =
                                 expression_type_name(module, &argument.value, names, index)
@@ -2160,6 +2502,21 @@ fn expression_type_name(
     }
 }
 
+fn source_integer_list(expression: &severian_ast::Expression) -> Option<Vec<u64>> {
+    let severian_ast::ExpressionKind::List(values) = &expression.kind else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| match &value.kind {
+            severian_ast::ExpressionKind::Literal(severian_ast::Literal::Integer(value)) => {
+                value.replace('_', "").parse::<u64>().ok()
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn type_annotation_name(annotation: &TypeAnnotation) -> Option<String> {
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => Some(name.clone()),
@@ -2171,6 +2528,9 @@ fn type_annotation_name(annotation: &TypeAnnotation) -> Option<String> {
                 .collect::<Option<Vec<_>>>()?
                 .join(", ")
         )),
+        TypeAnnotationKind::DimensionConstant(value) => Some(value.to_string()),
+        TypeAnnotationKind::DimensionRuntime(runtime) => Some(format!("?{runtime}")),
+        TypeAnnotationKind::ShapeSpread(name) => Some(format!("*{name}")),
         TypeAnnotationKind::Function { parameters, result } => Some(format!(
             "({}) -> {}",
             parameters
@@ -2234,6 +2594,7 @@ pub(super) fn specialize_function(
             severian_ast::GenericConstraint::Parameter { bound, .. } => {
                 *bound = specialize_annotation(bound, substitution);
             }
+            severian_ast::GenericConstraint::VariadicPack { .. } => {}
             severian_ast::GenericConstraint::Predicate(predicate) => {
                 specialize_expression(predicate, substitution);
             }
@@ -2269,6 +2630,7 @@ pub(super) fn specialize_signature(
             severian_ast::GenericConstraint::Parameter { bound, .. } => {
                 *bound = specialize_annotation(bound, substitution);
             }
+            severian_ast::GenericConstraint::VariadicPack { .. } => {}
             severian_ast::GenericConstraint::Predicate(predicate) => {
                 specialize_expression(predicate, substitution);
             }
@@ -2546,16 +2908,51 @@ fn specialize_annotation(
     substitution: &Substitution,
 ) -> TypeAnnotation {
     let kind = match &annotation.kind {
-        TypeAnnotationKind::Named { name, arguments } => TypeAnnotationKind::Named {
-            name: substitution
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| name.clone()),
-            arguments: arguments
-                .iter()
-                .map(|argument| specialize_annotation(argument, substitution))
-                .collect(),
-        },
+        TypeAnnotationKind::Named { name, arguments } => {
+            if arguments.is_empty() {
+                if let Some(dimension) = substitution.dimension(name) {
+                    dim_expr_annotation(dimension)
+                } else if let Some(replacement) = substitution.get(name) {
+                    TypeAnnotationKind::Named {
+                        name: replacement.clone(),
+                        arguments: Vec::new(),
+                    }
+                } else {
+                    TypeAnnotationKind::Named {
+                        name: name.clone(),
+                        arguments: Vec::new(),
+                    }
+                }
+            } else {
+                TypeAnnotationKind::Named {
+                    name: name.clone(),
+                    arguments: arguments
+                        .iter()
+                        .flat_map(|argument| {
+                            if let TypeAnnotationKind::ShapeSpread(parameter) = &argument.kind {
+                                if let Some(shape) = substitution.shape(parameter) {
+                                    return shape
+                                        .iter()
+                                        .map(|dimension| TypeAnnotation {
+                                            kind: dim_expr_annotation(dimension),
+                                            span: argument.span,
+                                        })
+                                        .collect::<Vec<_>>();
+                                }
+                            }
+                            vec![specialize_annotation(argument, substitution)]
+                        })
+                        .collect(),
+                }
+            }
+        }
+        TypeAnnotationKind::DimensionConstant(value) => {
+            TypeAnnotationKind::DimensionConstant(*value)
+        }
+        TypeAnnotationKind::DimensionRuntime(runtime) => {
+            TypeAnnotationKind::DimensionRuntime(*runtime)
+        }
+        TypeAnnotationKind::ShapeSpread(name) => TypeAnnotationKind::ShapeSpread(name.clone()),
         TypeAnnotationKind::Function { parameters, result } => TypeAnnotationKind::Function {
             parameters: parameters
                 .iter()
@@ -2573,5 +2970,26 @@ fn specialize_annotation(
     TypeAnnotation {
         kind,
         span: annotation.span,
+    }
+}
+
+fn dim_expr_annotation(dimension: &severian_universal::DimExpr) -> TypeAnnotationKind {
+    match dimension {
+        severian_universal::DimExpr::Constant(value) => {
+            TypeAnnotationKind::DimensionConstant(*value)
+        }
+        severian_universal::DimExpr::Runtime(runtime) => {
+            TypeAnnotationKind::DimensionRuntime(runtime.0)
+        }
+        severian_universal::DimExpr::Parameter(parameter) => TypeAnnotationKind::Named {
+            name: format!("__dim_parameter_{}", parameter.0),
+            arguments: Vec::new(),
+        },
+        severian_universal::DimExpr::Add(_, _)
+        | severian_universal::DimExpr::Multiply(_, _)
+        | severian_universal::DimExpr::DivideExact(_, _) => TypeAnnotationKind::Named {
+            name: format_dim_expr(dimension),
+            arguments: Vec::new(),
+        },
     }
 }

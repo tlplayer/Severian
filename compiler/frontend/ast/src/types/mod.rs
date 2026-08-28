@@ -138,6 +138,10 @@ pub enum GenericConstraint {
         bound: TypeAnnotation,
         span: Span,
     },
+    VariadicPack {
+        parameter: String,
+        span: Span,
+    },
     Predicate(Expression),
 }
 
@@ -154,6 +158,17 @@ pub enum TypeAnnotationKind {
         name: String,
         arguments: Vec<TypeAnnotation>,
     },
+    /// A compile-time dimension value used as a tensor generic argument.
+    /// This is deliberately not a named type: dimensions never enter the
+    /// ordinary type interner as synthetic `TypeId`s.
+    DimensionConstant(u64),
+    /// A dimension whose value is supplied by the launch/storage descriptor,
+    /// but whose axis identity is already known at compile time.
+    DimensionRuntime(u32),
+    /// A variadic shape argument such as `*Shape` in `Tensor[T, *Shape]`.
+    /// The referenced generic parameter is kinded as `Shape` during semantic
+    /// analysis and expands to zero or more `DimExpr` values.
+    ShapeSpread(String),
     Function {
         parameters: Vec<TypeAnnotation>,
         result: Box<TypeAnnotation>,
@@ -182,7 +197,11 @@ impl TypeAnnotation {
     pub fn named_parts(&self) -> Option<(&str, &[Self])> {
         match &self.kind {
             TypeAnnotationKind::Named { name, arguments } => Some((name, arguments)),
-            TypeAnnotationKind::Function { .. } | TypeAnnotationKind::Union(_) => None,
+            TypeAnnotationKind::DimensionConstant(_)
+            | TypeAnnotationKind::DimensionRuntime(_)
+            | TypeAnnotationKind::ShapeSpread(_)
+            | TypeAnnotationKind::Function { .. }
+            | TypeAnnotationKind::Union(_) => None,
         }
     }
 }

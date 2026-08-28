@@ -685,6 +685,56 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_dimension_generics_and_variadic_shape_arguments() {
+        let source = SourceFile::virtual_source(
+            "tensor-shape-generics.sev",
+            "class Tensor[T: TensorElement, *Shape: Dim]:\n    pass\n\ndef preserve[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:\n    return value\n\nvalue: Tensor[f32, 2, B, 1024]\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+
+        let severian_ast::Item::Class(tensor) = &module.items[0] else {
+            panic!("expected tensor class")
+        };
+        assert_eq!(tensor.type_parameters, ["T", "Shape"]);
+        assert!(tensor.constraints.iter().any(|constraint| matches!(
+            constraint,
+            severian_ast::GenericConstraint::VariadicPack { parameter, .. }
+                if parameter == "Shape"
+        )));
+
+        let severian_ast::Item::Function(preserve) = &module.items[1] else {
+            panic!("expected preserve function")
+        };
+        let (_, arguments) = preserve.parameters[0]
+            .annotation
+            .named_parts()
+            .expect("tensor application");
+        assert!(matches!(
+            &arguments[1].kind,
+            severian_ast::TypeAnnotationKind::ShapeSpread(name) if name == "Shape"
+        ));
+
+        let severian_ast::Item::Binding(value) = &module.items[2] else {
+            panic!("expected shaped tensor binding")
+        };
+        let (_, arguments) = value
+            .annotation
+            .as_ref()
+            .expect("binding annotation")
+            .named_parts()
+            .expect("tensor application");
+        assert!(matches!(
+            arguments[1].kind,
+            severian_ast::TypeAnnotationKind::DimensionConstant(2)
+        ));
+        assert_eq!(arguments[2].simple_name(), Some("B"));
+        assert!(matches!(
+            arguments[3].kind,
+            severian_ast::TypeAnnotationKind::DimensionConstant(1024)
+        ));
+    }
+
+    #[test]
     fn parses_intersection_bounds_and_map_loop_bindings() {
         let source = SourceFile::virtual_source(
             "map-generic.sev",

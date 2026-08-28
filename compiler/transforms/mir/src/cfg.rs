@@ -87,6 +87,7 @@ pub enum Operand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callee {
     Direct {
+        instance: Option<crate::FunctionId>,
         function: DefId,
         substitution: Substitution,
     },
@@ -1156,9 +1157,11 @@ impl BodyBuilder {
     fn callee(&self, callee: &HirCallee) -> Callee {
         match callee {
             HirCallee::Direct {
+                instance,
                 function,
                 substitution,
             } => Callee::Direct {
+                instance: *instance,
                 function: *function,
                 substitution: substitution.clone(),
             },

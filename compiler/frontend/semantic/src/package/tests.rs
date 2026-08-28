@@ -4,6 +4,35 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn generic_parameter_kinds_keep_types_dimensions_and_shapes_separate() {
+    let source = severian_source::SourceFile::virtual_source(
+        "shape-kinds.sev",
+        "def contract[T: TensorElement, B: Dim, Batch: Shape, *Tail: Dim](value: T) -> T:\n    return value\n",
+    );
+    let tokens = severian_lexer::scan(&source).unwrap();
+    let ast = severian_parser::parse(&tokens).unwrap();
+    let severian_ast::Item::Function(function) = &ast.items[0] else {
+        panic!("expected function")
+    };
+    let parameters = generic_parameters(&function.type_parameters, &function.constraints);
+    assert_eq!(parameters.len(), 4);
+    assert_eq!(parameters[0].kind, severian_universal::GenericParamKind::Type);
+    assert_eq!(
+        parameters[1].kind,
+        severian_universal::GenericParamKind::Dimension
+    );
+    assert_eq!(
+        parameters[2].kind,
+        severian_universal::GenericParamKind::Shape
+    );
+    assert_eq!(
+        parameters[3].kind,
+        severian_universal::GenericParamKind::Shape
+    );
+    assert!(parameters[3].variadic);
+}
+
 fn temporary() -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "severian-semantic-package-{}-{}",

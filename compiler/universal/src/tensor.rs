@@ -22,6 +22,10 @@ pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_typ
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
 pub const REDUCTION_AXES: AttributeId = AttributeId::from_name("tensor.reduction_axes");
+/// Flattened runtime operand constants encoded as repeated
+/// `[operand_index, value_count, values...]` records. They are structural
+/// launch data, never part of an operation or symbol identity.
+pub const RUNTIME_OPERANDS: AttributeId = AttributeId::from_name("tensor.runtime_operands");
 
 /// The small, structural tensor IR. Public tensor-library functions select a
 /// variant through `OPERATION_KIND`; adding a library algorithm does not add
@@ -588,7 +592,33 @@ impl TensorShape {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TensorType {
     pub element: TypeId,
+    /// Source-level symbolic shape. This retains dimension parameters and
+    /// shape packs until specialization proves a concrete rank.
+    pub source_shape: crate::ShapeTerm,
+    /// Backend compatibility view derived from `source_shape`. `Unranked`
+    /// means an unresolved source shape pack, never permission to emit a
+    /// rank-dependent MLIR operation.
     pub shape: TensorShape,
+}
+
+fn source_shape_from_lowered(shape: &TensorShape) -> crate::ShapeTerm {
+    match shape {
+        TensorShape::Unranked => crate::ShapeTerm::Pack(crate::ShapeParameterId(
+            crate::GenericParamId(u32::MAX),
+        )),
+        TensorShape::Ranked(dimensions) => crate::ShapeTerm::Ranked(
+            dimensions
+                .iter()
+                .enumerate()
+                .map(|(axis, dimension)| match dimension {
+                    TensorDimension::Known(value) => crate::DimExpr::Constant(*value),
+                    TensorDimension::Dynamic => {
+                        crate::DimExpr::Runtime(crate::RuntimeDimId(axis as u32))
+                    }
+                })
+                .collect(),
+        ),
+    }
 }
 
 impl TensorType {
@@ -599,9 +629,11 @@ impl TensorType {
                 other.element,
             ));
         }
+        let shape = self.shape.broadcast(&other.shape)?;
         Ok(Self {
             element: self.element,
-            shape: self.shape.broadcast(&other.shape)?,
+            source_shape: source_shape_from_lowered(&shape),
+            shape,
         })
     }
 
@@ -612,9 +644,11 @@ impl TensorType {
                 other.element,
             ));
         }
+        let shape = self.shape.matmul(&other.shape)?;
         Ok(Self {
             element: self.element,
-            shape: self.shape.matmul(&other.shape)?,
+            source_shape: source_shape_from_lowered(&shape),
+            shape,
         })
     }
 }
@@ -637,6 +671,7 @@ impl TypeContext {
             source: source.clone(),
             target: TensorType {
                 element: target_element,
+                source_shape: source.source_shape.clone(),
                 shape: source.shape.clone(),
             },
             element,
@@ -696,6 +731,11 @@ mod tests {
         let types = types();
         let source = TensorType {
             element: types.resolve_name("f8e4m3fn").unwrap(),
+            source_shape: crate::ShapeTerm::Ranked(vec![
+                crate::DimExpr::Runtime(crate::RuntimeDimId(0)),
+                crate::DimExpr::Runtime(crate::RuntimeDimId(1)),
+                crate::DimExpr::Runtime(crate::RuntimeDimId(2)),
+            ]),
             shape: TensorShape::dynamic(3),
         };
         let promoted = types

@@ -2,7 +2,7 @@ use severian_compile::{CompileRegion, TensorValueContract, ValueMutation};
 use severian_fusion::{
     AliasKind, BatchDimension, ContractionDimension, Dimension, ElementKind, FusionGraph,
     FusionNode, GraphError, InputAlias, Matmul, Mutation, NodeId, NodeKind, OperandRole, Rank,
-    Shape, StorageLayout,
+    RuntimeOperand, Shape, StorageLayout,
 };
 use severian_universal::{
     tensor, FloatFormat, IntegerWidth, PrimitiveRepresentation, TensorDimension, TensorShape,
@@ -187,6 +187,13 @@ pub fn fusion_graph_with_slots(
                 .filter_map(|value| i64::try_from(*value).ok())
                 .collect();
         }
+        if let Some(severian_universal::AttrValue::Integers(values)) =
+            operation.attributes.get(&tensor::RUNTIME_OPERANDS)
+        {
+            node.runtime_operands = decode_runtime_operands(values).map_err(|_| {
+                FusionGraphError::InvalidGraph(GraphError::OperandRoleCount { node: id })
+            })?;
+        }
         node.operand_roles = contracts
             .get(&result_slot)
             .and_then(|contract| contract.tensor.as_ref())
@@ -259,6 +266,28 @@ pub fn fusion_graph_with_slots(
     }
     let graph = FusionGraph::new(nodes).map_err(FusionGraphError::InvalidGraph)?;
     Ok((graph, slots))
+}
+
+fn decode_runtime_operands(values: &[i128]) -> Result<Vec<RuntimeOperand>, ()> {
+    let mut decoded = Vec::new();
+    let mut cursor = 0;
+    while cursor < values.len() {
+        let input_index = u16::try_from(*values.get(cursor).ok_or(())?).map_err(|_| ())?;
+        let count = usize::try_from(*values.get(cursor + 1).ok_or(())?).map_err(|_| ())?;
+        cursor += 2;
+        let end = cursor.checked_add(count).ok_or(())?;
+        let payload = values.get(cursor..end).ok_or(())?;
+        let values = payload
+            .iter()
+            .map(|value| i64::try_from(*value).map_err(|_| ()))
+            .collect::<Result<Vec<_>, _>>()?;
+        decoded.push(RuntimeOperand {
+            input_index,
+            values,
+        });
+        cursor = end;
+    }
+    Ok(decoded)
 }
 
 fn shape_from_contract(contract: &TensorValueContract) -> Shape {

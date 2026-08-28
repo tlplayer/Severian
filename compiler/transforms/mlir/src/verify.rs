@@ -105,9 +105,57 @@ pub fn compose(
         }
     }
 
-    module.verify("composed module")?;
+    if module.verify("composed module").is_err() {
+        let printed = module.print();
+        let excerpt = mismatched_call_signatures(&printed).join("\n");
+        return Err(MlirError::VerificationFailed(format!(
+            "composed module; mismatched calls:\n{excerpt}"
+        )));
+    }
     module.verify_allowed_dialects(target)?;
     Ok(module.print())
+}
+
+fn mismatched_call_signatures(module: &str) -> Vec<String> {
+    let mut definitions = std::collections::BTreeMap::new();
+    for line in module.lines() {
+        let Some(signature) = line
+            .split("function_type = ")
+            .nth(1)
+            .and_then(|tail| tail.split(", sym_name = \"").next())
+        else {
+            continue;
+        };
+        let Some(symbol) = line
+            .split(", sym_name = \"")
+            .nth(1)
+            .and_then(|tail| tail.split('"').next())
+        else {
+            continue;
+        };
+        let inputs = signature.split(" -> ").next().unwrap_or(signature);
+        definitions.insert(symbol.to_owned(), inputs.to_owned());
+    }
+    module
+        .lines()
+        .filter_map(|line| {
+            let tail = line.split("<{callee = @").nth(1)?;
+            let symbol = tail.split("}>").next()?;
+            let provided = line
+                .split("}> : ")
+                .nth(1)?
+                .split(" -> ")
+                .next()?;
+            let expected = definitions.get(symbol)?;
+            (provided != expected).then(|| {
+                format!(
+                    "@{symbol}: expected {expected}, provided {provided}; operation: {}",
+                    line.trim()
+                )
+            })
+        })
+        .take(40)
+        .collect()
 }
 
 /// Replaces compiled-region declarations with host functions that call the

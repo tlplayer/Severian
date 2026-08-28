@@ -21,11 +21,16 @@ The test is intentionally an executable goal, not a list of current backend
 exceptions. A failing cell remains visible until this complete route works:
 
     StorageViewAbi
-        -> runtime rank/shape/stride specialization
+        -> source shape-pack and dimension inference
+        -> compile-time ranked tensor specialization
         -> CPU MLIR or GPU TTIR
         -> compiled-kernel cache
         -> launcher
         -> execution
+
+Runtime rank specialization is reserved for genuinely opaque external storage.
+Static and symbolic source shapes must never require a runtime realization or
+JIT merely to discover rank.
 
 Dtype and rank are data throughout this test. The single native fixture below
 accepts representation fields as ordinary values; it must never be replaced
@@ -37,11 +42,25 @@ with dtype-named ABI symbols.
 def storage_view_fixture(kind: i32, bits: i32, format: i32) -> bytes
 
 
-def storage_view[T](kind: i32, bits: i32, format: i32) -> Tensor[T]:
+def storage_view[T](kind: i32, bits: i32, format: i32) -> Tensor[T, 2, 2]:
     return tensor.from_storage[T](storage_view_fixture(kind, bits, format))
 
 
-def exercise_structural_numeric[T](left: Tensor[T], right: Tensor[T], indices: Tensor[i64]) -> bool:
+# Shape-generic language contract. Dimensions are values and `*Shape` is a
+# variadic shape pack; neither is an ordinary type argument.
+def preserve_shape[T: tensor.TensorElement, *Shape: tensor.Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    return value
+
+
+def preserve_matrix[T: tensor.TensorElement, Rows: tensor.Dim, Columns: tensor.Dim](value: Tensor[T, Rows, Columns]) -> Tensor[T, Rows, Columns]:
+    return value
+
+
+def fixed_projection(value: Tensor[f32, 2, 128, 1024]) -> Tensor[f32, 2, 128, 1024]:
+    return value
+
+
+def exercise_structural_numeric[T: tensor.TensorElement, *Shape: tensor.Dim, *IndexShape: tensor.Dim](left: Tensor[T, *Shape], right: Tensor[T, *Shape], indices: Tensor[i64, *IndexShape]) -> bool:
     # Elementwise
     added = tensor.add(copy left, copy right)
     subtracted = tensor.subtract(copy left, copy right)
@@ -101,7 +120,7 @@ def exercise_structural_numeric[T](left: Tensor[T], right: Tensor[T], indices: T
     return observed > 0
 
 
-def exercise_float_primitives[T](value: Tensor[T], weights: Tensor[T]) -> bool:
+def exercise_float_primitives[T: tensor.TensorElement, *Shape: tensor.Dim](value: Tensor[T, *Shape], weights: Tensor[T, *Shape]) -> bool:
     exponential = tensor.exp[T](copy value)
     logarithm = tensor.log[T](copy value)
     hyperbolic = tensor.tanh[T](copy value)
@@ -177,7 +196,7 @@ def exercise_float_primitives[T](value: Tensor[T], weights: Tensor[T]) -> bool:
     return observed > 0
 
 
-def exercise_storage[T](value: Tensor[T]) -> bool:
+def exercise_storage[T: tensor.TensorElement, *Shape: tensor.Dim](value: Tensor[T, *Shape]) -> bool:
     dimensions = tensor.shape(copy value)
     strides = tensor.strides(copy value)
     values = tensor.values(value)
@@ -267,6 +286,16 @@ test "all storage representations convert through the same Convert operation ide
     assert(tensor.values(tensor.f64(tensor.f64(copy original))) == [1.0, 2.0, 3.0, 4.0])
     assert(tensor.values(tensor.f64(tensor.f80(copy original))) == [1.0, 2.0, 3.0, 4.0])
     assert(tensor.values(tensor.f64(tensor.f128(original))) == [1.0, 2.0, 3.0, 4.0])
+
+
+test "shape packs and dimension generics specialize rank before lowering":
+    shape_source: Tensor[f32, 2, 2] = tensor.f32(tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2]))
+    matrix_source: Tensor[f32, 2, 2] = tensor.f32(tensor.tensor([1.0, 2.0, 3.0, 4.0], [2, 2]))
+    arbitrary_rank: Tensor[f32, 2, 2] = preserve_shape(shape_source)
+    fixed_rank: Tensor[f32, 2, 2] = preserve_matrix(matrix_source)
+
+    assert(tensor.shape(arbitrary_rank) == [2, 2])
+    assert(tensor.shape(fixed_rank) == [2, 2])
 
 
 test "rank zero, one, two, and four remain data instead of operation identities":

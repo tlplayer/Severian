@@ -6,9 +6,14 @@ use severian_universal::{IrContext, RegisteredOperation, TypeContext, TypeId, Un
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-type Signatures =
+type DefinitionSignatures =
     BTreeMap<(severian_universal::DefId, severian_universal::Substitution), (Vec<TypeId>, TypeId)>;
-type CallContext<'a> = (&'a TypeContext, &'a Signatures);
+type InstanceSignatures = BTreeMap<crate::FunctionId, (Vec<TypeId>, TypeId)>;
+struct CallSignatures {
+    definitions: DefinitionSignatures,
+    instances: InstanceSignatures,
+}
+type CallContext<'a> = (&'a TypeContext, &'a CallSignatures);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyError {
@@ -95,7 +100,7 @@ pub(crate) fn verify_structure(module: &Module) -> Result<(), VerifyError> {
 }
 
 pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyError> {
-    let signatures = module
+    let definitions = module
         .functions
         .iter()
         .map(|function| {
@@ -105,6 +110,20 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let instances = module
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.id,
+                (function.parameters.clone(), function.result),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let signatures = CallSignatures {
+        definitions,
+        instances,
+    };
     verify_body(
         &module.initializer,
         &module.globals,
@@ -367,11 +386,19 @@ fn transfer(
         }
         if let Some((types, signatures)) = calls {
             if let Callee::Direct {
+                instance,
                 function,
                 substitution,
             } = callee
             {
-                let Some((parameters, _)) = signatures.get(&(*function, substitution.clone()))
+                let signature = instance
+                    .and_then(|instance| signatures.instances.get(&instance))
+                    .or_else(|| {
+                        signatures
+                            .definitions
+                            .get(&(*function, substitution.clone()))
+                    });
+                let Some((parameters, _)) = signature
                 else {
                     return Err(VerifyError::CallTarget);
                 };

@@ -6,7 +6,10 @@ use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeA
 use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
-use severian_universal::{DeclarationId, DefId, TypeId, UniversalContext};
+use severian_universal::{
+    DeclarationId, DefId, GenericParamId, GenericParamKind, GenericParameter, TypeId,
+    UniversalContext,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod generic;
@@ -40,6 +43,50 @@ pub struct FunctionDecl {
     /// downstream package can instantiate a generic definition. `None`
     /// continues to mean a declaration-only/foreign interface.
     pub generic_body: Option<Vec<severian_ast::Statement>>,
+}
+
+/// Classifies source generics without turning dimension or shape parameters
+/// into ordinary types. Parameter IDs remain declaration-local and stable by
+/// source order, matching the IDs used by HIR substitutions.
+pub(crate) fn generic_parameters(
+    names: &[String],
+    constraints: &[GenericConstraint],
+) -> Vec<GenericParameter> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let variadic = constraints.iter().any(|constraint| {
+                matches!(constraint, GenericConstraint::VariadicPack { parameter, .. } if parameter == name)
+            });
+            let bound_kind = constraints.iter().find_map(|constraint| {
+                let GenericConstraint::Parameter {
+                    parameter, bound, ..
+                } = constraint
+                else {
+                    return None;
+                };
+                if parameter != name {
+                    return None;
+                }
+                match bound.simple_name().and_then(|name| name.rsplit('.').next()) {
+                    Some("Dim") => Some(GenericParamKind::Dimension),
+                    Some("Shape") => Some(GenericParamKind::Shape),
+                    _ => None,
+                }
+            });
+            GenericParameter {
+                id: GenericParamId(index as u32),
+                name: name.clone(),
+                kind: if variadic {
+                    GenericParamKind::Shape
+                } else {
+                    bound_kind.unwrap_or(GenericParamKind::Type)
+                },
+                variadic,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,6 +365,10 @@ pub fn analyze_package_with_context(
                     id: stable_instance_function_id(binding.definition, &binding.substitution),
                     definition: binding.definition,
                     substitution,
+                    generic_parameters: generic_parameters(
+                        &original.type_parameters,
+                        &original.constraints,
+                    ),
                     type_parameters: Vec::new(),
                     parameter_names: signature.parameter_names.clone(),
                     parameter_variadics: signature.parameter_variadics.clone(),
@@ -753,6 +804,72 @@ fn resolve_package_type(
     if let Some((name, arguments)) = annotation.named_parts() {
         if !arguments.is_empty() {
             if let Some(class) = package_class_for_lookup(classes, module, name) {
+                if class.declaration.name == "Tensor" {
+                    let element = resolve_package_type(
+                        types,
+                        &arguments[0],
+                        module,
+                        classes,
+                        lists,
+                    )?;
+                    if arguments.len() == 1 {
+                        return types
+                            .instantiate_tensor(
+                                class.ty,
+                                element,
+                                severian_universal::TensorShape::Unranked,
+                            )
+                            .map_err(|error| {
+                                Diagnostic::new(
+                                    "E000204",
+                                    error.to_string(),
+                                    Some(annotation.span),
+                                )
+                            });
+                    }
+                    let dimensions = arguments[1..]
+                        .iter()
+                        .map(|argument| match &argument.kind {
+                            TypeAnnotationKind::DimensionConstant(value) => {
+                                Ok(severian_universal::DimExpr::Constant(*value))
+                            }
+                            TypeAnnotationKind::DimensionRuntime(runtime) => Ok(
+                                severian_universal::DimExpr::Runtime(
+                                    severian_universal::RuntimeDimId(*runtime),
+                                ),
+                            ),
+                            TypeAnnotationKind::ShapeSpread(name) => Err(Diagnostic::new(
+                                "E000204",
+                                format!(
+                                    "shape pack `*{name}` must be inferred or specialized before tensor type resolution"
+                                ),
+                                Some(argument.span),
+                            )),
+                            TypeAnnotationKind::Named { name, arguments }
+                                if arguments.is_empty() => Err(Diagnostic::new(
+                                    "E000204",
+                                    format!(
+                                        "dimension `{name}` must be bound by generic shape specialization before tensor type resolution"
+                                    ),
+                                    Some(argument.span),
+                                )),
+                            _ => Err(Diagnostic::new(
+                                "E000204",
+                                "tensor shape arguments must be dimension values or shape packs",
+                                Some(argument.span),
+                            )),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return types
+                        .instantiate_symbolic_tensor(
+                            class.ty,
+                            element,
+                            severian_universal::ShapeTerm::Ranked(dimensions),
+                        )
+                        .map_err(|error| {
+                            Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
+                        });
+                }
                 if class.declaration.type_parameters.len() != arguments.len() {
                     return Err(Diagnostic::new(
                         "E000204",
@@ -1511,6 +1628,7 @@ fn constraint_key(constraint: &GenericConstraint) -> String {
         GenericConstraint::Parameter {
             parameter, bound, ..
         } => format!("{parameter}:{}", type_key(bound)),
+        GenericConstraint::VariadicPack { parameter, .. } => format!("*{parameter}"),
         GenericConstraint::Predicate(expression) => format!("predicate:{:?}", expression.kind),
     }
 }
@@ -1522,6 +1640,9 @@ fn type_key(annotation: &TypeAnnotation) -> String {
             "{name}[{}]",
             arguments.iter().map(type_key).collect::<Vec<_>>().join(",")
         ),
+        TypeAnnotationKind::DimensionConstant(value) => value.to_string(),
+        TypeAnnotationKind::DimensionRuntime(runtime) => format!("?{runtime}"),
+        TypeAnnotationKind::ShapeSpread(name) => format!("*{name}"),
         TypeAnnotationKind::Union(types) => {
             format!(
                 "({})",
@@ -1553,7 +1674,8 @@ fn stable_instance_function_id(
     substitution: &GenericSubstitution,
 ) -> FunctionId {
     let arguments = substitution
-        .iter()
+        .bindings()
+        .into_iter()
         .map(|(parameter, ty)| format!("{parameter}={ty}"))
         .collect::<Vec<_>>()
         .join(",");
@@ -1575,6 +1697,11 @@ fn universal_substitution(
         .type_parameters
         .iter()
         .enumerate()
+        .filter(|(index, _)| {
+            generic_parameters(&function.type_parameters, &function.constraints)
+                .get(*index)
+                .is_some_and(|parameter| parameter.kind == GenericParamKind::Type)
+        })
         .filter_map(|(index, parameter)| {
             substitution
                 .get(parameter)
@@ -1588,12 +1715,13 @@ fn universal_substitution(
                     classes
                         .iter()
                         .find(|class| {
-                            class.module == module && class.declaration.name == name.as_str()
+                            class.module == module
+                                && class.declaration.name == (*name).as_str()
                         })
                         .or_else(|| {
                             classes
                                 .iter()
-                                .find(|class| class.declaration.name == name.as_str())
+                                .find(|class| class.declaration.name == (*name).as_str())
                         })
                         .map(|class| class.ty)
                 })

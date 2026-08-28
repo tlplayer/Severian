@@ -26,12 +26,19 @@ impl From<MlirError> for StructuredError {
 enum ValueType {
     Lowered(LoweredType),
     Index,
+    ShapeTensor(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Value {
     name: String,
     ty: ValueType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SliceComponent {
+    Static(i64),
+    Dynamic(Value),
 }
 
 impl Value {
@@ -42,7 +49,7 @@ impl Value {
     pub fn lowered_type(&self) -> Option<&LoweredType> {
         match &self.ty {
             ValueType::Lowered(ty) => Some(ty),
-            ValueType::Index => None,
+            ValueType::Index | ValueType::ShapeTensor(_) => None,
         }
     }
 }
@@ -51,6 +58,7 @@ impl Value {
 pub enum AffineExpression {
     Dimension(usize),
     Constant(i64),
+    FloorDiv { dimension: usize, divisor: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,9 +72,13 @@ impl AffineMap {
         domain_rank: usize,
         results: Vec<AffineExpression>,
     ) -> Result<Self, StructuredError> {
-        if results.iter().any(
-            |expression| matches!(expression, AffineExpression::Dimension(axis) if *axis >= domain_rank),
-        ) {
+        if results.iter().any(|expression| match expression {
+            AffineExpression::Dimension(axis) => *axis >= domain_rank,
+            AffineExpression::FloorDiv { dimension, divisor } => {
+                *dimension >= domain_rank || *divisor == 0
+            }
+            AffineExpression::Constant(_) => false,
+        }) {
             return Err(StructuredError(
                 "affine map references an axis outside its domain".into(),
             ));
@@ -107,8 +119,28 @@ pub enum ScalarBinaryOperation {
     MaximumUnsigned,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarUnaryOperation {
+    Exp,
+    Log,
+    Tanh,
+    Rsqrt,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScalarOperation {
+    FloatConvert {
+        result: String,
+        operand: String,
+        source: LoweredType,
+        target: LoweredType,
+    },
+    Unary {
+        result: String,
+        operation: ScalarUnaryOperation,
+        operand: String,
+        ty: LoweredType,
+    },
     Binary {
         result: String,
         operation: ScalarBinaryOperation,
@@ -158,6 +190,47 @@ impl GenericBody {
         let mut yielded = false;
         for (index, operation) in operations.iter().enumerate() {
             match operation {
+                ScalarOperation::FloatConvert {
+                    result,
+                    operand,
+                    source,
+                    target,
+                } => {
+                    if yielded
+                        || values.get(operand) != Some(source)
+                        || !matches!(source, LoweredType::Float { .. })
+                        || !matches!(target, LoweredType::Float { .. })
+                    {
+                        return Err(StructuredError(
+                            "scalar floating conversion has inconsistent operands".into(),
+                        ));
+                    }
+                    if values.insert(result.clone(), target.clone()).is_some() {
+                        return Err(StructuredError(format!(
+                            "scalar SSA value `%{result}` is defined twice"
+                        )));
+                    }
+                }
+                ScalarOperation::Unary {
+                    result,
+                    operand,
+                    ty,
+                    ..
+                } => {
+                    if yielded
+                        || values.get(operand) != Some(ty)
+                        || !matches!(ty, LoweredType::Float { .. })
+                    {
+                        return Err(StructuredError(
+                            "scalar unary operation has an inconsistent floating operand".into(),
+                        ));
+                    }
+                    if values.insert(result.clone(), ty.clone()).is_some() {
+                        return Err(StructuredError(format!(
+                            "scalar SSA value `%{result}` is defined twice"
+                        )));
+                    }
+                }
                 ScalarOperation::Binary {
                     result,
                     operation,
@@ -213,6 +286,11 @@ enum Operation {
         result: Value,
         literal: String,
     },
+    FloatConvert {
+        result: Value,
+        source: Value,
+        extend: bool,
+    },
     TensorDim {
         result: Value,
         tensor: Value,
@@ -221,6 +299,25 @@ enum Operation {
     IndexCast {
         result: Value,
         source: Value,
+    },
+    IntegerToIndex {
+        result: Value,
+        source: Value,
+    },
+    IndexSubtract {
+        result: Value,
+        left: Value,
+        right: Value,
+    },
+    IndexMultiply {
+        result: Value,
+        left: Value,
+        right: Value,
+    },
+    IndexCeilDivideSigned {
+        result: Value,
+        left: Value,
+        right: Value,
     },
     UnsignedToFloat {
         result: Value,
@@ -233,6 +330,41 @@ enum Operation {
     TensorCast {
         result: Value,
         source: Value,
+    },
+    ShapeTensorFromElements {
+        result: Value,
+        dimensions: Vec<Value>,
+    },
+    TensorReshape {
+        result: Value,
+        source: Value,
+        shape: Value,
+    },
+    TensorExtractSlice {
+        result: Value,
+        source: Value,
+        offsets: Vec<SliceComponent>,
+        sizes: Vec<SliceComponent>,
+        strides: Vec<SliceComponent>,
+    },
+    TensorConcat {
+        result: Value,
+        inputs: Vec<Value>,
+        axis: usize,
+    },
+    TensorGather {
+        result: Value,
+        source: Value,
+        indices: Value,
+        dynamic_sizes: Vec<Value>,
+        index_rank: usize,
+    },
+    TensorScatter {
+        result: Value,
+        source: Value,
+        indices: Value,
+        updates: Value,
+        dynamic_sizes: Vec<Value>,
     },
     LinalgFill {
         result: Value,
@@ -346,6 +478,38 @@ impl FunctionBuilder {
         Ok(result)
     }
 
+    pub fn float_convert(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+        target: LoweredType,
+    ) -> Result<Value, StructuredError> {
+        let Some(LoweredType::Float { format: source_format }) = source.lowered_type() else {
+            return Err(StructuredError(
+                "floating conversion requires a floating source".into(),
+            ));
+        };
+        let LoweredType::Float { format: target_format } = &target else {
+            return Err(StructuredError(
+                "floating conversion requires a floating target".into(),
+            ));
+        };
+        let source_bits = lowered_float_bits(*source_format);
+        let target_bits = lowered_float_bits(*target_format);
+        if source_bits == target_bits {
+            return Err(StructuredError(
+                "same-width floating formats require a structural bit conversion".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        self.push(Operation::FloatConvert {
+            result: result.clone(),
+            source: source.clone(),
+            extend: target_bits > source_bits,
+        })?;
+        Ok(result)
+    }
+
     pub fn tensor_dim(
         &mut self,
         name: impl Into<String>,
@@ -383,6 +547,91 @@ impl FunctionBuilder {
         self.push(Operation::IndexCast {
             result: result.clone(),
             source: source.clone(),
+        })?;
+        Ok(result)
+    }
+
+    pub fn integer_to_index(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+    ) -> Result<Value, StructuredError> {
+        if !matches!(source.lowered_type(), Some(LoweredType::Integer { .. })) {
+            return Err(StructuredError(
+                "arith.index_cast requires an integer source".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Index)?;
+        self.push(Operation::IntegerToIndex {
+            result: result.clone(),
+            source: source.clone(),
+        })?;
+        Ok(result)
+    }
+
+    pub fn index_subtract(
+        &mut self,
+        name: impl Into<String>,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, StructuredError> {
+        self.index_binary(name, left, right, false)
+    }
+
+    pub fn index_multiply(
+        &mut self,
+        name: impl Into<String>,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, StructuredError> {
+        if left.ty != ValueType::Index || right.ty != ValueType::Index {
+            return Err(StructuredError(
+                "structured index arithmetic requires index operands".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Index)?;
+        self.push(Operation::IndexMultiply {
+            result: result.clone(),
+            left: left.clone(),
+            right: right.clone(),
+        })?;
+        Ok(result)
+    }
+
+    pub fn index_ceil_divide_signed(
+        &mut self,
+        name: impl Into<String>,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, StructuredError> {
+        self.index_binary(name, left, right, true)
+    }
+
+    fn index_binary(
+        &mut self,
+        name: impl Into<String>,
+        left: &Value,
+        right: &Value,
+        divide: bool,
+    ) -> Result<Value, StructuredError> {
+        if left.ty != ValueType::Index || right.ty != ValueType::Index {
+            return Err(StructuredError(
+                "structured index arithmetic requires index operands".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Index)?;
+        self.push(if divide {
+            Operation::IndexCeilDivideSigned {
+                result: result.clone(),
+                left: left.clone(),
+                right: right.clone(),
+            }
+        } else {
+            Operation::IndexSubtract {
+                result: result.clone(),
+                left: left.clone(),
+                right: right.clone(),
+            }
         })?;
         Ok(result)
     }
@@ -476,6 +725,248 @@ impl FunctionBuilder {
         self.push(Operation::TensorCast {
             result: result.clone(),
             source: source.clone(),
+        })?;
+        Ok(result)
+    }
+
+    pub fn shape_tensor_from_elements(
+        &mut self,
+        name: impl Into<String>,
+        dimensions: Vec<Value>,
+    ) -> Result<Value, StructuredError> {
+        if dimensions.iter().any(|value| value.ty != ValueType::Index) {
+            return Err(StructuredError(
+                "shape tensor elements must have index type".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::ShapeTensor(dimensions.len()))?;
+        self.push(Operation::ShapeTensorFromElements {
+            result: result.clone(),
+            dimensions,
+        })?;
+        Ok(result)
+    }
+
+    pub fn tensor_reshape(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+        shape: &Value,
+        target: LoweredType,
+    ) -> Result<Value, StructuredError> {
+        let ValueType::ShapeTensor(result_rank) = &shape.ty else {
+            return Err(StructuredError(
+                "tensor.reshape shape must be a rank-one index tensor".into(),
+            ));
+        };
+        if tensor_rank_from_type(&target) != Some(*result_rank) {
+            return Err(StructuredError(
+                "tensor.reshape shape length must equal the result rank".into(),
+            ));
+        }
+        let source_element = tensor_scalar_type(
+            source
+                .lowered_type()
+                .ok_or_else(|| StructuredError("tensor.reshape source is not lowered".into()))?,
+        )?;
+        if tensor_scalar_type(&target).ok().as_ref() != Some(&source_element) {
+            return Err(StructuredError(
+                "tensor.reshape must preserve its element type".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        self.push(Operation::TensorReshape {
+            result: result.clone(),
+            source: source.clone(),
+            shape: shape.clone(),
+        })?;
+        Ok(result)
+    }
+
+    pub fn tensor_extract_slice(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+        target: LoweredType,
+        offsets: Vec<SliceComponent>,
+        sizes: Vec<SliceComponent>,
+        strides: Vec<SliceComponent>,
+    ) -> Result<Value, StructuredError> {
+        let rank = tensor_rank(source)?;
+        if offsets.len() != rank || sizes.len() != rank || strides.len() != rank {
+            return Err(StructuredError(
+                "tensor.extract_slice parameters must match source rank".into(),
+            ));
+        }
+        if strides
+            .iter()
+            .any(|stride| matches!(stride, SliceComponent::Static(value) if *value <= 0))
+            || sizes
+                .iter()
+                .any(|size| matches!(size, SliceComponent::Static(value) if *value < 0))
+        {
+            return Err(StructuredError(
+                "tensor.extract_slice requires non-negative sizes and positive strides".into(),
+            ));
+        }
+        let target_rank = match &target {
+            LoweredType::Tensor {
+                shape: LoweredTensorShape::Ranked(dimensions),
+                ..
+            } => dimensions.len(),
+            _ => {
+                return Err(StructuredError(
+                    "tensor.extract_slice target must be a ranked tensor".into(),
+                ))
+            }
+        };
+        if target_rank != rank {
+            return Err(StructuredError(
+                "tensor.extract_slice must preserve rank".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        for component in offsets.iter().chain(&sizes).chain(&strides) {
+            if let SliceComponent::Dynamic(value) = component {
+                if value.ty != ValueType::Index
+                    || self.values.get(&value.name) != Some(&ValueType::Index)
+                {
+                    return Err(StructuredError(
+                        "dynamic tensor.extract_slice components must be defined index values"
+                            .into(),
+                    ));
+                }
+            }
+        }
+        self.push(Operation::TensorExtractSlice {
+            result: result.clone(),
+            source: source.clone(),
+            offsets,
+            sizes,
+            strides,
+        })?;
+        Ok(result)
+    }
+
+    pub fn tensor_concat(
+        &mut self,
+        name: impl Into<String>,
+        inputs: Vec<Value>,
+        axis: usize,
+        target: LoweredType,
+    ) -> Result<Value, StructuredError> {
+        let Some(first) = inputs.first() else {
+            return Err(StructuredError(
+                "tensor.concat requires at least one input".into(),
+            ));
+        };
+        let rank = tensor_rank(first)?;
+        if axis >= rank || inputs.iter().any(|input| tensor_rank(input) != Ok(rank)) {
+            return Err(StructuredError(
+                "tensor.concat axis and operand ranks are inconsistent".into(),
+            ));
+        }
+        let element = tensor_scalar_type(
+            first
+                .lowered_type()
+                .expect("tensor rank validation established a lowered type"),
+        )?;
+        if inputs.iter().any(|input| {
+            input
+                .lowered_type()
+                .is_none_or(|ty| tensor_scalar_type(ty).ok().as_ref() != Some(&element))
+        }) || tensor_rank_from_type(&target) != Some(rank)
+            || tensor_scalar_type(&target).ok().as_ref() != Some(&element)
+        {
+            return Err(StructuredError(
+                "tensor.concat operands and result must share rank and element type".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        self.push(Operation::TensorConcat {
+            result: result.clone(),
+            inputs,
+            axis,
+        })?;
+        Ok(result)
+    }
+
+    pub fn tensor_gather(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+        indices: &Value,
+        dynamic_sizes: Vec<Value>,
+        target: LoweredType,
+    ) -> Result<Value, StructuredError> {
+        let source_rank = tensor_rank(source)?;
+        let index_rank = tensor_rank(indices)?;
+        let target_rank = tensor_rank_from_type(&target).ok_or_else(|| {
+            StructuredError("tensor.gather target must have known rank".into())
+        })?;
+        if source_rank == 0 || target_rank != index_rank + source_rank - 1 {
+            return Err(StructuredError(
+                "tensor.gather result rank must be index rank plus source rank minus one".into(),
+            ));
+        }
+        if dynamic_sizes.iter().any(|value| value.ty != ValueType::Index) {
+            return Err(StructuredError(
+                "tensor.generate dynamic sizes must have index type".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        self.push(Operation::TensorGather {
+            result: result.clone(),
+            source: source.clone(),
+            indices: indices.clone(),
+            dynamic_sizes,
+            index_rank,
+        })?;
+        Ok(result)
+    }
+
+    pub fn tensor_scatter(
+        &mut self,
+        name: impl Into<String>,
+        source: &Value,
+        indices: &Value,
+        updates: &Value,
+        dynamic_sizes: Vec<Value>,
+        target: LoweredType,
+    ) -> Result<Value, StructuredError> {
+        let source_rank = tensor_rank(source)?;
+        if source_rank == 0
+            || tensor_rank(indices)? != 1
+            || tensor_rank(updates)? != source_rank
+            || tensor_rank_from_type(&target) != Some(source_rank)
+        {
+            return Err(StructuredError(
+                "tensor.scatter requires rank-one indices and rank-preserving updates".into(),
+            ));
+        }
+        let source_element = tensor_scalar_type(
+            source
+                .lowered_type()
+                .expect("tensor.scatter source is lowered"),
+        )?;
+        if tensor_scalar_type(
+            updates
+                .lowered_type()
+                .expect("tensor.scatter updates are lowered"),
+        )? != source_element
+            || tensor_scalar_type(&target)? != source_element
+        {
+            return Err(StructuredError(
+                "tensor.scatter source, updates, and result must share one element type".into(),
+            ));
+        }
+        let result = self.define(name, ValueType::Lowered(target))?;
+        self.push(Operation::TensorScatter {
+            result: result.clone(),
+            source: source.clone(),
+            indices: indices.clone(),
+            updates: updates.clone(),
+            dynamic_sizes,
         })?;
         Ok(result)
     }
@@ -644,15 +1135,39 @@ impl FunctionBuilder {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModuleBuilder {
+    declarations: Vec<(String, Vec<LoweredType>, Vec<LoweredType>)>,
     functions: Vec<Function>,
 }
 
 impl ModuleBuilder {
+    pub fn declare_function(
+        &mut self,
+        name: impl Into<String>,
+        parameters: Vec<LoweredType>,
+        results: Vec<LoweredType>,
+    ) -> Result<(), StructuredError> {
+        let name = name.into();
+        legal_identifier(&name)?;
+        if self.functions.iter().any(|known| known.name == name)
+            || self.declarations.iter().any(|known| known.0 == name)
+        {
+            return Err(StructuredError(format!(
+                "MLIR function `{name}` is defined twice"
+            )));
+        }
+        self.declarations.push((name, parameters, results));
+        Ok(())
+    }
+
     pub fn add_function(&mut self, function: Function) -> Result<(), StructuredError> {
         if self
             .functions
             .iter()
             .any(|known| known.name == function.name)
+            || self
+                .declarations
+                .iter()
+                .any(|known| known.0 == function.name)
         {
             return Err(StructuredError(format!(
                 "MLIR function `{}` is defined twice",
@@ -665,6 +1180,17 @@ impl ModuleBuilder {
 
     pub fn print(&self) -> Result<String, StructuredError> {
         let mut output = "module {\n".to_owned();
+        for (name, parameters, results) in &self.declarations {
+            let parameters = parameters
+                .iter()
+                .map(type_spelling)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            output.push_str(&format!(
+                "  func.func private @{name}({parameters}){}\n",
+                print_result_signature(results)?
+            ));
+        }
         for function in &self.functions {
             print_function(&mut output, function)?;
         }
@@ -704,6 +1230,18 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             result.name,
             print_value_type(&result.ty)?
         )),
+        Operation::FloatConvert {
+            result,
+            source,
+            extend,
+        } => output.push_str(&format!(
+            "    %{} = {} %{} : {} to {}\n",
+            result.name,
+            if *extend { "arith.extf" } else { "arith.truncf" },
+            source.name,
+            print_value_type(&source.ty)?,
+            print_value_type(&result.ty)?
+        )),
         Operation::TensorDim {
             result,
             tensor,
@@ -720,6 +1258,36 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             result.name,
             source.name,
             print_value_type(&result.ty)?
+        )),
+        Operation::IntegerToIndex { result, source } => output.push_str(&format!(
+            "    %{} = arith.index_cast %{} : {} to index\n",
+            result.name,
+            source.name,
+            print_value_type(&source.ty)?
+        )),
+        Operation::IndexSubtract {
+            result,
+            left,
+            right,
+        } => output.push_str(&format!(
+            "    %{} = arith.subi %{}, %{} : index\n",
+            result.name, left.name, right.name
+        )),
+        Operation::IndexMultiply {
+            result,
+            left,
+            right,
+        } => output.push_str(&format!(
+            "    %{} = arith.muli %{}, %{} : index\n",
+            result.name, left.name, right.name
+        )),
+        Operation::IndexCeilDivideSigned {
+            result,
+            left,
+            right,
+        } => output.push_str(&format!(
+            "    %{} = arith.ceildivsi %{}, %{} : index\n",
+            result.name, left.name, right.name
         )),
         Operation::UnsignedToFloat { result, source } => output.push_str(&format!(
             "    %{} = arith.uitofp %{} : {} to {}\n",
@@ -744,6 +1312,163 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             print_value_type(&source.ty)?,
             print_value_type(&result.ty)?
         )),
+        Operation::ShapeTensorFromElements { result, dimensions } => output.push_str(&format!(
+            "    %{} = tensor.from_elements {} : {}\n",
+            result.name,
+            print_values(dimensions),
+            print_value_type(&result.ty)?
+        )),
+        Operation::TensorReshape {
+            result,
+            source,
+            shape,
+        } => output.push_str(&format!(
+            "    %{} = tensor.reshape %{}(%{}) : ({} , {}) -> {}\n",
+            result.name,
+            source.name,
+            shape.name,
+            print_value_type(&source.ty)?,
+            print_value_type(&shape.ty)?,
+            print_value_type(&result.ty)?
+        )),
+        Operation::TensorExtractSlice {
+            result,
+            source,
+            offsets,
+            sizes,
+            strides,
+        } => output.push_str(&format!(
+            "    %{} = tensor.extract_slice %{}[{}] [{}] [{}] : {} to {}\n",
+            result.name,
+            source.name,
+            print_slice_components(offsets),
+            print_slice_components(sizes),
+            print_slice_components(strides),
+            print_value_type(&source.ty)?,
+            print_value_type(&result.ty)?
+        )),
+        Operation::TensorConcat {
+            result,
+            inputs,
+            axis,
+        } => output.push_str(&format!(
+            "    %{} = tensor.concat dim({axis}) {} : ({}) -> {}\n",
+            result.name,
+            print_values(inputs),
+            inputs
+                .iter()
+                .map(|value| print_value_type(&value.ty))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", "),
+            print_value_type(&result.ty)?
+        )),
+        Operation::TensorGather {
+            result,
+            source,
+            indices,
+            dynamic_sizes,
+            index_rank,
+        } => {
+            let result_rank = tensor_rank_from_type(
+                result
+                    .lowered_type()
+                    .expect("tensor.gather result is lowered"),
+            )
+            .expect("tensor.gather result is ranked");
+            let coordinates = (0..result_rank)
+                .map(|axis| format!("%gather_i{axis}"))
+                .collect::<Vec<_>>();
+            let block_arguments = coordinates
+                .iter()
+                .map(|coordinate| format!("{coordinate}: index"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let index_coordinates = coordinates[..*index_rank].join(", ");
+            let index_scalar = tensor_scalar_type(
+                indices
+                    .lowered_type()
+                    .expect("tensor.gather indices are lowered"),
+            )?;
+            let result_scalar = tensor_scalar_type(
+                result
+                    .lowered_type()
+                    .expect("tensor.gather result is lowered"),
+            )?;
+            output.push_str(&format!(
+                "    %{} = tensor.generate {} {{\n    ^bb0({block_arguments}):\n      %gather_index_integer = tensor.extract %{}[{index_coordinates}] : {}\n      %gather_index = arith.index_cast %gather_index_integer : {} to index\n      %gather_value = tensor.extract %{}[{}] : {}\n      tensor.yield %gather_value : {}\n    }} : {}\n",
+                result.name,
+                print_values(dynamic_sizes),
+                indices.name,
+                print_value_type(&indices.ty)?,
+                print_value_type(&ValueType::Lowered(index_scalar))?,
+                source.name,
+                std::iter::once("%gather_index".to_owned())
+                    .chain(coordinates[*index_rank..].iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                print_value_type(&source.ty)?,
+                print_value_type(&ValueType::Lowered(result_scalar))?,
+                print_value_type(&result.ty)?
+            ));
+        }
+        Operation::TensorScatter {
+            result,
+            source,
+            indices,
+            updates,
+            dynamic_sizes,
+        } => {
+            let result_rank = tensor_rank_from_type(
+                result
+                    .lowered_type()
+                    .expect("tensor.scatter result is lowered"),
+            )
+            .expect("tensor.scatter result is ranked");
+            let coordinates = (0..result_rank)
+                .map(|axis| format!("%scatter_i{axis}"))
+                .collect::<Vec<_>>();
+            let block_arguments = coordinates
+                .iter()
+                .map(|coordinate| format!("{coordinate}: index"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let index_scalar = tensor_scalar_type(
+                indices
+                    .lowered_type()
+                    .expect("tensor.scatter indices are lowered"),
+            )?;
+            let result_scalar = tensor_scalar_type(
+                result
+                    .lowered_type()
+                    .expect("tensor.scatter result is lowered"),
+            )?;
+            let trailing = coordinates[1..].join(", ");
+            let update_coordinates = if trailing.is_empty() {
+                "%scatter_update_index".to_owned()
+            } else {
+                format!("%scatter_update_index, {trailing}")
+            };
+            output.push_str(&format!(
+                "    %{} = tensor.generate {} {{\n    ^bb0({block_arguments}):\n      %scatter_initial = tensor.extract %{}[{}] : {}\n      %scatter_axis = arith.constant 0 : index\n      %scatter_count = tensor.dim %{}, %scatter_axis : {}\n      %scatter_zero = arith.constant 0 : index\n      %scatter_one = arith.constant 1 : index\n      %scatter_selected = scf.for %scatter_update_index = %scatter_zero to %scatter_count step %scatter_one iter_args(%scatter_current = %scatter_initial) -> ({}) {{\n        %scatter_candidate_integer = tensor.extract %{}[%scatter_update_index] : {}\n        %scatter_candidate = arith.index_cast %scatter_candidate_integer : {} to index\n        %scatter_matches = arith.cmpi eq, %scatter_candidate, %scatter_i0 : index\n        %scatter_update = tensor.extract %{}[{update_coordinates}] : {}\n        %scatter_next = arith.select %scatter_matches, %scatter_update, %scatter_current : {}\n        scf.yield %scatter_next : {}\n      }}\n      tensor.yield %scatter_selected : {}\n    }} : {}\n",
+                result.name,
+                print_values(dynamic_sizes),
+                source.name,
+                coordinates.join(", "),
+                print_value_type(&source.ty)?,
+                indices.name,
+                print_value_type(&indices.ty)?,
+                print_value_type(&ValueType::Lowered(result_scalar.clone()))?,
+                indices.name,
+                print_value_type(&indices.ty)?,
+                print_value_type(&ValueType::Lowered(index_scalar))?,
+                updates.name,
+                print_value_type(&updates.ty)?,
+                print_value_type(&ValueType::Lowered(result_scalar.clone()))?,
+                print_value_type(&ValueType::Lowered(result_scalar.clone()))?,
+                print_value_type(&ValueType::Lowered(result_scalar))?,
+                print_value_type(&result.ty)?
+            ));
+        }
         Operation::LinalgFill {
             result,
             scalar,
@@ -802,6 +1527,31 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
             output.push_str("):\n");
             for scalar in &body.operations {
                 match scalar {
+                    ScalarOperation::FloatConvert {
+                        result,
+                        operand,
+                        source,
+                        target,
+                    } => output.push_str(&format!(
+                        "      %{result} = {} %{operand} : {} to {}\n",
+                        if scalar_float_bits(target)? > scalar_float_bits(source)? {
+                            "arith.extf"
+                        } else {
+                            "arith.truncf"
+                        },
+                        type_spelling(source)?,
+                        type_spelling(target)?
+                    )),
+                    ScalarOperation::Unary {
+                        result,
+                        operation,
+                        operand,
+                        ty,
+                    } => output.push_str(&format!(
+                        "      %{result} = {} %{operand} : {}\n",
+                        scalar_unary_name(*operation),
+                        type_spelling(ty)?
+                    )),
                     ScalarOperation::Binary {
                         result,
                         operation,
@@ -867,6 +1617,17 @@ fn print_operation(output: &mut String, operation: &Operation) -> Result<(), Str
     Ok(())
 }
 
+fn print_slice_components(components: &[SliceComponent]) -> String {
+    components
+        .iter()
+        .map(|component| match component {
+            SliceComponent::Static(value) => value.to_string(),
+            SliceComponent::Dynamic(value) => format!("%{}", value.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn tensor_rank(value: &Value) -> Result<usize, StructuredError> {
     match value.lowered_type() {
         Some(LoweredType::Tensor {
@@ -876,6 +1637,16 @@ fn tensor_rank(value: &Value) -> Result<usize, StructuredError> {
         _ => Err(StructuredError(
             "structured tensor operation requires known rank".into(),
         )),
+    }
+}
+
+fn tensor_rank_from_type(ty: &LoweredType) -> Option<usize> {
+    match ty {
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(dimensions),
+            ..
+        } => Some(dimensions.len()),
+        _ => None,
     }
 }
 
@@ -937,6 +1708,7 @@ fn print_value_type(ty: &ValueType) -> Result<String, StructuredError> {
     match ty {
         ValueType::Lowered(ty) => Ok(type_spelling(ty)?),
         ValueType::Index => Ok("index".into()),
+        ValueType::ShapeTensor(rank) => Ok(format!("tensor<{rank}xindex>")),
     }
 }
 
@@ -959,6 +1731,9 @@ fn print_affine_map(map: &AffineMap) -> String {
         .map(|expression| match expression {
             AffineExpression::Dimension(axis) => format!("d{axis}"),
             AffineExpression::Constant(value) => value.to_string(),
+            AffineExpression::FloorDiv { dimension, divisor } => {
+                format!("d{dimension} floordiv {divisor}")
+            }
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -980,6 +1755,30 @@ fn scalar_binary_name(operation: ScalarBinaryOperation) -> &'static str {
         ScalarBinaryOperation::MaximumSigned => "arith.maxsi",
         ScalarBinaryOperation::MaximumUnsigned => "arith.maxui",
     }
+}
+
+fn scalar_unary_name(operation: ScalarUnaryOperation) -> &'static str {
+    match operation {
+        ScalarUnaryOperation::Exp => "math.exp",
+        ScalarUnaryOperation::Log => "math.log",
+        ScalarUnaryOperation::Tanh => "math.tanh",
+        ScalarUnaryOperation::Rsqrt => "math.rsqrt",
+    }
+}
+
+fn lowered_float_bits(format: crate::LoweredFloatFormat) -> u16 {
+    match format {
+        crate::LoweredFloatFormat::Float8E4M3Fn | crate::LoweredFloatFormat::Float8E5M2 => 8,
+        crate::LoweredFloatFormat::BrainFloat16 => 16,
+        crate::LoweredFloatFormat::Ieee(bits) => bits,
+    }
+}
+
+fn scalar_float_bits(ty: &LoweredType) -> Result<u16, StructuredError> {
+    let LoweredType::Float { format } = ty else {
+        return Err(StructuredError("expected a scalar floating type".into()));
+    };
+    Ok(lowered_float_bits(*format))
 }
 
 fn scalar_binary_accepts(operation: ScalarBinaryOperation, ty: &LoweredType) -> bool {

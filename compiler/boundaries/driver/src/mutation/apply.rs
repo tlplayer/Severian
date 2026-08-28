@@ -109,7 +109,7 @@ fn apply_property(property: &mut PropertyDeclaration, edit: MutationEdit) -> boo
 fn apply_constraints(constraints: &mut [GenericConstraint], edit: MutationEdit) -> bool {
     constraints.iter_mut().any(|constraint| match constraint {
         GenericConstraint::Predicate(expression) => apply_expression(expression, edit),
-        GenericConstraint::Parameter { .. } => false,
+        GenericConstraint::Parameter { .. } | GenericConstraint::VariadicPack { .. } => false,
     })
 }
 

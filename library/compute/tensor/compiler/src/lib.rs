@@ -13,7 +13,7 @@ use severian_mlir::{
     structured::{
         AffineExpression, AffineMap, FunctionBuilder as StructuredFunctionBuilder, GenericBody,
         IteratorKind, ModuleBuilder as StructuredModuleBuilder, ScalarBinaryOperation,
-        ScalarOperation, Value as StructuredValue,
+        ScalarOperation, ScalarUnaryOperation, SliceComponent, Value as StructuredValue,
     },
     type_spelling, LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement,
     LoweredTensorShape, LoweredType, MlirArtifact,
@@ -243,8 +243,12 @@ impl TensorCompiler {
                 &operation_output_spellings,
                 &operation.attributes,
             )?;
+            let helper_symbol = format!(
+                "__sev_tensor_region_{}_op_{index}",
+                region.id.index()
+            );
             helpers.push_str(&format!(
-                "  func.func private @__sev_tensor_op_{index}({helper_parameters}){helper_result} {{\n{helper_body}  }}\n"
+                "  func.func private @{helper_symbol}({helper_parameters}){helper_result} {{\n{helper_body}  }}\n"
             ));
             let arguments = operand_slots
                 .iter()
@@ -263,7 +267,7 @@ impl TensorCompiler {
                 .collect::<Vec<_>>()
                 .join(", ");
             entry_body.push_str(&format!(
-                "    {result_names} = func.call @__sev_tensor_op_{index}({arguments}) : ({input_types}){helper_result}\n",
+                "    {result_names} = func.call @{helper_symbol}({arguments}) : ({input_types}){helper_result}\n",
                 input_types = operation_input_spellings.join(", "),
             ));
         }
@@ -392,17 +396,18 @@ fn region_uses_structured_mlir(region: &CompileRegion) -> bool {
     region.compile_operations.iter().any(|operation| {
         matches!(
             tensor::TensorOp::decode(operation.id, &operation.attributes),
-            Some(tensor::TensorOp::Elementwise(
-                tensor::ElementwiseOp::Add
-                    | tensor::ElementwiseOp::Subtract
-                    | tensor::ElementwiseOp::Multiply
-                    | tensor::ElementwiseOp::Divide
-            )) | Some(tensor::TensorOp::Reduce(
+            Some(tensor::TensorOp::Elementwise(_)) | Some(tensor::TensorOp::Reduce(
                 tensor::ReductionOp::Sum
                     | tensor::ReductionOp::SumAxis
                     | tensor::ReductionOp::MeanLast
                     | tensor::ReductionOp::MaxLast
-            ))
+            )) | Some(tensor::TensorOp::Slice)
+                | Some(tensor::TensorOp::Concatenate)
+                | Some(tensor::TensorOp::ReshapeView(_))
+                | Some(tensor::TensorOp::Permute(_))
+                | Some(tensor::TensorOp::Broadcast(_))
+                | Some(tensor::TensorOp::Gather)
+                | Some(tensor::TensorOp::Scatter)
         )
     })
 }
@@ -502,23 +507,13 @@ fn compile_structured_cpu_region(
             ));
         };
         let result = match kind {
-            tensor::TensorOp::Elementwise(
-                operation @ (tensor::ElementwiseOp::Add
-                | tensor::ElementwiseOp::Subtract
-                | tensor::ElementwiseOp::Multiply
-                | tensor::ElementwiseOp::Divide),
-            ) => lower_structured_elementwise(
+            tensor::TensorOp::Elementwise(operation) => lower_structured_elementwise(
                 &mut function,
                 operation,
                 &operands,
                 result_type,
                 *result_slot,
             )?,
-            tensor::TensorOp::Elementwise(operation) => {
-                return Err(invalid(format!(
-                    "structured MLIR capability is missing for elementwise {operation:?}"
-                )))
-            }
             tensor::TensorOp::Reduce(reduction) => lower_structured_reduction(
                 &mut function,
                 reduction,
@@ -526,6 +521,61 @@ fn compile_structured_cpu_region(
                 result_type,
                 &operation_inputs,
                 &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Slice => lower_structured_slice(
+                &mut function,
+                &operands,
+                result_type,
+                &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Concatenate => lower_structured_concatenate(
+                &mut function,
+                &operands,
+                result_type,
+                &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Reshape) => {
+                lower_structured_reshape(
+                    &mut function,
+                    &operands,
+                    result_type,
+                    &operation.attributes,
+                    *result_slot,
+                )?
+            }
+            tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Materialize) => operands
+                .first()
+                .cloned()
+                .ok_or_else(|| invalid("Materialize requires one tensor operand"))?,
+            tensor::TensorOp::Permute(permutation) => lower_structured_permute(
+                &mut function,
+                permutation,
+                &operands,
+                result_type,
+                &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Broadcast(broadcast) => lower_structured_broadcast(
+                &mut function,
+                broadcast,
+                &operands,
+                result_type,
+                &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Gather => lower_structured_gather(
+                &mut function,
+                &operands,
+                result_type,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Scatter => lower_structured_scatter(
+                &mut function,
+                &operands,
+                result_type,
                 *result_slot,
             )?,
             _ => {
@@ -558,6 +608,22 @@ fn compile_structured_cpu_region(
     function.return_values(returned).map_err(structured_error)?;
     let mut module = StructuredModuleBuilder::default();
     module
+        .declare_function(
+            "__sev_list_get_i64",
+            vec![
+                LoweredType::Bytes,
+                LoweredType::Integer {
+                    bits: 64,
+                    signed: true,
+                },
+            ],
+            vec![LoweredType::Integer {
+                bits: 64,
+                signed: true,
+            }],
+        )
+        .map_err(structured_error)?;
+    module
         .add_function(function.finish().map_err(structured_error)?)
         .map_err(structured_error)?;
     Ok(MlirArtifact {
@@ -574,11 +640,6 @@ fn lower_structured_elementwise(
     result_type: &LoweredType,
     result_slot: u32,
 ) -> Result<StructuredValue, CompileError> {
-    let [left, right] = operands else {
-        return Err(invalid(
-            "structured binary elementwise lowering requires two operands",
-        ));
-    };
     let LoweredType::Tensor {
         element,
         shape: LoweredTensorShape::Ranked(output_shape),
@@ -588,31 +649,48 @@ fn lower_structured_elementwise(
             "structured elementwise lowering requires a ranked tensor result",
         ));
     };
-    let left_shape = ranked_dimensions(
-        left.lowered_type()
-            .ok_or_else(|| invalid("elementwise left operand is not lowered"))?,
-    )
-    .ok_or_else(|| invalid("elementwise left operand has unknown rank"))?;
-    let right_shape = ranked_dimensions(
-        right
-            .lowered_type()
-            .ok_or_else(|| invalid("elementwise right operand is not lowered"))?,
-    )
-    .ok_or_else(|| invalid("elementwise right operand has unknown rank"))?;
     let rank = output_shape.len();
+    let input = operands
+        .first()
+        .ok_or_else(|| invalid("structured elementwise operation has no tensor operand"))?;
+    let input_shape = ranked_dimensions(
+        input
+            .lowered_type()
+            .ok_or_else(|| invalid("elementwise tensor operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("elementwise tensor operand has unknown rank"))?;
     let mut dynamic_sizes = Vec::new();
     for (axis, dimension) in output_shape.iter().enumerate() {
         if dimension != &LoweredTensorDimension::Dynamic {
             continue;
         }
-        let (source, source_axis) = structured_broadcast_dimension_source(
-            axis,
-            rank,
-            left,
-            left_shape,
-            right,
-            right_shape,
-        )?;
+        let (source, source_axis) = if matches!(
+            operation,
+            tensor::ElementwiseOp::Add
+                | tensor::ElementwiseOp::Subtract
+                | tensor::ElementwiseOp::Multiply
+                | tensor::ElementwiseOp::Divide
+        ) {
+            let right = operands
+                .get(1)
+                .ok_or_else(|| invalid("binary elementwise operation has no right operand"))?;
+            let right_shape = ranked_dimensions(
+                right
+                    .lowered_type()
+                    .ok_or_else(|| invalid("elementwise right operand is not lowered"))?,
+            )
+            .ok_or_else(|| invalid("elementwise right operand has unknown rank"))?;
+            structured_broadcast_dimension_source(
+                axis,
+                rank,
+                input,
+                input_shape,
+                right,
+                right_shape,
+            )?
+        } else {
+            (input, axis)
+        };
         let axis_value = function
             .index_constant(format!("v{result_slot}_c{axis}"), source_axis)
             .map_err(structured_error)?;
@@ -630,38 +708,209 @@ fn lower_structured_elementwise(
         )
         .map_err(structured_error)?;
     let scalar = lowered_scalar(*element);
-    let scalar_operation = structural_binary_operation(operation, *element)?;
-    let body = GenericBody::new(
-        vec![
-            ("lhs".into(), scalar.clone()),
-            ("rhs".into(), scalar.clone()),
-            ("unused".into(), scalar.clone()),
-        ],
-        vec![
-            ScalarOperation::Binary {
+    let mut tensor_inputs = vec![input.clone()];
+    let mut maps = vec![structured_broadcast_map(input_shape, rank)?];
+    let (arguments, captures, operations) = match operation {
+        tensor::ElementwiseOp::Add
+        | tensor::ElementwiseOp::Subtract
+        | tensor::ElementwiseOp::Multiply
+        | tensor::ElementwiseOp::Divide => {
+            let [_, right] = operands else {
+                return Err(invalid(
+                    "structured binary elementwise lowering requires two operands",
+                ));
+            };
+            let right_shape = ranked_dimensions(
+                right
+                    .lowered_type()
+                    .ok_or_else(|| invalid("elementwise right operand is not lowered"))?,
+            )
+            .ok_or_else(|| invalid("elementwise right operand has unknown rank"))?;
+            tensor_inputs.push(right.clone());
+            maps.push(structured_broadcast_map(right_shape, rank)?);
+            (
+                vec![
+                    ("lhs".into(), scalar.clone()),
+                    ("rhs".into(), scalar.clone()),
+                    ("unused".into(), scalar.clone()),
+                ],
+                Vec::new(),
+                vec![
+                    ScalarOperation::Binary {
+                        result: "computed".into(),
+                        operation: structural_binary_operation(operation, *element)?,
+                        left: "lhs".into(),
+                        right: "rhs".into(),
+                        ty: scalar.clone(),
+                    },
+                    ScalarOperation::Yield {
+                        value: "computed".into(),
+                        ty: scalar.clone(),
+                    },
+                ],
+            )
+        }
+        tensor::ElementwiseOp::Exp
+        | tensor::ElementwiseOp::Log
+        | tensor::ElementwiseOp::Tanh
+        | tensor::ElementwiseOp::Rsqrt => {
+            if !is_float(*element) || operands.len() != 1 {
+                return Err(invalid(
+                    "floating unary elementwise lowering requires one floating tensor",
+                ));
+            }
+            let unary = match operation {
+                tensor::ElementwiseOp::Exp => ScalarUnaryOperation::Exp,
+                tensor::ElementwiseOp::Log => ScalarUnaryOperation::Log,
+                tensor::ElementwiseOp::Tanh => ScalarUnaryOperation::Tanh,
+                tensor::ElementwiseOp::Rsqrt => ScalarUnaryOperation::Rsqrt,
+                _ => unreachable!(),
+            };
+            let (computed_type, operand_name, mut operations) = if matches!(
+                element,
+                LoweredTensorElement::Float {
+                    format: LoweredFloatFormat::Float8E4M3Fn
+                        | LoweredFloatFormat::Float8E5M2
+                }
+            ) {
+                let wide = LoweredType::Float {
+                    format: LoweredFloatFormat::Ieee(16),
+                };
+                (
+                    wide.clone(),
+                    "wide".to_owned(),
+                    vec![ScalarOperation::FloatConvert {
+                        result: "wide".into(),
+                        operand: "value".into(),
+                        source: scalar.clone(),
+                        target: wide,
+                    }],
+                )
+            } else {
+                (scalar.clone(), "value".to_owned(), Vec::new())
+            };
+            operations.push(ScalarOperation::Unary {
                 result: "computed".into(),
-                operation: scalar_operation,
-                left: "lhs".into(),
-                right: "rhs".into(),
+                operation: unary,
+                operand: operand_name,
+                ty: computed_type.clone(),
+            });
+            let yielded = if computed_type == scalar {
+                "computed"
+            } else {
+                operations.push(ScalarOperation::FloatConvert {
+                    result: "narrow".into(),
+                    operand: "computed".into(),
+                    source: computed_type,
+                    target: scalar.clone(),
+                });
+                "narrow"
+            };
+            operations.push(ScalarOperation::Yield {
+                value: yielded.into(),
                 ty: scalar.clone(),
-            },
-            ScalarOperation::Yield {
-                value: "computed".into(),
-                ty: scalar,
-            },
-        ],
-    )
-    .map_err(structured_error)?;
+            });
+            (
+                vec![
+                    ("value".into(), scalar.clone()),
+                    ("unused".into(), scalar.clone()),
+                ],
+                Vec::new(),
+                operations,
+            )
+        }
+        tensor::ElementwiseOp::Relu => {
+            if operands.len() != 1 {
+                return Err(invalid("Relu requires one tensor operand"));
+            }
+            let zero = function
+                .scalar_constant(
+                    format!("v{result_slot}_zero"),
+                    if is_float(*element) { "0.0" } else { "0" },
+                    scalar.clone(),
+                )
+                .map_err(structured_error)?;
+            let maximum = match element {
+                LoweredTensorElement::Float { .. } => ScalarBinaryOperation::MaximumFloat,
+                LoweredTensorElement::Integer { signed: true, .. } => {
+                    ScalarBinaryOperation::MaximumSigned
+                }
+                LoweredTensorElement::Integer { signed: false, .. }
+                | LoweredTensorElement::Boolean => ScalarBinaryOperation::MaximumUnsigned,
+            };
+            (
+                vec![
+                    ("value".into(), scalar.clone()),
+                    ("unused".into(), scalar.clone()),
+                ],
+                vec![zero],
+                vec![
+                    ScalarOperation::Binary {
+                        result: "computed".into(),
+                        operation: maximum,
+                        left: "value".into(),
+                        right: format!("v{result_slot}_zero"),
+                        ty: scalar.clone(),
+                    },
+                    ScalarOperation::Yield {
+                        value: "computed".into(),
+                        ty: scalar.clone(),
+                    },
+                ],
+            )
+        }
+        tensor::ElementwiseOp::Scale | tensor::ElementwiseOp::AddScalar => {
+            let [_, argument] = operands else {
+                return Err(invalid(
+                    "tensor-scalar elementwise lowering requires tensor and scalar operands",
+                ));
+            };
+            if !is_float(*element) {
+                return Err(invalid("tensor-scalar operations require floating tensors"));
+            }
+            let captured = if argument.lowered_type() == Some(&scalar) {
+                argument.clone()
+            } else {
+                function
+                    .float_convert(format!("v{result_slot}_scalar"), argument, scalar.clone())
+                    .map_err(structured_error)?
+            };
+            let captured_name = captured.name().to_owned();
+            (
+                vec![
+                    ("value".into(), scalar.clone()),
+                    ("unused".into(), scalar.clone()),
+                ],
+                vec![captured],
+                vec![
+                    ScalarOperation::Binary {
+                        result: "computed".into(),
+                        operation: if operation == tensor::ElementwiseOp::Scale {
+                            ScalarBinaryOperation::MultiplyFloat
+                        } else {
+                            ScalarBinaryOperation::AddFloat
+                        },
+                        left: "value".into(),
+                        right: captured_name,
+                        ty: scalar.clone(),
+                    },
+                    ScalarOperation::Yield {
+                        value: "computed".into(),
+                        ty: scalar.clone(),
+                    },
+                ],
+            )
+        }
+    };
+    let body = GenericBody::with_captures(arguments, captures, operations)
+        .map_err(structured_error)?;
+    maps.push(AffineMap::identity(rank));
     function
         .linalg_generic(
             format!("v{result_slot}"),
-            vec![left.clone(), right.clone()],
+            tensor_inputs,
             empty,
-            vec![
-                structured_broadcast_map(left_shape, rank)?,
-                structured_broadcast_map(right_shape, rank)?,
-                AffineMap::identity(rank),
-            ],
+            maps,
             vec![IteratorKind::Parallel; rank],
             body,
         )
@@ -704,14 +953,22 @@ fn lower_structured_reduction(
     let retained_axes = (0..input_shape.len())
         .filter(|axis| !axes.contains(axis))
         .collect::<Vec<_>>();
+    let keep_dimensions = matches!(
+        operation,
+        tensor::ReductionOp::MeanLast | tensor::ReductionOp::MaxLast
+    ) && output_shape.len() == input_shape.len();
     let mut dynamic_sizes = Vec::new();
     for (output_axis, dimension) in output_shape.iter().enumerate() {
         if dimension != &LoweredTensorDimension::Dynamic {
             continue;
         }
-        let source_axis = *retained_axes.get(output_axis).ok_or_else(|| {
-            invalid("dynamic reduction result dimension has no retained input axis")
-        })?;
+        let source_axis = if keep_dimensions {
+            output_axis
+        } else {
+            *retained_axes.get(output_axis).ok_or_else(|| {
+                invalid("dynamic reduction result dimension has no retained input axis")
+            })?
+        };
         let axis = function
             .index_constant(format!("v{result_slot}_c{output_axis}"), source_axis)
             .map_err(structured_error)?;
@@ -777,7 +1034,21 @@ fn lower_structured_reduction(
         .linalg_fill(format!("v{result_slot}_initialized"), &initial, &empty)
         .map_err(structured_error)?;
     let input_map = AffineMap::identity(input_shape.len());
-    let output_map = if retained_axes.len() == output_shape.len() {
+    let output_map = if keep_dimensions {
+        AffineMap::new(
+            input_shape.len(),
+            (0..input_shape.len())
+                .map(|axis| {
+                    if axes.contains(&axis) {
+                        AffineExpression::Constant(0)
+                    } else {
+                        AffineExpression::Dimension(axis)
+                    }
+                })
+                .collect(),
+        )
+        .map_err(structured_error)?
+    } else if retained_axes.len() == output_shape.len() {
         AffineMap::new(
             input_shape.len(),
             retained_axes
@@ -852,6 +1123,776 @@ fn lower_structured_reduction(
             body,
         )
         .map_err(structured_error)
+}
+
+fn lower_structured_scatter(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [source, indices, updates] = operands else {
+        return Err(invalid("Scatter requires source, indices, and updates tensors"));
+    };
+    let source_shape = ranked_dimensions(
+        source
+            .lowered_type()
+            .ok_or_else(|| invalid("Scatter source is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Scatter source rank must be known"))?;
+    let result_shape = ranked_dimensions(result_type)
+        .ok_or_else(|| invalid("Scatter result rank must be known"))?;
+    let mut dynamic_sizes = Vec::new();
+    for (axis, dimension) in result_shape.iter().enumerate() {
+        if dimension == &LoweredTensorDimension::Dynamic {
+            let axis_value = function
+                .index_constant(format!("v{result_slot}_scatter_axis_{axis}"), axis)
+                .map_err(structured_error)?;
+            dynamic_sizes.push(
+                function
+                    .tensor_dim(
+                        format!("v{result_slot}_scatter_dim_{axis}"),
+                        source,
+                        &axis_value,
+                    )
+                    .map_err(structured_error)?,
+            );
+        }
+    }
+    if source_shape.len() != result_shape.len() {
+        return Err(invalid("Scatter must preserve source rank"));
+    }
+    function
+        .tensor_scatter(
+            format!("v{result_slot}_scatter"),
+            source,
+            indices,
+            updates,
+            dynamic_sizes,
+            result_type.clone(),
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_gather(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [source, indices] = operands else {
+        return Err(invalid("Gather requires source and indices tensors"));
+    };
+    let source_shape = ranked_dimensions(
+        source
+            .lowered_type()
+            .ok_or_else(|| invalid("Gather source is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Gather source rank must be known"))?;
+    let index_shape = ranked_dimensions(
+        indices
+            .lowered_type()
+            .ok_or_else(|| invalid("Gather indices are not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Gather index rank must be known"))?;
+    let output_shape = ranked_dimensions(result_type)
+        .ok_or_else(|| invalid("Gather result rank must be known"))?;
+    if source_shape.is_empty() || output_shape.len() != index_shape.len() + source_shape.len() - 1 {
+        return Err(invalid(
+            "Gather result rank must be index rank plus source rank minus one",
+        ));
+    }
+    let mut dynamic_sizes = Vec::new();
+    for (output_axis, dimension) in output_shape.iter().enumerate() {
+        if dimension != &LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let (tensor, source_axis) = if output_axis < index_shape.len() {
+            (indices, output_axis)
+        } else {
+            (source, output_axis - index_shape.len() + 1)
+        };
+        let axis = function
+            .index_constant(format!("v{result_slot}_gather_axis_{output_axis}"), source_axis)
+            .map_err(structured_error)?;
+        dynamic_sizes.push(
+            function
+                .tensor_dim(
+                    format!("v{result_slot}_gather_dim_{output_axis}"),
+                    tensor,
+                    &axis,
+                )
+                .map_err(structured_error)?,
+        );
+    }
+    function
+        .tensor_gather(
+            format!("v{result_slot}_gather"),
+            source,
+            indices,
+            dynamic_sizes,
+            result_type.clone(),
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_broadcast(
+    function: &mut StructuredFunctionBuilder,
+    operation: tensor::BroadcastOp,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let input = operands
+        .first()
+        .ok_or_else(|| invalid("Broadcast requires one tensor operand"))?;
+    let input_shape = ranked_dimensions(
+        input
+            .lowered_type()
+            .ok_or_else(|| invalid("Broadcast input is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Broadcast input rank must be known"))?;
+    let output_shape = ranked_dimensions(result_type)
+        .ok_or_else(|| invalid("Broadcast result rank must be known"))?;
+    let output_rank = output_shape.len();
+    let (input_map, dynamic_sizes) = match operation {
+        tensor::BroadcastOp::Like => {
+            let [_, shape_donor] = operands else {
+                return Err(invalid("BroadcastLike requires value and shape-donor tensors"));
+            };
+            let donor_shape = ranked_dimensions(
+                shape_donor
+                    .lowered_type()
+                    .ok_or_else(|| invalid("BroadcastLike donor is not lowered"))?,
+            )
+            .ok_or_else(|| invalid("BroadcastLike donor rank must be known"))?;
+            if donor_shape.len() != output_rank {
+                return Err(invalid("BroadcastLike result rank must match its shape donor"));
+            }
+            let mut dynamic_sizes = Vec::new();
+            for (axis, dimension) in output_shape.iter().enumerate() {
+                if dimension == &LoweredTensorDimension::Dynamic {
+                    let axis_value = function
+                        .index_constant(format!("v{result_slot}_broadcast_axis_{axis}"), axis)
+                        .map_err(structured_error)?;
+                    dynamic_sizes.push(
+                        function
+                            .tensor_dim(
+                                format!("v{result_slot}_broadcast_dim_{axis}"),
+                                shape_donor,
+                                &axis_value,
+                            )
+                            .map_err(structured_error)?,
+                    );
+                }
+            }
+            (
+                structured_broadcast_map(input_shape, output_rank)?,
+                dynamic_sizes,
+            )
+        }
+        tensor::BroadcastOp::Repeat => {
+            let [_, _specification] = operands else {
+                return Err(invalid("Repeat requires one tensor and one axis/count operand"));
+            };
+            if input_shape.len() != output_rank {
+                return Err(invalid("Repeat must preserve tensor rank"));
+            }
+            let runtime = decode_runtime_operands(attributes)?;
+            let [axis, count] = runtime.get(&1).map(Vec::as_slice).unwrap_or_default() else {
+                return Err(invalid(
+                    "Repeat axis and count must be known before CPU MLIR emission",
+                ));
+            };
+            let rank_i128 = i128::try_from(output_rank)
+                .map_err(|_| invalid("tensor rank is outside i128"))?;
+            let axis = if *axis < 0 { rank_i128 + axis } else { *axis };
+            let axis = usize::try_from(axis)
+                .map_err(|_| invalid("Repeat axis is outside the tensor rank"))?;
+            let count = u64::try_from(*count)
+                .ok()
+                .filter(|count| *count > 0)
+                .ok_or_else(|| invalid("Repeat count must be positive"))?;
+            if axis >= output_rank {
+                return Err(invalid("Repeat axis is outside the tensor rank"));
+            }
+            let mut dynamic_sizes = Vec::new();
+            for (output_axis, dimension) in output_shape.iter().enumerate() {
+                if dimension != &LoweredTensorDimension::Dynamic {
+                    continue;
+                }
+                let axis_value = function
+                    .index_constant(
+                        format!("v{result_slot}_repeat_axis_{output_axis}"),
+                        output_axis,
+                    )
+                    .map_err(structured_error)?;
+                let input_dimension = function
+                    .tensor_dim(
+                        format!("v{result_slot}_repeat_input_dim_{output_axis}"),
+                        input,
+                        &axis_value,
+                    )
+                    .map_err(structured_error)?;
+                dynamic_sizes.push(if output_axis == axis {
+                    let count_value = function
+                        .index_constant(
+                            format!("v{result_slot}_repeat_count_{output_axis}"),
+                            usize::try_from(count)
+                                .map_err(|_| invalid("Repeat count is outside usize"))?,
+                        )
+                        .map_err(structured_error)?;
+                    function
+                        .index_multiply(
+                            format!("v{result_slot}_repeat_dim_{output_axis}"),
+                            &input_dimension,
+                            &count_value,
+                        )
+                        .map_err(structured_error)?
+                } else {
+                    input_dimension
+                });
+            }
+            (
+                AffineMap::new(
+                    output_rank,
+                    (0..output_rank)
+                        .map(|dimension| {
+                            if dimension == axis {
+                                AffineExpression::FloorDiv {
+                                    dimension,
+                                    divisor: count,
+                                }
+                            } else {
+                                AffineExpression::Dimension(dimension)
+                            }
+                        })
+                        .collect(),
+                )
+                .map_err(structured_error)?,
+                dynamic_sizes,
+            )
+        }
+    };
+    let empty = function
+        .tensor_empty(
+            format!("v{result_slot}_broadcast_empty"),
+            result_type.clone(),
+            dynamic_sizes,
+        )
+        .map_err(structured_error)?;
+    let scalar = lowered_scalar(tensor_element(result_type)?);
+    let body = GenericBody::new(
+        vec![
+            ("element".into(), scalar.clone()),
+            ("unused".into(), scalar.clone()),
+        ],
+        vec![ScalarOperation::Yield {
+            value: "element".into(),
+            ty: scalar,
+        }],
+    )
+    .map_err(structured_error)?;
+    function
+        .linalg_generic(
+            format!("v{result_slot}_broadcast"),
+            vec![input.clone()],
+            empty,
+            vec![input_map, AffineMap::identity(output_rank)],
+            vec![IteratorKind::Parallel; output_rank],
+            body,
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_permute(
+    function: &mut StructuredFunctionBuilder,
+    operation: tensor::PermuteOp,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let source = operands
+        .first()
+        .ok_or_else(|| invalid("Permute requires one tensor operand"))?;
+    let source_shape = ranked_dimensions(
+        source
+            .lowered_type()
+            .ok_or_else(|| invalid("Permute source is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Permute source rank must be known"))?;
+    let result_shape = ranked_dimensions(result_type)
+        .ok_or_else(|| invalid("Permute result rank must be known"))?;
+    let rank = source_shape.len();
+    if result_shape.len() != rank {
+        return Err(invalid("Permute must preserve tensor rank"));
+    }
+    let output_to_input = match operation {
+        tensor::PermuteOp::Reverse => (0..rank).rev().collect::<Vec<_>>(),
+        tensor::PermuteOp::Axes => {
+            let runtime = decode_runtime_operands(attributes)?;
+            let axes = runtime.get(&1).ok_or_else(|| {
+                invalid("Permute axis identities must be known before CPU MLIR emission")
+            })?;
+            axes.iter()
+                .map(|axis| {
+                    usize::try_from(*axis)
+                        .map_err(|_| invalid("Permute axis must be a non-negative usize"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+    };
+    if output_to_input.len() != rank
+        || output_to_input.iter().any(|axis| *axis >= rank)
+        || output_to_input.iter().copied().collect::<BTreeSet<_>>().len() != rank
+    {
+        return Err(invalid("Permute axes must be a permutation of the known rank"));
+    }
+    let mut dynamic_sizes = Vec::new();
+    for (output_axis, dimension) in result_shape.iter().enumerate() {
+        if dimension != &LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let source_axis = output_to_input[output_axis];
+        let axis = function
+            .index_constant(format!("v{result_slot}_permute_axis_{output_axis}"), source_axis)
+            .map_err(structured_error)?;
+        dynamic_sizes.push(
+            function
+                .tensor_dim(
+                    format!("v{result_slot}_permute_dim_{output_axis}"),
+                    source,
+                    &axis,
+                )
+                .map_err(structured_error)?,
+        );
+    }
+    let empty = function
+        .tensor_empty(
+            format!("v{result_slot}_permute_empty"),
+            result_type.clone(),
+            dynamic_sizes,
+        )
+        .map_err(structured_error)?;
+    let mut input_to_output = vec![0usize; rank];
+    for (output_axis, input_axis) in output_to_input.iter().copied().enumerate() {
+        input_to_output[input_axis] = output_axis;
+    }
+    let input_map = AffineMap::new(
+        rank,
+        input_to_output
+            .into_iter()
+            .map(AffineExpression::Dimension)
+            .collect(),
+    )
+    .map_err(structured_error)?;
+    let scalar = lowered_scalar(tensor_element(result_type)?);
+    let body = GenericBody::new(
+        vec![
+            ("element".into(), scalar.clone()),
+            ("unused".into(), scalar.clone()),
+        ],
+        vec![ScalarOperation::Yield {
+            value: "element".into(),
+            ty: scalar,
+        }],
+    )
+    .map_err(structured_error)?;
+    function
+        .linalg_generic(
+            format!("v{result_slot}_permute"),
+            vec![source.clone()],
+            empty,
+            vec![input_map, AffineMap::identity(rank)],
+            vec![IteratorKind::Parallel; rank],
+            body,
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_reshape(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [source, shape_list] = operands else {
+        return Err(invalid("Reshape requires one tensor and one shape operand"));
+    };
+    let result_rank = ranked_dimensions(result_type)
+        .ok_or_else(|| invalid("Reshape result rank must be known before MLIR emission"))?
+        .len();
+    let runtime = decode_runtime_operands(attributes)?;
+    let dimensions = if let Some(values) = runtime.get(&1) {
+        if values.len() != result_rank {
+            return Err(invalid("Reshape shape length must equal its result rank"));
+        }
+        values
+            .iter()
+            .enumerate()
+            .map(|(axis, value)| {
+                let value = usize::try_from(*value).map_err(|_| {
+                    invalid("structured Reshape currently requires non-negative dimensions")
+                })?;
+                function
+                    .index_constant(format!("v{result_slot}_reshape_dim_{axis}"), value)
+                    .map_err(structured_error)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        if !matches!(
+            shape_list.lowered_type(),
+            Some(LoweredType::Bytes | LoweredType::String)
+        ) {
+            return Err(invalid(
+                "dynamic Reshape shape must use the opaque runtime list ABI",
+            ));
+        }
+        let i64_type = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let mut dimensions = Vec::with_capacity(result_rank);
+        for axis in 0..result_rank {
+            let axis_value = function
+                .scalar_constant(
+                    format!("v{result_slot}_reshape_axis_{axis}"),
+                    axis.to_string(),
+                    i64_type.clone(),
+                )
+                .map_err(structured_error)?;
+            let [dimension] = function
+                .call(
+                    vec![format!("v{result_slot}_reshape_i64_{axis}")],
+                    "__sev_list_get_i64",
+                    vec![shape_list.clone(), axis_value],
+                    vec![i64_type.clone()],
+                )
+                .map_err(structured_error)?
+                .try_into()
+                .map_err(|_| invalid("shape list index call returned the wrong arity"))?;
+            dimensions.push(
+                function
+                    .integer_to_index(
+                        format!("v{result_slot}_reshape_dim_{axis}"),
+                        &dimension,
+                    )
+                    .map_err(structured_error)?,
+            );
+        }
+        dimensions
+    };
+    let shape = function
+        .shape_tensor_from_elements(format!("v{result_slot}_shape"), dimensions)
+        .map_err(structured_error)?;
+    function
+        .tensor_reshape(
+            format!("v{result_slot}_reshape"),
+            source,
+            &shape,
+            result_type.clone(),
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_slice(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let source = operands
+        .first()
+        .ok_or_else(|| invalid("structured Slice requires a tensor operand"))?;
+    let rank = ranked_dimensions(
+        source
+            .lowered_type()
+            .ok_or_else(|| invalid("structured Slice operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("structured Slice operand has unknown rank"))?
+    .len();
+    let runtime = decode_runtime_operands(attributes)?;
+    let (starts, sizes, strides) = if let (Some(starts), Some(ends), Some(strides)) =
+        (runtime.get(&1), runtime.get(&2), runtime.get(&3))
+    {
+        if starts.len() != rank || ends.len() != rank || strides.len() != rank {
+            return Err(invalid("Slice starts, ends, and steps must match tensor rank"));
+        }
+        let starts = starts
+            .iter()
+            .copied()
+            .map(|value| i64::try_from(value).map_err(|_| invalid("Slice start is outside i64")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let ends = ends
+            .iter()
+            .copied()
+            .map(|value| i64::try_from(value).map_err(|_| invalid("Slice end is outside i64")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let strides = strides
+            .iter()
+            .copied()
+            .map(|value| i64::try_from(value).map_err(|_| invalid("Slice step is outside i64")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sizes = starts
+            .iter()
+            .zip(&ends)
+            .zip(&strides)
+            .map(|((start, end), stride)| {
+                if *start < 0 || *end < *start || *stride <= 0 {
+                    return Err(invalid(
+                        "CPU tensor.extract_slice currently requires non-negative ordered bounds and positive steps",
+                    ));
+                }
+                let extent = end - start;
+                Ok((extent + stride - 1) / stride)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        (
+            starts.into_iter().map(SliceComponent::Static).collect(),
+            sizes.into_iter().map(SliceComponent::Static).collect(),
+            strides.into_iter().map(SliceComponent::Static).collect(),
+        )
+    } else {
+        let [_, starts_list, ends_list, strides_list] = operands else {
+            return Err(invalid(
+                "dynamic Slice requires source, starts, ends, and steps operands",
+            ));
+        };
+        for list in [starts_list, ends_list, strides_list] {
+            if !matches!(
+                list.lowered_type(),
+                Some(LoweredType::Bytes | LoweredType::String)
+            ) {
+                return Err(invalid(
+                    format!(
+                        "dynamic Slice shape operands must use the opaque runtime list ABI, got {:?}",
+                        list.lowered_type()
+                    ),
+                ));
+            }
+        }
+        let i64_type = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let mut starts = Vec::with_capacity(rank);
+        let mut sizes = Vec::with_capacity(rank);
+        let mut strides = Vec::with_capacity(rank);
+        for axis in 0..rank {
+            let axis_value = function
+                .scalar_constant(format!("v{result_slot}_axis_{axis}"), axis.to_string(), i64_type.clone())
+                .map_err(structured_error)?;
+            let load = |function: &mut StructuredFunctionBuilder,
+                        name: String,
+                        list: &StructuredValue|
+             -> Result<StructuredValue, CompileError> {
+                let [value] = function
+                    .call(
+                        vec![name],
+                        "__sev_list_get_i64",
+                        vec![list.clone(), axis_value.clone()],
+                        vec![i64_type.clone()],
+                    )
+                    .map_err(structured_error)?
+                    .try_into()
+                    .map_err(|_| invalid("list index call returned the wrong arity"))?;
+                Ok(value)
+            };
+            let start_i64 = load(function, format!("v{result_slot}_start_i64_{axis}"), starts_list)?;
+            let end_i64 = load(function, format!("v{result_slot}_end_i64_{axis}"), ends_list)?;
+            let stride_i64 = load(
+                function,
+                format!("v{result_slot}_stride_i64_{axis}"),
+                strides_list,
+            )?;
+            let start = function
+                .integer_to_index(format!("v{result_slot}_start_{axis}"), &start_i64)
+                .map_err(structured_error)?;
+            let end = function
+                .integer_to_index(format!("v{result_slot}_end_{axis}"), &end_i64)
+                .map_err(structured_error)?;
+            let stride = function
+                .integer_to_index(format!("v{result_slot}_stride_{axis}"), &stride_i64)
+                .map_err(structured_error)?;
+            let extent = function
+                .index_subtract(format!("v{result_slot}_extent_{axis}"), &end, &start)
+                .map_err(structured_error)?;
+            let size = function
+                .index_ceil_divide_signed(
+                    format!("v{result_slot}_size_{axis}"),
+                    &extent,
+                    &stride,
+                )
+                .map_err(structured_error)?;
+            starts.push(SliceComponent::Dynamic(start));
+            sizes.push(SliceComponent::Dynamic(size));
+            strides.push(SliceComponent::Dynamic(stride));
+        }
+        (starts, sizes, strides)
+    };
+    let slice_type = match result_type {
+        LoweredType::Tensor { element, .. }
+            if sizes
+                .iter()
+                .all(|size| matches!(size, SliceComponent::Static(_))) =>
+        {
+            LoweredType::Tensor {
+                element: *element,
+                shape: LoweredTensorShape::Ranked(
+                    sizes
+                        .iter()
+                        .map(|size| match size {
+                            SliceComponent::Static(value) => u64::try_from(*value)
+                                .map(LoweredTensorDimension::Known)
+                                .map_err(|_| invalid("Slice size is outside u64")),
+                            SliceComponent::Dynamic(_) => unreachable!(),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            }
+        }
+        _ => result_type.clone(),
+    };
+    let sliced = function
+        .tensor_extract_slice(
+            format!("v{result_slot}_slice"),
+            source,
+            slice_type.clone(),
+            starts,
+            sizes,
+            strides,
+        )
+        .map_err(structured_error)?;
+    if &slice_type == result_type {
+        Ok(sliced)
+    } else {
+        function
+            .tensor_cast(
+                format!("v{result_slot}_slice_contract"),
+                &sliced,
+                result_type.clone(),
+            )
+            .map_err(structured_error)
+    }
+}
+
+fn lower_structured_concatenate(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [left, right, _axis_operand] = operands else {
+        return Err(invalid(
+            "Concatenate requires two tensors and one axis-list operand",
+        ));
+    };
+    let rank = ranked_dimensions(
+        left.lowered_type()
+            .ok_or_else(|| invalid("Concatenate left operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Concatenate left operand has unknown rank"))?
+    .len();
+    let runtime = decode_runtime_operands(attributes)?;
+    let [axis] = runtime.get(&2).map(Vec::as_slice).unwrap_or_default() else {
+        return Err(invalid(
+            "Concatenate axis identity must be known before CPU MLIR emission",
+        ));
+    };
+    let rank_i128 = i128::try_from(rank).map_err(|_| invalid("tensor rank is outside i128"))?;
+    let axis = if *axis < 0 { rank_i128 + axis } else { *axis };
+    let axis = usize::try_from(axis)
+        .map_err(|_| invalid("Concatenate axis is outside the tensor rank"))?;
+    if axis >= rank {
+        return Err(invalid("Concatenate axis is outside the tensor rank"));
+    }
+    let left_shape = ranked_dimensions(
+        left.lowered_type()
+            .ok_or_else(|| invalid("Concatenate left operand is not lowered"))?,
+    )
+    .expect("Concatenate rank was established above");
+    let right_shape = ranked_dimensions(
+        right
+            .lowered_type()
+            .ok_or_else(|| invalid("Concatenate right operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Concatenate right operand has unknown rank"))?;
+    let LoweredType::Tensor {
+        element,
+        shape: LoweredTensorShape::Ranked(result_shape),
+    } = result_type
+    else {
+        return Err(invalid("Concatenate result must be a ranked tensor"));
+    };
+    let concat_type = LoweredType::Tensor {
+        element: *element,
+        shape: LoweredTensorShape::Ranked(
+            result_shape
+                .iter()
+                .enumerate()
+                .map(|(dimension, result)| {
+                    if left_shape[dimension] == LoweredTensorDimension::Dynamic
+                        || right_shape[dimension] == LoweredTensorDimension::Dynamic
+                    {
+                        LoweredTensorDimension::Dynamic
+                    } else {
+                        result.clone()
+                    }
+                })
+                .collect(),
+        ),
+    };
+    let concatenated = function
+        .tensor_concat(
+            format!("v{result_slot}_concat"),
+            vec![left.clone(), right.clone()],
+            axis,
+            concat_type.clone(),
+        )
+        .map_err(structured_error)?;
+    if &concat_type == result_type {
+        Ok(concatenated)
+    } else {
+        function
+            .tensor_cast(
+                format!("v{result_slot}_concat_contract"),
+                &concatenated,
+                result_type.clone(),
+            )
+            .map_err(structured_error)
+    }
+}
+
+fn decode_runtime_operands(attributes: &Attrs) -> Result<BTreeMap<usize, Vec<i128>>, CompileError> {
+    let Some(AttrValue::Integers(encoded)) = attributes.get(&tensor::RUNTIME_OPERANDS) else {
+        return Ok(BTreeMap::new());
+    };
+    let mut decoded = BTreeMap::new();
+    let mut cursor = 0usize;
+    while cursor < encoded.len() {
+        let operand = usize::try_from(encoded[cursor])
+            .map_err(|_| invalid("runtime operand index is outside usize"))?;
+        let count = encoded
+            .get(cursor + 1)
+            .copied()
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or_else(|| invalid("runtime operand encoding has an invalid value count"))?;
+        let start = cursor + 2;
+        let end = start
+            .checked_add(count)
+            .filter(|end| *end <= encoded.len())
+            .ok_or_else(|| invalid("runtime operand encoding is truncated"))?;
+        if decoded.insert(operand, encoded[start..end].to_vec()).is_some() {
+            return Err(invalid("runtime operand encoding defines one operand twice"));
+        }
+        cursor = end;
+    }
+    Ok(decoded)
 }
 
 fn structured_broadcast_dimension_source<'a>(
@@ -996,12 +2037,19 @@ fn structural_reduction_combiner(
     })
 }
 
-fn negative_infinity(format: LoweredFloatFormat) -> Result<&'static str, CompileError> {
+fn negative_infinity(format: LoweredFloatFormat) -> Result<String, CompileError> {
     match format {
-        LoweredFloatFormat::BrainFloat16 => Ok("0xFF80"),
-        LoweredFloatFormat::Ieee(16) => Ok("0xFC00"),
-        LoweredFloatFormat::Ieee(32) => Ok("0xFF800000"),
-        LoweredFloatFormat::Ieee(64) => Ok("0xFFF0000000000000"),
+        // E4M3FN has no infinity; 0xFE is its lowest finite value (-448).
+        LoweredFloatFormat::Float8E4M3Fn => Ok("0xFE".into()),
+        LoweredFloatFormat::Float8E5M2 => Ok("0xFC".into()),
+        LoweredFloatFormat::BrainFloat16 => Ok("0xFF80".into()),
+        LoweredFloatFormat::Ieee(16) => Ok("0xFC00".into()),
+        LoweredFloatFormat::Ieee(32) => Ok("0xFF800000".into()),
+        LoweredFloatFormat::Ieee(64) => Ok("0xFFF0000000000000".into()),
+        LoweredFloatFormat::Ieee(80) => Ok("0xFFFF8000000000000000".into()),
+        LoweredFloatFormat::Ieee(128) => {
+            Ok("0xFFFF0000000000000000000000000000".into())
+        }
         _ => Err(invalid(format!(
             "structured Max has no negative-infinity literal for {format:?}"
         ))),
@@ -1055,10 +2103,6 @@ fn legalize_cpu_operation(
     };
 
     match operation {
-        tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Relu) => {
-            require_known_ranks()?;
-            return fail("Relu has no CPU MLIR lowering yet");
-        }
         tensor::TensorOp::Elementwise(elementwise) => {
             require_known_ranks()?;
             if tensor_types.is_empty() {
@@ -1117,7 +2161,8 @@ fn legalize_cpu_operation(
                 tensor::ElementwiseOp::Exp
                 | tensor::ElementwiseOp::Log
                 | tensor::ElementwiseOp::Tanh
-                | tensor::ElementwiseOp::Rsqrt => {
+                | tensor::ElementwiseOp::Rsqrt
+                | tensor::ElementwiseOp::Relu => {
                     if inputs.len() != 1 || inputs.first() != Some(output) {
                         return fail(
                             "unary elementwise operations must preserve the exact tensor type",
@@ -1132,7 +2177,6 @@ fn legalize_cpu_operation(
                         return fail("tensor-scalar elementwise operations require an unchanged tensor and a floating scalar");
                     }
                 }
-                tensor::ElementwiseOp::Relu => unreachable!("Relu was rejected above"),
             }
         }
         tensor::TensorOp::Convert => {
@@ -1166,13 +2210,14 @@ fn legalize_cpu_operation(
             if input.is_empty() {
                 return fail("MeanLast requires a rank of at least one");
             }
-            if output.len() + 1 != input.len()
-                || !output
+            if output.len() != input.len()
+                || !output[..output.len() - 1]
                     .iter()
                     .zip(input)
                     .all(|(result, source)| dimensions_compatible(result, source))
+                || output.last() != Some(&LoweredTensorDimension::Known(1))
             {
-                return fail("MeanLast result must remove exactly the input's final axis");
+                return fail("MeanLast result must retain the final axis with extent one");
             }
             if matches!(input.last(), Some(LoweredTensorDimension::Known(0))) {
                 return fail("MeanLast cannot reduce a statically empty final axis");
@@ -1210,9 +2255,10 @@ fn legalize_cpu_operation(
                 return fail("reduction operand and result must share one element representation");
             }
             if reduction == tensor::ReductionOp::MaxLast
-                && output_shape.len() + 1 != input_shape.len()
+                && (output_shape.len() != input_shape.len()
+                    || output_shape.last() != Some(&LoweredTensorDimension::Known(1)))
             {
-                return fail("MaxLast result must remove exactly the input's final axis");
+                return fail("MaxLast result must retain the final axis with extent one");
             }
         }
         tensor::TensorOp::Matmul => {
@@ -1259,17 +2305,94 @@ fn legalize_cpu_operation(
                 return fail("Materialize must preserve the exact tensor type");
             }
         }
-        tensor::TensorOp::Permute(tensor::PermuteOp::Reverse) => {
+        tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Reshape) => {
             require_known_ranks()?;
-            let ([input], [output]) = (inputs, outputs) else {
-                return fail("Reverse requires one tensor operand and one tensor result");
+            let ([input, shape], [output]) = (inputs, outputs) else {
+                return fail("Reshape requires one tensor, one shape operand, and one result");
             };
+            if !matches!(shape, LoweredType::Bytes | LoweredType::String) {
+                return fail("Reshape shape must use the opaque runtime list ABI");
+            }
+            if tensor_element(input)? != tensor_element(output)? {
+                return fail("Reshape must preserve its element representation");
+            }
+        }
+        tensor::TensorOp::Broadcast(broadcast) => {
+            require_known_ranks()?;
+            let ([input, specification], [output]) = (inputs, outputs) else {
+                return fail("Broadcast requires two operands and one tensor result");
+            };
+            if tensor_element(input)? != tensor_element(output)? {
+                return fail("Broadcast must preserve its element representation");
+            }
+            match broadcast {
+                tensor::BroadcastOp::Like if !matches!(specification, LoweredType::Tensor { .. }) => {
+                    return fail("BroadcastLike requires a tensor shape donor");
+                }
+                tensor::BroadcastOp::Repeat
+                    if !matches!(specification, LoweredType::Bytes | LoweredType::String) =>
+                {
+                    return fail("Repeat requires an opaque axis/count list operand");
+                }
+                _ => {}
+            }
+        }
+        tensor::TensorOp::Gather => {
+            require_known_ranks()?;
+            let ([source, indices], [output]) = (inputs, outputs) else {
+                return fail("Gather requires source and indices tensors and one result");
+            };
+            let (Some(source_shape), Some(index_shape), Some(output_shape)) = (
+                ranked_dimensions(source),
+                ranked_dimensions(indices),
+                ranked_dimensions(output),
+            ) else {
+                unreachable!("known ranks were checked above")
+            };
+            if source_shape.is_empty()
+                || output_shape.len() != index_shape.len() + source_shape.len() - 1
+            {
+                return fail(
+                    "Gather result rank must be index rank plus source rank minus one",
+                );
+            }
+            if !matches!(
+                tensor_element(indices)?,
+                LoweredTensorElement::Integer { .. }
+            ) {
+                return fail("Gather indices must have an integer element representation");
+            }
+            if tensor_element(source)? != tensor_element(output)? {
+                return fail("Gather must preserve the source element representation");
+            }
+        }
+        tensor::TensorOp::Permute(permutation) => {
+            require_known_ranks()?;
+            let Some(input) = inputs.first() else {
+                return fail("Permute requires one tensor operand");
+            };
+            let [output] = outputs else {
+                return fail("Permute requires one tensor result");
+            };
+            if permutation == tensor::PermuteOp::Reverse && inputs.len() != 1
+                || permutation == tensor::PermuteOp::Axes
+                    && (inputs.len() != 2
+                        || !matches!(inputs[1], LoweredType::Bytes | LoweredType::String))
+            {
+                return fail("Permute operands do not match its structural variant");
+            }
+            if tensor_element(input)? != tensor_element(output)? {
+                return fail("Permute must preserve its element representation");
+            }
             let (Some(input), Some(output)) = (ranked_dimensions(input), ranked_dimensions(output))
             else {
                 unreachable!("known ranks were checked above")
             };
-            if input.len() != output.len()
-                || !input
+            if input.len() != output.len() {
+                return fail("Permute must preserve tensor rank");
+            }
+            if permutation == tensor::PermuteOp::Reverse
+                && !input
                     .iter()
                     .rev()
                     .zip(output)
@@ -1335,12 +2458,74 @@ fn legalize_cpu_operation(
                 );
             }
         }
-        tensor::TensorOp::Scatter => {
-            return fail("effectful scatter is not legal in the current CPU compute boundary");
-        }
-        _ => {
+        tensor::TensorOp::Concatenate => {
             require_known_ranks()?;
-            return fail("this structural operation class has no CPU MLIR lowering yet");
+            let ([left, right, axis], [output]) = (inputs, outputs) else {
+                return fail("Concatenate requires two tensors, one axis operand, and one result");
+            };
+            if !matches!(axis, LoweredType::Bytes | LoweredType::String) {
+                return fail("Concatenate axis must use the opaque runtime list ABI");
+            }
+            let (Some(left_shape), Some(right_shape), Some(output_shape)) = (
+                ranked_dimensions(left),
+                ranked_dimensions(right),
+                ranked_dimensions(output),
+            ) else {
+                unreachable!("known ranks were checked above")
+            };
+            if left_shape.len() != right_shape.len() || left_shape.len() != output_shape.len() {
+                return fail("Concatenate operands and result must have the same rank");
+            }
+            if tensor_element(left)? != tensor_element(right)?
+                || tensor_element(left)? != tensor_element(output)?
+            {
+                return fail("Concatenate operands and result must share one element type");
+            }
+        }
+        tensor::TensorOp::Scatter => {
+            require_known_ranks()?;
+            let ([source, indices, updates], [output]) = (inputs, outputs) else {
+                return fail("Scatter requires source, indices, updates, and one result");
+            };
+            let (Some(source_shape), Some(index_shape), Some(update_shape), Some(output_shape)) = (
+                ranked_dimensions(source),
+                ranked_dimensions(indices),
+                ranked_dimensions(updates),
+                ranked_dimensions(output),
+            ) else {
+                unreachable!("known ranks were checked above")
+            };
+            if source_shape.is_empty()
+                || index_shape.len() != 1
+                || update_shape.len() != source_shape.len()
+                || output_shape.len() != source_shape.len()
+            {
+                return fail(
+                    "Scatter currently requires rank-one indices and rank-preserving updates",
+                );
+            }
+            if !matches!(
+                tensor_element(indices)?,
+                LoweredTensorElement::Integer { .. }
+            ) || tensor_element(source)? != tensor_element(updates)?
+                || tensor_element(source)? != tensor_element(output)?
+            {
+                return fail("Scatter has incompatible index or element representations");
+            }
+        }
+        tensor::TensorOp::Slice => {
+            require_known_ranks()?;
+            let (Some(input), Some(output)) = (inputs.first(), outputs.first()) else {
+                return fail("Slice requires a tensor operand and tensor result");
+            };
+            let (Some(input), Some(output)) =
+                (ranked_dimensions(input), ranked_dimensions(output))
+            else {
+                unreachable!("known ranks were checked above")
+            };
+            if input.len() != output.len() {
+                return fail("Slice must preserve tensor rank");
+            }
         }
     }
     Ok(())
@@ -1419,13 +2604,10 @@ fn operation_declarations(
         return Ok("  func.func private @__sev_list_get_f64(!llvm.ptr, i64) -> f64\n".into());
     }
     if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::Values) {
-        let [LoweredType::Tensor { element, .. }] = inputs else {
+        let [LoweredType::Tensor { .. }] = inputs else {
             return Err(invalid("values requires one structural tensor operand"));
         };
-        let scalar = tensor_element_spelling(*element)?;
-        return Ok(format!(
-            "  func.func private @__sev_list_create() -> !llvm.ptr\n  func.func private @__sev_list_push_f64(!llvm.ptr, {scalar})\n"
-        ));
+        return Ok("  func.func private @__sev_list_create() -> !llvm.ptr\n  func.func private @__sev_list_push_f64(!llvm.ptr, f64)\n".into());
     }
     if matches!(
         operation,
@@ -1435,12 +2617,6 @@ fn operation_declarations(
     ) {
         return Ok(
             "  func.func private @__sev_list_create() -> !llvm.ptr\n  func.func private @__sev_list_push_i64(!llvm.ptr, i64)\n"
-                .into(),
-        );
-    }
-    if operation == tensor::TensorOp::Convert {
-        return Ok(
-            "  func.func private @__sev_f8e4m3fn_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e4m3fn(f32) -> i8\n  func.func private @__sev_f8e5m2_to_f32(i8) -> f32\n  func.func private @__sev_f32_to_f8e5m2(f32) -> i8\n"
                 .into(),
         );
     }
@@ -1523,8 +2699,16 @@ fn lower_storage_view_from_abi(
         ));
         physical = next;
     }
+    let load = match element {
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn | LoweredFloatFormat::Float8E5M2,
+        } => format!(
+            "      %element_bits = llvm.load %address : !llvm.ptr -> i8\n      %element = arith.bitcast %element_bits : i8 to {scalar}\n"
+        ),
+        _ => format!("      %element = llvm.load %address : !llvm.ptr -> {scalar}\n"),
+    };
     body.push_str(&format!(
-        "      %byte_width = arith.constant {byte_width} : i64\n      %byte_offset = arith.muli {physical}, %byte_width : i64\n      %address = llvm.getelementptr %data[%byte_offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n      %element = llvm.load %address : !llvm.ptr -> {scalar}\n      %next = tensor.insert %element into %current[{}] : {output}\n      scf.yield %next : {output}\n    }}\n    return %filled : {output}\n",
+        "      %byte_width = arith.constant {byte_width} : i64\n      %byte_offset = arith.muli {physical}, %byte_width : i64\n      %address = llvm.getelementptr %data[%byte_offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n{load}      %next = tensor.insert %element into %current[{}] : {output}\n      scf.yield %next : {output}\n    }}\n    return %filled : {output}\n",
         coordinates.join(", ")
     ));
     Ok(body)
@@ -1611,11 +2795,9 @@ fn lower_operation(
             return Err(invalid("values operand must be a structural tensor"));
         };
         let scalar = tensor_element_spelling(*element)?;
-        if scalar != "f64" {
-            return Err(invalid(
-                "values currently returns list[float] and requires f64",
-            ));
-        }
+        let list_element = LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        };
         let shape = effective_shape(shape, attributes);
         let dimensions =
             static_dimensions(&shape).map_err(|error| invalid(format!("values: {error}")))?;
@@ -1646,8 +2828,19 @@ fn lower_operation(
                 indices.push(name);
             }
             body.push_str(&format!(
-                "    %element{ordinal} = tensor.extract {operand}[{}] : {ranked_type}\n    func.call @__sev_list_push_f64(%result, %element{ordinal}) : (!llvm.ptr, {scalar}) -> ()\n",
+                "    %element{ordinal} = tensor.extract {operand}[{}] : {ranked_type}\n",
                 indices.join(", ")
+            ));
+            body.push_str(&lower_scalar_conversion(
+                &format!("%element{ordinal}"),
+                *element,
+                list_element,
+                &scalar,
+                "f64",
+                &format!("%element_f64{ordinal}"),
+            )?);
+            body.push_str(&format!(
+                "    func.call @__sev_list_push_f64(%result, %element_f64{ordinal}) : (!llvm.ptr, f64) -> ()\n"
             ));
         }
         body.push_str("    return %result : !llvm.ptr\n");
@@ -2205,9 +3398,6 @@ fn lower_scalar_conversion(
     target_type: &str,
     result: &str,
 ) -> Result<String, CompileError> {
-    if is_fp8(source) || is_fp8(target) {
-        return lower_fp8_conversion(value, source, target, source_type, target_type, result);
-    }
     if source == target {
         let (zero, add) = if is_float(source) {
             ("0.0", "arith.addf")
@@ -2285,110 +3475,6 @@ fn lower_scalar_conversion(
     Ok(format!(
         "    {result} = {conversion} {value} : {source_type} to {target_type}\n"
     ))
-}
-
-fn lower_fp8_conversion(
-    value: &str,
-    source: LoweredTensorElement,
-    target: LoweredTensorElement,
-    source_type: &str,
-    target_type: &str,
-    result: &str,
-) -> Result<String, CompileError> {
-    let mut body = String::new();
-    let f32_value = if let Some(symbol) = fp8_decode_symbol(source) {
-        body.push_str(&format!(
-            "    {result}_source_bits = arith.bitcast {value} : {source_type} to i8\n    {result}_f32 = func.call @{symbol}({result}_source_bits) : (i8) -> f32\n"
-        ));
-        format!("{}_f32", result.trim_start_matches('%'))
-    } else {
-        let operation = match source {
-            LoweredTensorElement::Float { format } => {
-                if float_format_bits(format) < 32 {
-                    "arith.extf"
-                } else if float_format_bits(format) > 32 {
-                    "arith.truncf"
-                } else {
-                    body.push_str(&format!(
-                        "    {result}_f32_zero = arith.constant 0.0 : f32\n    {result}_f32 = arith.addf {value}, {result}_f32_zero : f32\n"
-                    ));
-                    ""
-                }
-            }
-            LoweredTensorElement::Integer { signed: true, .. } => "arith.sitofp",
-            LoweredTensorElement::Integer { signed: false, .. } => "arith.uitofp",
-            LoweredTensorElement::Boolean => {
-                return Err(invalid("boolean cannot be converted through FP8"))
-            }
-        };
-        if !operation.is_empty() {
-            body.push_str(&format!(
-                "    {result}_f32 = {operation} {value} : {source_type} to f32\n"
-            ));
-        }
-        format!("{}_f32", result.trim_start_matches('%'))
-    };
-
-    if let Some(symbol) = fp8_encode_symbol(target) {
-        body.push_str(&format!(
-            "    {result}_target_bits = func.call @{symbol}(%{f32_value}) : (f32) -> i8\n    {result} = arith.bitcast {result}_target_bits : i8 to {target_type}\n"
-        ));
-        return Ok(body);
-    }
-    let conversion = match target {
-        LoweredTensorElement::Float { format } => {
-            if float_format_bits(format) > 32 {
-                "arith.extf"
-            } else if float_format_bits(format) < 32 {
-                "arith.truncf"
-            } else {
-                body.push_str(&format!(
-                    "    {result}_zero = arith.constant 0.0 : f32\n    {result} = arith.addf %{f32_value}, {result}_zero : f32\n"
-                ));
-                return Ok(body);
-            }
-        }
-        LoweredTensorElement::Integer { signed: true, .. } => "arith.fptosi",
-        LoweredTensorElement::Integer { signed: false, .. } => "arith.fptoui",
-        LoweredTensorElement::Boolean => return Err(invalid("FP8 cannot be converted to boolean")),
-    };
-    body.push_str(&format!(
-        "    {result} = {conversion} %{f32_value} : f32 to {target_type}\n"
-    ));
-    Ok(body)
-}
-
-const fn is_fp8(element: LoweredTensorElement) -> bool {
-    matches!(
-        element,
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Float8E4M3Fn | LoweredFloatFormat::Float8E5M2
-        }
-    )
-}
-
-const fn fp8_decode_symbol(element: LoweredTensorElement) -> Option<&'static str> {
-    match element {
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Float8E4M3Fn,
-        } => Some("__sev_f8e4m3fn_to_f32"),
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Float8E5M2,
-        } => Some("__sev_f8e5m2_to_f32"),
-        _ => None,
-    }
-}
-
-const fn fp8_encode_symbol(element: LoweredTensorElement) -> Option<&'static str> {
-    match element {
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Float8E4M3Fn,
-        } => Some("__sev_f32_to_f8e4m3fn"),
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Float8E5M2,
-        } => Some("__sev_f32_to_f8e5m2"),
-        _ => None,
-    }
 }
 
 const fn float_format_bits(format: LoweredFloatFormat) -> u16 {

@@ -1,6 +1,15 @@
 import path
 
-class Tensor[T]:
+trait TensorElement:
+    pass
+
+trait Dim:
+    pass
+
+trait Shape:
+    pass
+
+class Tensor[T: TensorElement, *Shape: Dim]:
     handle: string
 
 def element_count(shape: list[int]) -> int:
@@ -152,8 +161,12 @@ def add_scalar[T](value: Tensor[T], scalar: f32) -> Tensor[T]
 @compile(mlir, stablehlo, xla)
 def broadcast_like[T](value: Tensor[T], target: Tensor[T]) -> Tensor[T]
 
-@compile(mlir, stablehlo, xla)
-def gelu[T](value: Tensor[T]) -> Tensor[T]
+def gelu[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    squared = multiply(copy value, copy value)
+    cubic = multiply(squared, copy value)
+    curved = scale(add(copy value, scale(cubic, 0.044715)), 0.7978845608)
+    gate = add_scalar(tanh(curved), 1.0)
+    return scale(multiply(value, gate), 0.5)
 
 @compile(mlir, stablehlo, xla)
 def tanh[T](value: Tensor[T]) -> Tensor[T]
@@ -170,22 +183,22 @@ def concatenate[T](left: Tensor[T], right: Tensor[T], axis: list[int]) -> Tensor
 @compile(mlir, stablehlo, xla)
 def repeat[T](value: Tensor[T], specification: list[int]) -> Tensor[T]
 
-def rms_norm[T](value: Tensor[T], weights: Tensor[T], epsilon: float) -> Tensor[T]:
+def rms_norm[T: TensorElement, *Shape: Dim, *WeightShape: Dim](value: Tensor[T, *Shape], weights: Tensor[T, *WeightShape], epsilon: float) -> Tensor[T, *Shape]:
     squared = multiply(copy value, value)
     variance = mean_last(squared)
     inverse_root = rsqrt(add_scalar(variance, f32(epsilon)))
     normalized = multiply(value, inverse_root)
     return multiply(normalized, weights)
 
-def sigmoid[T](value: Tensor[T]) -> Tensor[T]:
+def sigmoid[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     denominator = add_scalar(exp(scale(copy value, -1.0)), f32(1.0))
     inverse_root = rsqrt(denominator)
     return multiply(copy inverse_root, inverse_root)
 
-def silu[T](value: Tensor[T]) -> Tensor[T]:
+def silu[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     return multiply(copy value, sigmoid(value))
 
-def softmax_last[T](value: Tensor[T]) -> Tensor[T]:
+def softmax_last[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     maximum = maximum_last(copy value)
     shifted = subtract(value, maximum)
     exponentials = exp(shifted)
@@ -194,10 +207,10 @@ def softmax_last[T](value: Tensor[T]) -> Tensor[T]:
     total = scale(mean_last(copy exponentials), float(dimensions[last_axis]))
     return divide(exponentials, total)
 
-def softmax_rows[T](value: Tensor[T]) -> Tensor[T]:
+def softmax_rows[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     return softmax_last(value)
 
-def rotate_half[T](value: Tensor[T]) -> Tensor[T]:
+def rotate_half[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
     dimensions = shape(value)
     assert(size(dimensions) > 0, "RoPE requires a ranked tensor")
     last_axis: int = int(size(dimensions) - 1)
@@ -218,11 +231,13 @@ def rotate_half[T](value: Tensor[T]) -> Tensor[T]:
     right_starts[last_axis] = half
     left = slice(copy value, starts, middle, copy steps)
     right = slice(value, right_starts, ends, steps)
-    return concatenate(scale(right, -1.0), left, [last_axis])
+    # Axis identities may be relative to rank. The compiler normalizes `-1`
+    # from the ranked tensor contract; it is data on Concatenate, not a new op.
+    return concatenate(scale(right, -1.0), left, [-1])
 
 # Qwen supplies its precomputed cosine and sine caches as ordinary tensors.
 # RoPE remains an elementwise/view composition and does not become an op ID.
-def rope[T](value: Tensor[T], cosine: Tensor[T], sine: Tensor[T]) -> Tensor[T]:
+def rope[T: TensorElement, *Shape: Dim, *CacheShape: Dim](value: Tensor[T, *Shape], cosine: Tensor[T, *CacheShape], sine: Tensor[T, *CacheShape]) -> Tensor[T, *Shape]:
     return add(
         multiply(copy value, cosine),
         multiply(rotate_half(value), sine),
@@ -250,26 +265,41 @@ def to_i_64[T](value: Tensor[T]) -> Tensor[i64]
 @compile(mlir, stablehlo, xla)
 def convert_like[source, target](value: Tensor[source], target_value: Tensor[target]) -> Tensor[target]
 
-@compile(mlir, stablehlo, xla)
-def layer_norm[T](value: Tensor[T], epsilon: float = 0.00001) -> Tensor[T]
+def layer_norm[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape], epsilon: float = 0.00001) -> Tensor[T, *Shape]:
+    average = mean_last(copy value)
+    centered = subtract(value, average)
+    variance = mean_last(multiply(copy centered, copy centered))
+    inverse = rsqrt(add_scalar(variance, f32(epsilon)))
+    return multiply(centered, inverse)
 
-@compile(mlir, stablehlo, xla)
-def relu_backward[T](input: Tensor[T], upstream: Tensor[T]) -> Tensor[T]
+def relu_backward[T: TensorElement, *Shape: Dim](input: Tensor[T, *Shape], upstream: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    # A smooth positive-side gate keeps the composition representable with the
+    # generic arithmetic primitives until compare/select join Elementwise.
+    gate = relu(tanh(scale(input, 16.0)))
+    return multiply(upstream, gate)
 
-@compile(mlir, stablehlo, xla)
-def softmax_backward[T](output: Tensor[T], upstream: Tensor[T]) -> Tensor[T]
+def softmax_backward[T: TensorElement, *Shape: Dim](output: Tensor[T, *Shape], upstream: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    weighted = multiply(copy output, copy upstream)
+    dimensions = shape(weighted)
+    last_axis: int = int(size(dimensions) - 1)
+    projection = scale(mean_last(weighted), float(dimensions[last_axis]))
+    return multiply(output, subtract(upstream, projection))
 
-@compile(mlir, stablehlo, xla)
-def layer_norm_backward[T](input: Tensor[T], upstream: Tensor[T], epsilon: float = 0.00001) -> Tensor[T]
+def layer_norm_backward[T: TensorElement, *Shape: Dim](input: Tensor[T, *Shape], upstream: Tensor[T, *Shape], epsilon: float = 0.00001) -> Tensor[T, *Shape]:
+    normalized = layer_norm(copy input, epsilon)
+    average_gradient = mean_last(copy upstream)
+    centered_gradient = subtract(copy upstream, average_gradient)
+    correlation = mean_last(multiply(upstream, normalized))
+    return subtract(centered_gradient, multiply(normalized, correlation))
 
-@compile(mlir, stablehlo, xla)
-def backward_mse(output: Tensor[f64]) -> Tensor[f64]
+def backward_mse[*Shape: Dim](output: Tensor[f64, *Shape]) -> Tensor[f64, *Shape]:
+    return scale(output, 2.0)
 
-@compile(mlir, stablehlo, xla)
-def gradient[T](value: Tensor[T]) -> Tensor[T]
+def gradient[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    return value
 
-@compile(mlir, stablehlo, xla)
-def sgd[T](value: Tensor[T], learning_rate: float) -> Tensor[T]
+def sgd[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape], learning_rate: float) -> Tensor[T, *Shape]:
+    return scale(value, -learning_rate)
 
 @compile(mlir, stablehlo, xla)
 def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
@@ -289,15 +319,17 @@ def mean(value: Tensor[f64]) -> float
 def maximum(value: Tensor[f64]) -> float
 @compile(mlir, stablehlo, xla)
 def minimum(value: Tensor[f64]) -> float
-@compile(mlir, stablehlo, xla)
-def softmax[T](value: Tensor[T]) -> Tensor[T]
+def softmax[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[T, *Shape]:
+    return softmax_last(value)
 
-@compile(mlir, stablehlo, xla)
-def compute_as_f32[T](value: Tensor[T]) -> Tensor[f32]
-@compile(mlir, stablehlo, xla)
-def store_as_f8e4m3fn[T](value: Tensor[T]) -> Tensor[f8e4m3fn]
-@compile(mlir, stablehlo, xla)
-def store_as_f8e5m2[T](value: Tensor[T]) -> Tensor[f8e5m2]
+def compute_as_f32[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[f32, *Shape]:
+    return to_f_32(value)
+
+def store_as_f8e4m3fn[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[f8e4m3fn, *Shape]:
+    return to_f8_e4_m3_fn(value)
+
+def store_as_f8e5m2[T: TensorElement, *Shape: Dim](value: Tensor[T, *Shape]) -> Tensor[f8e5m2, *Shape]:
+    return to_f8_e5_m2(value)
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
