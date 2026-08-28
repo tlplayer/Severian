@@ -238,22 +238,48 @@ def decode_codes(
         1,
     )
 
+def decode_higgs_audio_v2(
+    parameters: borrow tensor.SafeTensorStore,
+    codes: borrow list[int],
+    frames: int,
+) -> list[float]:
+    numeric: list[float] := []
+    for code in codes:
+        numeric.append(float(code))
+    code_tensor = tensor.to_i_64(tensor.ranked(numeric, [1, Codebooks, frames]))
+    return tensor.values(decode_codes(parameters, code_tensor))
+
+def write_higgs_audio_v2(
+    parameters: borrow tensor.SafeTensorStore,
+    path: string,
+    codes: borrow list[int],
+    frames: int,
+) -> bool:
+    output = audio.AudioBuffer(decode_higgs_audio_v2(parameters, codes, frames), SampleRate, 1)
+    return audio.write_wav(path, borrow output)
+
 class HiggsAudioV2Decoder:
     parameters: tensor.SafeTensorStore
 
     def HiggsAudioV2Decoder(root: string):
         parameters := tensor.open_safetensors(root + "/audio_tokenizer")
 
-    def decode(codes: tensor.Tensor[i64]) -> tensor.Tensor[f32]:
-        return decode_codes(borrow parameters, codes)
+    def decode(codes: borrow list[int], frames: int) -> list[float]:
+        return decode_higgs_audio_v2(borrow parameters, codes, frames)
 
-    def write(path: string, codes: tensor.Tensor[i64]) -> bool:
-        waveform = decode(codes)
-        output = audio.AudioBuffer(tensor.values(waveform), SampleRate, 1)
-        return audio.write_wav(path, borrow output)
+    def write(path: string, codes: borrow list[int], frames: int) -> bool:
+        return write_higgs_audio_v2(borrow parameters, path, codes, frames)
 
     def close() -> bool:
-        return tensor.close_safetensors(parameters)
+        return tensor.safetensor_close(copy parameters.handle) == 0
+
+def write(
+    decoder: borrow HiggsAudioV2Decoder,
+    path: string,
+    codes: borrow list[int],
+    frames: int,
+) -> bool:
+    return write_higgs_audio_v2(borrow decoder.parameters, path, codes, frames)
 
 
 test "Higgs Audio V2 decoder constants match the pinned OmniVoice config":

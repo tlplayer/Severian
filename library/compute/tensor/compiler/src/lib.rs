@@ -5359,7 +5359,7 @@ mod tests {
             TensorJitRequirement::Required { reasons }
                 if reasons.contains(&TensorJitReason::UnresolvedRank { slot: 0 })
         ));
-        let error = TensorCompiler
+        let artifact = TensorCompiler
             .compile(
                 &unranked_region,
                 &CompileContext {
@@ -5367,10 +5367,16 @@ mod tests {
                     target: &TargetSpec::host(),
                 },
             )
-            .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("runtime tensor specialization is required before backend emission"));
+            .unwrap();
+        let CompiledRegionArtifact::TensorJit(bundle) = artifact else {
+            panic!("unranked CPU tensor regions must cross the Tensor-JIT boundary")
+        };
+        assert!(matches!(bundle.inputs[0], LoweredType::Tensor { shape: LoweredTensorShape::Unranked, .. }));
+        assert!(bundle
+            .graph
+            .nodes()
+            .iter()
+            .all(|node| !node.operation.contains("f32") && !node.operation.contains("rank")));
     }
 
     #[test]

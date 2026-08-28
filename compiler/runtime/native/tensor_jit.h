@@ -38,6 +38,8 @@ enum {
     SEV_TENSOR_JIT_VALUE_SIGNED = 3,
     SEV_TENSOR_JIT_VALUE_UNSIGNED = 4,
     SEV_TENSOR_JIT_VALUE_FLOAT = 5,
+    /* A Severian list[int] used as a structural shape/index operand. */
+    SEV_TENSOR_JIT_VALUE_LIST_I64 = 6,
 };
 
 typedef union {

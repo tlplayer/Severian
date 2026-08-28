@@ -763,6 +763,15 @@ impl Compiler {
             })?;
             linker_arguments.push(source.to_string_lossy().into_owned());
         }
+        if program.host_mlir.contains("__sev_tokenizer_")
+            || linker_arguments.iter().any(|argument| {
+                Path::new(argument)
+                    .file_name()
+                    .is_some_and(|name| name == "tokenizer.c")
+            })
+        {
+            stage_tokenizer_provider(output)?;
+        }
         severian_backend::emit_mlir_executable_with_linker_arguments(
             &program.host_mlir,
             &self.target.triple,
@@ -1213,6 +1222,49 @@ fn stage_tensor_jit_provider(output: &Path) -> Result<(), CompileError> {
     Ok(())
 }
 
+fn stage_tokenizer_provider(output: &Path) -> Result<(), CompileError> {
+    #[cfg(target_os = "linux")]
+    const PROVIDER_NAME: &str = "libseverian_tokenizer_provider.so";
+    #[cfg(target_os = "macos")]
+    const PROVIDER_NAME: &str = "libseverian_tokenizer_provider.dylib";
+    #[cfg(target_os = "windows")]
+    const PROVIDER_NAME: &str = "severian_tokenizer_provider.dll";
+
+    let driver = std::env::current_exe().map_err(|error| {
+        CompileError::NativeLink(format!(
+            "could not locate the Severian driver while staging the tokenizer provider: {error}"
+        ))
+    })?;
+    let executable_directory = driver
+        .parent()
+        .ok_or_else(|| CompileError::NativeLink("Severian driver has no parent directory".into()))?;
+    let candidates = [
+        executable_directory.join(PROVIDER_NAME),
+        executable_directory
+            .parent()
+            .map(|parent| parent.join(PROVIDER_NAME))
+            .unwrap_or_default(),
+    ];
+    let source = candidates.iter().find(|candidate| candidate.is_file()).ok_or_else(|| {
+        CompileError::NativeLink(format!(
+            "tokenizer provider {PROVIDER_NAME} (ABI {}) was not built beside the Severian driver; build the severian-tokenizer-provider workspace target",
+            severian_tokenizer_provider::ABI_VERSION,
+        ))
+    })?;
+    let destination_directory = output.parent().unwrap_or_else(|| Path::new("."));
+    let destination = destination_directory.join(PROVIDER_NAME);
+    if source != &destination {
+        std::fs::copy(source, &destination).map_err(|error| {
+            CompileError::NativeLink(format!(
+                "could not stage tokenizer provider {} at {}: {error}",
+                source.display(),
+                destination.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 fn render_tensor_jit_launcher(
     launcher: &severian_compile::VerifiedTensorJitBundle,
     program: &[u8],
@@ -1274,12 +1326,34 @@ fn render_tensor_jit_launcher(
     );
     for (index, (ty, node)) in bundle.inputs.iter().zip(&bundle.input_nodes).enumerate() {
         let graph_node = bundle.graph.node(*node);
-        body.push_str(&render_tensor_jit_input(index, ty, graph_node.shape.element_kind)?);
+        let runtime_list = bundle.graph.nodes().iter().any(|consumer| {
+            consumer
+                .inputs
+                .iter()
+                .zip(&consumer.operand_roles)
+                .any(|(input, role)| {
+                    input == node && *role != severian_fusion::OperandRole::Data
+                })
+        });
+        body.push_str(&render_tensor_jit_input(
+            index,
+            ty,
+            graph_node.shape.element_kind,
+            runtime_list,
+        )?);
     }
     for (index, (ty, node)) in bundle.outputs.iter().zip(&bundle.output_nodes).enumerate() {
+        let graph_node = bundle.graph.node(*node);
+        let kind = if graph_node.kind == severian_fusion::NodeKind::StorageView
+            && matches!(graph_node.operation.as_str(), "shape" | "strides")
+        {
+            "SEV_TENSOR_JIT_VALUE_LIST_I64"
+        } else {
+            tensor_jit_value_kind(ty, graph_node.shape.element_kind)?
+        };
         body.push_str(&format!(
             "  outputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION;\n  outputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi);\n  outputs[{index}].kind = {};\n",
-            tensor_jit_value_kind(ty, bundle.graph.node(*node).shape.element_kind)?
+            kind
         ));
     }
     body.push_str(&format!(
@@ -1378,9 +1452,14 @@ fn render_tensor_jit_input(
     index: usize,
     ty: &severian_mlir::LoweredType,
     element: severian_fusion::ElementKind,
+    runtime_list: bool,
 ) -> Result<String, CompileError> {
     use severian_mlir::LoweredType;
-    let kind = tensor_jit_value_kind(ty, element)?;
+    let kind = if runtime_list {
+        "SEV_TENSOR_JIT_VALUE_LIST_I64"
+    } else {
+        tensor_jit_value_kind(ty, element)?
+    };
     if let LoweredType::Tensor {
         element: tensor_element,
         shape: severian_mlir::LoweredTensorShape::Unranked,

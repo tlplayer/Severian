@@ -12,6 +12,7 @@ os = { path = "../system/os", version = "0.1.0" }
 path = { path = "../system/path", version = "0.1.0" }
 process = { path = "../system/process", version = "0.1.0" }
 tensor = { path = "../compute/tensor", version = "0.1.0" }
+higgs_audio_v2 = { path = "codecs/higgs_audio_v2", version = "0.1.0" }
 
 [package.metadata.library]
 category = "ai"

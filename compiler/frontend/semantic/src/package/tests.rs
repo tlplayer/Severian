@@ -131,6 +131,36 @@ fn qualified_imported_types_resolve_in_annotations_and_constructors() {
 }
 
 #[test]
+fn transitively_reachable_class_methods_keep_origin_types_and_functions() {
+    let root = temporary();
+    std::fs::write(
+        root.join("storage.sev"),
+        "class Store:\n    handle: int\ndef close_store(store: Store) -> bool:\n    return store.handle != 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("codec.sev"),
+        "import \"storage.sev\" as storage\nclass Decoder:\n    parameters: storage.Store\n    def close() -> bool:\n        return storage.close_store(parameters)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("model.sev"),
+        "import \"codec.sev\" as codec\nclass Model:\n    decoder: codec.Decoder\n    def close() -> bool:\n        return decoder.close()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"model.sev\" as model\ndef selected(value: model.Model) -> bool:\n    return value.close()\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn package_signatures_preserve_named_parameters_and_defaults() {
     let root = temporary();
     std::fs::write(

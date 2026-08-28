@@ -1700,11 +1700,6 @@ impl Analyzer<'_> {
             }
         }
         for package_class in classes {
-            if source_module.is_some_and(|module| !package_class.lookups.contains_key(&module))
-                && package_class.declaration.name != "Tensor"
-            {
-                continue;
-            }
             if !package_class.declaration.type_parameters.is_empty() {
                 continue;
             }
@@ -12629,6 +12624,9 @@ impl Analyzer<'_> {
             )),
             "log" => Some(severian_universal::tensor::TensorOp::Elementwise(
                 severian_universal::tensor::ElementwiseOp::Log,
+            )),
+            "sin" => Some(severian_universal::tensor::TensorOp::Elementwise(
+                severian_universal::tensor::ElementwiseOp::Sin,
             )),
             "tanh" => Some(severian_universal::tensor::TensorOp::Elementwise(
                 severian_universal::tensor::ElementwiseOp::Tanh,

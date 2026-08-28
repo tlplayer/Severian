@@ -664,6 +664,7 @@ dependencies = [
  "severian-target",
  "severian-tensor-compiler",
  "severian-tensor-jit-provider",
+ "severian-tokenizer-provider",
  "severian-triton",
  "severian-universal",
  "severian-xxi",

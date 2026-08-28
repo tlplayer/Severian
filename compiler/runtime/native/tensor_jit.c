@@ -1,3 +1,7 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <pthread.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -13,6 +17,12 @@ typedef struct sev_tensor_jit_cache_entry {
     sev_tensor_jit_compiled_abi compiled;
     struct sev_tensor_jit_cache_entry *next;
 } sev_tensor_jit_cache_entry;
+
+typedef struct {
+    uint64_t length;
+    uint64_t capacity;
+    const int64_t *values;
+} sev_tensor_jit_i64_list;
 
 static pthread_mutex_t sev_tensor_jit_mutex = PTHREAD_MUTEX_INITIALIZER;
 static sev_tensor_jit_compile_fn sev_tensor_jit_compile = NULL;
@@ -140,6 +150,18 @@ static int32_t sev_tensor_jit_key(
             sev_tensor_jit_hash_bytes(key, view->dimensions, (size_t)view->rank * sizeof(*view->dimensions));
             sev_tensor_jit_hash_bytes(key, view->strides, (size_t)view->rank * sizeof(*view->strides));
             sev_tensor_jit_hash_bytes(key, &view->offset, sizeof(view->offset));
+        } else if (value->kind == SEV_TENSOR_JIT_VALUE_LIST_I64) {
+            const sev_tensor_jit_i64_list *list = value->value.pointer;
+            if (list == NULL || list->length > list->capacity ||
+                (list->length != 0 && list->values == NULL)) {
+                return SEV_TENSOR_JIT_INVALID_ARGUMENT;
+            }
+            sev_tensor_jit_hash_bytes(key, &list->length, sizeof(list->length));
+            sev_tensor_jit_hash_bytes(
+                key,
+                list->values,
+                (size_t)list->length * sizeof(*list->values)
+            );
         } else {
             sev_tensor_jit_hash_bytes(key, &value->value, sizeof(value->value));
         }

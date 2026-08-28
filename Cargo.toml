@@ -206,6 +206,9 @@ severian-driver = [
     "severian-universal",
     "severian-xxi",
     "severian-tensor-compiler",
+    "severian-tensor-jit-provider",
+    "severian-tokenizer-provider",
+    "severian-triton",
 ]
 severian-tensor-compiler = [
     "severian-artifact",

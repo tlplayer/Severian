@@ -1,0 +1,20 @@
+[package]
+name = "omnivoice-severian"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "omnivoice-severian"
+description = "Pinned OmniVoice checkpoint to native Severian tensor execution and WAV"
+
+[[bin]]
+name = "omnivoice-severian"
+path = "src/main.sev"
+
+[dependencies]
+model = { path = "../..", version = "0.1.0" }
+process = { path = "../../../system/process", version = "0.1.0" }
+
+[build]
+profile = "release"
+target = "host"
+

@@ -34,6 +34,7 @@ const COMPILE_FAILED: i32 = 3;
 
 const VALUE_STORAGE: u32 = 1;
 const VALUE_POINTER: u32 = 2;
+const VALUE_LIST_I64: u32 = 6;
 
 const RTLD_NOW: c_int = 2;
 static NEXT_LIBRARY: AtomicU64 = AtomicU64::new(0);
@@ -237,7 +238,7 @@ unsafe fn hydrate_runtime_operands(
                 continue;
             };
             let input = &inputs[external_index];
-            if input.kind != VALUE_POINTER {
+            if input.kind != VALUE_LIST_I64 {
                 continue;
             }
             let raw = unsafe { input.value.pointer.cast::<RuntimeList>() };
@@ -925,7 +926,12 @@ fn render_output(
             )
             .unwrap();
         }
-        writeln!(source, "  outputs[{index}].kind = SEV_TENSOR_JIT_VALUE_POINTER; outputs[{index}].value.pointer = list{index};").unwrap();
+        let kind = if matches!(node.operation.as_str(), "shape" | "strides") {
+            "SEV_TENSOR_JIT_VALUE_LIST_I64"
+        } else {
+            "SEV_TENSOR_JIT_VALUE_POINTER"
+        };
+        writeln!(source, "  outputs[{index}].kind = {kind}; outputs[{index}].value.pointer = list{index};").unwrap();
         return Ok(());
     }
     if let Some(rank) = tensor_rank(ty) {

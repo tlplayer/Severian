@@ -107,6 +107,7 @@ mod tests {
             .expect("the C compiler must run");
         assert!(compiled.success(), "failed to compile {}", source.display());
         let executed = Command::new(&executable)
+            .env("SEVERIAN_TENSOR_JIT_LIBRARY", "/nonexistent/severian-provider.so")
             .status()
             .expect("the tensor JIT launcher test must run");
         let _ = std::fs::remove_file(&executable);

@@ -3,6 +3,7 @@ import path
 import process
 import tensor
 import math
+import higgs_audio_v2
 
 class ModelError: Error
     message: string
@@ -164,6 +165,32 @@ def download(url: string, destination: string) -> bool:
     if process.run(command) != 0:
         return false
     return os.rename(temporary, destination) == 0
+
+def verify_sha256(selected: string, expected: string) -> bool:
+    marker = selected + ".sha256-" + expected
+    if os.is_file(marker):
+        return true
+    command = "printf '%s  %s\\n' " + shell_quote(expected) + " " + shell_quote(selected) + " | sha256sum --check --status"
+    if process.run(command) != 0:
+        return false
+    return process.run("touch " + shell_quote(marker)) == 0
+
+def acquire_omnivoice_payloads(loaded: LoadedModel) -> LoadedModel:
+    pinned_remote = loaded.artifact.revision == OmniVoiceRevision
+    assert(pinned_remote or loaded.artifact.revision == "local", "OmniVoice must use the pinned checkpoint revision or a verified local snapshot")
+    base = "https://huggingface.co/" + OmniVoiceRepository + "/resolve/" + OmniVoiceRevision + "/"
+    audio_root = loaded.artifact.root + "/audio_tokenizer"
+    assert(os.make_directories(audio_root), "could not create OmniVoice audio-tokenizer cache")
+    audio_config = audio_root + "/config.json"
+    audio_weights = audio_root + "/model.safetensors"
+    if not os.is_file(audio_config) and pinned_remote:
+        assert(download(base + "audio_tokenizer/config.json", audio_config), "could not acquire pinned OmniVoice audio-tokenizer config")
+    if not os.is_file(audio_weights) and pinned_remote:
+        assert(download(base + "audio_tokenizer/model.safetensors", audio_weights), "could not acquire pinned OmniVoice audio-tokenizer weights")
+    assert(os.is_file(audio_config) and os.is_file(audio_weights), "local OmniVoice snapshot is missing audio_tokenizer/config.json or model.safetensors")
+    assert(verify_sha256(loaded.artifact.weights, OmniVoiceWeightsSha256), "OmniVoice model checksum does not match the pinned checkpoint")
+    assert(verify_sha256(audio_weights, OmniVoiceAudioTokenizerSha256), "OmniVoice audio-tokenizer checksum does not match the pinned checkpoint")
+    return loaded
 
 def acquire_hugging_face(selected: Reference, root: string) -> Artifact:
     result = artifact_for(selected, root)
@@ -626,6 +653,48 @@ def omnivoice_sample_step(
             changed.append(best_position)
     return OmniVoiceSample(tokens, changed)
 
+def omnivoice_ids_tensor(values: borrow list[int], shape: list[int]) -> tensor.Tensor[i64]:
+    numeric: list[float] := []
+    for value in values:
+        numeric.append(float(value))
+    return tensor.to_i_64(tensor.ranked(numeric, shape))
+
+def omnivoice_mask_tensor(values: borrow list[bool], sequence: int) -> tensor.Tensor[f32]:
+    numeric: list[float] := []
+    for value in values:
+        numeric.append(1.0 if value else 0.0)
+    return tensor.to_f_32(tensor.ranked(numeric, [1, sequence, 1]))
+
+def omnivoice_text_row(prompt: borrow OmniVoicePrompt) -> list[int]:
+    result: list[int] := []
+    for position in range(0, prompt.sequence):
+        result.append(prompt.input_ids[position])
+    return result
+
+def omnivoice_target_logits(
+    logits: tensor.Tensor[f32],
+    start: int,
+    count: int,
+    architecture: borrow OmniVoiceConfig,
+) -> list[float]:
+    selected = tensor.slice(
+        logits,
+        [0, 0, start, 0],
+        [1, architecture.audio_codebooks, start + count, architecture.audio_vocabulary],
+        [1, 1, 1, 1],
+    )
+    return tensor.values(selected)
+
+def omnivoice_update_target(
+    prompt: borrow OmniVoicePrompt,
+    tokens: borrow list[int],
+) -> list[int]:
+    result = copy prompt.input_ids
+    for codebook in range(0, prompt.codebooks):
+        for position in range(0, prompt.target_tokens):
+            result[codebook * prompt.sequence + prompt.target_start + position] = tokens[codebook * prompt.target_tokens + position]
+    return result
+
 def parameter[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
     return tensor.load[T](parameters.entry(name))
 
@@ -890,13 +959,107 @@ def validate_omnivoice_state(
         assert(current.entry("post_attention_layernorm.weight").shape == [configuration.transformer.hidden_size])
     return true
 
+def omnivoice_forward_ids(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+    text_ids: tensor.Tensor[i64],
+    audio_ids: tensor.Tensor[i64],
+    audio_mask: tensor.Tensor[f32],
+) -> tensor.Tensor[f32]:
+    embeddings = omnivoice_embeddings(
+        parameters,
+        configuration,
+        text_ids,
+        audio_ids,
+        audio_mask,
+    )
+    return omnivoice_logits(parameters, configuration, embeddings)
+
+def synthesize_omnivoice(
+    parameters: borrow StateDict,
+    configuration: borrow OmniVoiceConfig,
+    tokenizer: borrow TextTokenizer,
+    decoder: borrow higgs_audio_v2.HiggsAudioV2Decoder,
+    path: string,
+    text: string,
+    target_tokens: int,
+    language: string,
+    instruction: string,
+    seed: int,
+) -> bool:
+    generation = omnivoice_generation_config()
+    prompt = omnivoice_prompt(
+        tokenizer,
+        text,
+        "",
+        [],
+        0,
+        target_tokens,
+        language,
+        instruction,
+        false,
+        configuration,
+    )
+    schedule = omnivoice_unmask_schedule(target_tokens, configuration, borrow generation)
+    current: list[int] := []
+    for _position in range(0, configuration.audio_codebooks * target_tokens):
+        current.append(configuration.audio_mask)
+    conditional_ids := copy prompt.input_ids
+    conditional_mask = omnivoice_mask_tensor(borrow prompt.audio_mask, prompt.sequence)
+    text_row = omnivoice_text_row(borrow prompt)
+    unconditional_mask_values: list[bool] := []
+    for _position in range(0, target_tokens):
+        unconditional_mask_values.append(true)
+
+    for step in range(0, generation.steps):
+        conditional_logits = omnivoice_forward_ids(
+            parameters,
+            configuration,
+            omnivoice_ids_tensor(borrow text_row, [1, prompt.sequence]),
+            omnivoice_ids_tensor(borrow conditional_ids, [1, configuration.audio_codebooks, prompt.sequence]),
+            copy conditional_mask,
+        )
+        unconditional_text: list[int] := []
+        for position in range(0, target_tokens):
+            unconditional_text.append(current[position])
+        unconditional_logits = omnivoice_forward_ids(
+            parameters,
+            configuration,
+            omnivoice_ids_tensor(borrow unconditional_text, [1, target_tokens]),
+            omnivoice_ids_tensor(borrow current, [1, configuration.audio_codebooks, target_tokens]),
+            omnivoice_mask_tensor(borrow unconditional_mask_values, target_tokens),
+        )
+        sampled = omnivoice_sample_step(
+            borrow omnivoice_target_logits(conditional_logits, prompt.target_start, target_tokens, configuration),
+            borrow omnivoice_target_logits(unconditional_logits, 0, target_tokens, configuration),
+            borrow current,
+            target_tokens,
+            schedule[step],
+            step,
+            seed,
+            configuration,
+            borrow generation,
+        )
+        next_tokens = sampled.tokens
+        for position in range(0, configuration.audio_codebooks * target_tokens):
+            current[position] = next_tokens[position]
+        conditional_ids = omnivoice_update_target(borrow prompt, borrow current)
+        if step == generation.steps - 1:
+            return higgs_audio_v2.write(decoder, path, borrow current, target_tokens)
+    assert(false, "OmniVoice generation requires at least one sampling step")
+    return false
+
 class OmniVoice: Module[f32]
     parameters: StateDict
     configuration: OmniVoiceConfig
+    tokenizer: TextTokenizer
+    decoder: higgs_audio_v2.HiggsAudioV2Decoder
 
     def OmniVoice(loaded: LoadedModel):
         parameters := state(loaded)
         configuration := omnivoice_config()
+        tokenizer := text_tokenizer(loaded.artifact)
+        decoder := higgs_audio_v2.HiggsAudioV2Decoder(loaded.artifact.root)
         assert(validate_omnivoice_state(borrow parameters, borrow configuration))
 
     def forward(embeddings: tensor.Tensor[f32]) -> tensor.Tensor[f32]:
@@ -911,20 +1074,43 @@ class OmniVoice: Module[f32]
         audio_ids: tensor.Tensor[i64],
         audio_mask: tensor.Tensor[f32],
     ) -> tensor.Tensor[f32]:
-        embeddings = omnivoice_embeddings(
+        return omnivoice_forward_ids(
             borrow parameters,
             borrow configuration,
             text_ids,
             audio_ids,
             audio_mask,
         )
-        return forward(embeddings)
+
+    def synthesize(
+        path: string,
+        text: string,
+        target_tokens: int,
+        language: string = "None",
+        instruction: string = "None",
+        seed: int = 0,
+    ) -> bool:
+        return synthesize_omnivoice(
+            borrow parameters,
+            borrow configuration,
+            borrow tokenizer,
+            borrow decoder,
+            path,
+            text,
+            target_tokens,
+            language,
+            instruction,
+            seed,
+        )
 
     def close() -> bool:
-        return parameters.close()
+        return parameters.close() and close(tokenizer) and decoder.close()
 
-def load_omnivoice(locator: string, root: string = "") -> OmniVoice:
-    return OmniVoice(load(reference(locator), root))
+def load_omnivoice(locator: string = OmniVoiceRepository, root: string = "") -> OmniVoice:
+    selected = omnivoice_reference() if locator == OmniVoiceRepository else reference(locator, OmniVoiceRevision)
+    loaded = load(selected, root)
+    complete = acquire_omnivoice_payloads(loaded)
+    return OmniVoice(complete)
 
 test "typed modules compose without a framework runtime":
     weights = tensor.f32(tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2]))

@@ -325,12 +325,43 @@ pub fn analyze_package_with_context(
             }
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
+        // Class methods retain the lexical module in which they were declared,
+        // even when a downstream package is the first caller that makes the
+        // method body reachable. Install those origin-module callables before
+        // analyzing the downstream body; otherwise `codec.write()` can retain
+        // its source body while losing bindings such as `audio.write_wav`.
+        let lexical_class_modules = class_lexical_modules(source_module.id, &package_classes);
+        for origin in &lexical_class_modules {
+            if *origin != source_module.id {
+                visible.extend(module_function_bindings(*origin, &index, &specializations));
+            }
+        }
         visible.extend(registry_function_bindings(
             &registry_modules,
             &index,
             &specializations,
         ));
-        let package_constants = imported_constant_bindings(source_module.id, module_graph, &index);
+        visible.sort_by_key(|binding| {
+            (
+                binding.lookup.clone(),
+                binding.definition,
+                binding.substitution.clone(),
+            )
+        });
+        visible.dedup_by(|left, right| {
+            left.lookup == right.lookup
+                && left.definition == right.definition
+                && left.substitution == right.substitution
+        });
+        let mut package_constants =
+            imported_constant_bindings(source_module.id, module_graph, &index);
+        for origin in lexical_class_modules {
+            if origin != source_module.id {
+                package_constants.extend(module_constant_bindings(origin, module_graph, &index));
+            }
+        }
+        package_constants.sort_by(|left, right| left.lookup.cmp(&right.lookup));
+        package_constants.dedup_by(|left, right| left.lookup == right.lookup);
         visible.extend(
             own_instances
                 .iter()
@@ -681,6 +712,43 @@ fn visible_class_names(
     names.sort();
     names.dedup();
     names
+}
+
+fn class_lexical_modules(
+    source: ModuleId,
+    classes: &[PackageClass],
+) -> BTreeSet<ModuleId> {
+    let mut modules = BTreeSet::from([source]);
+    let mut selected = classes
+        .iter()
+        .enumerate()
+        .filter(|(_, class)| class.lookups.get(&source).is_some_and(|names| !names.is_empty()))
+        .map(|(index, _)| index)
+        .collect::<BTreeSet<_>>();
+    loop {
+        let previous = selected.len();
+        let referenced = selected
+            .iter()
+            .flat_map(|index| {
+                let owner = &classes[*index];
+                owner.declaration.fields.iter().filter_map(move |field| {
+                    let name = field.annotation.named_parts()?.0;
+                    classes.iter().enumerate().find_map(|(candidate_index, candidate)| {
+                        candidate
+                            .lookups
+                            .get(&owner.module)
+                            .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
+                            .then_some(candidate_index)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        selected.extend(referenced);
+        if selected.len() == previous {
+            modules.extend(selected.iter().map(|index| classes[*index].module));
+            return modules;
+        }
+    }
 }
 
 fn resolve_package_type(
@@ -1106,6 +1174,34 @@ fn imported_function_bindings(
     stubs
 }
 
+fn module_function_bindings(
+    module: ModuleId,
+    index: &ProgramIndex,
+    specializations: &Specializations,
+) -> Vec<FunctionBinding> {
+    let mut bindings = imported_function_bindings(module, index, specializations);
+    for definition in &index.modules[&module].items {
+        let Some(item) = index.definitions.get(definition) else {
+            continue;
+        };
+        if !matches!(item.kind, DefKind::Function(_)) {
+            continue;
+        }
+        if item.name == "print" {
+            continue;
+        }
+        for substitution in function_instances(*definition, index, specializations) {
+            bindings.push(FunctionBinding {
+                lookup: item.name.clone(),
+                definition: *definition,
+                substitution,
+            });
+        }
+    }
+    bindings.retain(|binding| binding.lookup != "print");
+    bindings
+}
+
 fn registry_function_bindings(
     modules: &BTreeSet<ModuleId>,
     index: &ProgramIndex,
@@ -1192,6 +1288,27 @@ fn imported_constant_bindings(
     }
     constants.sort_by(|left, right| left.lookup.cmp(&right.lookup));
     constants.dedup_by(|left, right| left.lookup == right.lookup);
+    constants
+}
+
+fn module_constant_bindings(
+    module: ModuleId,
+    module_graph: &ModuleGraph,
+    index: &ProgramIndex,
+) -> Vec<PackageConstant> {
+    let mut constants = imported_constant_bindings(module, module_graph, index);
+    let Some(source) = module_graph.modules.iter().find(|source| source.id == module) else {
+        return constants;
+    };
+    constants.extend(source.ast.items.iter().filter_map(|item| {
+        let Item::Binding(binding) = item else {
+            return None;
+        };
+        Some(PackageConstant {
+            lookup: binding.name.clone(),
+            value: binding.value.clone(),
+        })
+    }));
     constants
 }
 

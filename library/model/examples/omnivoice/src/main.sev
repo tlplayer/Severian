@@ -1,0 +1,17 @@
+import model
+import process
+
+
+def main():
+    arguments = process.arguments()
+    assert(size(arguments) >= 4, "usage: omnivoice-severian MODEL_OR_REPOSITORY OUTPUT.wav TEXT [target_frames] [language] [instruction] [seed]")
+    locator = arguments[1]
+    output = arguments[2]
+    text = arguments[3]
+    target_frames = int(arguments[4]) if size(arguments) > 4 else 250
+    language = arguments[5] if size(arguments) > 5 else "None"
+    instruction = arguments[6] if size(arguments) > 6 else "None"
+    seed = int(arguments[7]) if size(arguments) > 7 else 0
+    voice = model.load_omnivoice(locator)
+    assert(voice.synthesize(output, text, target_frames, language, instruction, seed))
+    assert(voice.close())

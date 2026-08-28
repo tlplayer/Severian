@@ -1,7 +1,14 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <pthread.h>
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "tokenizer.h"
 
@@ -26,8 +33,28 @@ typedef const sev_tokenizer_provider_abi *(*sev_tokenizer_provider_fn)(void);
 static void sev_tokenizer_load_provider_locked(void) {
     if (sev_tokenizer_provider.open != NULL || sev_tokenizer_library != NULL) return;
     const char *path = getenv("SEVERIAN_TOKENIZER_LIBRARY");
-    if (path == NULL || *path == '\0') path = "libseverian_tokenizer_provider.so";
-    void *library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    void *library = NULL;
+    if (path != NULL && *path != '\0') {
+        library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    } else {
+        char executable[PATH_MAX];
+        ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+        if (length > 0) {
+            executable[length] = '\0';
+            char *separator = strrchr(executable, '/');
+            if (separator != NULL) {
+                separator[1] = '\0';
+                const char provider[] = "libseverian_tokenizer_provider.so";
+                if ((size_t)(separator + 1 - executable) + sizeof(provider) <= sizeof(executable)) {
+                    memcpy(separator + 1, provider, sizeof(provider));
+                    library = dlopen(executable, RTLD_NOW | RTLD_LOCAL);
+                }
+            }
+        }
+        if (library == NULL) {
+            library = dlopen("libseverian_tokenizer_provider.so", RTLD_NOW | RTLD_LOCAL);
+        }
+    }
     if (library == NULL) return;
     sev_tokenizer_provider_fn provider =
         (sev_tokenizer_provider_fn)dlsym(library, "sev_tokenizer_provider_v1");
