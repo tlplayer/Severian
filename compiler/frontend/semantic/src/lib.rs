@@ -7358,10 +7358,22 @@ impl Analyzer<'_> {
                     .map(|(_, candidate)| candidate)
                     .collect::<Vec<_>>();
                 let specificity = best.iter().map(|candidate| candidate.1).min();
-                let best = best
+                let mut best = best
                     .into_iter()
                     .filter(|candidate| Some(candidate.1) == specificity)
                     .collect::<Vec<_>>();
+                if let Some(first) = best.first() {
+                    let first_function = first.2;
+                    let definition = self.function_definitions[&first_function];
+                    let substitution = &self.function_substitutions[&first_function];
+                    if best.iter().all(|candidate| {
+                        let function = candidate.2;
+                        self.function_definitions[&function] == definition
+                            && &self.function_substitutions[&function] == substitution
+                    }) {
+                        best.truncate(1);
+                    }
+                }
                 if best.is_empty() {
                     if name == "print"
                         && !arguments.is_empty()
@@ -17754,7 +17766,13 @@ fn conversion_rank(
     if let (Some(actual_tensor), Some(expected_tensor)) =
         (types.tensor(actual), types.tensor(expected))
     {
-        return (actual_tensor.element == expected_tensor.element).then_some(ConversionRank::Exact);
+        // Tensor element agreement makes the conversion legal, but a ranked,
+        // dynamic, or unranked shape change is not an exact overload match.
+        // Keeping it exact lets an unranked generic specialization tie with
+        // the concrete ranked specialization and can erase rank inside a
+        // composed dependency body.
+        return (actual_tensor.element == expected_tensor.element)
+            .then_some(ConversionRank::General);
     }
     let conversion = types.numeric_conversion(actual, expected)?;
     match conversion.kind {

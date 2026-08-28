@@ -374,6 +374,67 @@ def omnivoice_unmask_schedule(
 def parameter[T](parameters: borrow StateDict, name: string, like: tensor.Tensor[T]) -> tensor.Tensor[T]:
     return tensor.load[T](parameters.entry(name))
 
+# Ranked architecture contracts keep AOT-known dimensions in source types.
+# The operation identities remain the same generic tensor primitives; these
+# functions merely prevent a model boundary from erasing information that the
+# caller already has. Unranked StateDict/class paths use runtime specialization.
+def ranked_parameter[T: tensor.TensorElement, *Shape: tensor.Dim](selected: tensor.SafeTensorEntry) -> tensor.Tensor[T, *Shape]:
+    return tensor.load[T](selected)
+
+def ranked_projection[T: tensor.TensorElement, *Leading: tensor.Dim, Input: tensor.Dim, Output: tensor.Dim](
+    value: tensor.Tensor[T, *Leading, Input],
+    weights: tensor.Tensor[T, Output, Input],
+) -> tensor.Tensor[T, *Leading, Output]:
+    return tensor.matmul(value, tensor.transpose(weights))
+
+def ranked_rms_norm[T: tensor.TensorElement, *Leading: tensor.Dim, Hidden: tensor.Dim](
+    value: tensor.Tensor[T, *Leading, Hidden],
+    weights: tensor.Tensor[T, Hidden],
+    epsilon: float,
+) -> tensor.Tensor[T, *Leading, Hidden]:
+    return tensor.rms_norm(value, weights, epsilon)
+
+def ranked_rope[T: tensor.TensorElement, *Leading: tensor.Dim, Sequence: tensor.Dim, Head: tensor.Dim](
+    value: tensor.Tensor[T, *Leading, Sequence, Head],
+    cosine: tensor.Tensor[T, 1, 1, Sequence, Head],
+    sine: tensor.Tensor[T, 1, 1, Sequence, Head],
+) -> tensor.Tensor[T, *Leading, Sequence, Head] with {
+    Head % 2 == 0,
+}:
+    return tensor.rope(value, cosine, sine)
+
+def ranked_batched_attention[T: tensor.TensorElement, *Batch: tensor.Dim, Query: tensor.Dim, Key: tensor.Dim, Head: tensor.Dim](
+    query: tensor.Tensor[T, *Batch, Query, Head],
+    key: tensor.Tensor[T, *Batch, Key, Head],
+    value: tensor.Tensor[T, *Batch, Key, Head],
+    head_dimension: int,
+) -> tensor.Tensor[T, *Batch, Query, Head]:
+    key_transposed: tensor.Tensor[T, *Batch, Head, Key] = tensor.permute(key, [0, 1, 3, 2])
+    scores: tensor.Tensor[T, *Batch, Query, Key] = tensor.scale(
+        tensor.matmul(query, key_transposed),
+        1.0 / (float(head_dimension) ** 0.5),
+    )
+    probabilities: tensor.Tensor[T, *Batch, Query, Key] = tensor.softmax_last(scores)
+    return tensor.matmul(probabilities, value)
+
+def ranked_qwen_mlp[T: tensor.TensorElement, *Leading: tensor.Dim, Hidden: tensor.Dim, Intermediate: tensor.Dim](
+    value: tensor.Tensor[T, *Leading, Hidden],
+    gate_weights: tensor.Tensor[T, Intermediate, Hidden],
+    up_weights: tensor.Tensor[T, Intermediate, Hidden],
+    down_weights: tensor.Tensor[T, Hidden, Intermediate],
+) -> tensor.Tensor[T, *Leading, Hidden]:
+    gate: tensor.Tensor[T, *Leading, Intermediate] = tensor.silu(ranked_projection(value, gate_weights))
+    up: tensor.Tensor[T, *Leading, Intermediate] = ranked_projection(value, up_weights)
+    combined: tensor.Tensor[T, *Leading, Intermediate] = tensor.multiply(gate, up)
+    return ranked_projection(combined, down_weights)
+
+def ranked_decoder_residual[T: tensor.TensorElement, *Leading: tensor.Dim, Hidden: tensor.Dim](
+    input: tensor.Tensor[T, *Leading, Hidden],
+    attended: tensor.Tensor[T, *Leading, Hidden],
+    mlp: tensor.Tensor[T, *Leading, Hidden],
+) -> tensor.Tensor[T, *Leading, Hidden]:
+    return tensor.add(tensor.add(input, attended), mlp)
+
 def linear[T](parameters: borrow StateDict, name: string, input: tensor.Tensor[T]) -> tensor.Tensor[T]:
     weights = parameter(borrow parameters, name + ".weight", copy input)
     return tensor.matmul(input, tensor.transpose(weights))

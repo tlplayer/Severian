@@ -1,0 +1,40 @@
+[fixture]
+name = "qwen-voice-golden"
+model = "k2-fsa/OmniVoice"
+checkpoint_revision = "PIN_REQUIRED_BEFORE_REAL_WEIGHT_ACCEPTANCE"
+reference_wav = "fixtures/qwen-voice/reference.wav"
+prompt_text = "The quick brown fox jumps over the lazy dog."
+output_wav = "target/qwen-voice-golden/severian.wav"
+sample_rate = 24000
+seed = 3407
+
+[compiler]
+source = "16-qwen-voice-golden.sev"
+required_route = "StorageViewAbi -> ranked specialization -> CPU MLIR or GPU TTIR -> cached launcher -> execution"
+forbid_unranked_rank_dependent_mlir = true
+forbid_dtype_or_rank_symbol_suffixes = true
+
+[shapes]
+batch = 1
+sequence = 2
+hidden = 4
+heads = 1
+head_dimension = 4
+intermediate = 8
+audio_codebooks = 2
+audio_vocabulary = 4
+
+[acceptance]
+compiler_golden = "all staged assertions in 16-qwen-voice-golden.sev pass"
+real_weights = "OmniVoice SafeTensor manifest and every layer contract validate"
+audio = "finite unclipped 24kHz WAV, requested transcript, recognizable reference speaker"
+
+[stages]
+generic_storage_load = "implemented: real optional BF16 SafeTensor entry -> ranked StorageView MLIR"
+qwen_primitives = "implemented: projection, RMSNorm, RoPE, softmax attention, MLP, residual"
+rank_generic_matmul = "implemented: rank-2 and batched contraction use one Matmul identity"
+compiler_artifact = "implemented: verifier-valid ranked CPU MLIR with no dtype/rank operation suffix"
+unranked_runtime_jit = "pending: model class fields that intentionally erase rank require the executable Tensor JIT launcher"
+omnivoice_checkpoint = "pending: set checkpoint_revision to an immutable donor revision and install its weights"
+tokenizer_and_sampling = "pending: prompt builder and deterministic masked-codebook generation"
+codec_and_wav = "pending: Higgs Audio V2 decoder and 24 kHz WAV comparison"

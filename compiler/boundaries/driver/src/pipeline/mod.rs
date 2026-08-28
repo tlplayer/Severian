@@ -688,8 +688,8 @@ impl Compiler {
         source: &Path,
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
-        let (hir, sources, types) = self.check_file_to_hir(source, mode)?;
-        self.check_hir_to_mir(hir, sources, types)
+        let graph = self.resolve_modules(source)?;
+        self.check_graph_to_mir(graph, mode)
     }
 
     fn check_graph_to_mir(
@@ -697,8 +697,15 @@ impl Compiler {
         graph: severian_modules::ModuleGraph,
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
+        let root_package = graph
+            .modules
+            .last()
+            .map(|module| module.package.0)
+            .expect("a resolved module graph contains its root");
         let (hir, sources, types) = self.check_graph_to_hir(graph, mode)?;
-        self.check_hir_to_mir(hir, sources, types)
+        let mut mir = self.check_hir_to_mir(hir, sources, types)?;
+        retain_package_exports_and_dependencies(&mut mir, u128::from(root_package));
+        Ok(mir)
     }
 
     fn check_hir_to_mir(
@@ -1596,7 +1603,235 @@ fn select_test(module: &MirModule, selected: severian_mir::FunctionId) -> MirMod
         .functions
         .retain(|function| !test_functions.contains(&function.id) || function.id == selected);
     module.tests.clear();
+    retain_reachable_functions(&mut module, [selected]);
     module
+}
+
+fn retain_package_exports_and_dependencies(module: &mut MirModule, root_package: u128) {
+    let roots = module
+        .functions
+        .iter()
+        .filter(|function| function.definition.package == root_package)
+        .map(|function| function.id)
+        .chain(module.entry)
+        .chain(module.tests.iter().map(|test| test.function))
+        .collect::<BTreeSet<_>>();
+    retain_reachable_functions(module, roots);
+}
+
+fn retain_reachable_functions(
+    module: &mut MirModule,
+    roots: impl IntoIterator<Item = severian_mir::FunctionId>,
+) {
+    let functions_by_definition = module.functions.iter().fold(
+        BTreeMap::<severian_universal::DefId, Vec<severian_mir::FunctionId>>::new(),
+        |mut functions, function| {
+            functions
+                .entry(function.definition)
+                .or_default()
+                .push(function.id);
+            functions
+        },
+    );
+    let bodies = module
+        .functions
+        .iter()
+        .filter_map(|function| function.body.as_ref().map(|body| (function.id, body)))
+        .collect::<BTreeMap<_, _>>();
+    let mut reachable = roots.into_iter().collect::<BTreeSet<_>>();
+    let mut queue = std::collections::VecDeque::from_iter(reachable.iter().copied());
+
+    let mut initial_instances = BTreeSet::new();
+    let mut initial_definitions = BTreeSet::new();
+    collect_function_references(
+        &module.initializer,
+        &mut initial_instances,
+        &mut initial_definitions,
+    );
+    enqueue_function_references(
+        initial_instances,
+        initial_definitions,
+        &functions_by_definition,
+        &mut reachable,
+        &mut queue,
+    );
+
+    while let Some(function) = queue.pop_front() {
+        let Some(body) = bodies.get(&function) else {
+            continue;
+        };
+        let mut instances = BTreeSet::new();
+        let mut definitions = BTreeSet::new();
+        collect_function_references(body, &mut instances, &mut definitions);
+        enqueue_function_references(
+            instances,
+            definitions,
+            &functions_by_definition,
+            &mut reachable,
+            &mut queue,
+        );
+    }
+
+    module
+        .functions
+        .retain(|function| reachable.contains(&function.id));
+}
+
+fn enqueue_function_references(
+    instances: BTreeSet<severian_mir::FunctionId>,
+    definitions: BTreeSet<severian_universal::DefId>,
+    functions_by_definition: &BTreeMap<
+        severian_universal::DefId,
+        Vec<severian_mir::FunctionId>,
+    >,
+    reachable: &mut BTreeSet<severian_mir::FunctionId>,
+    queue: &mut std::collections::VecDeque<severian_mir::FunctionId>,
+) {
+    for function in instances.into_iter().chain(
+        definitions
+            .into_iter()
+            .flat_map(|definition| functions_by_definition.get(&definition))
+            .flatten()
+            .copied(),
+    ) {
+        if reachable.insert(function) {
+            queue.push_back(function);
+        }
+    }
+}
+
+fn collect_function_references(
+    body: &severian_mir::CfgBody,
+    instances: &mut BTreeSet<severian_mir::FunctionId>,
+    definitions: &mut BTreeSet<severian_universal::DefId>,
+) {
+    for block in &body.blocks {
+        for statement in &block.statements {
+            match statement {
+                severian_mir::CfgStatement::Assign(_, value) => {
+                    collect_rvalue_functions(value, definitions)
+                }
+                severian_mir::CfgStatement::Assert {
+                    condition, message, ..
+                } => {
+                    collect_operand_function(condition, definitions);
+                    if let Some(message) = message {
+                        collect_operand_function(message, definitions);
+                    }
+                }
+                severian_mir::CfgStatement::Operation { operands, .. } => {
+                    for operand in operands {
+                        collect_operand_function(operand, definitions);
+                    }
+                }
+                severian_mir::CfgStatement::Drop(_)
+                | severian_mir::CfgStatement::StorageLive(_)
+                | severian_mir::CfgStatement::StorageDead(_)
+                | severian_mir::CfgStatement::Coverage(_) => {}
+            }
+        }
+        match &block.terminator {
+            severian_mir::Terminator::Call {
+                callee, arguments, ..
+            }
+            | severian_mir::Terminator::Spawn {
+                callee, arguments, ..
+            } => {
+                collect_callee_functions(callee, instances, definitions);
+                for argument in arguments {
+                    collect_operand_function(argument, definitions);
+                }
+            }
+            severian_mir::Terminator::Goto(_, operands) => {
+                for operand in operands {
+                    collect_operand_function(operand, definitions);
+                }
+            }
+            severian_mir::Terminator::Branch { condition, .. } => {
+                collect_operand_function(condition, definitions)
+            }
+            severian_mir::Terminator::Switch { discriminant, .. } => {
+                collect_operand_function(discriminant, definitions)
+            }
+            severian_mir::Terminator::SpawnFieldUpdate { value, .. }
+            | severian_mir::Terminator::Throw(value) => {
+                collect_operand_function(value, definitions)
+            }
+            severian_mir::Terminator::Return(value) => {
+                if let Some(value) = value {
+                    collect_operand_function(value, definitions);
+                }
+            }
+            severian_mir::Terminator::Unreachable => {}
+        }
+    }
+}
+
+fn collect_callee_functions(
+    callee: &severian_mir::Callee,
+    instances: &mut BTreeSet<severian_mir::FunctionId>,
+    definitions: &mut BTreeSet<severian_universal::DefId>,
+) {
+    match callee {
+        severian_mir::Callee::Direct {
+            instance,
+            function,
+            ..
+        } => {
+            if let Some(instance) = instance {
+                instances.insert(*instance);
+            } else {
+                definitions.insert(*function);
+            }
+        }
+        severian_mir::Callee::Method {
+            implementation,
+            receiver,
+            ..
+        } => {
+            definitions.insert(*implementation);
+            collect_operand_function(receiver, definitions);
+        }
+        severian_mir::Callee::FunctionValue(operand) => {
+            collect_operand_function(operand, definitions)
+        }
+        severian_mir::Callee::Constructor { .. } | severian_mir::Callee::Intrinsic(_) => {}
+    }
+}
+
+fn collect_rvalue_functions(
+    value: &severian_mir::Rvalue,
+    definitions: &mut BTreeSet<severian_universal::DefId>,
+) {
+    match value {
+        severian_mir::Rvalue::Use(operand)
+        | severian_mir::Rvalue::Unary { operand, .. }
+        | severian_mir::Rvalue::Convert { operand, .. }
+        | severian_mir::Rvalue::Await { task: operand } => {
+            collect_operand_function(operand, definitions)
+        }
+        severian_mir::Rvalue::Binary { left, right, .. } => {
+            collect_operand_function(left, definitions);
+            collect_operand_function(right, definitions);
+        }
+        severian_mir::Rvalue::Aggregate { fields, .. } => {
+            for field in fields {
+                collect_operand_function(field, definitions);
+            }
+        }
+        severian_mir::Rvalue::BorrowShared(_)
+        | severian_mir::Rvalue::BorrowExclusive(_)
+        | severian_mir::Rvalue::AddressOf(_) => {}
+    }
+}
+
+fn collect_operand_function(
+    operand: &severian_mir::Operand,
+    definitions: &mut BTreeSet<severian_universal::DefId>,
+) {
+    if let severian_mir::Operand::Function(definition) = operand {
+        definitions.insert(*definition);
+    }
 }
 
 fn with_core_prelude(
@@ -1965,6 +2200,61 @@ mod tests {
         assert_eq!(selected.functions.len(), 1);
         assert_eq!(selected.functions[0].id, severian_mir::FunctionId(0));
         assert!(selected.tests.is_empty());
+    }
+
+    #[test]
+    fn qwen_voice_golden_reaches_ranked_structural_mlir_without_typed_symbols() {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("docs/examples/08-numerics/16-qwen-voice-golden.sev");
+        let (mlir, load_mlir) = std::thread::Builder::new()
+            .name("qwen-voice-mlir-golden".into())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let compiler = Compiler::new(TargetSpec::host()).unwrap();
+                let mir = compiler
+                    .check_file_to_mir(&source, CompileMode::Test)
+                    .unwrap();
+                let compile_test = |name: &str| {
+                    let selected = mir
+                        .tests
+                        .iter()
+                        .find(|test| test.name == name)
+                        .unwrap();
+                    compiler
+                        .compile_mir_to_mlir(&select_test(&mir, selected.function))
+                        .unwrap()
+                };
+                (
+                    compile_test(
+                        "ranked Qwen attention MLP decoder and OmniVoice head shapes execute",
+                    ),
+                    compile_test(
+                        "dependency load[T] enters ranked StorageView MLIR without a typed symbol",
+                    ),
+                )
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        assert!(mlir.contains("linalg.generic"));
+        assert!(mlir.contains("\"reduction\""));
+        assert!(mlir.contains("tensor<1x1x2x4xf32>"));
+        assert!(mlir
+            .lines()
+            .filter(|line| line.contains("func.func @__sev_artifact_"))
+            .all(|line| !line.contains("tensor<*x")));
+        assert!(!mlir.contains("matmul_rank"));
+        assert!(!mlir.contains("matmul_f32"));
+        assert!(load_mlir.contains(
+            "func.func private @__sev_safetensor_view(i64, !llvm.ptr) -> !llvm.ptr"
+        ));
+        assert!(!load_mlir.contains("load_bf16"));
+        assert!(load_mlir
+            .lines()
+            .filter(|line| line.contains("func.func @__sev_artifact_"))
+            .all(|line| !line.contains("tensor<*x")));
     }
 
     #[test]

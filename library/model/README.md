@@ -71,3 +71,30 @@ masked-codebook update/sampling kernels, and the Higgs Audio V2 codec
 encoder/decoder. Those
 components remain separate architecture modules rather than being hidden
 behind `load_omnivoice`.
+
+## Compiler acceptance ladder
+
+The executable compiler golden is
+`docs/examples/08-numerics/16-qwen-voice-golden.sev`; its pinned-asset contract
+is the adjacent TOML manifest. Run it with:
+
+```text
+sev check docs/examples/08-numerics/16-qwen-voice-golden.sev
+sev test docs/examples/08-numerics/16-qwen-voice-golden.sev
+sev check docs/examples/08-numerics/16-qwen-voice-golden.sev --emit mlir
+```
+
+The golden calls the ranked model APIs from this package rather than carrying
+a second Qwen implementation. It covers projection, RMSNorm, RoPE, batched
+softmax attention, SwiGLU, decoder residuals, audio-head reshaping, and—when
+the pinned SmolLM2 fixture is installed—a real `load[bf16]` StorageView read.
+The compiler test also checks that compute artifacts are ranked and that no
+Matmul/load symbol encodes dtype or rank.
+
+Ranked APIs preserve dimensions that are already known by the program.
+Existing `Tensor[T]` model classes intentionally remain valid: when those
+classes erase rank or receive genuinely dynamic storage, they cross the small
+runtime Tensor-JIT boundary instead of pretending an opaque pointer is a
+builtin MLIR tensor. Completing that executable JIT launcher and the
+tokenizer/sampler/codec stages is required before the manifest's WAV quality
+acceptance can run.

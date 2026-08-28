@@ -859,11 +859,7 @@ fn visit_function_for_specializations(
     };
     for substitution in substitutions {
         let mut names = inherited_names.clone();
-        for parameter in &function.type_parameters {
-            if let Some(actual) = substitution.get(parameter) {
-                names.insert(format!("$type:{parameter}"), actual.clone());
-            }
-        }
+        install_specialization_environment(&mut names, &substitution);
         for parameter in &function.parameters {
             if let Some(name) = specialized_type_name(&parameter.annotation, &substitution) {
                 names.insert(parameter.name.clone(), name);
@@ -882,6 +878,29 @@ fn visit_function_for_specializations(
         }
     }
     Ok(())
+}
+
+fn install_specialization_environment(
+    names: &mut BTreeMap<String, String>,
+    substitution: &Substitution,
+) {
+    for (parameter, actual) in &substitution.types {
+        names.insert(format!("$type:{parameter}"), actual.clone());
+    }
+    for (parameter, actual) in &substitution.dimensions {
+        names.insert(
+            format!("$dimension:{parameter}"),
+            format_dim_expr(actual),
+        );
+    }
+    for (parameter, shape) in &substitution.shapes {
+        for (axis, dimension) in shape.iter().enumerate() {
+            names.insert(
+                format!("$shape:{parameter}:{axis}"),
+                format_dim_expr(dimension),
+            );
+        }
+    }
 }
 
 fn validate_specializations(
@@ -2681,13 +2700,35 @@ fn environment_type_name(
     annotation: &TypeAnnotation,
     names: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let substitution = names
-        .iter()
-        .filter_map(|(name, actual)| {
-            name.strip_prefix("$type:")
-                .map(|parameter| (parameter.to_owned(), actual.clone()))
-        })
-        .collect::<Substitution>();
+    let mut substitution = Substitution::new();
+    let mut shapes = BTreeMap::<String, BTreeMap<usize, severian_universal::DimExpr>>::new();
+    for (name, actual) in names {
+        if let Some(parameter) = name.strip_prefix("$type:") {
+            substitution.insert_type(parameter.to_owned(), actual.clone());
+            continue;
+        }
+        if let Some(parameter) = name.strip_prefix("$dimension:") {
+            substitution
+                .bind_dimension(parameter, parse_dim_expr(actual, 0))
+                .ok()?;
+            continue;
+        }
+        if let Some(shape_axis) = name.strip_prefix("$shape:") {
+            let (parameter, axis) = shape_axis.rsplit_once(':')?;
+            let axis = axis.parse::<usize>().ok()?;
+            shapes
+                .entry(parameter.to_owned())
+                .or_default()
+                .insert(axis, parse_dim_expr(actual, axis));
+        }
+    }
+    for (parameter, axes) in shapes {
+        if axes.keys().copied().eq(0..axes.len()) {
+            substitution
+                .bind_shape(&parameter, axes.into_values().collect())
+                .ok()?;
+        }
+    }
     specialized_type_name(annotation, &substitution)
 }
 
@@ -3112,5 +3153,45 @@ fn dim_expr_annotation(dimension: &severian_universal::DimExpr) -> TypeAnnotatio
             name: format_dim_expr(dimension),
             arguments: Vec::new(),
         },
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn nested_specialization_retains_element_dimensions_and_shape_packs() {
+        let source = severian_source::SourceFile::virtual_source(
+            "ranked-environment.sev",
+            "def preserve[T: TensorElement, B: Dim, *Tail: Dim](value: Tensor[T, B, *Tail]) -> Tensor[T, B, *Tail]:\n    return value\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let severian_ast::Item::Function(function) = &ast.items[0] else {
+            panic!("expected function")
+        };
+
+        let mut substitution = Substitution::new();
+        substitution.insert_type("T".into(), "bf16".into());
+        substitution
+            .bind_dimension("B", severian_universal::DimExpr::Constant(2))
+            .unwrap();
+        substitution
+            .bind_shape(
+                "Tail",
+                vec![
+                    severian_universal::DimExpr::Constant(16),
+                    severian_universal::DimExpr::Constant(128),
+                ],
+            )
+            .unwrap();
+
+        let mut names = BTreeMap::new();
+        install_specialization_environment(&mut names, &substitution);
+        assert_eq!(
+            environment_type_name(&function.parameters[0].annotation, &names).as_deref(),
+            Some("Tensor[bf16, 2, 16, 128]")
+        );
     }
 }

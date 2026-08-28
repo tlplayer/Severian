@@ -1,0 +1,117 @@
+import tensor
+import model
+
+
+'''
+Ranked compiler golden for the Qwen/OmniVoice inference path.
+
+This fixture is deliberately small enough to run on every development build,
+but its operation sequence is the real architecture sequence:
+
+    generic projection -> RMSNorm -> RoPE -> batched attention
+    -> SwiGLU MLP -> decoder residual -> audio-codebook logits
+
+The adjacent TOML manifest freezes the eventual real-weight/reference-voice
+acceptance inputs. Codec and WAV generation are separate final boundaries; a
+compiler test must not claim that plausible audio validates malformed tensor
+IR.
+'''
+
+
+test "ranked Qwen projection RMSNorm and RoPE reach the tensor compiler":
+    hidden: tensor.Tensor[f32, 1, 2, 4] = tensor.f32(tensor.tensor([
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+    ], [1, 2, 4]))
+    identity: tensor.Tensor[f32, 4, 4] = tensor.f32(tensor.tensor([
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ], [4, 4]))
+    norm_weights: tensor.Tensor[f32, 4] = tensor.f32(tensor.tensor([
+        1.0, 1.0, 1.0, 1.0,
+    ], [4]))
+    projected = model.ranked_projection(hidden, identity)
+    normalized = model.ranked_rms_norm(projected, norm_weights, 0.000001)
+    heads: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.reshape(normalized, [1, 1, 2, 4])
+    cosine: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.f32(tensor.tensor([
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+    ], [1, 1, 2, 4]))
+    sine: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+    ], [1, 1, 2, 4]))
+    rotated = model.ranked_rope(heads, cosine, sine)
+    assert(tensor.shape(rotated) == [1, 1, 2, 4])
+
+
+test "ranked Qwen attention MLP decoder and OmniVoice head shapes execute":
+    query: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+    ], [1, 1, 2, 4]))
+    key: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+    ], [1, 1, 2, 4]))
+    value: tensor.Tensor[f32, 1, 1, 2, 4] = tensor.f32(tensor.tensor([
+        1.0, 2.0, 3.0, 4.0,
+        3.0, 4.0, 5.0, 6.0,
+    ], [1, 1, 2, 4]))
+    attended_heads = model.ranked_batched_attention(query, key, value, 4)
+    attended: tensor.Tensor[f32, 1, 2, 4] = tensor.reshape(attended_heads, [1, 2, 4])
+
+    hidden: tensor.Tensor[f32, 1, 2, 4] = tensor.f32(tensor.tensor([
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+    ], [1, 2, 4]))
+    gate: tensor.Tensor[f32, 8, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ], [8, 4]))
+    up: tensor.Tensor[f32, 8, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ], [8, 4]))
+    down: tensor.Tensor[f32, 4, 8] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ], [4, 8]))
+    mlp = model.ranked_qwen_mlp(copy hidden, gate, up, down)
+    decoded = model.ranked_decoder_residual(hidden, attended, mlp)
+    assert(tensor.shape(decoded) == [1, 2, 4])
+
+    audio_head: tensor.Tensor[f32, 8, 4] = tensor.f32(tensor.tensor([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ], [8, 4]))
+    flat = model.ranked_projection(decoded, audio_head)
+    logits: tensor.Tensor[f32, 1, 2, 2, 4] = tensor.reshape(flat, [1, 2, 2, 4])
+    assert(tensor.shape(logits) == [1, 2, 2, 4])
+
+
+test "dependency load[T] enters ranked StorageView MLIR without a typed symbol":
+    root = "target/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
+    if model.valid_artifact(root):
+        loaded = model.LoadedModel(
+            model.artifact(model.SmolLm2, model.SmolLm2Revision, root),
+            "LlamaForCausalLM",
+            134515008,
+            "bf16",
+        )
+        store = model.tensors(loaded)
+        selected = model.weight(store, "model.layers.0.input_layernorm.weight")
+        norm: tensor.Tensor[bf16, 576] = model.ranked_parameter[bf16](selected)
+        values = tensor.values(norm)
+        assert(size(values) == 576)
+        assert(values[0] > 0.0)
+        assert(tensor.close_safetensors(store))

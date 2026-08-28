@@ -86,6 +86,12 @@ def from_storage[T](descriptor: bytes) -> Tensor[T]
 def load[T](value: SafeTensorEntry) -> Tensor[T]:
     return from_storage[T](safetensor_view(value.store_handle, value.name))
 
+# A ranked expected type selects this same-name overload and carries its shape
+# through the generic dependency body to the StorageView ABI boundary. Calls
+# with no ranked evidence continue to use the unranked contract above.
+def load[T, *Shape: Dim](value: SafeTensorEntry) -> Tensor[T, *Shape]:
+    return from_storage[T](safetensor_view(value.store_handle, value.name))
+
 # Backend handle construction and lifetime live at the tensor boundary.
 # Consumers use these typed APIs and never redeclare backend symbols.
 

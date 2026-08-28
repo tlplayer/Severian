@@ -37,8 +37,30 @@ impl CompileHandler for TensorCompiler {
         context: &CompileContext<'_>,
     ) -> Result<CompiledRegionArtifact, CompileError> {
         if let TensorJitRequirement::Required { reasons } = region.tensor_jit_requirement() {
+            let operations = region
+                .compile_operations
+                .iter()
+                .filter_map(|operation| {
+                    tensor::TensorOp::decode(operation.id, &operation.attributes)
+                })
+                .collect::<Vec<_>>();
+            let contracts = region
+                .value_contracts
+                .iter()
+                .filter(|contract| {
+                    reasons.iter().any(|reason| match reason {
+                        severian_compile::TensorJitReason::UnresolvedRank { slot }
+                        | severian_compile::TensorJitReason::RuntimeGpuLayout { slot }
+                        | severian_compile::TensorJitReason::DynamicGpuExtent { slot, .. } => {
+                            *slot == contract.slot
+                        }
+                    })
+                })
+                .map(|contract| (contract.slot, contract.type_id, contract.tensor.clone()))
+                .collect::<Vec<_>>();
             return Err(invalid(format!(
-                "runtime tensor specialization is required before backend emission: {reasons:?}"
+                "runtime tensor specialization is required before backend emission for region {:?} {operations:?}: {reasons:?}; unresolved contracts: {contracts:?}",
+                region.id,
             )));
         }
         if region.placement == Some(ExecutionPlacement::Gpu) {
@@ -399,6 +421,7 @@ fn region_uses_structured_mlir(region: &CompileRegion) -> bool {
         matches!(
             tensor::TensorOp::decode(operation.id, &operation.attributes),
             Some(tensor::TensorOp::Elementwise(_))
+                | Some(tensor::TensorOp::Matmul)
                 | Some(tensor::TensorOp::Reduce(
                     tensor::ReductionOp::Sum
                         | tensor::ReductionOp::SumAxis
@@ -525,6 +548,12 @@ fn compile_structured_cpu_region(
                 result_type,
                 &operation_inputs,
                 &operation.attributes,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Matmul => lower_structured_matmul(
+                &mut function,
+                &operands,
+                result_type,
                 *result_slot,
             )?,
             tensor::TensorOp::Slice => lower_structured_slice(
@@ -688,6 +717,192 @@ fn compile_structured_cpu_region(
         inputs,
         outputs,
     })
+}
+
+fn lower_structured_matmul(
+    function: &mut StructuredFunctionBuilder,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [left, right] = operands else {
+        return Err(invalid("structured Matmul requires two tensor operands"));
+    };
+    let LoweredType::Tensor {
+        element,
+        shape: LoweredTensorShape::Ranked(output_shape),
+    } = result_type
+    else {
+        return Err(invalid(
+            "structured Matmul requires a ranked tensor result",
+        ));
+    };
+    let left_shape = ranked_dimensions(
+        left.lowered_type()
+            .ok_or_else(|| invalid("Matmul left operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Matmul left operand has unknown rank"))?;
+    let right_shape = ranked_dimensions(
+        right
+            .lowered_type()
+            .ok_or_else(|| invalid("Matmul right operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("Matmul right operand has unknown rank"))?;
+    if left_shape.len() < 2 || right_shape.len() < 2 || output_shape.len() < 2 {
+        return Err(invalid("Matmul requires rank of at least two"));
+    }
+
+    let batch_rank = output_shape.len() - 2;
+    let left_batch_rank = left_shape.len() - 2;
+    let right_batch_rank = right_shape.len() - 2;
+    let mut dynamic_sizes = Vec::new();
+    for (axis, dimension) in output_shape.iter().enumerate() {
+        if dimension != &LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let (source, source_axis) = if axis < batch_rank {
+            let left_axis = axis.checked_sub(batch_rank - left_batch_rank);
+            let right_axis = axis.checked_sub(batch_rank - right_batch_rank);
+            match (left_axis, right_axis) {
+                (Some(left_axis), _)
+                    if left_shape[left_axis] != LoweredTensorDimension::Known(1) =>
+                {
+                    (left, left_axis)
+                }
+                (_, Some(right_axis)) => (right, right_axis),
+                (Some(left_axis), None) => (left, left_axis),
+                (None, None) => {
+                    return Err(invalid(
+                        "dynamic Matmul batch dimension has no runtime source",
+                    ))
+                }
+            }
+        } else if axis == batch_rank {
+            (left, left_shape.len() - 2)
+        } else {
+            (right, right_shape.len() - 1)
+        };
+        let axis_value = function
+            .index_constant(format!("v{result_slot}_c{axis}"), source_axis)
+            .map_err(structured_error)?;
+        dynamic_sizes.push(
+            function
+                .tensor_dim(format!("v{result_slot}_d{axis}"), source, &axis_value)
+                .map_err(structured_error)?,
+        );
+    }
+    let empty = function
+        .tensor_empty(
+            format!("v{result_slot}_empty"),
+            result_type.clone(),
+            dynamic_sizes,
+        )
+        .map_err(structured_error)?;
+    let scalar = lowered_scalar(*element);
+    let zero = function
+        .scalar_constant(
+            format!("v{result_slot}_zero"),
+            if is_float(*element) { "0.0" } else { "0" },
+            scalar.clone(),
+        )
+        .map_err(structured_error)?;
+    let initialized = function
+        .linalg_fill(format!("v{result_slot}_initialized"), &zero, &empty)
+        .map_err(structured_error)?;
+
+    let loop_rank = batch_rank + 3;
+    let matrix_m = batch_rank;
+    let matrix_n = batch_rank + 1;
+    let contraction_k = batch_rank + 2;
+    let operand_map = |shape: &[LoweredTensorDimension], left_operand: bool| {
+        let operand_batch_rank = shape.len() - 2;
+        let batch_offset = batch_rank - operand_batch_rank;
+        let mut expressions = shape[..operand_batch_rank]
+            .iter()
+            .enumerate()
+            .map(|(axis, dimension)| {
+                if dimension == &LoweredTensorDimension::Known(1) {
+                    AffineExpression::Constant(0)
+                } else {
+                    AffineExpression::Dimension(batch_offset + axis)
+                }
+            })
+            .collect::<Vec<_>>();
+        if left_operand {
+            expressions.extend([
+                AffineExpression::Dimension(matrix_m),
+                AffineExpression::Dimension(contraction_k),
+            ]);
+        } else {
+            expressions.extend([
+                AffineExpression::Dimension(contraction_k),
+                AffineExpression::Dimension(matrix_n),
+            ]);
+        }
+        AffineMap::new(loop_rank, expressions).map_err(structured_error)
+    };
+    let output_map = AffineMap::new(
+        loop_rank,
+        (0..batch_rank)
+            .chain([matrix_m, matrix_n])
+            .map(AffineExpression::Dimension)
+            .collect(),
+    )
+    .map_err(structured_error)?;
+    let multiplication = if is_float(*element) {
+        ScalarBinaryOperation::MultiplyFloat
+    } else {
+        ScalarBinaryOperation::MultiplyInteger
+    };
+    let addition = if is_float(*element) {
+        ScalarBinaryOperation::AddFloat
+    } else {
+        ScalarBinaryOperation::AddInteger
+    };
+    let body = GenericBody::new(
+        vec![
+            ("lhs".into(), scalar.clone()),
+            ("rhs".into(), scalar.clone()),
+            ("accumulator".into(), scalar.clone()),
+        ],
+        vec![
+            ScalarOperation::Binary {
+                result: "product".into(),
+                operation: multiplication,
+                left: "lhs".into(),
+                right: "rhs".into(),
+                ty: scalar.clone(),
+            },
+            ScalarOperation::Binary {
+                result: "sum".into(),
+                operation: addition,
+                left: "accumulator".into(),
+                right: "product".into(),
+                ty: scalar.clone(),
+            },
+            ScalarOperation::Yield {
+                value: "sum".into(),
+                ty: scalar,
+            },
+        ],
+    )
+    .map_err(structured_error)?;
+    let mut iterators = vec![IteratorKind::Parallel; loop_rank];
+    iterators[contraction_k] = IteratorKind::Reduction;
+    function
+        .linalg_generic(
+            format!("v{result_slot}"),
+            vec![left.clone(), right.clone()],
+            initialized,
+            vec![
+                operand_map(left_shape, true)?,
+                operand_map(right_shape, false)?,
+                output_map,
+            ],
+            iterators,
+            body,
+        )
+        .map_err(structured_error)
 }
 
 fn lower_structured_storage_metadata(
@@ -4643,7 +4858,8 @@ mod tests {
         );
         assert!(artifact
             .module
-            .contains("tensor.empty(%result_dim0, %result_dim2, %result_dim3)"));
+            .contains("tensor.empty(%v2_d0, %v2_d2, %v2_d3)"));
+        assert!(artifact.module.contains("\"reduction\""));
     }
 
     #[test]
