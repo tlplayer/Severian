@@ -156,6 +156,7 @@ mod tests {
             output_slots: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            value_contracts: Vec::new(),
             effects: EffectSet::default(),
             placement: Some(ExecutionPlacement::Gpu),
         };

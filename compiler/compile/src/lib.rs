@@ -7,9 +7,11 @@ mod registry;
 
 pub use error::CompileError;
 pub use model::{
-    CompileContext, CompileOperation, CompilePlan, CompileRegion, CompiledRegionArtifact,
-    EffectSet, GpuKernelBundle, PlanSegment, PlannedBlock, PlannedFunction, StandardRegion,
-    VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
+    CompileContext, CompileOperation, CompilePlan, CompileRegion, CompileRegionSpecialization,
+    CompileValueContract, CompiledRegionArtifact, EffectSet, GpuKernelBundle, PlanSegment,
+    PlannedBlock, PlannedFunction, RegionSpecializationError, RuntimeValueSpecialization,
+    StandardRegion, TensorValueContract, ValueAlias, ValueMutation, VerifiedCompiledRegionArtifact,
+    VerifiedGpuKernelBundle,
 };
 pub use planner::plan;
 pub use registry::{CompileHandler, CompilerRegistry};

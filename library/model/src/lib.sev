@@ -2,6 +2,7 @@ import os
 import path
 import process
 import tensor
+import math
 
 class ModelError: Error
     message: string
@@ -284,6 +285,38 @@ class Qwen3Config:
 def qwen3_06b() -> Qwen3Config:
     return Qwen3Config(1024, 3072, 28, 16, 8, 128, 0.000001, 1000000.0)
 
+class Qwen3RotaryCache[T]:
+    cosine: tensor.Tensor[T]
+    sine: tensor.Tensor[T]
+
+def qwen3_rotary_cache[T](
+    configuration: borrow Qwen3Config,
+    sequence: int,
+    like: tensor.Tensor[T],
+) -> Qwen3RotaryCache[T]:
+    assert(sequence > 0)
+    assert(configuration.head_dimension % 2 == 0)
+    half = int(configuration.head_dimension / 2)
+    cosine: list[float] := []
+    sine: list[float] := []
+    for position in range(0, sequence):
+        for component in range(0, configuration.head_dimension):
+            frequency_component := component
+            if frequency_component >= half:
+                frequency_component -= half
+            exponent = 2.0 * float(frequency_component) / float(configuration.head_dimension)
+            frequency = 1.0 / (configuration.rope_theta ** exponent)
+            angle = float(position) * frequency
+            cosine.append(float(math.cos(angle)))
+            sine.append(float(math.sin(angle)))
+    cache_shape = [1, 1, sequence, configuration.head_dimension]
+    cosine_tensor = tensor.ranked(cosine, copy cache_shape)
+    sine_tensor = tensor.ranked(sine, cache_shape)
+    return Qwen3RotaryCache[T](
+        tensor.convert_like(cosine_tensor, copy like),
+        tensor.convert_like(sine_tensor, like),
+    )
+
 class OmniVoiceConfig:
     transformer: Qwen3Config
     audio_codebooks: int
@@ -413,6 +446,7 @@ def batched_attention[T](
 def qwen3_attention[T](
     parameters: borrow StateDict,
     configuration: borrow Qwen3Config,
+    rotary: borrow Qwen3RotaryCache[T],
     input: tensor.Tensor[T],
 ) -> tensor.Tensor[T]:
     input_shape = tensor.shape(input)
@@ -439,9 +473,8 @@ def qwen3_attention[T](
 
     query = rms_norm(borrow parameters, "q_norm", configuration.rms_epsilon, query)
     key = rms_norm(borrow parameters, "k_norm", configuration.rms_epsilon, key)
-    rope_configuration = tensor.ranked([configuration.rope_theta, 0.0], [2])
-    query = tensor.rope(query, rope_configuration)
-    key = tensor.rope(key, rope_configuration)
+    query = tensor.rope(query, copy rotary.cosine, copy rotary.sine)
+    key = tensor.rope(key, rotary.cosine, rotary.sine)
 
     repeats = int(configuration.attention_heads / configuration.key_value_heads)
     key = tensor.repeat(key, [1, repeats])
@@ -461,11 +494,12 @@ def qwen3_mlp[T](parameters: borrow StateDict, input: tensor.Tensor[T]) -> tenso
 def qwen3_layer[T](
     parameters: borrow StateDict,
     configuration: borrow Qwen3Config,
+    rotary: borrow Qwen3RotaryCache[T],
     input: tensor.Tensor[T],
 ) -> tensor.Tensor[T]:
     normalized = rms_norm(borrow parameters, "input_layernorm", configuration.rms_epsilon, copy input)
     attention_parameters = scoped(borrow parameters, "self_attn")
-    attended = qwen3_attention(borrow attention_parameters, configuration, normalized)
+    attended = qwen3_attention(borrow attention_parameters, configuration, rotary, normalized)
     residual = tensor.add(input, attended)
     post_normalized = rms_norm(
         borrow parameters,
@@ -482,11 +516,15 @@ def qwen3_forward[T](
     embeddings: tensor.Tensor[T],
 ) -> tensor.Tensor[T]:
     hidden := embeddings
+    embedding_shape = tensor.shape(copy embeddings)
+    assert(size(embedding_shape) == 3, "Qwen3 expects [batch, sequence, hidden] embeddings")
+    rotary = qwen3_rotary_cache(configuration, embedding_shape[1], copy embeddings)
     for layer in range(0, configuration.layers):
         layer_parameters = scoped(borrow parameters, "layers." + string(layer))
         hidden = qwen3_layer(
             borrow layer_parameters,
             configuration,
+            borrow rotary,
             hidden,
         )
     return rms_norm(parameters, "norm", configuration.rms_epsilon, hidden)
@@ -587,20 +625,31 @@ test "RMS normalization is composed from compiler-lowered typed operations":
     assert(values[1] > 0.999 and values[1] < 1.001)
 
 test "scaled dot-product attention executes as batched MLIR tensor operations":
-    query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
-    key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
-    value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 2, 2]))
+    query: tensor.Tensor[f32] = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
+    key: tensor.Tensor[f32] = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 2, 2]))
+    value: tensor.Tensor[f32] = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 2, 2]))
     output = attention(query, key, value, 2)
     assert(tensor.shape(output) == [1, 2, 2])
     assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0])
 
 test "attention preserves model batch and head axes":
-    query = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
-    key = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
-    value = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 1, 2, 2]))
+    query: tensor.Tensor[f32] = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
+    key: tensor.Tensor[f32] = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 1, 2, 2]))
+    value: tensor.Tensor[f32] = tensor.f32(tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [2, 1, 2, 2]))
     output = batched_attention(query, key, value, 2)
     assert(tensor.shape(output) == [2, 1, 2, 2])
     assert(tensor.values(output) == [2.0, 3.0, 2.0, 3.0, 6.0, 7.0, 6.0, 7.0])
+
+test "Qwen rotary caches are generic tensors composed before attention":
+    configuration = Qwen3Config(4, 8, 1, 1, 1, 4, 0.000001, 10000.0)
+    like: tensor.Tensor[f32] = tensor.f32(tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [1, 1, 2, 4]))
+    cache = qwen3_rotary_cache(borrow configuration, 2, like)
+    assert(tensor.shape(cache.cosine) == [1, 1, 2, 4])
+    assert(tensor.shape(cache.sine) == [1, 1, 2, 4])
+    cosine = tensor.values(cache.cosine)
+    sine = tensor.values(cache.sine)
+    assert(cosine[0] == 1.0 and cosine[1] == 1.0 and cosine[2] == 1.0 and cosine[3] == 1.0)
+    assert(sine[0] == 0.0 and sine[1] == 0.0 and sine[2] == 0.0 and sine[3] == 0.0)
 
 test "OmniVoice configuration names the exact cached checkpoint architecture":
     configuration = omnivoice_config()
@@ -649,11 +698,11 @@ test "generic linear lowering executes a real SmolLM2 projection":
     if valid_artifact(root):
         loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
         store = tensors(loaded)
-        q_projection = tensor.load[bf16](weight(store, "model.layers.0.self_attn.q_proj.weight"))
+        q_projection: tensor.Tensor[bf16] = tensor.load[bf16](weight(store, "model.layers.0.self_attn.q_proj.weight"))
         zeros: list[float] := []
         for _index in range(0, 576):
             zeros.append(0.0)
-        hidden = tensor.bf16(tensor.tensor(zeros, [1, 576]))
+        hidden: tensor.Tensor[bf16] = tensor.bf16(tensor.tensor(zeros, [1, 576]))
         projected = linear(hidden, q_projection)
         assert(tensor.shape(projected) == [1, 576])
         projected_values = tensor.values(projected)

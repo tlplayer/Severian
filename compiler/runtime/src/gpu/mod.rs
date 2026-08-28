@@ -8,8 +8,8 @@ mod cache;
 pub use cache::{CacheKey, KernelCache};
 
 use severian_fusion::{
-    Dimension, FusionGraph, FusionPlan, FusionRegion, GpuTarget, KernelSpecialization, NodeId,
-    Rank, RegionId,
+    Dimension, ElementKind, FusionGraph, FusionPlan, FusionRegion, GpuTarget, KernelSpecialization,
+    NodeId, Rank, RegionId, RuntimeShape, RuntimeStrides,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -28,6 +28,141 @@ pub struct EventId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RegionExecutionId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageSpecializationBinding {
+    pub node: NodeId,
+    pub view: crate::StorageView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedStorageInputs {
+    pub specialization: KernelSpecialization,
+    /// Pointer arguments in the same order as the supplied region bindings.
+    /// Shape, stride, and offset fields live in `specialization` and therefore
+    /// participate in TTIR construction and cache identity before launch.
+    pub arguments: Vec<KernelArgument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageSpecializationError {
+    UnknownNode(NodeId),
+    ElementMismatch {
+        node: NodeId,
+        expected_kind: ElementKind,
+        expected_bits: u16,
+        found_kind: ElementKind,
+        found_bits: u16,
+    },
+    InvalidElementWidth(u32),
+    InvalidElementRepresentation(crate::StorageElementRepresentationAbi),
+    InvalidSpecialization(severian_fusion::SpecializationError),
+}
+
+impl fmt::Display for StorageSpecializationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for StorageSpecializationError {}
+
+/// Copies runtime tensor metadata into the compiler-owned specialization.
+/// This function never dereferences `StorageView::data`; native storage is not
+/// an MLIR tensor and cannot be used to infer rank inside an emitter.
+pub fn specialize_storage_views(
+    graph: &FusionGraph,
+    target: GpuTarget,
+    bindings: &[StorageSpecializationBinding],
+) -> Result<KernelSpecialization, StorageSpecializationError> {
+    let mut shapes = Vec::with_capacity(bindings.len());
+    let mut strides = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        let Some(node) = graph.nodes().get(binding.node.0 as usize) else {
+            return Err(StorageSpecializationError::UnknownNode(binding.node));
+        };
+        let (found_kind, found_bits) = storage_element(&binding.view.element)?;
+        if found_kind != node.shape.element_kind || found_bits != node.shape.element_bits {
+            return Err(StorageSpecializationError::ElementMismatch {
+                node: binding.node,
+                expected_kind: node.shape.element_kind,
+                expected_bits: node.shape.element_bits,
+                found_kind,
+                found_bits,
+            });
+        }
+        shapes.push(RuntimeShape {
+            node: binding.node,
+            dimensions: binding.view.dimensions.clone(),
+        });
+        strides.push(RuntimeStrides {
+            node: binding.node,
+            strides: binding.view.strides.clone(),
+            offset: binding.view.offset,
+        });
+    }
+    let specialization = KernelSpecialization {
+        shapes,
+        strides,
+        target,
+    };
+    specialization
+        .validate(graph, target)
+        .map_err(StorageSpecializationError::InvalidSpecialization)?;
+    Ok(specialization)
+}
+
+pub fn prepare_storage_inputs(
+    graph: &FusionGraph,
+    target: GpuTarget,
+    bindings: &[StorageSpecializationBinding],
+) -> Result<PreparedStorageInputs, StorageSpecializationError> {
+    let specialization = specialize_storage_views(graph, target, bindings)?;
+    let arguments = bindings
+        .iter()
+        .map(|binding| KernelArgument::Scalar {
+            bytes: binding.view.data.to_ne_bytes().to_vec(),
+            alignment: core::mem::align_of::<u64>() as u8,
+        })
+        .collect();
+    Ok(PreparedStorageInputs {
+        specialization,
+        arguments,
+    })
+}
+
+fn storage_element(
+    element: &crate::StorageElementRepresentationAbi,
+) -> Result<(ElementKind, u16), StorageSpecializationError> {
+    let bits = u16::try_from(element.bits)
+        .map_err(|_| StorageSpecializationError::InvalidElementWidth(element.bits))?;
+    let kind = match (element.kind, element.float_format) {
+        (crate::StorageElementKind::SignedInteger, crate::StorageFloatFormat::None) => {
+            ElementKind::SignedInteger
+        }
+        (crate::StorageElementKind::UnsignedInteger, crate::StorageFloatFormat::None) => {
+            ElementKind::UnsignedInteger
+        }
+        (crate::StorageElementKind::Float, crate::StorageFloatFormat::BrainFloat) => {
+            ElementKind::BrainFloat
+        }
+        (crate::StorageElementKind::Float, crate::StorageFloatFormat::Float8E4M3Fn) => {
+            ElementKind::Float8E4M3Fn
+        }
+        (crate::StorageElementKind::Float, crate::StorageFloatFormat::Float8E5M2) => {
+            ElementKind::Float8E5M2
+        }
+        (crate::StorageElementKind::Float, crate::StorageFloatFormat::Ieee) => {
+            ElementKind::IeeeFloat
+        }
+        _ => {
+            return Err(StorageSpecializationError::InvalidElementRepresentation(
+                *element,
+            ))
+        }
+    };
+    Ok((kind, bits))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceInfo {

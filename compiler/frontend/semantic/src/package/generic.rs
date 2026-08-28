@@ -688,32 +688,37 @@ fn visit_function_for_specializations(
     specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     let id = function_def_id(module.package, module.id, &module.ast, function);
-    let substitution = if function.type_parameters.is_empty() {
-        Some(Substitution::new())
+    let substitutions = if function.type_parameters.is_empty() {
+        vec![Substitution::new()]
     } else {
         specializations
             .get(&id)
-            .and_then(|instances| instances.keys().next().cloned())
+            .map(|instances| instances.keys().cloned().collect())
+            .unwrap_or_default()
     };
-    let Some(substitution) = substitution else {
-        return Ok(());
-    };
-    let mut names = inherited_names.clone();
-    for parameter in &function.parameters {
-        if let Some(name) = specialized_type_name(&parameter.annotation, &substitution) {
-            names.insert(parameter.name.clone(), name);
+    for substitution in substitutions {
+        let mut names = inherited_names.clone();
+        for parameter in &function.type_parameters {
+            if let Some(actual) = substitution.get(parameter) {
+                names.insert(format!("$type:{parameter}"), actual.clone());
+            }
         }
-    }
-    let result = specialized_type_name(&function.result, &substitution);
-    if let Some(body) = &function.body {
-        visit_statements_for_specializations(
-            module.id,
-            body,
-            result.as_deref(),
-            &mut names,
-            index,
-            specializations,
-        )?;
+        for parameter in &function.parameters {
+            if let Some(name) = specialized_type_name(&parameter.annotation, &substitution) {
+                names.insert(parameter.name.clone(), name);
+            }
+        }
+        let result = specialized_type_name(&function.result, &substitution);
+        if let Some(body) = &function.body {
+            visit_statements_for_specializations(
+                module.id,
+                body,
+                result.as_deref(),
+                &mut names,
+                index,
+                specializations,
+            )?;
+        }
     }
     Ok(())
 }
@@ -943,7 +948,10 @@ fn visit_statements_for_specializations(
     for statement in statements {
         match statement {
             severian_ast::Statement::Binding(binding) => {
-                let expected = binding.annotation.as_ref().and_then(simple_type_name);
+                let expected = binding
+                    .annotation
+                    .as_ref()
+                    .and_then(|annotation| environment_type_name(annotation, names));
                 visit_expression_for_specializations(
                     module,
                     &binding.value,
@@ -1227,7 +1235,7 @@ fn visit_statements_for_specializations(
                 for case in cases {
                     let mut case_names = names.clone();
                     if let (Some(binding), Some(annotation)) = (&case.binding, &case.annotation) {
-                        if let Some(ty) = simple_type_name(annotation) {
+                        if let Some(ty) = environment_type_name(annotation, names) {
                             case_names.insert(binding.clone(), ty);
                         }
                     }
@@ -1298,7 +1306,45 @@ fn visit_expression_for_specializations(
     match &expression.kind {
         severian_ast::ExpressionKind::Call { callee, arguments } => {
             if let Some(path) = ast_callable_path(callee) {
+                let explicit_arguments =
+                    if let severian_ast::ExpressionKind::TypeApplication { arguments, .. } =
+                        &callee.kind
+                    {
+                        arguments
+                            .iter()
+                            .map(|argument| {
+                                let name = type_annotation_name(argument)?;
+                                Some(names.get(&format!("$type:{name}")).cloned().unwrap_or(name))
+                            })
+                            .collect::<Option<Vec<_>>>()
+                    } else {
+                        None
+                    };
                 let definitions = resolve_path(module, &path, index);
+                if let Some(explicit) = &explicit_arguments {
+                    let arities = definitions
+                        .iter()
+                        .filter_map(|definition| match &index.definitions[definition].kind {
+                            DefKind::Function(signature) => Some(signature.type_parameters.len()),
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>();
+                    if !arities.is_empty() && !arities.contains(&explicit.len()) {
+                        let expected = arities
+                            .iter()
+                            .map(usize::to_string)
+                            .collect::<Vec<_>>()
+                            .join(" or ");
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            format!(
+                                "`{path}` expects {expected} generic type argument(s), but received {}",
+                                explicit.len()
+                            ),
+                            Some(callee.span),
+                        ));
+                    }
+                }
                 let unambiguous = definitions.len() == 1;
                 for definition in definitions {
                     let DefKind::Function(signature) = &index.definitions[&definition].kind else {
@@ -1318,7 +1364,19 @@ fn visit_expression_for_specializations(
                     }
                     let mut substitution = Substitution::new();
                     let mut conflict = None;
-                    if !variadic {
+                    if let Some(explicit) = &explicit_arguments {
+                        if explicit.len() != signature.type_parameters.len() {
+                            continue;
+                        }
+                        substitution.extend(
+                            signature
+                                .type_parameters
+                                .iter()
+                                .cloned()
+                                .zip(explicit.iter().cloned()),
+                        );
+                    }
+                    if explicit_arguments.is_none() && !variadic {
                         if let Some(expected) = expected {
                             conflict = infer_substitution(
                                 &signature.result,
@@ -1329,24 +1387,27 @@ fn visit_expression_for_specializations(
                             .err();
                         }
                     }
-                    for (parameter, argument) in signature.parameters[..fixed].iter().zip(arguments)
-                    {
-                        if conflict.is_some() {
-                            break;
-                        }
-                        if let Some(actual) =
-                            expression_type_name(module, &argument.value, names, index)
+                    if explicit_arguments.is_none() {
+                        for (parameter, argument) in
+                            signature.parameters[..fixed].iter().zip(arguments)
                         {
-                            conflict = infer_substitution(
-                                parameter,
-                                &actual,
-                                &signature.type_parameters,
-                                &mut substitution,
-                            )
-                            .err();
+                            if conflict.is_some() {
+                                break;
+                            }
+                            if let Some(actual) =
+                                expression_type_name(module, &argument.value, names, index)
+                            {
+                                conflict = infer_substitution(
+                                    parameter,
+                                    &actual,
+                                    &signature.type_parameters,
+                                    &mut substitution,
+                                )
+                                .err();
+                            }
                         }
                     }
-                    if variadic && conflict.is_none() {
+                    if explicit_arguments.is_none() && variadic && conflict.is_none() {
                         let parameter = &signature.parameters[fixed];
                         for argument in &arguments[fixed..] {
                             if let Some(mut actual) =
@@ -1389,7 +1450,7 @@ fn visit_expression_for_specializations(
                             }
                         }
                     }
-                    if variadic && conflict.is_none() {
+                    if explicit_arguments.is_none() && variadic && conflict.is_none() {
                         if let Some(expected) = expected {
                             conflict = infer_substitution(
                                 &signature.result,
@@ -1811,6 +1872,7 @@ fn ast_callable_path(expression: &severian_ast::Expression) -> Option<String> {
         severian_ast::ExpressionKind::Member { object, name } => {
             Some(format!("{}.{}", ast_callable_path(object)?, name))
         }
+        severian_ast::ExpressionKind::TypeApplication { callee, .. } => ast_callable_path(callee),
         _ => None,
     }
 }
@@ -2134,6 +2196,20 @@ fn simple_type_name(annotation: &TypeAnnotation) -> Option<String> {
     type_annotation_name(annotation)
 }
 
+fn environment_type_name(
+    annotation: &TypeAnnotation,
+    names: &BTreeMap<String, String>,
+) -> Option<String> {
+    let substitution = names
+        .iter()
+        .filter_map(|(name, actual)| {
+            name.strip_prefix("$type:")
+                .map(|parameter| (parameter.to_owned(), actual.clone()))
+        })
+        .collect::<Substitution>();
+    specialized_type_name(annotation, &substitution)
+}
+
 fn specialized_type_name(
     annotation: &TypeAnnotation,
     substitution: &Substitution,
@@ -2148,8 +2224,34 @@ pub(super) fn specialize_function(
     let mut function = function.clone();
     for parameter in &mut function.parameters {
         parameter.annotation = specialize_annotation(&parameter.annotation, substitution);
+        if let Some(default) = &mut parameter.default {
+            specialize_expression(default, substitution);
+        }
     }
     function.result = specialize_annotation(&function.result, substitution);
+    for constraint in &mut function.constraints {
+        match constraint {
+            severian_ast::GenericConstraint::Parameter { bound, .. } => {
+                *bound = specialize_annotation(bound, substitution);
+            }
+            severian_ast::GenericConstraint::Predicate(predicate) => {
+                specialize_expression(predicate, substitution);
+            }
+        }
+    }
+    for contract in &mut function.contracts {
+        specialize_expression(&mut contract.condition, substitution);
+        if let Some(failure) = &mut contract.failure {
+            specialize_expression(failure, substitution);
+        }
+    }
+    if let Some(hook) = &mut function.hook {
+        specialize_statements(&mut hook.with_phase, substitution);
+        specialize_statements(&mut hook.without_phase, substitution);
+    }
+    if let Some(body) = &mut function.body {
+        specialize_statements(body, substitution);
+    }
     function
 }
 
@@ -2157,6 +2259,25 @@ pub(super) fn specialize_signature(
     function: &FunctionDecl,
     substitution: &Substitution,
 ) -> FunctionDecl {
+    let mut parameter_defaults = function.parameter_defaults.clone();
+    for default in parameter_defaults.iter_mut().flatten() {
+        specialize_expression(default, substitution);
+    }
+    let mut constraints = function.constraints.clone();
+    for constraint in &mut constraints {
+        match constraint {
+            severian_ast::GenericConstraint::Parameter { bound, .. } => {
+                *bound = specialize_annotation(bound, substitution);
+            }
+            severian_ast::GenericConstraint::Predicate(predicate) => {
+                specialize_expression(predicate, substitution);
+            }
+        }
+    }
+    let mut generic_body = function.generic_body.clone();
+    if let Some(body) = &mut generic_body {
+        specialize_statements(body, substitution);
+    }
     FunctionDecl {
         signature: function.signature,
         type_parameters: Vec::new(),
@@ -2167,9 +2288,256 @@ pub(super) fn specialize_signature(
             .iter()
             .map(|annotation| specialize_annotation(annotation, substitution))
             .collect(),
-        parameter_defaults: function.parameter_defaults.clone(),
+        parameter_defaults,
         result: specialize_annotation(&function.result, substitution),
-        constraints: function.constraints.clone(),
+        constraints,
+        generic_body,
+    }
+}
+
+fn specialize_statements(statements: &mut [severian_ast::Statement], substitution: &Substitution) {
+    for statement in statements {
+        specialize_statement(statement, substitution);
+    }
+}
+
+fn specialize_binding(binding: &mut severian_ast::Binding, substitution: &Substitution) {
+    if let Some(annotation) = &mut binding.annotation {
+        *annotation = specialize_annotation(annotation, substitution);
+    }
+    specialize_expression(&mut binding.value, substitution);
+}
+
+fn specialize_statement(statement: &mut severian_ast::Statement, substitution: &Substitution) {
+    use severian_ast::Statement;
+    match statement {
+        Statement::Binding(binding) => specialize_binding(binding, substitution),
+        Statement::Destructure { value, .. }
+        | Statement::Expression(value)
+        | Statement::Defer {
+            expression: value, ..
+        }
+        | Statement::Return {
+            value: Some(value), ..
+        }
+        | Statement::FallibleElse { value, .. } => {
+            specialize_expression(value, substitution);
+        }
+        Statement::FieldAssignment { object, value, .. } => {
+            specialize_expression(object, substitution);
+            specialize_expression(value, substitution);
+        }
+        Statement::IndexAssignment {
+            object,
+            index,
+            value,
+            ..
+        } => {
+            specialize_expression(object, substitution);
+            specialize_expression(index, substitution);
+            specialize_expression(value, substitution);
+        }
+        Statement::Return { value: None, .. }
+        | Statement::Break { .. }
+        | Statement::Continue { .. } => {}
+        Statement::Assert {
+            condition, message, ..
+        } => {
+            specialize_expression(condition, substitution);
+            if let Some(message) = message {
+                specialize_expression(message, substitution);
+            }
+        }
+        Statement::Unsafe { body, .. } | Statement::Placement { body, .. } => {
+            specialize_statements(body, substitution);
+        }
+        Statement::Try {
+            body,
+            catch_annotation,
+            catch_body,
+            ..
+        } => {
+            specialize_statements(body, substitution);
+            if let Some(annotation) = catch_annotation {
+                *annotation = specialize_annotation(annotation, substitution);
+            }
+            specialize_statements(catch_body, substitution);
+        }
+        Statement::If {
+            condition,
+            then_block,
+            else_block,
+            ..
+        } => {
+            specialize_expression(condition, substitution);
+            specialize_statements(then_block, substitution);
+            specialize_statements(else_block, substitution);
+        }
+        Statement::While {
+            condition,
+            initializer,
+            guards,
+            body,
+            ..
+        } => {
+            specialize_expression(condition, substitution);
+            if let Some(initializer) = initializer {
+                specialize_binding(initializer, substitution);
+            }
+            for guard in guards {
+                specialize_expression(&mut guard.condition, substitution);
+            }
+            specialize_statements(body, substitution);
+        }
+        Statement::For {
+            iterable,
+            initializer,
+            body,
+            ..
+        } => {
+            specialize_expression(iterable, substitution);
+            if let Some(initializer) = initializer {
+                specialize_binding(initializer, substitution);
+            }
+            specialize_statements(body, substitution);
+        }
+        Statement::Match { subject, cases, .. } => {
+            specialize_expression(subject, substitution);
+            for case in cases {
+                if let Some(annotation) = &mut case.annotation {
+                    *annotation = specialize_annotation(annotation, substitution);
+                }
+                specialize_statements(&mut case.body, substitution);
+            }
+        }
+        Statement::Select {
+            limit,
+            cases,
+            error_body,
+            ..
+        } => {
+            specialize_expression(limit, substitution);
+            for case in cases {
+                specialize_expression(&mut case.channel, substitution);
+                specialize_statements(&mut case.body, substitution);
+            }
+            specialize_statements(error_body, substitution);
+        }
+    }
+    if let Statement::FallibleElse { body, .. } = statement {
+        specialize_statements(body, substitution);
+    }
+}
+
+fn specialize_expression(expression: &mut severian_ast::Expression, substitution: &Substitution) {
+    use severian_ast::ExpressionKind;
+    match &mut expression.kind {
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+        ExpressionKind::List(values)
+        | ExpressionKind::Set(values)
+        | ExpressionKind::Tuple(values) => {
+            for value in values {
+                specialize_expression(value, substitution);
+            }
+        }
+        ExpressionKind::Map(entries) => {
+            for entry in entries {
+                specialize_expression(&mut entry.key, substitution);
+                specialize_expression(&mut entry.value, substitution);
+            }
+        }
+        ExpressionKind::ListComprehension { value, clauses }
+        | ExpressionKind::SetComprehension { value, clauses } => {
+            specialize_expression(value, substitution);
+            specialize_comprehension_clauses(clauses, substitution);
+        }
+        ExpressionKind::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            specialize_expression(key, substitution);
+            specialize_expression(value, substitution);
+            specialize_comprehension_clauses(clauses, substitution);
+        }
+        ExpressionKind::Mock { cases, fallback } => {
+            for case in cases {
+                specialize_expression(&mut case.call, substitution);
+                specialize_expression(&mut case.result, substitution);
+            }
+            specialize_expression(fallback, substitution);
+        }
+        ExpressionKind::Lambda { body, .. }
+        | ExpressionKind::Member { object: body, .. }
+        | ExpressionKind::Async {
+            expression: body, ..
+        }
+        | ExpressionKind::Await { expression: body }
+        | ExpressionKind::Throw { error: body }
+        | ExpressionKind::Unary { operand: body, .. } => {
+            specialize_expression(body, substitution);
+        }
+        ExpressionKind::Index { object, index } => {
+            specialize_expression(object, substitution);
+            specialize_expression(index, substitution);
+        }
+        ExpressionKind::Slice {
+            object,
+            start,
+            end,
+            step,
+            ..
+        } => {
+            specialize_expression(object, substitution);
+            for bound in [start, end, step].into_iter().flatten() {
+                specialize_expression(bound, substitution);
+            }
+        }
+        ExpressionKind::TypeApplication { callee, arguments } => {
+            specialize_expression(callee, substitution);
+            for argument in arguments {
+                *argument = specialize_annotation(argument, substitution);
+            }
+        }
+        ExpressionKind::Call { callee, arguments } => {
+            specialize_expression(callee, substitution);
+            for argument in arguments {
+                specialize_expression(&mut argument.value, substitution);
+                if let Some(expected_error) = &mut argument.expected_error {
+                    specialize_expression(expected_error, substitution);
+                }
+            }
+        }
+        ExpressionKind::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            specialize_expression(value, substitution);
+            specialize_expression(condition, substitution);
+            specialize_expression(fallback, substitution);
+        }
+        ExpressionKind::Fallback { value, fallback }
+        | ExpressionKind::Binary {
+            left: value,
+            right: fallback,
+            ..
+        } => {
+            specialize_expression(value, substitution);
+            specialize_expression(fallback, substitution);
+        }
+    }
+}
+
+fn specialize_comprehension_clauses(
+    clauses: &mut [severian_ast::ComprehensionClause],
+    substitution: &Substitution,
+) {
+    for clause in clauses {
+        specialize_expression(&mut clause.iterable, substitution);
+        if let Some(condition) = &mut clause.condition {
+            specialize_expression(condition, substitution);
+        }
     }
 }
 

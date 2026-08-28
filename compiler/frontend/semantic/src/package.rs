@@ -36,6 +36,10 @@ pub struct FunctionDecl {
     pub parameter_defaults: Vec<Option<severian_ast::Expression>>,
     pub result: TypeAnnotation,
     pub constraints: Vec<GenericConstraint>,
+    /// Source body retained by the package declaration interface so a
+    /// downstream package can instantiate a generic definition. `None`
+    /// continues to mean a declaration-only/foreign interface.
+    pub generic_body: Option<Vec<severian_ast::Statement>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,10 +244,21 @@ pub fn analyze_package_with_context(
                         function,
                     );
                     if let Some(instances) = specializations.get(&id) {
+                        let mut retained = function.clone();
+                        if let DefKind::Function(interface) = &index.definitions[&id].kind {
+                            retained.body.clone_from(&interface.generic_body);
+                            for (parameter, default) in retained
+                                .parameters
+                                .iter_mut()
+                                .zip(&interface.parameter_defaults)
+                            {
+                                parameter.default.clone_from(default);
+                            }
+                        }
                         for substitution in instances.keys() {
                             own_instances.push((id, substitution.clone()));
                             ast.items
-                                .push(Item::Function(specialize_function(function, substitution)));
+                                .push(Item::Function(specialize_function(&retained, substitution)));
                         }
                     }
                 }
@@ -1204,6 +1219,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                                 .collect(),
                             result: function.result.clone(),
                             constraints: function.constraints.clone(),
+                            generic_body: function.body.clone(),
                         }),
                         id,
                     )

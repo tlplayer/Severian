@@ -263,7 +263,7 @@ fn extract_cfg_compile_operations(
                 attributes: wrapper_attributes,
             });
             spans.push(old_spans.get(start).copied().flatten());
-            regions.push(CompileRegion {
+            let mut region = CompileRegion {
                 id: region_id,
                 compiler,
                 operations: Vec::new(),
@@ -285,13 +285,18 @@ fn extract_cfg_compile_operations(
                         type_id,
                     })
                     .collect(),
+                value_contracts: Vec::new(),
                 effects: EffectSet {
                     reads_memory: true,
                     writes_memory: true,
                     may_trap: true,
                 },
                 placement,
-            });
+            };
+            region
+                .rebuild_value_contracts(types)
+                .map_err(CompileError::InvalidArtifact)?;
+            regions.push(region);
             start = end;
         }
         block.statements = statements;
@@ -635,6 +640,7 @@ fn build_region(
         output_slots: Vec::new(),
         inputs,
         outputs,
+        value_contracts: Vec::new(),
         effects,
         placement: None,
     })

@@ -1,4 +1,4 @@
-use severian_compile::CompileRegion;
+use severian_compile::{CompileRegion, TensorValueContract, ValueMutation};
 use severian_fusion::{
     AliasKind, BatchDimension, ContractionDimension, Dimension, ElementKind, FusionGraph,
     FusionNode, GraphError, InputAlias, Matmul, Mutation, NodeId, NodeKind, OperandRole, Rank,
@@ -60,17 +60,58 @@ pub fn fusion_graph(
 ) -> Result<FusionGraph, FusionGraphError> {
     let mut nodes = Vec::new();
     let mut slots = BTreeMap::new();
+    let contracts = region
+        .value_contracts
+        .iter()
+        .map(|contract| (contract.slot, contract))
+        .collect::<BTreeMap<_, _>>();
+    let mut storage_descriptor_shapes = BTreeMap::new();
+    for operation in &region.compile_operations {
+        if tensor::TensorOp::decode(operation.id, &operation.attributes)
+            != Some(tensor::TensorOp::StorageView(
+                tensor::StorageViewOp::FromAbi,
+            ))
+        {
+            continue;
+        }
+        if let (Some(descriptor), Some(result)) = (
+            operation.operand_slots.first(),
+            operation.result_slots.first(),
+        ) {
+            let shape = contracts
+                .get(result)
+                .and_then(|contract| contract.tensor.as_ref())
+                .map(shape_from_contract)
+                .or_else(|| {
+                    operation
+                        .results
+                        .first()
+                        .and_then(|result| fusion_shape(*result, types).ok())
+                });
+            if let Some(shape) = shape {
+                storage_descriptor_shapes.insert(*descriptor, shape);
+            }
+        }
+    }
     for (slot, value) in region.inputs.iter().enumerate() {
         let id = NodeId(nodes.len() as u32);
-        let mut node = FusionNode::structural(
-            id.0,
-            NodeKind::Parameter,
-            [],
-            fusion_shape(value.type_id, types)?,
-        );
+        let shape = storage_descriptor_shapes
+            .get(&(slot as u32))
+            .cloned()
+            .map(Ok)
+            .unwrap_or_else(|| fusion_shape(value.type_id, types))?;
+        let mut node = FusionNode::structural(id.0, NodeKind::Parameter, [], shape);
         node.operation = "parameter".into();
-        if types.tensor(value.type_id).is_some() {
+        if types.tensor(value.type_id).is_some()
+            || storage_descriptor_shapes.contains_key(&(slot as u32))
+        {
             node.layout = StorageLayout::Runtime;
+        }
+        if let Some(contract) = contracts
+            .get(&(slot as u32))
+            .and_then(|contract| contract.tensor.as_ref())
+        {
+            apply_tensor_contract(&mut node, contract, &[]);
         }
         nodes.push(node);
         slots.insert(slot as u32, id);
@@ -112,11 +153,28 @@ pub fn fusion_graph(
                     .ok_or(FusionGraphError::MissingValueSlot(*slot))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let shape = fusion_shape(operation.results[0], types)?;
+        if structural == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi) {
+            let source = *inputs
+                .first()
+                .ok_or(FusionGraphError::MissingValueSlot(result_slot))?;
+            if slots.insert(result_slot, source).is_some() {
+                return Err(FusionGraphError::DuplicateValueSlot(result_slot));
+            }
+            continue;
+        }
+        let shape = contracts
+            .get(&result_slot)
+            .and_then(|contract| contract.tensor.as_ref())
+            .map(shape_from_contract)
+            .unwrap_or(fusion_shape(operation.results[0], types)?);
         let kind = node_kind(structural);
         let id = NodeId(nodes.len() as u32);
         let mut node = FusionNode::structural(id.0, kind, inputs, shape);
-        node.operand_roles = operand_roles(structural, node.inputs.len());
+        node.operand_roles = contracts
+            .get(&result_slot)
+            .and_then(|contract| contract.tensor.as_ref())
+            .map(|contract| operand_roles_from_contract(contract, &operand_slots))
+            .unwrap_or_else(|| operand_roles(structural, node.inputs.len()));
         node.operation = structural
             .kind()
             .unwrap_or_else(|| operation_name(structural))
@@ -171,12 +229,74 @@ pub fn fusion_graph(
                 },
             };
         }
+        if let Some(contract) = contracts
+            .get(&result_slot)
+            .and_then(|contract| contract.tensor.as_ref())
+        {
+            apply_tensor_contract(&mut node, contract, &operand_slots);
+        }
         if slots.insert(result_slot, id).is_some() {
             return Err(FusionGraphError::DuplicateValueSlot(result_slot));
         }
         nodes.push(node);
     }
     FusionGraph::new(nodes).map_err(FusionGraphError::InvalidGraph)
+}
+
+fn shape_from_contract(contract: &TensorValueContract) -> Shape {
+    Shape {
+        rank: contract.rank.clone(),
+        element_kind: contract.element_kind,
+        element_bits: contract.element_bits,
+    }
+}
+
+fn apply_tensor_contract(
+    node: &mut FusionNode,
+    contract: &TensorValueContract,
+    operand_slots: &[u32],
+) {
+    node.shape = shape_from_contract(contract);
+    node.layout = contract.layout.clone();
+    node.aliases = contract
+        .aliases
+        .iter()
+        .filter_map(|alias| {
+            operand_slots
+                .iter()
+                .position(|slot| *slot == alias.source_slot)
+                .and_then(|input_index| u16::try_from(input_index).ok())
+                .map(|input_index| InputAlias {
+                    input_index,
+                    kind: alias.kind,
+                })
+        })
+        .collect();
+    node.mutation = match contract.mutation {
+        ValueMutation::None => Mutation::None,
+        ValueMutation::WritesSlot(slot) => operand_slots
+            .iter()
+            .position(|operand| *operand == slot)
+            .and_then(|input_index| u16::try_from(input_index).ok())
+            .map(Mutation::WritesInput)
+            .unwrap_or(Mutation::None),
+    };
+}
+
+fn operand_roles_from_contract(
+    contract: &TensorValueContract,
+    operand_slots: &[u32],
+) -> Vec<OperandRole> {
+    operand_slots
+        .iter()
+        .map(|slot| {
+            if contract.runtime_shape_operands.contains(slot) {
+                OperandRole::RuntimeShape
+            } else {
+                OperandRole::Data
+            }
+        })
+        .collect()
 }
 
 fn matmul_contract(nodes: &[FusionNode], node: &FusionNode) -> Matmul {

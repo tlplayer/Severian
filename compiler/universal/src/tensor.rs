@@ -21,6 +21,7 @@ pub const OPERATION_KIND: AttributeId = AttributeId::from_name("tensor.operation
 pub const ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.element_type");
 pub const TARGET_ELEMENT_TYPE: AttributeId = AttributeId::from_name("tensor.target_element_type");
 pub const RESULT_SHAPE: AttributeId = AttributeId::from_name("tensor.result_shape");
+pub const REDUCTION_AXES: AttributeId = AttributeId::from_name("tensor.reduction_axes");
 
 /// The small, structural tensor IR. Public tensor-library functions select a
 /// variant through `OPERATION_KIND`; adding a library algorithm does not add
@@ -85,6 +86,7 @@ pub enum BroadcastOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StorageViewOp {
     FromElements,
+    FromAbi,
     Shape,
     Strides,
     Values,
@@ -132,6 +134,7 @@ impl TensorOp {
             Self::Broadcast(BroadcastOp::Like) => "like",
             Self::Broadcast(BroadcastOp::Repeat) => "repeat",
             Self::StorageView(StorageViewOp::FromElements) => "from_elements",
+            Self::StorageView(StorageViewOp::FromAbi) => "from_abi",
             Self::StorageView(StorageViewOp::Shape) => "shape",
             Self::StorageView(StorageViewOp::Strides) => "strides",
             Self::StorageView(StorageViewOp::Values) => "values",
@@ -185,6 +188,7 @@ impl TensorOp {
             (CONCATENATE, None) => Self::Concatenate,
             (CONVERT, None) => Self::Convert,
             (STORAGE_VIEW, Some("from_elements")) => Self::StorageView(StorageViewOp::FromElements),
+            (STORAGE_VIEW, Some("from_abi")) => Self::StorageView(StorageViewOp::FromAbi),
             (STORAGE_VIEW, Some("shape")) => Self::StorageView(StorageViewOp::Shape),
             (STORAGE_VIEW, Some("strides")) => Self::StorageView(StorageViewOp::Strides),
             (STORAGE_VIEW, Some("values")) => Self::StorageView(StorageViewOp::Values),
@@ -249,29 +253,6 @@ impl TensorElementKind {
         }
     }
 
-    pub fn storage_tag(self) -> Option<u8> {
-        Some(match self {
-            Self::SignedInteger(8) => 0,
-            Self::SignedInteger(16) => 1,
-            Self::SignedInteger(32) => 2,
-            Self::SignedInteger(64) => 3,
-            Self::SignedInteger(128) => 4,
-            Self::UnsignedInteger(8) => 5,
-            Self::UnsignedInteger(16) => 6,
-            Self::UnsignedInteger(32) => 7,
-            Self::UnsignedInteger(64) => 8,
-            Self::UnsignedInteger(128) => 9,
-            Self::Float8E4M3Fn => 10,
-            Self::Float8E5M2 => 11,
-            Self::IeeeFloat(16) => 12,
-            Self::BrainFloat16 => 13,
-            Self::IeeeFloat(32) => 14,
-            Self::IeeeFloat(64) => 15,
-            Self::IeeeFloat(128) => 16,
-            _ => return None,
-        })
-    }
-
     pub const fn bits(self) -> u16 {
         match self {
             Self::SignedInteger(bits) | Self::UnsignedInteger(bits) | Self::IeeeFloat(bits) => bits,
@@ -294,10 +275,6 @@ impl TensorElementKind {
             other => other,
         }
     }
-}
-
-pub fn element_storage_tag(types: &TypeContext, element: TypeId) -> Option<u8> {
-    TensorElementKind::from_type(types, element)?.storage_tag()
 }
 
 #[derive(Clone)]
@@ -654,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn every_required_tensor_dtype_has_storage_and_accumulation_semantics() {
+    fn every_required_tensor_dtype_has_representation_and_accumulation_semantics() {
         let types = types();
         let kinds = [
             ("i8", TensorElementKind::SignedInteger(8)),
@@ -675,10 +652,9 @@ mod tests {
             ("f64", TensorElementKind::IeeeFloat(64)),
             ("f128", TensorElementKind::IeeeFloat(128)),
         ];
-        for (tag, (name, kind)) in kinds.into_iter().enumerate() {
+        for (name, kind) in kinds {
             let element = types.resolve_name(name).unwrap();
             assert_eq!(TensorElementKind::from_type(&types, element), Some(kind));
-            assert_eq!(element_storage_tag(&types, element), Some(tag as u8));
             assert!(kind.byte_width().is_power_of_two());
         }
         let f80 = types.resolve_name("f80").unwrap();
@@ -686,7 +662,6 @@ mod tests {
             TensorElementKind::from_type(&types, f80),
             Some(TensorElementKind::IeeeFloat(80))
         );
-        assert_eq!(element_storage_tag(&types, f80), None);
         assert_eq!(
             TensorElementKind::Float8E4M3Fn.accumulation(),
             TensorElementKind::IeeeFloat(32)

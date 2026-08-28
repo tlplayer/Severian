@@ -66,13 +66,16 @@ def entry(store: SafeTensorStore, name: string) -> SafeTensorEntry:
     assert(byte_start >= 0 and byte_end >= byte_start, "SafeTensor offsets are invalid for " + name)
     return SafeTensorEntry(store.handle, name, dtype, shape, byte_start, byte_end, store.path)
 
-@compile(mlir, stablehlo, xla)
-def mapped[T](handle: int, name: string) -> Tensor[T]
+@c(symbol = "__sev_safetensor_view")
+def safetensor_view(handle: int, name: string) -> bytes
 
-# The element representation is a type argument in source and an ABI tag in
-# the compiler/runtime call. It is never encoded in an operation or symbol.
+@compile(mlir, stablehlo, xla)
+def from_storage[T](descriptor: bytes) -> Tensor[T]
+
+# The loader reports its representation through StorageViewAbi. The resolved
+# type argument is validated by the structural storage-view lowering.
 def load[T](value: SafeTensorEntry) -> Tensor[T]:
-    return mapped[T](value.store_handle, value.name)
+    return from_storage[T](safetensor_view(value.store_handle, value.name))
 
 # Backend handle construction and lifetime live at the tensor boundary.
 # Consumers use these typed APIs and never redeclare backend symbols.

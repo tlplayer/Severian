@@ -2,6 +2,7 @@
 
 mod emit;
 mod ffi;
+pub mod structured;
 mod verify;
 
 pub use emit::{render, MlirArtifact, MlirError};

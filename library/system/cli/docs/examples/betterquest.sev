@@ -32,9 +32,11 @@ def main():
         case matches:
             if matches.action != "run":
                 print(cli.response(application, matches))
-            elif matches.command == "generate":
-                print("generate", cli.values(matches, "model")[0], cli.values(matches, "output")[0])
-            elif matches.command == "inspect":
-                print("inspect", cli.values(matches, "model")[0])
+            else:
+                if matches.command == "generate":
+                    print("generate", cli.values(matches, "model")[0], cli.values(matches, "output")[0])
+                else:
+                    if matches.command == "inspect":
+                        print("inspect", cli.values(matches, "model")[0])
         case error:
             print(cli.render_error(error))

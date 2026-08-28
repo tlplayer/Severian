@@ -5,11 +5,16 @@ mod fusion;
 pub use fusion::{fusion_graph, FusionGraphError};
 
 use severian_compile::{
-    CompileContext, CompileError, CompileHandler, CompileRegion, CompiledRegionArtifact,
-    GpuKernelBundle, GpuTarget,
+    CompileContext, CompileError, CompileHandler, CompileRegion, CompileRegionSpecialization,
+    CompiledRegionArtifact, GpuKernelBundle, GpuTarget,
 };
 use severian_fusion::{plan as plan_fusion, DeviceModel};
 use severian_mlir::{
+    structured::{
+        AffineExpression, AffineMap, FunctionBuilder as StructuredFunctionBuilder, GenericBody,
+        IteratorKind, ModuleBuilder as StructuredModuleBuilder, ScalarBinaryOperation,
+        ScalarOperation, Value as StructuredValue,
+    },
     type_spelling, LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement,
     LoweredTensorShape, LoweredType, MlirArtifact,
 };
@@ -42,6 +47,29 @@ impl CompileHandler for TensorCompiler {
 }
 
 impl TensorCompiler {
+    /// Runtime/JIT entry point for a CPU region whose source contract may be
+    /// unranked. The region is refined from explicit shape/stride metadata
+    /// before the ordinary MLIR builder is entered.
+    pub fn compile_specialized_cpu(
+        &self,
+        region: &CompileRegion,
+        context: &CompileContext<'_>,
+        specialization: &CompileRegionSpecialization,
+    ) -> Result<MlirArtifact, CompileError> {
+        let (region, types) = region
+            .specialize_for_emission(context.types, specialization)
+            .map_err(|error| {
+                invalid(format!("CPU tensor runtime specialization failed: {error}"))
+            })?;
+        self.compile_cpu(
+            &region,
+            &CompileContext {
+                types: &types,
+                target: context.target,
+            },
+        )
+    }
+
     fn compile_cpu(
         &self,
         region: &CompileRegion,
@@ -49,6 +77,10 @@ impl TensorCompiler {
     ) -> Result<MlirArtifact, CompileError> {
         if region.compile_operations.is_empty() {
             return Err(invalid("the tensor compiler requires a non-empty region"));
+        }
+        legalize_cpu_region_before_emission(region, context)?;
+        if region_uses_structured_mlir(region) {
+            return compile_structured_cpu_region(region, context);
         }
         let inputs = region
             .inputs
@@ -149,6 +181,7 @@ impl TensorCompiler {
                 }
             }
             inferred_result_slots = result_slots.clone();
+            legalize_cpu_operation(operation_kind, &operation_inputs, &operation_outputs)?;
             let operation_input_spellings = operation_inputs
                 .iter()
                 .map(type_spelling)
@@ -301,11 +334,1060 @@ impl TensorCompiler {
     }
 }
 
+fn legalize_cpu_region_before_emission(
+    region: &CompileRegion,
+    context: &CompileContext<'_>,
+) -> Result<(), CompileError> {
+    for operation in &region.compile_operations {
+        let kind =
+            tensor::TensorOp::decode(operation.id, &operation.attributes).ok_or_else(|| {
+                invalid(format!(
+                    "tensor operation {:?} has no structural operation kind",
+                    operation.id
+                ))
+            })?;
+        let inputs = operation
+            .operands
+            .iter()
+            .map(|type_id| lower_type(*type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let outputs = operation
+            .results
+            .iter()
+            .map(|type_id| lower_type(*type_id, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        legalize_cpu_operation(kind, &inputs, &outputs)?;
+    }
+    Ok(())
+}
+
+fn region_uses_structured_mlir(region: &CompileRegion) -> bool {
+    region.compile_operations.iter().any(|operation| {
+        matches!(
+            tensor::TensorOp::decode(operation.id, &operation.attributes),
+            Some(tensor::TensorOp::Elementwise(
+                tensor::ElementwiseOp::Add
+                    | tensor::ElementwiseOp::Subtract
+                    | tensor::ElementwiseOp::Multiply
+                    | tensor::ElementwiseOp::Divide
+            )) | Some(tensor::TensorOp::Reduce(
+                tensor::ReductionOp::Sum
+                    | tensor::ReductionOp::SumAxis
+                    | tensor::ReductionOp::MeanLast
+                    | tensor::ReductionOp::MaxLast
+            ))
+        )
+    })
+}
+
+fn compile_structured_cpu_region(
+    region: &CompileRegion,
+    context: &CompileContext<'_>,
+) -> Result<MlirArtifact, CompileError> {
+    let inputs = region
+        .inputs
+        .iter()
+        .map(|value| lower_type(value.type_id, context))
+        .collect::<Result<Vec<_>, _>>()?;
+    let outputs = region
+        .outputs
+        .iter()
+        .map(|value| lower_type(value.type_id, context))
+        .collect::<Result<Vec<_>, _>>()?;
+    let parameters = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| (format!("arg{index}"), ty.clone()))
+        .collect();
+    let mut function = StructuredFunctionBuilder::new("entry", false, parameters, outputs.clone())
+        .map_err(structured_error)?;
+    let mut slots = (0..inputs.len())
+        .map(|index| {
+            function
+                .parameter(index)
+                .map(|value| (index as u32, value))
+                .map_err(structured_error)
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let mut inferred_next_slot = inputs.len() as u32;
+    let mut inferred_results = Vec::new();
+
+    for operation in &region.compile_operations {
+        let kind =
+            tensor::TensorOp::decode(operation.id, &operation.attributes).ok_or_else(|| {
+                invalid(format!(
+                    "tensor operation {:?} has no structural operation kind",
+                    operation.id
+                ))
+            })?;
+        let operation_inputs = operation
+            .operands
+            .iter()
+            .map(|ty| lower_type(*ty, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let operation_outputs = operation
+            .results
+            .iter()
+            .map(|ty| lower_type(*ty, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        legalize_cpu_operation(kind, &operation_inputs, &operation_outputs)?;
+        let operand_slots =
+            if operation.operand_slots.is_empty() && region.compile_operations.len() == 1 {
+                (0..operation_inputs.len() as u32).collect::<Vec<_>>()
+            } else {
+                operation.operand_slots.clone()
+            };
+        let result_slots = if operation.result_slots.is_empty()
+            && region.compile_operations.len() == 1
+        {
+            let result = (inferred_next_slot..inferred_next_slot + operation_outputs.len() as u32)
+                .collect::<Vec<_>>();
+            inferred_next_slot += operation_outputs.len() as u32;
+            result
+        } else {
+            operation.result_slots.clone()
+        };
+        if operand_slots.len() != operation_inputs.len()
+            || result_slots.len() != operation_outputs.len()
+        {
+            return Err(invalid(
+                "structured tensor region value slots do not match operation arity",
+            ));
+        }
+        let operands = operand_slots
+            .iter()
+            .map(|slot| {
+                slots.get(slot).cloned().ok_or_else(|| {
+                    invalid(format!(
+                        "structured tensor operand slot {slot} is undefined"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let [result_slot] = result_slots.as_slice() else {
+            return Err(invalid(
+                "structured tensor operations currently require one result",
+            ));
+        };
+        let [result_type] = operation_outputs.as_slice() else {
+            return Err(invalid(
+                "structured tensor operations currently require one result type",
+            ));
+        };
+        let result = match kind {
+            tensor::TensorOp::Elementwise(
+                operation @ (tensor::ElementwiseOp::Add
+                | tensor::ElementwiseOp::Subtract
+                | tensor::ElementwiseOp::Multiply
+                | tensor::ElementwiseOp::Divide),
+            ) => lower_structured_elementwise(
+                &mut function,
+                operation,
+                &operands,
+                result_type,
+                *result_slot,
+            )?,
+            tensor::TensorOp::Elementwise(operation) => {
+                return Err(invalid(format!(
+                    "structured MLIR capability is missing for elementwise {operation:?}"
+                )))
+            }
+            tensor::TensorOp::Reduce(reduction) => lower_structured_reduction(
+                &mut function,
+                reduction,
+                &operands,
+                result_type,
+                &operation_inputs,
+                &operation.attributes,
+                *result_slot,
+            )?,
+            _ => {
+                return Err(invalid(format!(
+                    "structured MLIR capability is missing for {kind:?}"
+                )))
+            }
+        };
+        if slots.insert(*result_slot, result).is_some() {
+            return Err(invalid(format!(
+                "structured tensor slot {result_slot} is defined twice"
+            )));
+        }
+        inferred_results = result_slots;
+    }
+
+    let output_slots = if region.output_slots.is_empty() {
+        inferred_results
+    } else {
+        region.output_slots.clone()
+    };
+    let returned = output_slots
+        .iter()
+        .map(|slot| {
+            slots.get(slot).cloned().ok_or_else(|| {
+                invalid(format!("structured tensor output slot {slot} is undefined"))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    function.return_values(returned).map_err(structured_error)?;
+    let mut module = StructuredModuleBuilder::default();
+    module
+        .add_function(function.finish().map_err(structured_error)?)
+        .map_err(structured_error)?;
+    Ok(MlirArtifact {
+        module: module.print().map_err(structured_error)?,
+        inputs,
+        outputs,
+    })
+}
+
+fn lower_structured_elementwise(
+    function: &mut StructuredFunctionBuilder,
+    operation: tensor::ElementwiseOp,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [left, right] = operands else {
+        return Err(invalid(
+            "structured binary elementwise lowering requires two operands",
+        ));
+    };
+    let LoweredType::Tensor {
+        element,
+        shape: LoweredTensorShape::Ranked(output_shape),
+    } = result_type
+    else {
+        return Err(invalid(
+            "structured elementwise lowering requires a ranked tensor result",
+        ));
+    };
+    let left_shape = ranked_dimensions(
+        left.lowered_type()
+            .ok_or_else(|| invalid("elementwise left operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("elementwise left operand has unknown rank"))?;
+    let right_shape = ranked_dimensions(
+        right
+            .lowered_type()
+            .ok_or_else(|| invalid("elementwise right operand is not lowered"))?,
+    )
+    .ok_or_else(|| invalid("elementwise right operand has unknown rank"))?;
+    let rank = output_shape.len();
+    let mut dynamic_sizes = Vec::new();
+    for (axis, dimension) in output_shape.iter().enumerate() {
+        if dimension != &LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let (source, source_axis) = structured_broadcast_dimension_source(
+            axis,
+            rank,
+            left,
+            left_shape,
+            right,
+            right_shape,
+        )?;
+        let axis_value = function
+            .index_constant(format!("v{result_slot}_c{axis}"), source_axis)
+            .map_err(structured_error)?;
+        dynamic_sizes.push(
+            function
+                .tensor_dim(format!("v{result_slot}_d{axis}"), source, &axis_value)
+                .map_err(structured_error)?,
+        );
+    }
+    let empty = function
+        .tensor_empty(
+            format!("v{result_slot}_empty"),
+            result_type.clone(),
+            dynamic_sizes,
+        )
+        .map_err(structured_error)?;
+    let scalar = lowered_scalar(*element);
+    let scalar_operation = structural_binary_operation(operation, *element)?;
+    let body = GenericBody::new(
+        vec![
+            ("lhs".into(), scalar.clone()),
+            ("rhs".into(), scalar.clone()),
+            ("unused".into(), scalar.clone()),
+        ],
+        vec![
+            ScalarOperation::Binary {
+                result: "computed".into(),
+                operation: scalar_operation,
+                left: "lhs".into(),
+                right: "rhs".into(),
+                ty: scalar.clone(),
+            },
+            ScalarOperation::Yield {
+                value: "computed".into(),
+                ty: scalar,
+            },
+        ],
+    )
+    .map_err(structured_error)?;
+    function
+        .linalg_generic(
+            format!("v{result_slot}"),
+            vec![left.clone(), right.clone()],
+            empty,
+            vec![
+                structured_broadcast_map(left_shape, rank)?,
+                structured_broadcast_map(right_shape, rank)?,
+                AffineMap::identity(rank),
+            ],
+            vec![IteratorKind::Parallel; rank],
+            body,
+        )
+        .map_err(structured_error)
+}
+
+fn lower_structured_reduction(
+    function: &mut StructuredFunctionBuilder,
+    operation: tensor::ReductionOp,
+    operands: &[StructuredValue],
+    result_type: &LoweredType,
+    input_types: &[LoweredType],
+    attributes: &Attrs,
+    result_slot: u32,
+) -> Result<StructuredValue, CompileError> {
+    let [input] = operands else {
+        return Err(invalid(
+            "structured reduction lowering requires one tensor operand",
+        ));
+    };
+    let [LoweredType::Tensor {
+        element,
+        shape: LoweredTensorShape::Ranked(input_shape),
+    }] = input_types
+    else {
+        return Err(invalid(
+            "structured reduction lowering requires a ranked tensor operand",
+        ));
+    };
+    let LoweredType::Tensor {
+        shape: LoweredTensorShape::Ranked(output_shape),
+        ..
+    } = result_type
+    else {
+        return Err(invalid(
+            "structured reduction lowering requires a ranked tensor result",
+        ));
+    };
+    let axes = structural_reduction_axes(operation, input_shape.len(), attributes)?;
+    let retained_axes = (0..input_shape.len())
+        .filter(|axis| !axes.contains(axis))
+        .collect::<Vec<_>>();
+    let mut dynamic_sizes = Vec::new();
+    for (output_axis, dimension) in output_shape.iter().enumerate() {
+        if dimension != &LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let source_axis = *retained_axes.get(output_axis).ok_or_else(|| {
+            invalid("dynamic reduction result dimension has no retained input axis")
+        })?;
+        let axis = function
+            .index_constant(format!("v{result_slot}_c{output_axis}"), source_axis)
+            .map_err(structured_error)?;
+        dynamic_sizes.push(
+            function
+                .tensor_dim(format!("v{result_slot}_d{output_axis}"), input, &axis)
+                .map_err(structured_error)?,
+        );
+    }
+    let empty = function
+        .tensor_empty(
+            format!("v{result_slot}_empty"),
+            result_type.clone(),
+            dynamic_sizes,
+        )
+        .map_err(structured_error)?;
+    let scalar = lowered_scalar(*element);
+    let mean_width = if operation == tensor::ReductionOp::MeanLast {
+        if !is_float(*element) {
+            return Err(invalid(
+                "MeanLast requires a floating element representation",
+            ));
+        }
+        let last_axis = input_shape.len() - 1;
+        Some(match input_shape[last_axis] {
+            LoweredTensorDimension::Known(width) => function
+                .scalar_constant(
+                    format!("v{result_slot}_width"),
+                    format!("{width}.0"),
+                    scalar.clone(),
+                )
+                .map_err(structured_error)?,
+            LoweredTensorDimension::Dynamic => {
+                let axis = function
+                    .index_constant(format!("v{result_slot}_width_axis"), last_axis)
+                    .map_err(structured_error)?;
+                let width_index = function
+                    .tensor_dim(format!("v{result_slot}_width_index"), input, &axis)
+                    .map_err(structured_error)?;
+                let width_i64 = function
+                    .index_cast(
+                        format!("v{result_slot}_width_i64"),
+                        &width_index,
+                        LoweredType::Integer {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )
+                    .map_err(structured_error)?;
+                function
+                    .unsigned_to_float(format!("v{result_slot}_width"), &width_i64, scalar.clone())
+                    .map_err(structured_error)?
+            }
+        })
+    } else {
+        None
+    };
+    let (identity, combine) = structural_reduction_combiner(operation, *element)?;
+    let initial = function
+        .scalar_constant(format!("v{result_slot}_identity"), identity, scalar.clone())
+        .map_err(structured_error)?;
+    let initialized = function
+        .linalg_fill(format!("v{result_slot}_initialized"), &initial, &empty)
+        .map_err(structured_error)?;
+    let input_map = AffineMap::identity(input_shape.len());
+    let output_map = if retained_axes.len() == output_shape.len() {
+        AffineMap::new(
+            input_shape.len(),
+            retained_axes
+                .iter()
+                .map(|axis| AffineExpression::Dimension(*axis))
+                .collect(),
+        )
+        .map_err(structured_error)?
+    } else if retained_axes.is_empty()
+        && output_shape
+            .iter()
+            .all(|dimension| dimension == &LoweredTensorDimension::Known(1))
+    {
+        AffineMap::new(
+            input_shape.len(),
+            vec![AffineExpression::Constant(0); output_shape.len()],
+        )
+        .map_err(structured_error)?
+    } else {
+        return Err(invalid(
+            "structured reduction result rank does not match its retained axes",
+        ));
+    };
+    let mut scalar_operations = Vec::new();
+    let combined_right = if let Some(width) = &mean_width {
+        scalar_operations.push(ScalarOperation::Binary {
+            result: "finalized".into(),
+            operation: ScalarBinaryOperation::DivideFloat,
+            left: "value".into(),
+            right: width.name().into(),
+            ty: scalar.clone(),
+        });
+        "finalized"
+    } else {
+        "value"
+    };
+    scalar_operations.push(ScalarOperation::Binary {
+        result: "combined".into(),
+        operation: combine,
+        left: "accumulator".into(),
+        right: combined_right.into(),
+        ty: scalar.clone(),
+    });
+    scalar_operations.push(ScalarOperation::Yield {
+        value: "combined".into(),
+        ty: scalar.clone(),
+    });
+    let body = GenericBody::with_captures(
+        vec![
+            ("value".into(), scalar.clone()),
+            ("accumulator".into(), scalar.clone()),
+        ],
+        mean_width.into_iter().collect(),
+        scalar_operations,
+    )
+    .map_err(structured_error)?;
+    function
+        .linalg_generic(
+            format!("v{result_slot}"),
+            vec![input.clone()],
+            initialized,
+            vec![input_map, output_map],
+            (0..input_shape.len())
+                .map(|axis| {
+                    if axes.contains(&axis) {
+                        IteratorKind::Reduction
+                    } else {
+                        IteratorKind::Parallel
+                    }
+                })
+                .collect(),
+            body,
+        )
+        .map_err(structured_error)
+}
+
+fn structured_broadcast_dimension_source<'a>(
+    output_axis: usize,
+    output_rank: usize,
+    left: &'a StructuredValue,
+    left_shape: &[LoweredTensorDimension],
+    right: &'a StructuredValue,
+    right_shape: &[LoweredTensorDimension],
+) -> Result<(&'a StructuredValue, usize), CompileError> {
+    let left_axis = output_axis.checked_sub(output_rank - left_shape.len());
+    let right_axis = output_axis.checked_sub(output_rank - right_shape.len());
+    for (value, axis, shape) in [
+        (left, left_axis, left_shape),
+        (right, right_axis, right_shape),
+    ] {
+        if let Some(axis) = axis {
+            if shape[axis] != LoweredTensorDimension::Known(1) {
+                return Ok((value, axis));
+            }
+        }
+    }
+    left_axis
+        .map(|axis| (left, axis))
+        .or_else(|| right_axis.map(|axis| (right, axis)))
+        .ok_or_else(|| invalid("dynamic broadcast dimension has no runtime source"))
+}
+
+fn structured_broadcast_map(
+    source: &[LoweredTensorDimension],
+    output_rank: usize,
+) -> Result<AffineMap, CompileError> {
+    let offset = output_rank - source.len();
+    AffineMap::new(
+        output_rank,
+        source
+            .iter()
+            .enumerate()
+            .map(|(axis, dimension)| {
+                if dimension == &LoweredTensorDimension::Known(1) {
+                    AffineExpression::Constant(0)
+                } else {
+                    AffineExpression::Dimension(offset + axis)
+                }
+            })
+            .collect(),
+    )
+    .map_err(structured_error)
+}
+
+fn structural_binary_operation(
+    operation: tensor::ElementwiseOp,
+    element: LoweredTensorElement,
+) -> Result<ScalarBinaryOperation, CompileError> {
+    use ScalarBinaryOperation as Scalar;
+    Ok(match (operation, element) {
+        (tensor::ElementwiseOp::Add, LoweredTensorElement::Float { .. }) => Scalar::AddFloat,
+        (tensor::ElementwiseOp::Add, _) => Scalar::AddInteger,
+        (tensor::ElementwiseOp::Subtract, LoweredTensorElement::Float { .. }) => {
+            Scalar::SubtractFloat
+        }
+        (tensor::ElementwiseOp::Subtract, _) => Scalar::SubtractInteger,
+        (tensor::ElementwiseOp::Multiply, LoweredTensorElement::Float { .. }) => {
+            Scalar::MultiplyFloat
+        }
+        (tensor::ElementwiseOp::Multiply, _) => Scalar::MultiplyInteger,
+        (tensor::ElementwiseOp::Divide, LoweredTensorElement::Float { .. }) => Scalar::DivideFloat,
+        (tensor::ElementwiseOp::Divide, LoweredTensorElement::Integer { signed: true, .. }) => {
+            Scalar::DivideSigned
+        }
+        (tensor::ElementwiseOp::Divide, _) => Scalar::DivideUnsigned,
+        _ => {
+            return Err(invalid(format!(
+                "structured MLIR capability is missing for elementwise {operation:?}"
+            )))
+        }
+    })
+}
+
+fn structural_reduction_axes(
+    operation: tensor::ReductionOp,
+    rank: usize,
+    attributes: &Attrs,
+) -> Result<BTreeSet<usize>, CompileError> {
+    let axes = match operation {
+        tensor::ReductionOp::Sum => (0..rank).collect(),
+        tensor::ReductionOp::MeanLast | tensor::ReductionOp::MaxLast => [rank
+            .checked_sub(1)
+            .ok_or_else(|| invalid("last-axis reduction requires a non-scalar tensor"))?]
+        .into_iter()
+        .collect(),
+        tensor::ReductionOp::SumAxis => match attributes.get(&tensor::REDUCTION_AXES) {
+            Some(AttrValue::Integers(axes)) => axes
+                .iter()
+                .map(|axis| {
+                    usize::try_from(*axis)
+                        .map_err(|_| invalid("reduction axis must be a non-negative usize"))
+                })
+                .collect::<Result<BTreeSet<_>, _>>()?,
+            _ => {
+                return Err(invalid(
+                    "SumAxis requires structural reduction axis identities",
+                ))
+            }
+        },
+    };
+    if axes.is_empty() || axes.iter().any(|axis| *axis >= rank) {
+        return Err(invalid(
+            "reduction axes are empty or outside the known rank",
+        ));
+    }
+    Ok(axes)
+}
+
+fn structural_reduction_combiner(
+    operation: tensor::ReductionOp,
+    element: LoweredTensorElement,
+) -> Result<(String, ScalarBinaryOperation), CompileError> {
+    use ScalarBinaryOperation as Scalar;
+    Ok(match operation {
+        tensor::ReductionOp::Sum | tensor::ReductionOp::SumAxis | tensor::ReductionOp::MeanLast => {
+            (
+                if is_float(element) { "0.0" } else { "0" }.into(),
+                if is_float(element) {
+                    Scalar::AddFloat
+                } else {
+                    Scalar::AddInteger
+                },
+            )
+        }
+        tensor::ReductionOp::MaxLast => match element {
+            LoweredTensorElement::Float { format } => {
+                (negative_infinity(format)?.into(), Scalar::MaximumFloat)
+            }
+            LoweredTensorElement::Integer { bits, signed: true } => {
+                (signed_minimum(bits), Scalar::MaximumSigned)
+            }
+            LoweredTensorElement::Integer { signed: false, .. } | LoweredTensorElement::Boolean => {
+                ("0".into(), Scalar::MaximumUnsigned)
+            }
+        },
+    })
+}
+
+fn negative_infinity(format: LoweredFloatFormat) -> Result<&'static str, CompileError> {
+    match format {
+        LoweredFloatFormat::BrainFloat16 => Ok("0xFF80"),
+        LoweredFloatFormat::Ieee(16) => Ok("0xFC00"),
+        LoweredFloatFormat::Ieee(32) => Ok("0xFF800000"),
+        LoweredFloatFormat::Ieee(64) => Ok("0xFFF0000000000000"),
+        _ => Err(invalid(format!(
+            "structured Max has no negative-infinity literal for {format:?}"
+        ))),
+    }
+}
+
+fn signed_minimum(bits: u16) -> String {
+    if bits == 0 {
+        "0".into()
+    } else {
+        format!("-{}", 1u128 << (bits - 1))
+    }
+}
+
+fn lowered_scalar(element: LoweredTensorElement) -> LoweredType {
+    match element {
+        LoweredTensorElement::Integer { bits, signed } => LoweredType::Integer { bits, signed },
+        LoweredTensorElement::Float { format } => LoweredType::Float { format },
+        LoweredTensorElement::Boolean => LoweredType::Boolean,
+    }
+}
+
+fn structured_error(error: impl std::fmt::Display) -> CompileError {
+    invalid(format!("structured MLIR construction failed: {error}"))
+}
+
+fn legalize_cpu_operation(
+    operation: tensor::TensorOp,
+    inputs: &[LoweredType],
+    outputs: &[LoweredType],
+) -> Result<(), CompileError> {
+    let fail = |message: &str| {
+        Err(invalid(format!(
+            "CPU tensor MLIR legalization failed for {operation:?}: {message}"
+        )))
+    };
+    let tensor_types = inputs
+        .iter()
+        .chain(outputs)
+        .filter(|ty| matches!(ty, LoweredType::Tensor { .. }))
+        .collect::<Vec<_>>();
+    let require_known_ranks = || {
+        if tensor_types
+            .iter()
+            .all(|ty| ranked_dimensions(ty).is_some())
+        {
+            Ok(())
+        } else {
+            fail("rank-dependent emission requires known tensor rank; dynamic dimensions are legal, unranked tensors are not")
+        }
+    };
+
+    match operation {
+        tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Relu) => {
+            require_known_ranks()?;
+            return fail("Relu has no CPU MLIR lowering yet");
+        }
+        tensor::TensorOp::Elementwise(elementwise) => {
+            require_known_ranks()?;
+            if tensor_types.is_empty() {
+                return fail("elementwise operations require tensor values");
+            }
+            let [output] = outputs else {
+                return fail("elementwise operations require one result");
+            };
+            let output_element = tensor_element(output)?;
+            if matches!(
+                elementwise,
+                tensor::ElementwiseOp::Exp
+                    | tensor::ElementwiseOp::Log
+                    | tensor::ElementwiseOp::Tanh
+                    | tensor::ElementwiseOp::Rsqrt
+                    | tensor::ElementwiseOp::Scale
+                    | tensor::ElementwiseOp::AddScalar
+            ) && !is_float(output_element)
+            {
+                return fail(
+                    "this elementwise operation requires a floating element representation",
+                );
+            }
+            for input in inputs
+                .iter()
+                .filter(|input| matches!(input, LoweredType::Tensor { .. }))
+            {
+                if tensor_element(input)? != output_element {
+                    return fail("elementwise tensor operands and result must share one element representation");
+                }
+            }
+            match elementwise {
+                tensor::ElementwiseOp::Add
+                | tensor::ElementwiseOp::Subtract
+                | tensor::ElementwiseOp::Multiply
+                | tensor::ElementwiseOp::Divide => {
+                    let [left, right] = inputs else {
+                        return fail("binary elementwise operations require two tensor operands");
+                    };
+                    let (Some(left), Some(right), Some(output)) = (
+                        ranked_dimensions(left),
+                        ranked_dimensions(right),
+                        ranked_dimensions(output),
+                    ) else {
+                        return fail("binary elementwise values must be ranked tensors");
+                    };
+                    if output.len() != left.len().max(right.len())
+                        || !broadcast_shape_is_compatible(left, output)
+                        || !broadcast_shape_is_compatible(right, output)
+                    {
+                        return fail(
+                            "binary elementwise operand shapes do not broadcast to the result",
+                        );
+                    }
+                }
+                tensor::ElementwiseOp::Exp
+                | tensor::ElementwiseOp::Log
+                | tensor::ElementwiseOp::Tanh
+                | tensor::ElementwiseOp::Rsqrt => {
+                    if inputs.len() != 1 || inputs.first() != Some(output) {
+                        return fail(
+                            "unary elementwise operations must preserve the exact tensor type",
+                        );
+                    }
+                }
+                tensor::ElementwiseOp::Scale | tensor::ElementwiseOp::AddScalar => {
+                    if inputs.len() != 2
+                        || inputs.first() != Some(output)
+                        || !matches!(inputs.get(1), Some(LoweredType::Float { .. }))
+                    {
+                        return fail("tensor-scalar elementwise operations require an unchanged tensor and a floating scalar");
+                    }
+                }
+                tensor::ElementwiseOp::Relu => unreachable!("Relu was rejected above"),
+            }
+        }
+        tensor::TensorOp::Convert => {
+            require_known_ranks()?;
+            let ([input], [output]) = (inputs, outputs) else {
+                return fail("Convert requires one tensor operand and one tensor result");
+            };
+            let (Some(input_shape), Some(output_shape)) =
+                (ranked_dimensions(input), ranked_dimensions(output))
+            else {
+                unreachable!("known ranks were checked above")
+            };
+            if input_shape.len() != output_shape.len()
+                || !input_shape
+                    .iter()
+                    .zip(output_shape)
+                    .all(|(input, output)| dimensions_compatible(input, output))
+            {
+                return fail("Convert must preserve tensor rank and dimensions");
+            }
+        }
+        tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast) => {
+            require_known_ranks()?;
+            let ([input], [output]) = (inputs, outputs) else {
+                return fail("MeanLast requires one tensor operand and one tensor result");
+            };
+            let (Some(input), Some(output)) = (ranked_dimensions(input), ranked_dimensions(output))
+            else {
+                unreachable!("known ranks were checked above")
+            };
+            if input.is_empty() {
+                return fail("MeanLast requires a rank of at least one");
+            }
+            if output.len() + 1 != input.len()
+                || !output
+                    .iter()
+                    .zip(input)
+                    .all(|(result, source)| dimensions_compatible(result, source))
+            {
+                return fail("MeanLast result must remove exactly the input's final axis");
+            }
+            if matches!(input.last(), Some(LoweredTensorDimension::Known(0))) {
+                return fail("MeanLast cannot reduce a statically empty final axis");
+            }
+            if !matches!(
+                tensor_element(inputs.first().unwrap())?,
+                LoweredTensorElement::Float { .. }
+            ) {
+                return fail("MeanLast requires a floating element representation");
+            }
+            if tensor_element(&inputs[0])? != tensor_element(&outputs[0])? {
+                return fail("MeanLast operand and result must share one element representation");
+            }
+        }
+        tensor::TensorOp::Reduce(
+            reduction @ (tensor::ReductionOp::Sum
+            | tensor::ReductionOp::SumAxis
+            | tensor::ReductionOp::MaxLast),
+        ) => {
+            require_known_ranks()?;
+            let ([input], [output]) = (inputs, outputs) else {
+                return fail(
+                    "structural reductions require one tensor operand and one tensor result",
+                );
+            };
+            let (Some(input_shape), Some(output_shape)) =
+                (ranked_dimensions(input), ranked_dimensions(output))
+            else {
+                unreachable!("known ranks were checked above")
+            };
+            if input_shape.is_empty() {
+                return fail("reduction requires a rank of at least one");
+            }
+            if tensor_element(input)? != tensor_element(output)? {
+                return fail("reduction operand and result must share one element representation");
+            }
+            if reduction == tensor::ReductionOp::MaxLast
+                && output_shape.len() + 1 != input_shape.len()
+            {
+                return fail("MaxLast result must remove exactly the input's final axis");
+            }
+        }
+        tensor::TensorOp::Matmul => {
+            require_known_ranks()?;
+            let ([left, right], [output]) = (inputs, outputs) else {
+                return fail("Matmul requires two tensor operands and one tensor result");
+            };
+            let (Some(left), Some(right), Some(output)) = (
+                ranked_dimensions(left),
+                ranked_dimensions(right),
+                ranked_dimensions(output),
+            ) else {
+                unreachable!("known ranks were checked above")
+            };
+            if left.len() < 2 || right.len() < 2 || output.len() < 2 {
+                return fail("Matmul operands and result require rank of at least two");
+            }
+            if output.len() != left.len().max(right.len()) {
+                return fail("Matmul result rank must equal the maximum operand rank");
+            }
+            let left_element = tensor_element(inputs.first().unwrap())?;
+            if tensor_element(&inputs[1])? != left_element
+                || tensor_element(outputs.first().unwrap())? != left_element
+            {
+                return fail("Matmul operands and result must share one element representation");
+            }
+            if !dimensions_compatible(&left[left.len() - 1], &right[right.len() - 2]) {
+                return fail("Matmul contraction dimensions are incompatible");
+            }
+            if !dimensions_compatible(&output[output.len() - 2], &left[left.len() - 2])
+                || !dimensions_compatible(&output[output.len() - 1], &right[right.len() - 1])
+            {
+                return fail("Matmul result matrix dimensions do not match M and N");
+            }
+            legalize_matmul_batches(left, right, output).map_err(|message| {
+                invalid(format!(
+                    "CPU tensor MLIR legalization failed for {operation:?}: {message}"
+                ))
+            })?;
+        }
+        tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Materialize) => {
+            require_known_ranks()?;
+            if inputs.len() != 1 || outputs.len() != 1 || inputs[0] != outputs[0] {
+                return fail("Materialize must preserve the exact tensor type");
+            }
+        }
+        tensor::TensorOp::Permute(tensor::PermuteOp::Reverse) => {
+            require_known_ranks()?;
+            let ([input], [output]) = (inputs, outputs) else {
+                return fail("Reverse requires one tensor operand and one tensor result");
+            };
+            let (Some(input), Some(output)) = (ranked_dimensions(input), ranked_dimensions(output))
+            else {
+                unreachable!("known ranks were checked above")
+            };
+            if input.len() != output.len()
+                || !input
+                    .iter()
+                    .rev()
+                    .zip(output)
+                    .all(|(source, result)| dimensions_compatible(source, result))
+            {
+                return fail("Reverse result dimensions must reverse the input dimensions");
+            }
+        }
+        tensor::TensorOp::StorageView(tensor::StorageViewOp::Shape) => {
+            // This is metadata inspection of a genuine MLIR tensor value. A
+            // host StorageViewAbi pointer is deliberately not a LoweredType::Tensor.
+            let ([input], [_output]) = (inputs, outputs) else {
+                return fail("Shape requires one tensor operand and one metadata result");
+            };
+            if !matches!(input, LoweredType::Tensor { .. }) {
+                return fail(
+                    "a host StorageViewAbi pointer cannot enter compute MLIR as a builtin tensor",
+                );
+            }
+        }
+        tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi) => {
+            require_known_ranks()?;
+            let ([input], [output]) = (inputs, outputs) else {
+                return fail("FromAbi requires one descriptor and one tensor result");
+            };
+            if !matches!(input, LoweredType::Bytes) {
+                return fail("FromAbi requires an opaque StorageViewAbi pointer");
+            }
+            if !matches!(output, LoweredType::Tensor { .. }) {
+                return fail("FromAbi requires one ranked tensor result");
+            }
+        }
+        tensor::TensorOp::StorageView(
+            storage_operation @ (tensor::StorageViewOp::FromElements
+            | tensor::StorageViewOp::Strides
+            | tensor::StorageViewOp::Values),
+        ) => {
+            require_known_ranks()?;
+            match storage_operation {
+                tensor::StorageViewOp::FromElements
+                    if outputs.len() != 1 || !matches!(outputs[0], LoweredType::Tensor { .. }) =>
+                {
+                    return fail("FromElements requires one ranked tensor result");
+                }
+                tensor::StorageViewOp::Strides | tensor::StorageViewOp::Values
+                    if inputs.len() != 1 || !matches!(inputs[0], LoweredType::Tensor { .. }) =>
+                {
+                    return fail(
+                        "storage metadata inspection requires one genuine MLIR tensor operand",
+                    );
+                }
+                _ => {}
+            }
+            if tensor_types.iter().any(|ty| {
+                ranked_dimensions(ty).is_some_and(|dimensions| {
+                    dimensions
+                        .iter()
+                        .any(|dimension| *dimension == LoweredTensorDimension::Dynamic)
+                })
+            }) {
+                return fail(
+                    "this storage metadata operation currently requires known dimension sizes",
+                );
+            }
+        }
+        tensor::TensorOp::Scatter => {
+            return fail("effectful scatter is not legal in the current CPU compute boundary");
+        }
+        _ => {
+            require_known_ranks()?;
+            return fail("this structural operation class has no CPU MLIR lowering yet");
+        }
+    }
+    Ok(())
+}
+
+fn ranked_dimensions(ty: &LoweredType) -> Option<&[LoweredTensorDimension]> {
+    match ty {
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(dimensions),
+            ..
+        } => Some(dimensions),
+        _ => None,
+    }
+}
+
+fn dimensions_compatible(left: &LoweredTensorDimension, right: &LoweredTensorDimension) -> bool {
+    matches!(left, LoweredTensorDimension::Dynamic)
+        || matches!(right, LoweredTensorDimension::Dynamic)
+        || left == right
+}
+
+fn broadcast_shape_is_compatible(
+    source: &[LoweredTensorDimension],
+    output: &[LoweredTensorDimension],
+) -> bool {
+    if source.len() > output.len() {
+        return false;
+    }
+    let offset = output.len() - source.len();
+    source.iter().enumerate().all(|(axis, source)| {
+        source == &LoweredTensorDimension::Known(1)
+            || dimensions_compatible(source, &output[offset + axis])
+    })
+}
+
+fn legalize_matmul_batches(
+    left: &[LoweredTensorDimension],
+    right: &[LoweredTensorDimension],
+    output: &[LoweredTensorDimension],
+) -> Result<(), &'static str> {
+    let output_batch = &output[..output.len() - 2];
+    for result_axis in 0..output_batch.len() {
+        let left_axis = result_axis.checked_sub(output_batch.len() - (left.len() - 2));
+        let right_axis = result_axis.checked_sub(output_batch.len() - (right.len() - 2));
+        let left_dimension = left_axis.map(|axis| &left[axis]);
+        let right_dimension = right_axis.map(|axis| &right[axis]);
+        let result = &output_batch[result_axis];
+        for dimension in [left_dimension, right_dimension].into_iter().flatten() {
+            if dimension != &LoweredTensorDimension::Known(1)
+                && !dimensions_compatible(dimension, result)
+            {
+                return Err("Matmul batch dimensions are not broadcast-compatible with the result");
+            }
+        }
+        if let (Some(left), Some(right)) = (left_dimension, right_dimension) {
+            if left != &LoweredTensorDimension::Known(1)
+                && right != &LoweredTensorDimension::Known(1)
+                && !dimensions_compatible(left, right)
+            {
+                return Err("Matmul operand batch dimensions are not broadcast-compatible");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn operation_declarations(
     operation: tensor::TensorOp,
     inputs: &[LoweredType],
     outputs: &[LoweredType],
 ) -> Result<String, CompileError> {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi) {
+        return Ok("  func.func private @__sev_storage_view_validate(!llvm.ptr, i32, i32, i32, i64) -> i32\n  func.func private @__sev_storage_view_data(!llvm.ptr) -> !llvm.ptr\n  func.func private @__sev_storage_view_dimension(!llvm.ptr, i64) -> i64\n  func.func private @__sev_storage_view_stride(!llvm.ptr, i64) -> i64\n  func.func private @__sev_storage_view_offset(!llvm.ptr) -> i64\n".into());
+    }
     if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromElements) {
         return Ok("  func.func private @__sev_list_get_f64(!llvm.ptr, i64) -> f64\n".into());
     }
@@ -339,6 +1421,117 @@ fn operation_declarations(
     Ok(String::new())
 }
 
+fn lower_storage_view_from_abi(
+    inputs: &[LoweredType],
+    outputs: &[LoweredType],
+    output_spellings: &[String],
+) -> Result<String, CompileError> {
+    let ([LoweredType::Bytes], [LoweredType::Tensor { element, shape }], [output]) =
+        (inputs, outputs, output_spellings)
+    else {
+        return Err(invalid(
+            "from_abi requires one opaque descriptor and one ranked tensor result",
+        ));
+    };
+    let LoweredTensorShape::Ranked(dimensions) = shape else {
+        return Err(invalid(
+            "from_abi requires runtime specialization to establish result rank",
+        ));
+    };
+    let (kind, bits, float_format) = storage_abi_representation(*element)?;
+    let scalar = tensor_element_spelling(*element)?;
+    let byte_width = u64::from(bits.div_ceil(8));
+    let mut body = String::new();
+    body.push_str(&format!(
+        "    %expected_kind = arith.constant {kind} : i32\n    %expected_bits = arith.constant {bits} : i32\n    %expected_float_format = arith.constant {float_format} : i32\n    %expected_rank = arith.constant {} : i64\n    %valid_i32 = func.call @__sev_storage_view_validate(%arg0, %expected_kind, %expected_bits, %expected_float_format, %expected_rank) : (!llvm.ptr, i32, i32, i32, i64) -> i32\n    %zero_i32 = arith.constant 0 : i32\n    %valid = arith.cmpi ne, %valid_i32, %zero_i32 : i32\n    cf.assert %valid, \"StorageView element representation or rank does not match Tensor[T]\"\n    %data = func.call @__sev_storage_view_data(%arg0) : (!llvm.ptr) -> !llvm.ptr\n    %storage_offset = func.call @__sev_storage_view_offset(%arg0) : (!llvm.ptr) -> i64\n",
+        dimensions.len()
+    ));
+    let mut dynamic_dimensions = Vec::new();
+    for (axis, dimension) in dimensions.iter().enumerate() {
+        body.push_str(&format!(
+            "    %axis{axis} = arith.constant {axis} : i64\n    %dim{axis}_i64 = func.call @__sev_storage_view_dimension(%arg0, %axis{axis}) : (!llvm.ptr, i64) -> i64\n    %dim{axis} = arith.index_cast %dim{axis}_i64 : i64 to index\n    %stride{axis} = func.call @__sev_storage_view_stride(%arg0, %axis{axis}) : (!llvm.ptr, i64) -> i64\n"
+        ));
+        match dimension {
+            LoweredTensorDimension::Dynamic => dynamic_dimensions.push(format!("%dim{axis}")),
+            LoweredTensorDimension::Known(expected) => body.push_str(&format!(
+                "    %known_dim{axis} = arith.constant {expected} : i64\n    %dim{axis}_matches = arith.cmpi eq, %dim{axis}_i64, %known_dim{axis} : i64\n    cf.assert %dim{axis}_matches, \"StorageView dimension {axis} does not match the specialized tensor contract\"\n"
+            )),
+        }
+    }
+    body.push_str(&format!(
+        "    %empty = tensor.empty({}) : {output}\n    %c0 = arith.constant 0 : index\n    %c1 = arith.constant 1 : index\n    %element_count0 = arith.constant 1 : index\n",
+        dynamic_dimensions.join(", ")
+    ));
+    let mut count = "%element_count0".to_owned();
+    for axis in 0..dimensions.len() {
+        let next = format!("%element_count{}", axis + 1);
+        body.push_str(&format!(
+            "    {next} = arith.muli {count}, %dim{axis} : index\n"
+        ));
+        count = next;
+    }
+    body.push_str("    %zero_i64 = arith.constant 0 : i64\n");
+    body.push_str(&format!(
+        "    %filled = scf.for %linear = %c0 to {count} step %c1 iter_args(%current = %empty) -> ({output}) {{\n"
+    ));
+    let mut remaining = "%linear".to_owned();
+    let mut coordinates = vec![String::new(); dimensions.len()];
+    for axis in (0..dimensions.len()).rev() {
+        let coordinate = format!("%coordinate{axis}");
+        let next_remaining = format!("%remaining{axis}");
+        body.push_str(&format!(
+            "      {coordinate} = arith.remui {remaining}, %dim{axis} : index\n      {next_remaining} = arith.divui {remaining}, %dim{axis} : index\n"
+        ));
+        coordinates[axis] = coordinate;
+        remaining = next_remaining;
+    }
+    body.push_str("      %physical0 = arith.addi %storage_offset, %zero_i64 : i64\n");
+    let mut physical = "%physical0".to_owned();
+    for (axis, coordinate) in coordinates.iter().enumerate() {
+        let coordinate_i64 = format!("%coordinate{axis}_i64");
+        let contribution = format!("%contribution{axis}");
+        let next = format!("%physical{}", axis + 1);
+        body.push_str(&format!(
+            "      {coordinate_i64} = arith.index_cast {coordinate} : index to i64\n      {contribution} = arith.muli {coordinate_i64}, %stride{axis} : i64\n      {next} = arith.addi {physical}, {contribution} : i64\n"
+        ));
+        physical = next;
+    }
+    body.push_str(&format!(
+        "      %byte_width = arith.constant {byte_width} : i64\n      %byte_offset = arith.muli {physical}, %byte_width : i64\n      %address = llvm.getelementptr %data[%byte_offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n      %element = llvm.load %address : !llvm.ptr -> {scalar}\n      %next = tensor.insert %element into %current[{}] : {output}\n      scf.yield %next : {output}\n    }}\n    return %filled : {output}\n",
+        coordinates.join(", ")
+    ));
+    Ok(body)
+}
+
+fn storage_abi_representation(
+    element: LoweredTensorElement,
+) -> Result<(u32, u32, u32), CompileError> {
+    Ok(match element {
+        LoweredTensorElement::Integer { bits, signed: true } => (1, u32::from(bits), 0),
+        LoweredTensorElement::Integer {
+            bits,
+            signed: false,
+        } => (2, u32::from(bits), 0),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(bits),
+        } => (3, u32::from(bits), 1),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::BrainFloat16,
+        } => (3, 16, 2),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn,
+        } => (3, 8, 3),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E5M2,
+        } => (3, 8, 4),
+        LoweredTensorElement::Boolean => {
+            return Err(invalid(
+                "SafeTensor StorageView ABI does not define a Boolean element kind",
+            ))
+        }
+    })
+}
+
 fn lower_operation(
     operation: tensor::TensorOp,
     inputs: &[LoweredType],
@@ -347,6 +1540,9 @@ fn lower_operation(
     output_spellings: &[String],
     attributes: &Attrs,
 ) -> Result<String, CompileError> {
+    if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi) {
+        return lower_storage_view_from_abi(inputs, outputs, output_spellings);
+    }
     if operation == tensor::TensorOp::StorageView(tensor::StorageViewOp::FromElements) {
         let [output] = output_spellings else {
             return Err(invalid("from_elements requires one tensor result"));
@@ -551,8 +1747,29 @@ fn lower_operation(
                 .collect::<Vec<_>>();
             let left_map = broadcast_indexing_map(left_shape, output_shape.len())?;
             let right_map = broadcast_indexing_map(right_shape, output_shape.len())?;
+            let output_rank = output_shape.len();
+            let (dynamic_sizes, dynamic_arguments) = dynamic_result_dimensions(
+                output_shape,
+                |axis| {
+                    let left = axis
+                        .checked_sub(output_rank - left_shape.len())
+                        .map(|source_axis| (0, source_axis, &left_shape[source_axis]));
+                    let right = axis
+                        .checked_sub(output_rank - right_shape.len())
+                        .map(|source_axis| (1, source_axis, &right_shape[source_axis]));
+                    [left, right]
+                        .into_iter()
+                        .flatten()
+                        .find(|(_, _, dimension)| **dimension != LoweredTensorDimension::Known(1))
+                        .or(left)
+                        .or(right)
+                        .map(|(operand, source_axis, _)| (operand, source_axis))
+                },
+                inputs,
+                input_spellings,
+            )?;
             return Ok(format!(
-                "    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%empty : {output}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %unused: {scalar}):\n      %value = {instruction} %left, %right : {scalar}\n      linalg.yield %value : {scalar}\n    }} -> {output}\n    return %result : {output}\n",
+                "{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%empty : {output}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %unused: {scalar}):\n      %value = {instruction} %left, %right : {scalar}\n      linalg.yield %value : {scalar}\n    }} -> {output}\n    return %result : {output}\n",
                 loops = loops.join(", "),
                 left_map = left_map.join(", "),
                 right_map = right_map.join(", "),
@@ -616,7 +1833,9 @@ fn lower_operation(
             ));
         }
         let LoweredTensorElement::Float { .. } = element else {
-            return Err(invalid("tensor-scalar model operations require floating tensors"));
+            return Err(invalid(
+                "tensor-scalar model operations require floating tensors",
+            ));
         };
         let tensor_scalar = tensor_element_spelling(*element)?;
         let argument_element = LoweredTensorElement::Float {
@@ -638,28 +1857,24 @@ fn lower_operation(
             .map(|axis| format!("d{axis}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let instruction = if operation
-            == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Scale)
-        {
-            "arith.mulf"
-        } else {
-            "arith.addf"
-        };
+        let instruction =
+            if operation == tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Scale) {
+                "arith.mulf"
+            } else {
+                "arith.addf"
+            };
+        let (dynamic_sizes, dynamic_arguments) =
+            dynamic_result_dimensions(dimensions, |axis| Some((0, axis)), inputs, input_spellings)?;
         return Ok(format!(
-            "{scalar_conversion}    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {output}) outs(%empty : {output}) {{\n    ^bb0(%value: {tensor_scalar}, %unused: {tensor_scalar}):\n      %computed = {instruction} %value, %scalar : {tensor_scalar}\n      linalg.yield %computed : {tensor_scalar}\n    }} -> {output}\n    return %result : {output}\n",
+            "{scalar_conversion}{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {output}) outs(%empty : {output}) {{\n    ^bb0(%value: {tensor_scalar}, %unused: {tensor_scalar}):\n      %computed = {instruction} %value, %scalar : {tensor_scalar}\n      linalg.yield %computed : {tensor_scalar}\n    }} -> {output}\n    return %result : {output}\n",
             iterators = vec!["\"parallel\""; dimensions.len()].join(", "),
         ));
     }
 
-    if matches!(
-        operation,
-        tensor::TensorOp::Reduce(
-            tensor::ReductionOp::MeanLast | tensor::ReductionOp::MaxLast
-        )
-    ) {
+    if operation == tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast) {
         let [LoweredType::Tensor {
             element,
-            shape: input_shape,
+            shape: LoweredTensorShape::Ranked(input_dimensions),
         }] = inputs
         else {
             return Err(invalid("last-axis reduction requires one tensor operand"));
@@ -669,64 +1884,47 @@ fn lower_operation(
                 "last-axis model reductions require one floating element type",
             ));
         }
-        let input_dimensions = static_dimensions(input_shape)
-            .map_err(|error| invalid(format!("last-axis reduction: {error}")))?;
-        let Some(width) = input_dimensions.last().copied() else {
+        let Some(width) = input_dimensions.last() else {
             return Err(invalid("last-axis reduction requires a non-scalar tensor"));
         };
-        if width == 0 {
-            return Err(invalid("last-axis reduction cannot reduce an empty dimension"));
+        if width == &LoweredTensorDimension::Known(0) {
+            return Err(invalid(
+                "last-axis reduction cannot reduce an empty dimension",
+            ));
         }
-        let output_dimensions = input_dimensions[..input_dimensions.len() - 1]
-            .iter()
-            .map(|dimension| LoweredTensorDimension::Known(*dimension as u64))
-            .collect::<Vec<_>>();
-        let ranked_output = type_spelling(&LoweredType::Tensor {
-            element: *element,
+        let LoweredType::Tensor {
             shape: LoweredTensorShape::Ranked(output_dimensions),
-        })
-        .map_err(|error| invalid(error.to_string()))?;
+            ..
+        } = result_type
+        else {
+            return Err(invalid(
+                "last-axis reduction requires a ranked tensor result",
+            ));
+        };
         let rank = input_dimensions.len();
-        let loops = (0..rank)
-            .map(|axis| format!("d{axis}"))
-            .collect::<Vec<_>>();
+        let loops = (0..rank).map(|axis| format!("d{axis}")).collect::<Vec<_>>();
         let outer = loops[..rank - 1].join(", ");
         let scalar = tensor_element_spelling(*element)?;
-        let (initial, combine, prepare) = if operation
-            == tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast)
-        {
-            (
-                "0.0".to_owned(),
-                "arith.addf".to_owned(),
+        let (dynamic_sizes, dynamic_arguments) = dynamic_result_dimensions(
+            output_dimensions,
+            |axis| Some((0, axis)),
+            inputs,
+            input_spellings,
+        )?;
+        let width = match width {
+            LoweredTensorDimension::Known(width) => {
+                format!("    %width = arith.constant {width}.0 : {scalar}\n")
+            }
+            LoweredTensorDimension::Dynamic => {
+                let last = rank - 1;
                 format!(
-                    "      %width = arith.constant {width}.0 : {scalar}\n      %prepared = arith.divf %value, %width : {scalar}\n"
-                ),
-            )
-        } else {
-            (
-                "-0x7FF0000000000000".to_owned(),
-                "arith.maximumf".to_owned(),
-                "      %prepared = arith.addf %value, %zero_value : ".to_owned()
-                    + &scalar
-                    + "\n",
-            )
-        };
-        let max_zero = if operation
-            == tensor::TensorOp::Reduce(tensor::ReductionOp::MaxLast)
-        {
-            format!("    %zero_value = arith.constant 0.0 : {scalar}\n")
-        } else {
-            String::new()
-        };
-        let cast = if &ranked_output == output {
-            format!("    return %reduced : {output}\n")
-        } else {
-            format!(
-                "    %result = tensor.cast %reduced : {ranked_output} to {output}\n    return %result : {output}\n"
-            )
+                    "    %width_axis = arith.constant {last} : index\n    %width_index = tensor.dim %arg0, %width_axis : {input}\n    %width_i64 = arith.index_cast %width_index : index to i64\n    %width = arith.uitofp %width_i64 : i64 to {scalar}\n",
+                    input = input_spellings[0],
+                )
+            }
         };
         return Ok(format!(
-            "    %empty = tensor.empty() : {ranked_output}\n    %initial_value = arith.constant {initial} : {scalar}\n    %initialized = linalg.fill ins(%initial_value : {scalar}) outs(%empty : {ranked_output}) -> {ranked_output}\n{max_zero}    %reduced = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%initialized : {ranked_output}) {{\n    ^bb0(%value: {scalar}, %accumulator: {scalar}):\n{prepare}      %next = {combine} %accumulator, %prepared : {scalar}\n      linalg.yield %next : {scalar}\n    }} -> {ranked_output}\n{cast}",
+            "{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {output}\n    %initial_value = arith.constant 0.0 : {scalar}\n    %initialized = linalg.fill ins(%initial_value : {scalar}) outs(%empty : {output}) -> {output}\n{width}    %reduced = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%initialized : {output}) {{\n    ^bb0(%value: {scalar}, %accumulator: {scalar}):\n      %prepared = arith.divf %value, %width : {scalar}\n      %next = arith.addf %accumulator, %prepared : {scalar}\n      linalg.yield %next : {scalar}\n    }} -> {output}\n    return %reduced : {output}\n",
             identity = loops.join(", "),
             iterators = (0..rank)
                 .map(|axis| if axis + 1 == rank { "\"reduction\"" } else { "\"parallel\"" })
@@ -769,8 +1967,14 @@ fn lower_operation(
         let loop_dimensions = (0..rank).map(|axis| format!("d{axis}")).collect::<Vec<_>>();
         let input_map = loop_dimensions.iter().rev().cloned().collect::<Vec<_>>();
         let iterator_types = vec!["\"parallel\""; rank].join(", ");
+        let (dynamic_sizes, dynamic_arguments) = dynamic_result_dimensions(
+            output_dimensions,
+            |axis| Some((0, rank - 1 - axis)),
+            inputs,
+            input_spellings,
+        )?;
         return Ok(format!(
-            "    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({input_map})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterator_types}]}} ins(%arg0 : {input}) outs(%empty : {output}) {{\n    ^bb0(%element: {scalar}, %unused: {scalar}):\n      linalg.yield %element : {scalar}\n    }} -> {output}\n    return %result : {output}\n",
+            "{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({input_map})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterator_types}]}} ins(%arg0 : {input}) outs(%empty : {output}) {{\n    ^bb0(%element: {scalar}, %unused: {scalar}):\n      linalg.yield %element : {scalar}\n    }} -> {output}\n    return %result : {output}\n",
             loops = loop_dimensions.join(", "),
             input_map = input_map.join(", "),
         ));
@@ -818,12 +2022,6 @@ fn lower_operation(
         if output_dimensions.len() < 2 {
             return Err(invalid("matmul result rank must be at least two"));
         }
-        // Dynamic broadcast selection requires runtime indexing and is a
-        // separate lowering concern. Rank and static batch shape are already
-        // fully generic here.
-        static_dimensions(left_shape).map_err(|error| invalid(format!("matmul: {error}")))?;
-        static_dimensions(right_shape).map_err(|error| invalid(format!("matmul: {error}")))?;
-        static_dimensions(&shape).map_err(|error| invalid(format!("matmul: {error}")))?;
         let scalar = tensor_element_spelling(*element)?;
         let zero = if is_float(*element) { "0.0" } else { "0" };
         let ranked_type = type_spelling(&LoweredType::Tensor {
@@ -833,6 +2031,34 @@ fn lower_operation(
         .map_err(|error| invalid(error.to_string()))?;
         let output_rank = output_dimensions.len();
         let batch_rank = output_rank - 2;
+        let (dynamic_sizes, dynamic_arguments) = dynamic_result_dimensions(
+            output_dimensions,
+            |axis| {
+                if axis == batch_rank {
+                    return Some((0, left_dimensions.len() - 2));
+                }
+                if axis == batch_rank + 1 {
+                    return Some((1, right_dimensions.len() - 1));
+                }
+                let left_offset = batch_rank - (left_dimensions.len() - 2);
+                let right_offset = batch_rank - (right_dimensions.len() - 2);
+                let left = axis
+                    .checked_sub(left_offset)
+                    .map(|source_axis| (0, source_axis, &left_dimensions[source_axis]));
+                let right = axis
+                    .checked_sub(right_offset)
+                    .map(|source_axis| (1, source_axis, &right_dimensions[source_axis]));
+                [left, right]
+                    .into_iter()
+                    .flatten()
+                    .find(|(_, _, dimension)| **dimension != LoweredTensorDimension::Known(1))
+                    .or(left)
+                    .or(right)
+                    .map(|(operand, source_axis, _)| (operand, source_axis))
+            },
+            inputs,
+            input_spellings,
+        )?;
         let loops = (0..=output_rank)
             .map(|axis| format!("d{axis}"))
             .collect::<Vec<_>>();
@@ -870,7 +2096,7 @@ fn lower_operation(
             "arith.addi"
         };
         return Ok(format!(
-            "    %empty = tensor.empty() : {ranked_type}\n    %zero = arith.constant {zero} : {scalar}\n    %initialized = linalg.fill ins(%zero : {scalar}) outs(%empty : {ranked_type}) -> {ranked_type}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({output_map})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%initialized : {ranked_type}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %acc: {scalar}):\n      %product = {multiply} %left, %right : {scalar}\n      %sum = {add} %acc, %product : {scalar}\n      linalg.yield %sum : {scalar}\n    }} -> {ranked_type}\n    return %result : {output}\n",
+            "{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {ranked_type}\n    %zero = arith.constant {zero} : {scalar}\n    %initialized = linalg.fill ins(%zero : {scalar}) outs(%empty : {ranked_type}) -> {ranked_type}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({left_map})>, affine_map<({loops}) -> ({right_map})>, affine_map<({loops}) -> ({output_map})>], iterator_types = [{iterators}]}} ins(%arg0, %arg1 : {left_type}, {right_type}) outs(%initialized : {ranked_type}) {{\n    ^bb0(%left: {scalar}, %right: {scalar}, %acc: {scalar}):\n      %product = {multiply} %left, %right : {scalar}\n      %sum = {add} %acc, %product : {scalar}\n      linalg.yield %sum : {scalar}\n    }} -> {ranked_type}\n    return %result : {output}\n",
             left_type = input_spellings[0],
             right_type = input_spellings[1],
             loops = loops.join(", "),
@@ -906,7 +2132,12 @@ fn lower_tensor_conversion(
     else {
         return Err(invalid("tensor conversion requires a ranked result"));
     };
-    if source_shape != target_shape {
+    if source_shape.len() != target_shape.len()
+        || !source_shape
+            .iter()
+            .zip(target_shape)
+            .all(|(source, target)| dimensions_compatible(source, target))
+    {
         return Err(invalid("tensor conversion must preserve shape"));
     }
     let source_scalar = tensor_element_spelling(*source_element)?;
@@ -928,159 +2159,15 @@ fn lower_tensor_conversion(
     let input = input_spellings
         .first()
         .ok_or_else(|| invalid("tensor conversion input type is missing"))?;
+    let (dynamic_sizes, dynamic_arguments) = dynamic_result_dimensions(
+        target_shape,
+        |axis| Some((0, axis)),
+        inputs,
+        input_spellings,
+    )?;
     Ok(format!(
-        "    %empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%empty : {output}) {{\n    ^bb0(%value: {source_scalar}, %unused: {target_scalar}):\n{conversion}      linalg.yield %converted : {target_scalar}\n    }} -> {output}\n    return %result : {output}\n"
+        "{dynamic_sizes}    %empty = tensor.empty({dynamic_arguments}) : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({loops}) -> ({loops})>, affine_map<({loops}) -> ({loops})>], iterator_types = [{iterators}]}} ins(%arg0 : {input}) outs(%empty : {output}) {{\n    ^bb0(%value: {source_scalar}, %unused: {target_scalar}):\n{conversion}      linalg.yield %converted : {target_scalar}\n    }} -> {output}\n    return %result : {output}\n"
     ))
-}
-
-#[allow(dead_code)]
-fn lower_rms_norm(
-    inputs: &[LoweredType],
-    result_type: &LoweredType,
-    input_spellings: &[String],
-    output: &str,
-    result_element: LoweredTensorElement,
-) -> Result<String, CompileError> {
-    let [LoweredType::Tensor {
-        element: input_element,
-        shape: LoweredTensorShape::Ranked(input_shape),
-    }, LoweredType::Tensor {
-        element: weight_element,
-        shape: LoweredTensorShape::Ranked(weight_shape),
-    }, LoweredType::Float {
-        format: epsilon_format,
-    }] = inputs
-    else {
-        return Err(invalid(
-            "RMSNorm requires a ranked input, ranked weights, and floating epsilon",
-        ));
-    };
-    let LoweredType::Tensor {
-        element: output_element,
-        shape: LoweredTensorShape::Ranked(output_shape),
-    } = result_type
-    else {
-        return Err(invalid("RMSNorm requires a ranked tensor result"));
-    };
-    if input_element != weight_element
-        || input_element != output_element
-        || input_element != &result_element
-    {
-        return Err(invalid(
-            "RMSNorm input, weights, and result must have one element type",
-        ));
-    }
-    if input_shape.is_empty() || output_shape != input_shape {
-        return Err(invalid("RMSNorm must preserve a non-scalar input shape"));
-    }
-    if weight_shape.len() != 1 || weight_shape[0] != input_shape[input_shape.len() - 1] {
-        return Err(invalid(
-            "RMSNorm weights must match the input's last dimension",
-        ));
-    }
-    let dimensions = static_dimensions(&LoweredTensorShape::Ranked(input_shape.clone()))
-        .map_err(|error| invalid(format!("RMSNorm: {error}")))?;
-    let width = *dimensions
-        .last()
-        .ok_or_else(|| invalid("RMSNorm input must have a last dimension"))?;
-    if width == 0 {
-        return Err(invalid("RMSNorm last dimension must not be empty"));
-    }
-    let storage_scalar = tensor_element_spelling(result_element)?;
-    if matches!(result_element, LoweredTensorElement::Boolean) {
-        return Err(invalid("RMSNorm requires a numeric tensor element type"));
-    }
-    let accumulation_element = rms_accumulation_element(result_element);
-    let accumulation_scalar = tensor_element_spelling(accumulation_element)?;
-    let outer_shape = LoweredTensorShape::Ranked(input_shape[..input_shape.len() - 1].to_vec());
-    let outer_type = type_spelling(&LoweredType::Tensor {
-        element: accumulation_element,
-        shape: outer_shape,
-    })
-    .map_err(|error| invalid(error.to_string()))?;
-    let rank = input_shape.len();
-    let loops = (0..rank).map(|axis| format!("d{axis}")).collect::<Vec<_>>();
-    let outer = loops[..rank - 1].join(", ");
-    let identity = loops.join(", ");
-    let iterators = (0..rank)
-        .map(|axis| {
-            if axis + 1 == rank {
-                "\"reduction\""
-            } else {
-                "\"parallel\""
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let epsilon_source = input_spellings
-        .get(2)
-        .ok_or_else(|| invalid("RMSNorm epsilon type is missing"))?;
-    let epsilon = lower_scalar_conversion(
-        "%arg2",
-        LoweredTensorElement::Float {
-            format: *epsilon_format,
-        },
-        accumulation_element,
-        epsilon_source,
-        &accumulation_scalar,
-        "%epsilon",
-    )?;
-    let value_to_accumulation = lower_scalar_conversion(
-        "%value",
-        result_element,
-        accumulation_element,
-        &storage_scalar,
-        &accumulation_scalar,
-        "%value_compute",
-    )?;
-    let weight_to_accumulation = lower_scalar_conversion(
-        "%weight",
-        result_element,
-        accumulation_element,
-        &storage_scalar,
-        &accumulation_scalar,
-        "%weight_compute",
-    )?;
-    let output_from_accumulation = lower_scalar_conversion(
-        "%weighted",
-        accumulation_element,
-        result_element,
-        &accumulation_scalar,
-        &storage_scalar,
-        "%weighted_output",
-    )?;
-    let input_type = &input_spellings[0];
-    let weight_type = &input_spellings[1];
-    Ok(format!(
-        "    %sum_empty = tensor.empty() : {outer_type}\n    %zero = arith.constant 0.0 : {accumulation_scalar}\n    %sum_initial = linalg.fill ins(%zero : {accumulation_scalar}) outs(%sum_empty : {outer_type}) -> {outer_type}\n    %sum = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>], iterator_types = [{iterators}]}} ins(%arg0 : {input_type}) outs(%sum_initial : {outer_type}) {{\n    ^bb0(%value: {storage_scalar}, %accumulator: {accumulation_scalar}):\n{value_to_accumulation}      %square = arith.mulf %value_compute, %value_compute : {accumulation_scalar}\n      %next = arith.addf %accumulator, %square : {accumulation_scalar}\n      linalg.yield %next : {accumulation_scalar}\n    }} -> {outer_type}\n{epsilon}    %inverse_empty = tensor.empty() : {outer_type}\n    %width = arith.constant {width}.0 : {accumulation_scalar}\n    %inverse = linalg.generic {{indexing_maps = [affine_map<({outer}) -> ({outer})>, affine_map<({outer}) -> ({outer})>], iterator_types = [{outer_iterators}]}} ins(%sum : {outer_type}) outs(%inverse_empty : {outer_type}) {{\n    ^bb0(%total: {accumulation_scalar}, %unused: {accumulation_scalar}):\n      %mean = arith.divf %total, %width : {accumulation_scalar}\n      %stabilized = arith.addf %mean, %epsilon : {accumulation_scalar}\n      %factor = math.rsqrt %stabilized : {accumulation_scalar}\n      linalg.yield %factor : {accumulation_scalar}\n    }} -> {outer_type}\n    %output_empty = tensor.empty() : {output}\n    %result = linalg.generic {{indexing_maps = [affine_map<({identity}) -> ({identity})>, affine_map<({identity}) -> ({outer})>, affine_map<({identity}) -> (d{last})>, affine_map<({identity}) -> ({identity})>], iterator_types = [{output_iterators}]}} ins(%arg0, %inverse, %arg1 : {input_type}, {outer_type}, {weight_type}) outs(%output_empty : {output}) {{\n    ^bb0(%value: {storage_scalar}, %factor: {accumulation_scalar}, %weight: {storage_scalar}, %unused: {storage_scalar}):\n{value_to_accumulation}{weight_to_accumulation}      %normalized = arith.mulf %value_compute, %factor : {accumulation_scalar}\n      %weighted = arith.mulf %normalized, %weight_compute : {accumulation_scalar}\n{output_from_accumulation}      linalg.yield %weighted_output : {storage_scalar}\n    }} -> {output}\n    return %result : {output}\n",
-        outer_iterators = vec!["\"parallel\""; rank - 1].join(", "),
-        output_iterators = vec!["\"parallel\""; rank].join(", "),
-        last = rank - 1,
-    ))
-}
-
-#[allow(dead_code)]
-const fn rms_accumulation_element(element: LoweredTensorElement) -> LoweredTensorElement {
-    match element {
-        LoweredTensorElement::Float {
-            format:
-                LoweredFloatFormat::Float8E4M3Fn
-                | LoweredFloatFormat::Float8E5M2
-                | LoweredFloatFormat::Ieee(16)
-                | LoweredFloatFormat::BrainFloat16,
-        } => LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Ieee(32),
-        },
-        LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Ieee(80 | 128),
-        } => LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Ieee(64),
-        },
-        LoweredTensorElement::Integer { .. } => LoweredTensorElement::Float {
-            format: LoweredFloatFormat::Ieee(64),
-        },
-        other => other,
-    }
 }
 
 fn lower_scalar_conversion(
@@ -1332,6 +2419,48 @@ fn static_dimensions(shape: &LoweredTensorShape) -> Result<Vec<usize>, CompileEr
         .collect()
 }
 
+fn dynamic_result_dimensions(
+    dimensions: &[LoweredTensorDimension],
+    source_for_axis: impl Fn(usize) -> Option<(usize, usize)>,
+    inputs: &[LoweredType],
+    input_spellings: &[String],
+) -> Result<(String, String), CompileError> {
+    let mut definitions = String::new();
+    let mut arguments = Vec::new();
+    for (axis, dimension) in dimensions.iter().enumerate() {
+        if *dimension != LoweredTensorDimension::Dynamic {
+            continue;
+        }
+        let (operand, source_axis) = source_for_axis(axis).ok_or_else(|| {
+            invalid(format!(
+                "dynamic result dimension {axis} has no runtime shape source"
+            ))
+        })?;
+        let Some(LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(source_dimensions),
+            ..
+        }) = inputs.get(operand)
+        else {
+            return Err(invalid(format!(
+                "dynamic result dimension {axis} does not reference a ranked tensor operand"
+            )));
+        };
+        if source_axis >= source_dimensions.len() {
+            return Err(invalid(format!(
+                "dynamic result dimension {axis} references missing operand axis {source_axis}"
+            )));
+        }
+        let input = input_spellings
+            .get(operand)
+            .ok_or_else(|| invalid("dynamic result shape source type is missing"))?;
+        definitions.push_str(&format!(
+            "    %result_dim{axis}_axis = arith.constant {source_axis} : index\n    %result_dim{axis} = tensor.dim %arg{operand}, %result_dim{axis}_axis : {input}\n"
+        ));
+        arguments.push(format!("%result_dim{axis}"));
+    }
+    Ok((definitions, arguments.join(", ")))
+}
+
 fn static_element_count(shape: &LoweredTensorShape) -> Result<usize, CompileError> {
     static_dimensions(shape)?
         .into_iter()
@@ -1476,7 +2605,9 @@ fn invalid(message: impl Into<String>) -> CompileError {
 mod tests {
     use super::*;
     use severian_artifact::{ArtifactId, CompiledRegionId};
-    use severian_compile::{CompileOperation, EffectSet};
+    use severian_compile::{
+        CompileOperation, CompileRegionSpecialization, EffectSet, RuntimeValueSpecialization,
+    };
     use severian_mir::{Value, ValueId};
     use severian_target::{Device, DeviceKind, FeatureSet, TargetSpec};
     use severian_universal::{install_primitives, Attrs, TypeContextBuilder};
@@ -1554,9 +2685,604 @@ mod tests {
                 id: ValueId(operands as u32),
                 type_id: tensor_type,
             }],
+            value_contracts: Vec::new(),
             effects: EffectSet::default(),
             placement: None,
         }
+    }
+
+    fn direct_region(
+        input_types: &[TypeId],
+        output_type: TypeId,
+        operation: tensor::TensorOp,
+    ) -> CompileRegion {
+        let mut attributes = Attrs::new();
+        let operation_id = operation.apply(&mut attributes);
+        let result_slot = input_types.len() as u32;
+        CompileRegion {
+            id: CompiledRegionId::new(0),
+            compiler: tensor::compiler_id(),
+            operations: Vec::new(),
+            compile_operations: vec![CompileOperation {
+                id: operation_id,
+                operands: input_types.to_vec(),
+                results: vec![output_type],
+                operand_slots: (0..result_slot).collect(),
+                result_slots: vec![result_slot],
+                attributes,
+            }],
+            output_slots: vec![result_slot],
+            inputs: input_types
+                .iter()
+                .enumerate()
+                .map(|(index, type_id)| Value {
+                    id: ValueId(index as u32),
+                    type_id: *type_id,
+                })
+                .collect(),
+            outputs: vec![Value {
+                id: ValueId(result_slot),
+                type_id: output_type,
+            }],
+            value_contracts: Vec::new(),
+            effects: EffectSet::default(),
+            placement: None,
+        }
+    }
+
+    fn compile_direct_and_verify(types: &TypeContext, region: &CompileRegion) -> MlirArtifact {
+        let artifact = TensorCompiler
+            .compile(
+                region,
+                &CompileContext {
+                    types,
+                    target: &TargetSpec::host(),
+                },
+            )
+            .unwrap_or_else(|error| panic!("direct tensor region did not lower: {error}"));
+        let CompiledRegionArtifact::CpuMlir(artifact) = artifact else {
+            panic!("host tensor region unexpectedly selected the GPU route");
+        };
+        severian_mlir::verify_artifact(
+            ArtifactId::for_region(region.id),
+            artifact.clone(),
+            &TargetSpec::host(),
+        )
+        .unwrap_or_else(|error| panic!("direct tensor region emitted invalid MLIR: {error}"));
+        assert!(!artifact.module.contains("rank2"));
+        assert!(!artifact.module.contains("rank4"));
+        assert!(!artifact.module.contains("_bf16"));
+        assert!(!artifact.module.contains("_f32"));
+        artifact
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_rank_two_bf16_add() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let matrix = types
+            .instantiate_tensor(constructor, bf16, TensorShape::ranked([2, 4]))
+            .unwrap();
+        let region = direct_region(
+            &[matrix, matrix],
+            matrix,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+        );
+        let artifact = compile_direct_and_verify(&types, &region);
+        assert!(artifact.module.contains("tensor<2x4xbf16>"));
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_rank_four_f32_add() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 4, 5]))
+            .unwrap();
+        compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[tensor_type, tensor_type],
+                tensor_type,
+                tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            ),
+        );
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_rank_two_dynamic_dimension_add() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::dynamic(2))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[tensor_type, tensor_type],
+                tensor_type,
+                tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            ),
+        );
+        assert!(artifact.module.contains("tensor<?x?xf32>"));
+    }
+
+    #[test]
+    fn structured_elementwise_add_builds_rank_two_dynamic_bf16_mlir() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, bf16, TensorShape::dynamic(2))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[tensor_type, tensor_type],
+                tensor_type,
+                tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            ),
+        );
+        assert!(artifact
+            .module
+            .contains("func.func @entry(%arg0: tensor<?x?xbf16>, %arg1: tensor<?x?xbf16>)"));
+        assert_eq!(artifact.module.matches("tensor.dim").count(), 2);
+        assert!(artifact.module.contains("tensor.empty(%v2_d0, %v2_d1)"));
+        assert_eq!(
+            artifact
+                .module
+                .matches("affine_map<(d0, d1) -> (d0, d1)>")
+                .count(),
+            3
+        );
+        assert!(artifact
+            .module
+            .contains("iterator_types = [\"parallel\", \"parallel\"]"));
+        assert!(artifact
+            .module
+            .contains("^bb0(%lhs: bf16, %rhs: bf16, %unused: bf16)"));
+        assert!(artifact
+            .module
+            .contains("%computed = arith.addf %lhs, %rhs : bf16"));
+        assert!(!artifact.module.contains("bf16_add"));
+        assert!(!artifact.module.contains("rank2"));
+    }
+
+    #[test]
+    fn structured_elementwise_add_uses_the_same_emitter_for_rank_four() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::dynamic(4))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[tensor_type, tensor_type],
+                tensor_type,
+                tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            ),
+        );
+        assert_eq!(artifact.module.matches("tensor.dim").count(), 4);
+        assert!(artifact
+            .module
+            .contains("iterator_types = [\"parallel\", \"parallel\", \"parallel\", \"parallel\"]"));
+        assert!(artifact.module.contains("arith.addf %lhs, %rhs : f32"));
+    }
+
+    #[test]
+    fn structured_sum_reduces_all_axes_with_one_generic_reduction_builder() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([1]))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[input],
+                output,
+                tensor::TensorOp::Reduce(tensor::ReductionOp::Sum),
+            ),
+        );
+        assert!(artifact
+            .module
+            .contains("iterator_types = [\"reduction\", \"reduction\"]"));
+        assert!(artifact.module.contains("affine_map<(d0, d1) -> (0)>"));
+        assert!(artifact
+            .module
+            .contains("arith.addf %accumulator, %value : f32"));
+    }
+
+    #[test]
+    fn structured_max_last_reuses_reduction_maps_for_rank_four_bf16() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, bf16, TensorShape::ranked([2, 3, 4, 5]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, bf16, TensorShape::ranked([2, 3, 4]))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[input],
+                output,
+                tensor::TensorOp::Reduce(tensor::ReductionOp::MaxLast),
+            ),
+        );
+        assert!(artifact.module.contains("arith.constant 0xFF80 : bf16"));
+        assert!(artifact.module.contains(
+            "iterator_types = [\"parallel\", \"parallel\", \"parallel\", \"reduction\"]"
+        ));
+        assert!(artifact
+            .module
+            .contains("arith.maximumf %accumulator, %value : bf16"));
+    }
+
+    #[test]
+    fn structured_sum_axis_takes_axis_identity_from_ir_data() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2]))
+            .unwrap();
+        let mut region = direct_region(
+            &[input],
+            output,
+            tensor::TensorOp::Reduce(tensor::ReductionOp::SumAxis),
+        );
+        region.compile_operations[0]
+            .attributes
+            .insert(tensor::REDUCTION_AXES, AttrValue::Integers(vec![1]));
+        let artifact = compile_direct_and_verify(&types, &region);
+        assert!(artifact.module.contains("affine_map<(d0, d1) -> (d0)>"));
+        assert!(artifact
+            .module
+            .contains("iterator_types = [\"parallel\", \"reduction\"]"));
+        assert!(!artifact.module.contains("sum_axis_f32"));
+    }
+
+    #[test]
+    fn missing_structural_reduction_axes_fail_before_mlir_printing() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2]))
+            .unwrap();
+        let error = TensorCompiler
+            .compile(
+                &direct_region(
+                    &[input],
+                    output,
+                    tensor::TensorOp::Reduce(tensor::ReductionOp::SumAxis),
+                ),
+                &CompileContext {
+                    types: &types,
+                    target: &TargetSpec::host(),
+                },
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("requires structural reduction axis identities"));
+        assert!(!error.contains("ParseFailed"));
+        assert!(!error.contains("VerificationFailed"));
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_mean_last_for_rank_two_bf16() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, bf16, TensorShape::ranked([3, 4]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, bf16, TensorShape::ranked([3]))
+            .unwrap();
+        compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[input],
+                output,
+                tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast),
+            ),
+        );
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_mean_last_for_rank_four_f32() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 4, 5]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 4]))
+            .unwrap();
+        compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[input],
+                output,
+                tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast),
+            ),
+        );
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_dynamic_mean_last_dimensions() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let input = types
+            .instantiate_tensor(constructor, f32, TensorShape::dynamic(2))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::dynamic(1))
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(
+                &[input],
+                output,
+                tensor::TensorOp::Reduce(tensor::ReductionOp::MeanLast),
+            ),
+        );
+        assert!(artifact.module.contains("width_index = tensor.dim"));
+        assert!(artifact.module.contains("tensor.empty(%v1_d0)"));
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_rank_two_matmul() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let left = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3]))
+            .unwrap();
+        let right = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([3, 4]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 4]))
+            .unwrap();
+        compile_direct_and_verify(
+            &types,
+            &direct_region(&[left, right], output, tensor::TensorOp::Matmul),
+        );
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_rank_four_batched_matmul() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let left = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 4, 5]))
+            .unwrap();
+        let right = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 5, 6]))
+            .unwrap();
+        let output = types
+            .instantiate_tensor(constructor, f32, TensorShape::ranked([2, 3, 4, 6]))
+            .unwrap();
+        compile_direct_and_verify(
+            &types,
+            &direct_region(&[left, right], output, tensor::TensorOp::Matmul),
+        );
+    }
+
+    #[test]
+    fn legal_mlir_boundary_accepts_dynamic_batched_matmul_dimensions() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let left = types
+            .instantiate_tensor(
+                constructor,
+                f32,
+                TensorShape::Ranked(vec![
+                    TensorDimension::Dynamic,
+                    TensorDimension::Known(3),
+                    TensorDimension::Dynamic,
+                    TensorDimension::Known(5),
+                ]),
+            )
+            .unwrap();
+        let right = types
+            .instantiate_tensor(
+                constructor,
+                f32,
+                TensorShape::Ranked(vec![
+                    TensorDimension::Dynamic,
+                    TensorDimension::Known(3),
+                    TensorDimension::Known(5),
+                    TensorDimension::Dynamic,
+                ]),
+            )
+            .unwrap();
+        let output = types
+            .instantiate_tensor(
+                constructor,
+                f32,
+                TensorShape::Ranked(vec![
+                    TensorDimension::Dynamic,
+                    TensorDimension::Known(3),
+                    TensorDimension::Dynamic,
+                    TensorDimension::Dynamic,
+                ]),
+            )
+            .unwrap();
+        let artifact = compile_direct_and_verify(
+            &types,
+            &direct_region(&[left, right], output, tensor::TensorOp::Matmul),
+        );
+        assert!(artifact
+            .module
+            .contains("tensor.empty(%result_dim0, %result_dim2, %result_dim3)"));
+    }
+
+    #[test]
+    fn legal_mlir_boundary_rejects_unranked_elementwise_before_emission() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::Unranked)
+            .unwrap();
+        let error = TensorCompiler
+            .compile(
+                &direct_region(
+                    &[tensor_type, tensor_type],
+                    tensor_type,
+                    tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+                ),
+                &CompileContext {
+                    types: &types,
+                    target: &TargetSpec::host(),
+                },
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("MLIR legalization failed"), "{error}");
+        assert!(error.contains("known tensor rank"), "{error}");
+        assert!(!error.contains("lowering is not implemented"), "{error}");
+    }
+
+    #[test]
+    fn runtime_specialization_ranks_unranked_values_before_mlir_emission() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::Unranked)
+            .unwrap();
+        let mut region = direct_region(
+            &[tensor_type, tensor_type],
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+        );
+        region.rebuild_value_contracts(&types).unwrap();
+        assert!(region.value_contracts.iter().all(|contract| matches!(
+            contract.tensor.as_ref().map(|tensor| &tensor.rank),
+            Some(severian_fusion::Rank::Unranked)
+        )));
+        let specialize = |slot| RuntimeValueSpecialization {
+            slot,
+            dimensions: vec![2, 3],
+            strides: vec![3, 1],
+            offset: 0,
+        };
+        let target = TargetSpec::host();
+        let artifact = TensorCompiler
+            .compile_specialized_cpu(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+                &CompileRegionSpecialization {
+                    values: vec![specialize(0), specialize(1), specialize(2)],
+                },
+            )
+            .unwrap();
+        assert!(artifact.module.contains("tensor<?x?xf32>"));
+        assert!(!artifact.module.contains("tensor<*x"));
+        assert!(region.value_contracts.iter().all(|contract| matches!(
+            contract.tensor.as_ref().map(|tensor| &tensor.rank),
+            Some(severian_fusion::Rank::Unranked)
+        )));
+        severian_mlir::verify_artifact(ArtifactId::for_region(region.id), artifact, &target)
+            .unwrap();
+    }
+
+    #[test]
+    fn runtime_specialization_does_not_confuse_rank_zero_with_unranked() {
+        let (mut types, constructor) = types();
+        let f32 = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, f32, TensorShape::Unranked)
+            .unwrap();
+        let region = direct_region(
+            &[tensor_type, tensor_type],
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+        );
+        let (specialized, _) = region
+            .specialize_for_emission(
+                &types,
+                &CompileRegionSpecialization {
+                    values: (0..3)
+                        .map(|slot| RuntimeValueSpecialization {
+                            slot,
+                            dimensions: Vec::new(),
+                            strides: Vec::new(),
+                            offset: 0,
+                        })
+                        .collect(),
+                },
+            )
+            .unwrap();
+        assert!(specialized.value_contracts.iter().all(|contract| {
+            matches!(
+                contract.tensor.as_ref().map(|tensor| &tensor.rank),
+                Some(severian_fusion::Rank::Ranked(dimensions)) if dimensions.is_empty()
+            )
+        }));
+    }
+
+    #[test]
+    fn storage_view_abi_is_validated_and_materialized_after_rank_specialization() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let descriptor = types.resolve_name("bytes").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, bf16, TensorShape::Unranked)
+            .unwrap();
+        let region = direct_region(
+            &[descriptor],
+            tensor_type,
+            tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi),
+        );
+        let target = TargetSpec::host();
+        let artifact = TensorCompiler
+            .compile_specialized_cpu(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+                &CompileRegionSpecialization {
+                    values: vec![RuntimeValueSpecialization {
+                        slot: 1,
+                        dimensions: vec![2, 3],
+                        strides: vec![3, 1],
+                        offset: 0,
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(artifact
+            .module
+            .contains("@__sev_storage_view_validate(!llvm.ptr, i32, i32, i32, i64) -> i32"));
+        assert!(artifact
+            .module
+            .contains("%expected_kind = arith.constant 3 : i32"));
+        assert!(artifact
+            .module
+            .contains("%expected_bits = arith.constant 16 : i32"));
+        assert!(artifact
+            .module
+            .contains("%expected_float_format = arith.constant 2 : i32"));
+        assert!(artifact
+            .module
+            .contains("llvm.load %address : !llvm.ptr -> bf16"));
+        assert!(!artifact.module.contains("__sev_safetensor_bf16"));
+        severian_mlir::verify_artifact(ArtifactId::for_region(region.id), artifact, &target)
+            .unwrap();
     }
 
     fn compile_and_verify(
@@ -1692,6 +3418,7 @@ mod tests {
                 id: ValueId(1),
                 type_id: storage,
             }],
+            value_contracts: Vec::new(),
             effects: EffectSet::default(),
             placement: None,
         };
@@ -1872,6 +3599,68 @@ mod tests {
     }
 
     #[test]
+    fn gpu_storage_descriptor_becomes_a_typed_parameter_not_ttir_parsing() {
+        let (mut types, constructor) = types();
+        let bf16 = types.resolve_name("bf16").unwrap();
+        let descriptor = types.resolve_name("bytes").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, bf16, TensorShape::Unranked)
+            .unwrap();
+        let mut region = direct_region(
+            &[descriptor],
+            tensor_type,
+            tensor::TensorOp::StorageView(tensor::StorageViewOp::FromAbi),
+        );
+        let mut attributes = Attrs::new();
+        let add = tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add);
+        region.compile_operations.push(CompileOperation {
+            id: add.apply(&mut attributes),
+            operands: vec![tensor_type, tensor_type],
+            results: vec![tensor_type],
+            operand_slots: vec![1, 1],
+            result_slots: vec![2],
+            attributes,
+        });
+        region.output_slots = vec![2];
+        region.outputs[0].id = ValueId(2);
+        region.placement = Some(ExecutionPlacement::Gpu);
+        region.rebuild_value_contracts(&types).unwrap();
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "sm_80".into(),
+            features: FeatureSet::from_names(["vendor.nvidia"]),
+        });
+        let artifact = TensorCompiler
+            .compile(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap();
+        let CompiledRegionArtifact::GpuKernel(bundle) = artifact else {
+            panic!("GPU storage descriptor entered CPU MLIR")
+        };
+        assert_eq!(bundle.inputs, [LoweredType::Bytes]);
+        assert_eq!(bundle.graph.nodes().len(), 2);
+        let parameter = bundle.graph.node(severian_fusion::NodeId(0));
+        assert_eq!(parameter.kind, severian_fusion::NodeKind::Parameter);
+        assert_eq!(
+            parameter.shape.element_kind,
+            severian_fusion::ElementKind::BrainFloat
+        );
+        assert_eq!(parameter.shape.element_bits, 16);
+        assert_eq!(parameter.layout, severian_fusion::StorageLayout::Runtime);
+        assert_eq!(
+            bundle.graph.node(severian_fusion::NodeId(1)).kind,
+            severian_fusion::NodeKind::Elementwise
+        );
+    }
+
+    #[test]
     fn gpu_graph_dtype_is_data_not_an_operation_identity_or_symbol_suffix() {
         let (mut types, constructor) = types();
         let expected = [
@@ -1951,11 +3740,20 @@ mod tests {
             .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
             .unwrap();
 
-        let reshape_region = region(
+        let mut reshape_region = region(
             tensor_type,
             tensor::TensorOp::ReshapeView(tensor::ReshapeViewOp::Reshape),
             2,
         );
+        reshape_region.rebuild_value_contracts(&types).unwrap();
+        let reshape_contract = reshape_region
+            .value_contracts
+            .iter()
+            .find(|contract| contract.slot == 2)
+            .and_then(|contract| contract.tensor.as_ref())
+            .unwrap();
+        assert_eq!(reshape_contract.runtime_shape_operands, [1]);
+        assert_eq!(reshape_contract.aliases[0].source_slot, 0);
         let reshape_graph = fusion_graph(&reshape_region, &types).unwrap();
         let reshape = reshape_graph.node(severian_fusion::NodeId(2));
         assert_eq!(
@@ -1978,7 +3776,8 @@ mod tests {
         );
         assert_eq!(reshape.layout, severian_fusion::StorageLayout::Runtime);
 
-        let slice_region = region(tensor_type, tensor::TensorOp::Slice, 4);
+        let mut slice_region = region(tensor_type, tensor::TensorOp::Slice, 4);
+        slice_region.rebuild_value_contracts(&types).unwrap();
         let slice_graph = fusion_graph(&slice_region, &types).unwrap();
         let slice = slice_graph.node(severian_fusion::NodeId(4));
         assert_eq!(
@@ -1998,7 +3797,8 @@ mod tests {
                     && *offset == severian_fusion::Stride::Dynamic
         ));
 
-        let scatter_region = region(tensor_type, tensor::TensorOp::Scatter, 3);
+        let mut scatter_region = region(tensor_type, tensor::TensorOp::Scatter, 3);
+        scatter_region.rebuild_value_contracts(&types).unwrap();
         let scatter_graph = fusion_graph(&scatter_region, &types).unwrap();
         let scatter = scatter_graph.node(severian_fusion::NodeId(3));
         assert_eq!(scatter.aliases[0].kind, severian_fusion::AliasKind::InPlace);

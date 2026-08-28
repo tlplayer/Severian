@@ -46,7 +46,38 @@ static void exercise_safetensor_view(int32_t dtype, const char *name) {
         bytes[8 + header_length + index] = (uint8_t)(index + 1);
     }
     sev_safetensor store = {-1, length, bytes, header_length};
-    sev_tensor *tensor = sev_safetensor_view((int64_t)(intptr_t)&store, "x", dtype);
+    sev_storage_view_abi *view = __sev_safetensor_view((int64_t)(intptr_t)&store, "x");
+    assert(view->magic == SEV_STORAGE_VIEW_ABI_MAGIC);
+    assert(view->abi_version == SEV_STORAGE_VIEW_ABI_VERSION);
+    assert(view->byte_size == sizeof(*view));
+    assert(view->data == bytes + 8 + header_length);
+    assert(view->byte_length == width);
+    assert(view->rank == 1 && view->dimensions[0] == 1 && view->strides[0] == 1);
+    assert(view->element.bits == width * 8);
+    if (dtype == 13) {
+        assert(view->element.kind == SEV_STORAGE_ELEMENT_FLOAT);
+        assert(view->element.bits == 16);
+        assert(view->element.float_format == SEV_STORAGE_FLOAT_BRAIN);
+    }
+    assert(__sev_storage_view_validate(
+        view,
+        view->element.kind,
+        view->element.bits,
+        view->element.float_format,
+        1
+    ));
+    assert(!__sev_storage_view_validate(
+        view,
+        view->element.kind,
+        view->element.bits == 16 ? 32 : 16,
+        view->element.float_format,
+        1
+    ));
+    assert(__sev_storage_view_data(view) == view->data);
+    assert(__sev_storage_view_dimension(view, 0) == 1);
+    assert(__sev_storage_view_stride(view, 0) == 1);
+    assert(__sev_storage_view_offset(view) == 0);
+    sev_tensor *tensor = sev_tensor_get(view);
     assert(tensor->dtype == dtype);
     assert(tensor->rank == 1 && tensor->shape[0] == 1 && tensor->count == 1);
     assert(sev_tensor_value(tensor, 0).bits == sev_read_u128(bytes + 8 + header_length, width));
@@ -54,6 +85,7 @@ static void exercise_safetensor_view(int32_t dtype, const char *name) {
     free(tensor->shape);
     free(tensor->strides);
     free(tensor);
+    free(view);
     free(bytes);
 }
 

@@ -3,6 +3,13 @@
 use std::path::{Path, PathBuf};
 
 pub mod gpu;
+pub mod storage_view;
+
+pub use storage_view::{
+    StorageElementKind, StorageElementRepresentationAbi, StorageFloatFormat, StorageOwnership,
+    StorageView, StorageViewAbi, StorageViewError, STORAGE_VIEW_ABI_MAGIC,
+    STORAGE_VIEW_ABI_VERSION, STORAGE_VIEW_CONTIGUOUS, STORAGE_VIEW_READ_ONLY,
+};
 
 /// Native runtime translation units linked by artifact backends.
 ///

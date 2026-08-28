@@ -35,6 +35,52 @@ typedef struct sev_tensor {
     char operation;
 } sev_tensor;
 
+#define SEV_STORAGE_VIEW_ABI_MAGIC UINT64_C(0x535653544f524147)
+#define SEV_STORAGE_VIEW_ABI_VERSION UINT32_C(1)
+#define SEV_STORAGE_VIEW_READ_ONLY UINT64_C(1)
+#define SEV_STORAGE_VIEW_CONTIGUOUS UINT64_C(2)
+
+typedef enum {
+    SEV_STORAGE_ELEMENT_SIGNED_INTEGER = 1,
+    SEV_STORAGE_ELEMENT_UNSIGNED_INTEGER = 2,
+    SEV_STORAGE_ELEMENT_FLOAT = 3,
+} sev_storage_element_kind;
+
+typedef enum {
+    SEV_STORAGE_FLOAT_NONE = 0,
+    SEV_STORAGE_FLOAT_IEEE = 1,
+    SEV_STORAGE_FLOAT_BRAIN = 2,
+    SEV_STORAGE_FLOAT8_E4M3_FN = 3,
+    SEV_STORAGE_FLOAT8_E5M2 = 4,
+} sev_storage_float_format;
+
+typedef struct {
+    uint32_t abi_version;
+    uint32_t byte_size;
+    uint32_t kind;
+    uint32_t bits;
+    uint32_t float_format;
+    uint32_t reserved;
+} sev_storage_element_representation_abi;
+
+typedef struct {
+    uint64_t magic;
+    uint32_t abi_version;
+    uint32_t byte_size;
+    uint64_t flags;
+    const uint8_t *data;
+    uint64_t byte_length;
+    uint64_t rank;
+    const int64_t *dimensions;
+    const int64_t *strides;
+    int64_t offset;
+    sev_storage_element_representation_abi element;
+    void *owner;
+} sev_storage_view_abi;
+
+_Static_assert(sizeof(sev_storage_element_representation_abi) == 24, "storage element ABI drift");
+_Static_assert(sizeof(sev_storage_view_abi) == 104, "storage view ABI drift");
+
 typedef struct {
     int descriptor;
     size_t length;
@@ -44,6 +90,9 @@ typedef struct {
 
 static sev_tensor *sev_tensor_new(size_t rank, const int64_t *shape, int32_t dtype);
 static void *sev_tensor_wrap(sev_tensor *tensor);
+static unsigned sev_tensor_dtype_bits(int32_t dtype);
+static _Bool sev_tensor_dtype_signed(int32_t dtype);
+static _Bool sev_tensor_dtype_unsigned(int32_t dtype);
 
 static void sev_tensor_abort_if(_Bool condition) {
     if (condition) abort();
@@ -335,7 +384,7 @@ static long double sev_decode_binary_float(
     return negative ? -value : value;
 }
 
-static void *sev_safetensor_view(int64_t handle, const char *name, int32_t requested_dtype) {
+sev_storage_view_abi *__sev_safetensor_view(int64_t handle, const char *name) {
     sev_safetensor *store = (sev_safetensor *)(intptr_t)handle;
     sev_tensor_abort_if(store == NULL);
     char dtype[24];
@@ -345,7 +394,8 @@ static void *sev_safetensor_view(int64_t handle, const char *name, int32_t reque
     sev_tensor_abort_if(!sev_safetensor_string_field(
         object, object_end, "\"dtype\"", dtype, sizeof(dtype)
     ));
-    sev_tensor_abort_if(sev_safetensor_dtype_tag(dtype) != requested_dtype);
+    int32_t storage_dtype = sev_safetensor_dtype_tag(dtype);
+    sev_tensor_abort_if(storage_dtype < 0);
     const uint8_t *cursor = sev_safetensor_array_field(object, object_end, "\"shape\"");
     sev_tensor_abort_if(cursor == NULL);
     size_t rank = 0;
@@ -373,15 +423,15 @@ static void *sev_safetensor_view(int64_t handle, const char *name, int32_t reque
     sev_tensor_abort_if(!sev_safetensor_offsets(store, name, &relative_start, &relative_end));
     uint64_t data_start = 8 + store->header_length;
     sev_tensor_abort_if(data_start + relative_end > store->length);
-    sev_tensor *tensor = sev_tensor_new(rank, shape, requested_dtype);
+    sev_tensor *tensor = sev_tensor_new(rank, shape, storage_dtype);
     free(shape);
-    size_t byte_width = requested_dtype == 4 || requested_dtype == 9 || requested_dtype == 16
+    size_t byte_width = storage_dtype == 4 || storage_dtype == 9 || storage_dtype == 16
         ? 16
-        : requested_dtype == 3 || requested_dtype == 8 || requested_dtype == 15
+        : storage_dtype == 3 || storage_dtype == 8 || storage_dtype == 15
             ? 8
-            : requested_dtype == 2 || requested_dtype == 7 || requested_dtype == 14
+            : storage_dtype == 2 || storage_dtype == 7 || storage_dtype == 14
                 ? 4
-                : requested_dtype == 1 || requested_dtype == 6 || requested_dtype == 12 || requested_dtype == 13
+                : storage_dtype == 1 || storage_dtype == 6 || storage_dtype == 12 || storage_dtype == 13
                     ? 2
                     : 1;
     sev_tensor_abort_if(relative_end - relative_start != tensor->count * byte_width);
@@ -391,31 +441,83 @@ static void *sev_safetensor_view(int64_t handle, const char *name, int32_t reque
     tensor->owns_values = 0;
     tensor->mapped_values = data;
     tensor->mapped_byte_width = byte_width;
-    return sev_tensor_wrap(tensor);
+    sev_storage_view_abi *view = calloc(1, sizeof(*view));
+    sev_tensor_abort_if(view == NULL);
+    view->magic = SEV_STORAGE_VIEW_ABI_MAGIC;
+    view->abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
+    view->byte_size = (uint32_t)sizeof(*view);
+    view->flags = SEV_STORAGE_VIEW_READ_ONLY | SEV_STORAGE_VIEW_CONTIGUOUS;
+    view->data = data;
+    view->byte_length = relative_end - relative_start;
+    view->rank = rank;
+    view->dimensions = tensor->shape;
+    view->strides = tensor->strides;
+    view->offset = tensor->offset;
+    view->element.abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
+    view->element.byte_size = (uint32_t)sizeof(view->element);
+    view->element.bits = sev_tensor_dtype_bits(storage_dtype);
+    view->element.kind = sev_tensor_dtype_signed(storage_dtype)
+        ? SEV_STORAGE_ELEMENT_SIGNED_INTEGER
+        : sev_tensor_dtype_unsigned(storage_dtype)
+            ? SEV_STORAGE_ELEMENT_UNSIGNED_INTEGER
+            : SEV_STORAGE_ELEMENT_FLOAT;
+    view->element.float_format = storage_dtype == 13
+        ? SEV_STORAGE_FLOAT_BRAIN
+        : storage_dtype == 10
+            ? SEV_STORAGE_FLOAT8_E4M3_FN
+            : storage_dtype == 11
+                ? SEV_STORAGE_FLOAT8_E5M2
+                : view->element.kind == SEV_STORAGE_ELEMENT_FLOAT
+                    ? SEV_STORAGE_FLOAT_IEEE
+                    : SEV_STORAGE_FLOAT_NONE;
+    view->owner = tensor;
+    return view;
 }
 
-#define SEV_SAFETENSOR_VIEW(name, tag) \
-    void *__sev_safetensor_##name##_view(int64_t handle, const char *tensor_name) { \
-        return sev_safetensor_view(handle, tensor_name, tag); \
+int32_t __sev_storage_view_validate(
+    const void *storage,
+    uint32_t expected_kind,
+    uint32_t expected_bits,
+    uint32_t expected_float_format,
+    uint64_t expected_rank
+) {
+    const sev_storage_view_abi *view = storage;
+    if (view == NULL
+        || view->magic != SEV_STORAGE_VIEW_ABI_MAGIC
+        || view->abi_version != SEV_STORAGE_VIEW_ABI_VERSION
+        || view->byte_size < sizeof(*view)
+        || view->element.abi_version != SEV_STORAGE_VIEW_ABI_VERSION
+        || view->element.byte_size < sizeof(view->element)) {
+        return 0;
     }
+    return view->element.kind == expected_kind
+        && view->element.bits == expected_bits
+        && view->element.float_format == expected_float_format
+        && view->rank == expected_rank;
+}
 
-SEV_SAFETENSOR_VIEW(i8, 0)
-SEV_SAFETENSOR_VIEW(i16, 1)
-SEV_SAFETENSOR_VIEW(i32, 2)
-SEV_SAFETENSOR_VIEW(i64, 3)
-SEV_SAFETENSOR_VIEW(i128, 4)
-SEV_SAFETENSOR_VIEW(u8, 5)
-SEV_SAFETENSOR_VIEW(u16, 6)
-SEV_SAFETENSOR_VIEW(u32, 7)
-SEV_SAFETENSOR_VIEW(u64, 8)
-SEV_SAFETENSOR_VIEW(u128, 9)
-SEV_SAFETENSOR_VIEW(f8e4m3fn, 10)
-SEV_SAFETENSOR_VIEW(f8e5m2, 11)
-SEV_SAFETENSOR_VIEW(f16, 12)
-SEV_SAFETENSOR_VIEW(bf16, 13)
-SEV_SAFETENSOR_VIEW(f32, 14)
-SEV_SAFETENSOR_VIEW(f64, 15)
-SEV_SAFETENSOR_VIEW(f128, 16)
+void *__sev_storage_view_data(const void *storage) {
+    const sev_storage_view_abi *view = storage;
+    return view == NULL ? NULL : (void *)view->data;
+}
+
+int64_t __sev_storage_view_dimension(const void *storage, uint64_t axis) {
+    const sev_storage_view_abi *view = storage;
+    sev_tensor_abort_if(view == NULL || axis >= view->rank);
+    return view->dimensions[axis];
+}
+
+int64_t __sev_storage_view_stride(const void *storage, uint64_t axis) {
+    const sev_storage_view_abi *view = storage;
+    sev_tensor_abort_if(view == NULL || axis >= view->rank);
+    return view->strides[axis];
+}
+
+int64_t __sev_storage_view_offset(const void *storage) {
+    const sev_storage_view_abi *view = storage;
+    sev_tensor_abort_if(view == NULL);
+    return view->offset;
+}
 
 static uintptr_t sev_tensor_f64_bits(double value) {
     uint64_t bits = 0;
@@ -700,6 +802,15 @@ static sev_tensor *sev_tensor_new(size_t rank, const int64_t *shape, int32_t dty
 
 static sev_tensor *sev_tensor_get(void *value) {
     sev_tensor_abort_if(value == NULL);
+    sev_storage_view_abi *view = value;
+    if (view->magic == SEV_STORAGE_VIEW_ABI_MAGIC) {
+        sev_tensor_abort_if(
+            view->abi_version != SEV_STORAGE_VIEW_ABI_VERSION
+                || view->byte_size < sizeof(*view)
+                || view->owner == NULL
+        );
+        return view->owner;
+    }
     return value;
 }
 

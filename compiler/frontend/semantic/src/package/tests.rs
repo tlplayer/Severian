@@ -289,6 +289,506 @@ fn imported_generic_overload_is_specialized_after_declaration_collection() {
 }
 
 #[test]
+fn explicit_type_arguments_specialize_imported_and_nested_generic_calls() {
+    let root = temporary();
+    std::fs::write(
+        root.join("generic.sev"),
+        "def identity[T](value: T) -> T:\n    return value\ndef forward[T](value: T) -> T:\n    return identity[T](value)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"generic.sev\" as generic\ndef selected(value: i32) -> i32:\n    return generic.forward[i32](value)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    let substitutions = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .filter(|function| !function.substitution.0.is_empty())
+        .count();
+    assert_eq!(substitutions, 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn complete_generic_body_specialization_rewrites_every_type_application_position() {
+    let root = temporary();
+    let source = root.join("complete.sev");
+    std::fs::write(
+        &source,
+        "def complete[T](value: T = factory[T]()) -> T:\n    local: Box[T] = Box[T](forward[list[T]](value))\n    return local\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let function = graph.modules[0]
+        .ast
+        .items
+        .iter()
+        .find_map(|item| match item {
+            severian_ast::Item::Function(function) => Some(function),
+            _ => None,
+        })
+        .unwrap();
+    let substitution = std::collections::BTreeMap::from([("T".into(), "bf16".into())]);
+    let specialized = super::generic::specialize_function(function, &substitution);
+
+    assert_eq!(
+        specialized.parameters[0].annotation.simple_name(),
+        Some("bf16")
+    );
+    assert_eq!(specialized.result.simple_name(), Some("bf16"));
+    let default = specialized.parameters[0].default.as_ref().unwrap();
+    let severian_ast::ExpressionKind::Call { callee, .. } = &default.kind else {
+        panic!("default must remain a call")
+    };
+    let severian_ast::ExpressionKind::TypeApplication { arguments, .. } = &callee.kind else {
+        panic!("default callee must remain a type application")
+    };
+    assert_eq!(arguments[0].simple_name(), Some("bf16"));
+
+    let body = specialized.body.as_ref().unwrap();
+    let severian_ast::Statement::Binding(local) = &body[0] else {
+        panic!("first statement must remain a binding")
+    };
+    let (name, annotation_arguments) = local.annotation.as_ref().unwrap().named_parts().unwrap();
+    assert_eq!(name, "Box");
+    assert_eq!(annotation_arguments[0].simple_name(), Some("bf16"));
+    let severian_ast::ExpressionKind::Call { callee, arguments } = &local.value.kind else {
+        panic!("local initializer must remain a constructor call")
+    };
+    let severian_ast::ExpressionKind::TypeApplication {
+        arguments: class_arguments,
+        ..
+    } = &callee.kind
+    else {
+        panic!("constructor must retain its type application")
+    };
+    assert_eq!(class_arguments[0].simple_name(), Some("bf16"));
+    let severian_ast::ExpressionKind::Call {
+        callee: nested_callee,
+        ..
+    } = &arguments[0].value.kind
+    else {
+        panic!("constructor argument must remain the nested call")
+    };
+    let severian_ast::ExpressionKind::TypeApplication {
+        arguments: nested_arguments,
+        ..
+    } = &nested_callee.kind
+    else {
+        panic!("nested call must retain its type application")
+    };
+    let (name, list_arguments) = nested_arguments[0].named_parts().unwrap();
+    assert_eq!(name, "list");
+    assert_eq!(list_arguments[0].simple_name(), Some("bf16"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_mir() {
+    let root = temporary();
+    let tensor_root = root.join("tensor");
+    let app_root = root.join("app");
+    std::fs::create_dir_all(&tensor_root).unwrap();
+    std::fs::create_dir_all(&app_root).unwrap();
+    let tensor_source = tensor_root.join("lib.sev");
+    let app_source = app_root.join("main.sev");
+    std::fs::write(
+        &tensor_source,
+        "class Tensor[T]:\n    value: T\ndef relay[T](value: T) -> T:\n    return value\ndef load[T](entry: T) -> Tensor[T]:\n    local: T = relay[T](entry)\n    return Tensor[T](local)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &app_source,
+        "import tensor\ndef selected(entry: bf16) -> tensor.Tensor[bf16]:\n    return tensor.load[bf16](entry)\n",
+    )
+    .unwrap();
+    let app = severian_modules::PackageId(0);
+    let tensor = severian_modules::PackageId(1);
+    let packages = severian_modules::PackageGraph {
+        root: app,
+        packages: std::collections::BTreeMap::from([
+            (
+                app,
+                severian_modules::ResolvedPackage {
+                    id: app,
+                    root: app_root.clone(),
+                    library: app_source.clone(),
+                    dependencies: std::collections::BTreeMap::from([("tensor".into(), tensor)]),
+                },
+            ),
+            (
+                tensor,
+                severian_modules::ResolvedPackage {
+                    id: tensor,
+                    root: tensor_root,
+                    library: tensor_source,
+                    dependencies: std::collections::BTreeMap::new(),
+                },
+            ),
+        ]),
+    };
+    let graph = severian_modules::resolve_with_packages(&app_source, &packages).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let load_definition = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| {
+            definition.name == "load" && definition.id.package == u128::from(tensor.0)
+        })
+        .unwrap();
+    let DefKind::Function(load_interface) = &load_definition.kind else {
+        panic!("tensor.load must be indexed as a function")
+    };
+    assert!(load_interface.generic_body.is_some());
+    let relay_definition = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| {
+            definition.name == "relay" && definition.id.package == u128::from(tensor.0)
+        })
+        .unwrap();
+
+    let bf16 = typed.types.resolve_name("bf16").unwrap();
+    let expected =
+        severian_universal::Substitution::new([(severian_universal::GenericParamId(0), bf16)]);
+    let selected = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .find(|function| function.name == "selected")
+        .unwrap();
+    let body = selected.body.as_ref().unwrap();
+    let severian_hir::Statement::Return(Some(call)) = &body.statements[0] else {
+        panic!("selected must return the tensor.load call")
+    };
+    let severian_hir::ExpressionKind::Call { callee, .. } = &call.kind else {
+        panic!("selected return must remain a call")
+    };
+    let severian_hir::Callee::Direct {
+        function,
+        substitution,
+    } = callee
+    else {
+        panic!("tensor.load must be a direct generic call")
+    };
+    assert_eq!(*function, load_definition.id);
+    assert_eq!(*substitution, expected);
+    assert_eq!(substitution.0.len(), 1);
+
+    let load_instance = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .find(|function| function.definition == load_definition.id)
+        .unwrap();
+    assert_eq!(load_instance.name, "load");
+    assert_eq!(load_instance.substitution, expected);
+    let load_module = typed
+        .hir
+        .modules
+        .iter()
+        .find(|module| {
+            module
+                .functions
+                .iter()
+                .any(|function| function.id == load_instance.id)
+        })
+        .unwrap();
+    let load_body = load_instance.body.as_ref().unwrap();
+    let severian_hir::Statement::Binding(local) = load_body.statements[0] else {
+        panic!("specialized dependency body must retain its local")
+    };
+    let local = load_module
+        .bindings
+        .iter()
+        .find(|binding| binding.id == local)
+        .unwrap();
+    let severian_hir::ExpressionKind::Call { callee, .. } = &local.value.kind else {
+        panic!("dependency local must retain its nested relay call")
+    };
+    let severian_hir::Callee::Direct {
+        function,
+        substitution,
+    } = callee
+    else {
+        panic!("nested relay must remain a direct generic call")
+    };
+    assert_eq!(*function, relay_definition.id);
+    assert_eq!(*substitution, expected);
+
+    let mir = severian_mir::build(&typed.hir).unwrap();
+    let selected = mir
+        .functions
+        .iter()
+        .find(|function| function.name == "selected")
+        .unwrap();
+    let body = selected.body.as_ref().unwrap();
+    let (function, substitution) = body
+        .blocks
+        .iter()
+        .find_map(|block| match &block.terminator {
+            severian_mir::Terminator::Call {
+                callee:
+                    severian_mir::Callee::Direct {
+                        function,
+                        substitution,
+                    },
+                ..
+            } => Some((*function, substitution.clone())),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(function, load_definition.id);
+    assert_eq!(substitution, expected);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn every_outer_instance_discovers_its_nested_generic_instance() {
+    let root = temporary();
+    let source = root.join("instances.sev");
+    std::fs::write(
+        &source,
+        "def inner[T](value: T) -> T:\n    return value\ndef outer[T](value: T) -> T:\n    return inner[T](value)\ndef selected_integer(value: i32) -> i32:\n    return outer[i32](value)\ndef selected_boolean(value: bool) -> bool:\n    return outer[bool](value)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let inner = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "inner")
+        .unwrap();
+    let instances = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .filter(|function| function.definition == inner.id)
+        .collect::<Vec<_>>();
+    assert_eq!(instances.len(), 2);
+    assert!(instances
+        .iter()
+        .all(|function| function.name == "inner" && function.substitution.0.len() == 1));
+    assert_ne!(instances[0].substitution, instances[1].substitution);
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_type_application_selects_the_matching_generic_arity_and_overload() {
+    let root = temporary();
+    let source = root.join("overloads.sev");
+    std::fs::write(
+        &source,
+        "def choose[T](value: T) -> T:\n    return value\ndef choose[T, U](value: T, fallback: U) -> U:\n    return fallback\ndef selected(value: i32, fallback: bool) -> bool:\n    return choose[i32, bool](value, fallback)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let chosen = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| {
+            matches!(
+                &definition.kind,
+                DefKind::Function(function)
+                    if definition.name == "choose" && function.type_parameters.len() == 2
+            )
+        })
+        .unwrap();
+    let selected = typed.hir.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "selected")
+        .unwrap();
+    let body = selected.body.as_ref().unwrap();
+    let severian_hir::Statement::Return(Some(call)) = &body.statements[0] else {
+        panic!("selected must return the applied generic call")
+    };
+    let severian_hir::ExpressionKind::Call {
+        callee:
+            severian_hir::Callee::Direct {
+                function,
+                substitution,
+            },
+        ..
+    } = &call.kind
+    else {
+        panic!("ordinary TypeApplication must lower to a direct HIR call")
+    };
+    assert_eq!(*function, chosen.id);
+    assert_eq!(substitution.0.len(), 2);
+    assert_eq!(
+        substitution.get(severian_universal::GenericParamId(0)),
+        typed.types.resolve_name("i32")
+    );
+    assert_eq!(
+        substitution.get(severian_universal::GenericParamId(1)),
+        typed.types.resolve_name("bool")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_type_application_reports_generic_arity_before_call_lowering() {
+    let root = temporary();
+    let source = root.join("arity.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\ndef selected(value: i32) -> i32:\n    return identity[i32, bool](value)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let error =
+        analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap_err();
+    assert_eq!(error.code, "E000206");
+    assert!(error.message.contains("expects 1 generic type argument"));
+    assert!(error.message.contains("received 2"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_type_application_requires_resolvable_type_arguments() {
+    let root = temporary();
+    let source = root.join("unresolved.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\ndef selected(value: i32) -> i32:\n    return identity[MissingType](value)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let error =
+        analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap_err();
+    assert_eq!(error.code, "E000204");
+    assert!(error.message.contains("MissingType"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_type_ids_filter_other_materialized_instances() {
+    let root = temporary();
+    let source = root.join("instance-filter.sev");
+    std::fs::write(
+        &source,
+        "def select[T](value: i32) -> i32:\n    return value\ndef materialize_integer(value: i32) -> i32:\n    return select[i32](value)\ndef materialize_boolean(value: i32) -> i32:\n    return select[bool](value)\ndef chosen(value: i32) -> i32:\n    return select[i32](value)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let chosen = typed.hir.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "chosen")
+        .unwrap();
+    let severian_hir::Statement::Return(Some(call)) = &chosen.body.as_ref().unwrap().statements[0]
+    else {
+        panic!("chosen must return the explicitly applied call")
+    };
+    let severian_hir::ExpressionKind::Call {
+        callee: severian_hir::Callee::Direct { substitution, .. },
+        ..
+    } = &call.kind
+    else {
+        panic!("chosen must lower to a direct generic call")
+    };
+    assert_eq!(substitution.0.len(), 1);
+    assert_eq!(
+        substitution.get(severian_universal::GenericParamId(0)),
+        typed.types.resolve_name("i32")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn qualified_generic_class_application_stays_a_constructor_outcome() {
+    let root = temporary();
+    let dependency_root = root.join("dependency");
+    let app_root = root.join("app");
+    std::fs::create_dir_all(&dependency_root).unwrap();
+    std::fs::create_dir_all(&app_root).unwrap();
+    let dependency_source = dependency_root.join("lib.sev");
+    let app_source = app_root.join("main.sev");
+    std::fs::write(&dependency_source, "class Box[T]:\n    value: T\n").unwrap();
+    std::fs::write(
+        &app_source,
+        "import dependency\ndef selected(value: i32) -> dependency.Box[i32]:\n    return dependency.Box[i32](value)\n",
+    )
+    .unwrap();
+    let app = severian_modules::PackageId(0);
+    let dependency = severian_modules::PackageId(1);
+    let packages = severian_modules::PackageGraph {
+        root: app,
+        packages: std::collections::BTreeMap::from([
+            (
+                app,
+                severian_modules::ResolvedPackage {
+                    id: app,
+                    root: app_root,
+                    library: app_source.clone(),
+                    dependencies: std::collections::BTreeMap::from([(
+                        "dependency".into(),
+                        dependency,
+                    )]),
+                },
+            ),
+            (
+                dependency,
+                severian_modules::ResolvedPackage {
+                    id: dependency,
+                    root: dependency_root,
+                    library: dependency_source,
+                    dependencies: std::collections::BTreeMap::new(),
+                },
+            ),
+        ]),
+    };
+    let graph = severian_modules::resolve_with_packages(&app_source, &packages).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let selected = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .find(|function| function.name == "selected")
+        .unwrap();
+    let body = selected.body.as_ref().unwrap();
+    let severian_hir::Statement::Return(Some(value)) = &body.statements[0] else {
+        panic!("selected must return the qualified constructor")
+    };
+    assert!(matches!(
+        value.kind,
+        severian_hir::ExpressionKind::Aggregate { .. }
+    ));
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn semantic_lowering_has_no_load_named_branch() {
+    let semantic = include_str!("../lib.rs");
+    assert!(!semantic.contains("\"load\""));
+}
+
+#[test]
 fn uncalled_generic_declarations_are_indexed_without_forcing_a_body_instance() {
     let root = temporary();
     let source = root.join("generic.sev");

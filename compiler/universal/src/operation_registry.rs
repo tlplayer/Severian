@@ -88,6 +88,7 @@ impl ProviderId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrValue {
     Integer(i128),
+    Integers(Vec<i128>),
     Boolean(bool),
     String(String),
     Type(TyId),

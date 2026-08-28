@@ -93,6 +93,15 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                     .map(|value| value_type(module, *value))
                     .collect::<Result<Vec<_>, _>>()?;
                 let result = result.map(|value| value_type(module, value)).transpose()?;
+                if inputs
+                    .iter()
+                    .chain(result.iter())
+                    .any(|ty| matches!(ty, LoweredType::Tensor { .. }))
+                {
+                    return Err(MlirError::UnsupportedOperation(format!(
+                        "native runtime symbol `{symbol}` cannot receive or return an MLIR builtin tensor; use a !llvm.ptr StorageViewAbi at the host boundary and specialize it into a ranked tensor before compute lowering"
+                    )));
+                }
                 if let Some(known) =
                     runtime_signatures.insert(symbol.clone(), (inputs.clone(), result.clone()))
                 {
@@ -1689,6 +1698,11 @@ fn render_runtime_call(
     let mut argument_types = Vec::with_capacity(arguments.len());
     for (index, value) in arguments.iter().copied().enumerate() {
         let ty = value_type(module, value)?;
+        if matches!(ty, LoweredType::Tensor { .. }) {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "native runtime symbol `{symbol}` cannot receive an MLIR builtin tensor; use a !llvm.ptr StorageViewAbi at the host boundary"
+            )));
+        }
         if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
             let spelling = mlir_type(&ty)?;
             let (size, _) = lowered_type_layout(module, &ty, &mut BTreeSet::new())?;
@@ -1719,6 +1733,11 @@ fn render_runtime_call(
     let argument_types = argument_types.join(", ");
     if let Some(result) = result {
         let result_ty = value_type(module, result)?;
+        if matches!(result_ty, LoweredType::Tensor { .. }) {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "native runtime symbol `{symbol}` cannot return an MLIR builtin tensor; declare the C void pointer result as !llvm.ptr StorageViewAbi and specialize it before compute lowering"
+            )));
+        }
         if aggregate_abi && matches!(result_ty, LoweredType::Aggregate(_)) {
             let spelling = mlir_type(&result_ty)?;
             output.push_str(&format!(
@@ -3035,6 +3054,79 @@ mod tests {
         };
         let rendered = render(&module).unwrap();
         assert!(rendered.contains("func.call @__sev_string_concat(%v0, %v1)"));
+    }
+
+    #[test]
+    fn native_runtime_calls_cannot_disguise_storage_pointers_as_tensors() {
+        let module = Module {
+            values: vec![severian_lir::Value {
+                id: ValueId(0),
+                ty: LoweredType::Tensor {
+                    element: LoweredTensorElement::Float {
+                        format: LoweredFloatFormat::BrainFloat16,
+                    },
+                    shape: LoweredTensorShape::Unranked,
+                },
+            }],
+            initializer: Block {
+                operations: vec![Operation::RuntimeCall {
+                    symbol: "__sev_safetensor_view".into(),
+                    arguments: Vec::new(),
+                    result: Some(ValueId(0)),
+                }],
+            },
+            ..Module::default()
+        };
+        let error = render(&module).unwrap_err().to_string();
+        assert!(error.contains("cannot receive or return an MLIR builtin tensor"));
+        assert!(error.contains("!llvm.ptr StorageViewAbi"));
+        assert!(!error.contains("tensor<*xbf16>"));
+    }
+
+    #[test]
+    fn safetensor_loader_has_one_pointer_returning_mlir_declaration() {
+        let module = Module {
+            values: vec![
+                severian_lir::Value {
+                    id: ValueId(0),
+                    ty: LoweredType::Integer {
+                        bits: 64,
+                        signed: true,
+                    },
+                },
+                severian_lir::Value {
+                    id: ValueId(1),
+                    ty: LoweredType::String,
+                },
+                severian_lir::Value {
+                    id: ValueId(2),
+                    ty: LoweredType::Bytes,
+                },
+            ],
+            initializer: Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: Constant::Integer("1".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Constant {
+                        value: Constant::String("weight".into()),
+                        result: ValueId(1),
+                    },
+                    Operation::RuntimeCall {
+                        symbol: "__sev_safetensor_view".into(),
+                        arguments: vec![ValueId(0), ValueId(1)],
+                        result: Some(ValueId(2)),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+        let rendered = render(&module).unwrap();
+        assert!(rendered
+            .contains("func.func private @__sev_safetensor_view(i64, !llvm.ptr) -> !llvm.ptr"));
+        assert!(!rendered.contains("@__sev_safetensor_view(i64, !llvm.ptr) -> tensor<"));
+        assert!(!rendered.contains("__sev_safetensor_bf16_view"));
     }
 
     #[test]

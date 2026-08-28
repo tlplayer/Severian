@@ -1,6 +1,7 @@
 use super::*;
 use severian_fusion::{
-    plan, DeviceModel, ElementKind, FusionNode, KernelSpecialization, NodeKind, RuntimeShape, Shape,
+    plan, DeviceModel, ElementKind, FusionGraph, FusionNode, KernelSpecialization, NodeKind, Rank,
+    RuntimeShape, Shape, StorageLayout,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -104,6 +105,63 @@ impl GpuDriver for MockDriver {
 
 struct MockCompiler {
     count: Arc<AtomicUsize>,
+}
+
+#[test]
+fn storage_view_metadata_creates_the_kernel_specialization_before_compilation() {
+    let mut parameter = FusionNode::structural(
+        0,
+        NodeKind::Parameter,
+        [],
+        Shape {
+            rank: Rank::Unranked,
+            element_kind: ElementKind::BrainFloat,
+            element_bits: 16,
+        },
+    );
+    parameter.layout = StorageLayout::Runtime;
+    let graph = FusionGraph::new(vec![parameter]).unwrap();
+    let view = crate::StorageView::new(
+        0x1000,
+        2_097_152,
+        crate::StorageElementRepresentationAbi {
+            abi_version: crate::STORAGE_VIEW_ABI_VERSION,
+            byte_size: core::mem::size_of::<crate::StorageElementRepresentationAbi>() as u32,
+            kind: crate::StorageElementKind::Float,
+            bits: 16,
+            float_format: crate::StorageFloatFormat::BrainFloat,
+            reserved: 0,
+        },
+        vec![1, 16, 512, 128],
+        vec![1_048_576, 65_536, 128, 1],
+        0,
+        crate::StorageOwnership::Borrowed,
+    )
+    .unwrap();
+    let prepared = prepare_storage_inputs(
+        &graph,
+        GpuTarget::Nvidia,
+        &[StorageSpecializationBinding {
+            node: NodeId(0),
+            view,
+        }],
+    )
+    .unwrap();
+    let specialization = prepared.specialization;
+    assert_eq!(
+        specialization.shapes,
+        vec![RuntimeShape {
+            node: NodeId(0),
+            dimensions: vec![1, 16, 512, 128],
+        }]
+    );
+    assert_eq!(
+        specialization.strides[0].strides,
+        [1_048_576, 65_536, 128, 1]
+    );
+    assert_eq!(specialization.target, GpuTarget::Nvidia);
+    let packed = pack_arguments(&MockDriver::default(), &prepared.arguments).unwrap();
+    assert_eq!(packed.value(0), Some(0x1000u64.to_ne_bytes().as_slice()));
 }
 
 impl GpuCompiler for MockCompiler {
