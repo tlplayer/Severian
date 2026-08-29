@@ -548,6 +548,10 @@ impl GpuCompiler for MockCompiler {
                 warp_size: 32,
                 num_ctas: 1,
                 shared_memory_bytes: 1024,
+                global_scratch_bytes_per_program: 0,
+                global_scratch_alignment: 1,
+                profile_scratch_bytes_per_program: 0,
+                profile_scratch_alignment: 1,
             },
         })
     }
@@ -762,7 +766,10 @@ fn storage_view_to_specialization_cache_launcher_and_execution_is_one_path() {
     assert_eq!(second.execution.cache_hits, 1);
     assert_eq!(count.load(Ordering::SeqCst), 1);
     assert_eq!(runtime.driver().launches.len(), 2);
-    assert_eq!(runtime.driver().launches[0].arguments.offsets.len(), 3);
+    let arguments = &runtime.driver().launches[0].arguments;
+    assert_eq!(arguments.offsets.len(), 5);
+    assert_eq!(arguments.value(3), Some(0u64.to_ne_bytes().as_slice()));
+    assert_eq!(arguments.value(4), Some(0u64.to_ne_bytes().as_slice()));
 }
 
 #[test]
@@ -980,6 +987,10 @@ fn persistent_cache_round_trips_launch_metadata_and_code() {
             warp_size: 32,
             num_ctas: 1,
             shared_memory_bytes: 4096,
+            global_scratch_bytes_per_program: 0,
+            global_scratch_alignment: 1,
+            profile_scratch_bytes_per_program: 0,
+            profile_scratch_alignment: 1,
         },
     };
     let mut cache = KernelCache::persistent(&directory);

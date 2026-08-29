@@ -328,7 +328,10 @@ fn emit_elementwise(
             "{result} = {operation} {}, {} : {tensor}",
             first.name, rhs.name
         ));
-    } else if matches!(node.operation.as_str(), "exp" | "log" | "sin" | "tanh" | "rsqrt") {
+    } else if matches!(
+        node.operation.as_str(),
+        "exp" | "log" | "sin" | "tanh" | "rsqrt"
+    ) {
         emitter.line(format!(
             "{result} = math.{} {} : {tensor}",
             node.operation, first.name
@@ -342,7 +345,7 @@ fn emit_elementwise(
             "arith.cmpi sgt"
         };
         emitter.line(format!(
-            "{compare} = {compare_operation} {}, {zero} : {tensor}",
+            "{compare} = {compare_operation}, {}, {zero} : {tensor}",
             first.name
         ));
         emitter.line(format!(

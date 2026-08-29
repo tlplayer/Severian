@@ -8,7 +8,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8; 8] = b"SEVGPU\0\x01";
+const MAGIC: &[u8; 8] = b"SEVGPU\0\x02";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CacheKey([u64; 4]);
@@ -412,6 +412,20 @@ fn encode(key: CacheKey, artifact: &KernelArtifact) -> Vec<u8> {
     bytes.extend_from_slice(&artifact.launch.warp_size.to_le_bytes());
     bytes.extend_from_slice(&artifact.launch.num_ctas.to_le_bytes());
     bytes.extend_from_slice(&artifact.launch.shared_memory_bytes.to_le_bytes());
+    bytes.extend_from_slice(
+        &artifact
+            .launch
+            .global_scratch_bytes_per_program
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(&artifact.launch.global_scratch_alignment.to_le_bytes());
+    bytes.extend_from_slice(
+        &artifact
+            .launch
+            .profile_scratch_bytes_per_program
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(&artifact.launch.profile_scratch_alignment.to_le_bytes());
     bytes
 }
 
@@ -440,6 +454,10 @@ fn decode(key: CacheKey, bytes: &[u8]) -> Result<KernelArtifact, CacheError> {
     let warp_size = cursor.u32()?;
     let num_ctas = cursor.u32()?;
     let shared_memory_bytes = cursor.u64()?;
+    let global_scratch_bytes_per_program = cursor.u64()?;
+    let global_scratch_alignment = cursor.u64()?;
+    let profile_scratch_bytes_per_program = cursor.u64()?;
+    let profile_scratch_alignment = cursor.u64()?;
     if !cursor.remaining().is_empty() {
         return Err(CacheError::Corrupt("trailing bytes".into()));
     }
@@ -454,6 +472,10 @@ fn decode(key: CacheKey, bytes: &[u8]) -> Result<KernelArtifact, CacheError> {
             warp_size,
             num_ctas,
             shared_memory_bytes,
+            global_scratch_bytes_per_program,
+            global_scratch_alignment,
+            profile_scratch_bytes_per_program,
+            profile_scratch_alignment,
         },
     })
 }

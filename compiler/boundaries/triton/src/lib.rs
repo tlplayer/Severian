@@ -14,20 +14,18 @@ use severian_fusion::{
 use std::collections::BTreeSet;
 use std::fmt;
 
-#[allow(unsafe_code)]
-mod native;
 mod donor;
 mod linear_layout;
+#[allow(unsafe_code)]
+mod native;
 mod ttir;
 
 pub use donor::{AmdIsaFamily, AmdTargetFeatures, LdsTransLoadParameters};
-pub use linear_layout::{
-    LayoutDimension, LayoutInputDimension, LinearLayout, LinearLayoutError,
-};
+pub use linear_layout::{LayoutDimension, LayoutInputDimension, LinearLayout, LinearLayoutError};
 pub use native::NativeTritonCompiler;
 pub use ttir::TtirModule;
 
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 pub const DONOR_REVISION: &str = "8957b9aac23e526fb1252c7c3b592e6f43c175c8";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +108,10 @@ pub struct LaunchMetadata {
     pub warp_size: u32,
     pub num_ctas: u32,
     pub shared_memory_bytes: u64,
+    pub global_scratch_bytes_per_program: u64,
+    pub global_scratch_alignment: u64,
+    pub profile_scratch_bytes_per_program: u64,
+    pub profile_scratch_alignment: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -477,6 +479,10 @@ pub struct AbiLaunchMetadata {
     pub num_ctas: u32,
     pub _reserved: u32,
     pub shared_memory_bytes: u64,
+    pub global_scratch_bytes_per_program: u64,
+    pub global_scratch_alignment: u64,
+    pub profile_scratch_bytes_per_program: u64,
+    pub profile_scratch_alignment: u64,
 }
 
 pub type AbiCompileFn = unsafe extern "C" fn(
@@ -1031,6 +1037,26 @@ mod tests {
         assert!(module.text.contains("tt.load"));
         assert!(module.text.contains("arith.addf"));
         assert!(module.text.contains("tt.store"));
+        parse_with_pinned_triton(&module);
+    }
+
+    #[test]
+    fn unary_relu_emits_the_mlir_comparison_predicate_separator() {
+        let shape = Shape::typed(
+            [severian_fusion::Dimension::Known(64)],
+            ElementKind::IeeeFloat,
+            32,
+        );
+        let mut relu = FusionNode::structural(1, NodeKind::Elementwise, [NodeId(0)], shape.clone());
+        relu.operation = "relu".into();
+        let graph = FusionGraph::new(vec![
+            FusionNode::structural(0, NodeKind::Parameter, [], shape),
+            relu,
+        ])
+        .unwrap();
+        let plan = plan(&graph, DeviceModel::conservative_gpu());
+        let module = lower_to_ttir(&graph, &plan.regions[0], &specialization()).unwrap();
+        assert!(module.text.contains("arith.cmpf ogt,"));
         parse_with_pinned_triton(&module);
     }
 

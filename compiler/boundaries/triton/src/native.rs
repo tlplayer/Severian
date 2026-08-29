@@ -62,13 +62,27 @@ impl std::fmt::Debug for NativeTritonCompiler {
 }
 
 impl NativeTritonCompiler {
-    /// Loads the bridge named by `SEVERIAN_TRITON_BRIDGE_LIBRARY`, falling
-    /// back to the platform loader's search path.
+    /// Loads the explicitly configured bridge, then a bridge staged beside
+    /// the current executable, then the platform loader's search path.
     pub fn load() -> Result<Self, BridgeError> {
-        let path = std::env::var_os("SEVERIAN_TRITON_BRIDGE_LIBRARY")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_LIBRARY_NAME));
-        Self::load_from(path)
+        if let Some(path) = std::env::var_os("SEVERIAN_TRITON_BRIDGE_LIBRARY") {
+            return Self::load_from(PathBuf::from(path));
+        }
+        let mut candidates = Vec::new();
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(directory) = executable.parent() {
+                candidates.push(directory.join(DEFAULT_LIBRARY_NAME));
+            }
+        }
+        candidates.push(PathBuf::from(DEFAULT_LIBRARY_NAME));
+        let mut diagnostics = Vec::new();
+        for candidate in candidates {
+            match Self::load_from(&candidate) {
+                Ok(compiler) => return Ok(compiler),
+                Err(error) => diagnostics.push(format!("{}: {error}", candidate.display())),
+            }
+        }
+        Err(BridgeError::NativeUnavailable(diagnostics.join("; ")))
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> Result<Self, BridgeError> {
@@ -149,6 +163,10 @@ fn decode_result(
             warp_size: raw.launch.warp_size,
             num_ctas: raw.launch.num_ctas,
             shared_memory_bytes: raw.launch.shared_memory_bytes,
+            global_scratch_bytes_per_program: raw.launch.global_scratch_bytes_per_program,
+            global_scratch_alignment: raw.launch.global_scratch_alignment,
+            profile_scratch_bytes_per_program: raw.launch.profile_scratch_bytes_per_program,
+            profile_scratch_alignment: raw.launch.profile_scratch_alignment,
         },
     })
 }
@@ -206,6 +224,12 @@ impl GpuCompiler for NativeTritonCompiler {
                 warp_size: compiled.launch.warp_size,
                 num_ctas: compiled.launch.num_ctas,
                 shared_memory_bytes: compiled.launch.shared_memory_bytes,
+                global_scratch_bytes_per_program: compiled.launch.global_scratch_bytes_per_program,
+                global_scratch_alignment: compiled.launch.global_scratch_alignment,
+                profile_scratch_bytes_per_program: compiled
+                    .launch
+                    .profile_scratch_bytes_per_program,
+                profile_scratch_alignment: compiled.launch.profile_scratch_alignment,
             },
         })
     }

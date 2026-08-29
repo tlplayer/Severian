@@ -1,7 +1,6 @@
 #include "severian_triton_bridge.h"
 
 #include "TritonAMDGPUToLLVM/Passes.h"
-#include "TritonAMDGPUTransforms/Passes.h"
 #include "TritonNVIDIAGPUToLLVM/Passes.h"
 #include "NVGPUToLLVM/Passes.h"
 #include "lld/Common/Driver.h"
@@ -12,6 +11,8 @@
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
+#include "mlir/Dialect/Func/Extensions/InlinerExtension.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Diagnostics.h"
@@ -35,6 +36,11 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
@@ -104,7 +110,11 @@ static void initializeCompiler() {
     mlir::triton::gpu::registerTritonGPUPasses();
     mlir::triton::registerConvertTritonToTritonGPUPass();
     mlir::triton::gpu::registerTritonGPUToLLVMPasses();
-    mlir::registerTritonAMDGPUPasses();
+    // Backend pipelines are assembled through typed pass factories below.
+    // Do not register every command-line AMD pass here: the pinned donor has
+    // one transform declared in both `mlir` and `mlir::triton::amdgpu`, and
+    // its aggregate textual registry references the wrong namespace.  That
+    // registry is unnecessary for parsing TTIR or running our typed pipeline.
     mlir::triton::registerTritonAMDGPUToLLVMPasses();
     mlir::triton::registerTritonNVIDIAGPUToLLVMPasses();
     mlir::triton::registerNVGPUToLLVMPasses();
@@ -113,6 +123,8 @@ static void initializeCompiler() {
 
 static void registerDialects(mlir::DialectRegistry &registry) {
   mlir::registerAllDialects(registry);
+  mlir::func::registerInlinerExtension(registry);
+  mlir::LLVM::registerInlinerInterface(registry);
   registry.insert<mlir::triton::TritonDialect,
                   mlir::triton::gpu::TritonGPUDialect>();
   mlir::registerBuiltinDialectTranslation(registry);
@@ -288,6 +300,57 @@ emitLLVM(llvm::Module &module, const std::string &triple,
   return std::string(artifact.begin(), artifact.end());
 }
 
+static std::optional<std::string>
+prepareAmdKernel(llvm::Module &module,
+                 const sev_triton_compile_options &options,
+                 std::string &diagnostic) {
+  module.setTargetTriple(llvm::Triple("amdgcn-amd-amdhsa"));
+
+  // These are the target-finalization steps performed by Triton's AMD donor
+  // immediately after MLIR-to-LLVM translation.  They are deliberately data
+  // driven by launch options; no dtype or rank participates in kernel identity.
+  llvm::Type *i32 = llvm::Type::getInt32Ty(module.getContext());
+  if (!module.getNamedGlobal("__oclc_ABI_version")) {
+    auto *abi = new llvm::GlobalVariable(
+        module, i32, true, llvm::GlobalValue::LinkOnceODRLinkage,
+        llvm::ConstantInt::get(i32, 500), "__oclc_ABI_version", nullptr,
+        llvm::GlobalValue::ThreadLocalMode::NotThreadLocal, 4);
+    abi->setVisibility(llvm::GlobalValue::ProtectedVisibility);
+    abi->setAlignment(llvm::MaybeAlign(4));
+    abi->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Local);
+  }
+  module.addModuleFlag(llvm::Module::Error, "amdhsa_code_object_version", 500);
+
+  llvm::Function *kernel = nullptr;
+  for (llvm::Function &function : module) {
+    if (!function.isDeclaration() && function.hasExternalLinkage()) {
+      if (kernel) {
+        diagnostic += "AMD LLVM module contains more than one external kernel\n";
+        return std::nullopt;
+      }
+      kernel = &function;
+    }
+  }
+  if (!kernel) {
+    diagnostic += "AMD LLVM module contains no external kernel\n";
+    return std::nullopt;
+  }
+
+  kernel->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+  kernel->addFnAttr("amdgpu-cluster-dims",
+                    std::to_string(options.num_ctas) + ",1,1");
+  kernel->addFnAttr(
+      "amdgpu-flat-work-group-size",
+      "1," + std::to_string(options.num_warps * options.warp_size));
+  kernel->addFnAttr("uniform-work-group-size", "true");
+  kernel->addFnAttr("denormal-fp-math-f32", "ieee");
+  for (llvm::Argument &argument : kernel->args()) {
+    if (!argument.hasByRefAttr() && !argument.hasNestAttr())
+      argument.addAttr(llvm::Attribute::InReg);
+  }
+  return kernel->getName().str();
+}
+
 static std::optional<std::vector<uint8_t>>
 linkHsaco(const std::string &object, std::string &diagnostic) {
   llvm::SmallString<128> inputPath;
@@ -342,6 +405,29 @@ static uint64_t sharedMemory(ModuleOp module) {
   return 0;
 }
 
+struct ScratchMemory {
+  uint64_t globalBytesPerProgram = 0;
+  uint64_t globalAlignment = 1;
+  uint64_t profileBytesPerProgram = 0;
+  uint64_t profileAlignment = 1;
+};
+
+static uint64_t moduleInteger(ModuleOp module, llvm::StringRef name,
+                              uint64_t fallback) {
+  if (auto value = module->getAttrOfType<mlir::IntegerAttr>(name))
+    return value.getValue().getZExtValue();
+  return fallback;
+}
+
+static ScratchMemory scratchMemory(ModuleOp module) {
+  return {
+      moduleInteger(module, "ttg.global_scratch_memory_size", 0),
+      moduleInteger(module, "ttg.global_scratch_memory_alignment", 1),
+      moduleInteger(module, "ttg.profile_scratch_memory_size", 0),
+      moduleInteger(module, "ttg.profile_scratch_memory_alignment", 1),
+  };
+}
+
 static uint64_t nodeElements(const sev_triton_compile_request &request,
                              uint32_t nodeId) {
   const auto &region = *request.region;
@@ -388,20 +474,27 @@ static uint64_t gridX(const sev_triton_compile_request &request) {
 static void publish(sev_triton_compiled_kernel *output, OwnedKernel *owner,
                     sev_triton_kernel_format format,
                     const sev_triton_compile_options *options,
-                    uint64_t grid, uint64_t shared) {
+                    uint64_t grid, uint64_t shared,
+                    ScratchMemory scratch = {}) {
   output->abi_version = SEV_TRITON_ABI_VERSION;
   output->format = format;
   output->entry_point = bytes(owner->entryPoint);
   output->code = bytes(owner->code);
   output->diagnostics = bytes(owner->diagnostics);
-  output->launch = {grid,
-                    1,
-                    1,
-                    options ? options->num_warps : 0,
-                    options ? options->warp_size : 0,
-                    options ? options->num_ctas : 0,
-                    0,
-                    shared};
+  output->launch = {};
+  output->launch.grid_x = grid;
+  output->launch.grid_y = 1;
+  output->launch.grid_z = 1;
+  output->launch.num_warps = options ? options->num_warps : 0;
+  output->launch.warp_size = options ? options->warp_size : 0;
+  output->launch.num_ctas = options ? options->num_ctas : 0;
+  output->launch.shared_memory_bytes = shared;
+  output->launch.global_scratch_bytes_per_program =
+      scratch.globalBytesPerProgram;
+  output->launch.global_scratch_alignment = scratch.globalAlignment;
+  output->launch.profile_scratch_bytes_per_program =
+      scratch.profileBytesPerProgram;
+  output->launch.profile_scratch_alignment = scratch.profileAlignment;
   output->owner = owner;
 }
 
@@ -428,7 +521,7 @@ sev_triton_compile(const sev_triton_compile_request *request,
     return fail(output, SEV_TRITON_INVALID_ARGUMENT, "request is null");
   if (request->abi_version != SEV_TRITON_ABI_VERSION)
     return fail(output, SEV_TRITON_INVALID_ARGUMENT,
-                "Triton bridge ABI mismatch: expected 5");
+                "Triton bridge ABI mismatch: expected 6");
   if (!request->region || !request->specialization || !request->options)
     return fail(output, SEV_TRITON_INVALID_ARGUMENT,
                 "region, specialization, and options are required");
@@ -485,6 +578,7 @@ sev_triton_compile(const sev_triton_compile_request *request,
                 &options);
 
   const uint64_t shared = sharedMemory(*module);
+  const ScratchMemory scratch = scratchMemory(*module);
   llvm::LLVMContext llvmContext;
   std::unique_ptr<llvm::Module> llvmModule =
       mlir::translateModuleToLLVMIR(*module, llvmContext);
@@ -512,6 +606,11 @@ sev_triton_compile(const sev_triton_compile_request *request,
     format = SEV_TRITON_PTX;
   } else {
     const std::string arch = stringFrom(options.architecture);
+    auto entryPoint = prepareAmdKernel(*llvmModule, options, diagnostics);
+    if (!entryPoint)
+      return fail(output, SEV_TRITON_CODEGEN_FAILURE,
+                  std::move(diagnostics), &options);
+    owner->entryPoint = std::move(*entryPoint);
     if (options.emit != SEV_TRITON_HSACO &&
         options.emit != SEV_TRITON_AMDGCN &&
         options.emit != SEV_TRITON_LLVM_IR)
@@ -539,7 +638,8 @@ sev_triton_compile(const sev_triton_compile_request *request,
     }
   }
   owner->diagnostics = std::move(diagnostics);
-  publish(output, owner.get(), format, &options, gridX(*request), shared);
+  publish(output, owner.get(), format, &options, gridX(*request), shared,
+          scratch);
   output->owner = owner.release();
   return SEV_TRITON_OK;
 }

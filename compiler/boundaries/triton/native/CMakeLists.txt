@@ -7,6 +7,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # bridge at runtime. Every embedded object therefore has to be position
 # independent, including Triton's optional AMD/NVIDIA subdirectories.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# LLVM and Triton's in-tree targets are compiled without exceptions or RTTI.
+# The AMD/NVIDIA backend directories are normally added by Triton's Python
+# extension build, which supplies the same flags.  This standalone bridge adds
+# those directories itself, so establish the ABI contract before any donor
+# target is created.  Mixing RTTI-enabled backend objects with LLVM's no-RTTI
+# objects leaves typeinfo references that only fail when dlopen loads the
+# finished bridge.
+add_compile_options(
+  $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+  $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # GCC 15 diagnoses APInt small-storage destruction and generated MLIR
   # operand-segment copies after inlining. The objects are valid and
@@ -75,6 +85,17 @@ include_directories(${LLD_INCLUDE_DIRS})
 get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
 
 add_library(severian_triton_bridge SHARED severian_triton_bridge.cpp)
+if(UNIX AND NOT APPLE)
+  # A runtime-loaded compiler provider must be self-contained.  Diagnose an
+  # incomplete donor/LLVM link here instead of deferring it to dlopen in a
+  # generated Severian executable.  Bind its statically embedded pinned LLVM
+  # internally as well: the host compiler process may already contain the
+  # distro LLVM shared library, whose command-line registry and C++ globals
+  # must not interpose the donor revision's copies during static initialization.
+  target_link_options(severian_triton_bridge PRIVATE
+    "LINKER:-z,defs"
+    "LINKER:-Bsymbolic")
+endif()
 target_compile_definitions(severian_triton_bridge PRIVATE
   SEVERIAN_TRITON_PINNED_REVISION="8957b9aac23e526fb1252c7c3b592e6f43c175c8")
 target_include_directories(severian_triton_bridge PRIVATE
@@ -92,7 +113,6 @@ target_include_directories(severian_triton_bridge PRIVATE
 target_link_libraries(severian_triton_bridge PRIVATE
   ${triton_libs}
   TritonAMDGPUToLLVM
-  TritonAMDGPUTransforms
   TritonAMDGPUDialectToLLVM
   TritonNVIDIAGPUToLLVM
   NVGPUToLLVM
@@ -109,6 +129,8 @@ target_link_libraries(severian_triton_bridge PRIVATE
   MLIRROCDLToLLVMIRTranslation
   MLIRTargetLLVMIRExport
   MLIRLLVMDialect
+  MLIRLLVMIRTransforms
+  MLIRFuncInlinerExtension
   LLVMNVPTXCodeGen
   LLVMAMDGPUCodeGen
   LLVMAMDGPUAsmParser

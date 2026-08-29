@@ -717,13 +717,16 @@ fn concatenate_runtime_shape(
             message: "concatenate ranks are incompatible".into(),
         });
     }
-    let rank = i64::try_from(left.len()).map_err(|_| {
-        StorageSpecializationError::ShapeInference {
+    let rank =
+        i64::try_from(left.len()).map_err(|_| StorageSpecializationError::ShapeInference {
             node,
             message: "concatenate rank exceeds the runtime ABI".into(),
-        }
-    })?;
-    let normalized = if axis < 0 { rank.checked_add(axis) } else { Some(axis) };
+        })?;
+    let normalized = if axis < 0 {
+        rank.checked_add(axis)
+    } else {
+        Some(axis)
+    };
     let axis = normalized
         .and_then(|axis| usize::try_from(axis).ok())
         .filter(|axis| *axis < left.len())
@@ -1025,6 +1028,12 @@ pub struct LaunchRequirements {
     pub warp_size: u32,
     pub num_ctas: u32,
     pub shared_memory_bytes: u64,
+    /// Triton appends these two launcher-owned pointer arguments after the
+    /// structural region inputs and outputs. Sizes are per grid program.
+    pub global_scratch_bytes_per_program: u64,
+    pub global_scratch_alignment: u64,
+    pub profile_scratch_bytes_per_program: u64,
+    pub profile_scratch_alignment: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1655,12 +1664,42 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
                 self.loaded.insert((device, key), kernel);
                 kernel
             };
-            let arguments = pack_arguments(&self.driver, &invocation.arguments)?;
             let grid = calculate_grid(
                 invocation.graph,
                 invocation.specialization,
                 &artifact.launch.grid,
             )?;
+            let programs = grid
+                .into_iter()
+                .try_fold(1u64, |count, dimension| count.checked_mul(dimension))
+                .ok_or(RuntimeError::TensorSizeOverflow(
+                    invocation.region.outputs[0],
+                ))?;
+            let mut invocation_arguments = invocation.arguments.clone();
+            for (bytes_per_program, alignment) in [
+                (
+                    artifact.launch.global_scratch_bytes_per_program,
+                    artifact.launch.global_scratch_alignment,
+                ),
+                (
+                    artifact.launch.profile_scratch_bytes_per_program,
+                    artifact.launch.profile_scratch_alignment,
+                ),
+            ] {
+                let bytes = bytes_per_program.checked_mul(programs).ok_or(
+                    RuntimeError::TensorSizeOverflow(invocation.region.outputs[0]),
+                )?;
+                if bytes == 0 {
+                    invocation_arguments.push(KernelArgument::scalar(0u64));
+                } else {
+                    let buffer = self.allocate(device, bytes, alignment.max(1))?;
+                    invocation_arguments.push(KernelArgument::Buffer {
+                        buffer,
+                        byte_offset: 0,
+                    });
+                }
+            }
+            let arguments = pack_arguments(&self.driver, &invocation_arguments)?;
             let event = self
                 .driver
                 .launch(&LaunchCommand {

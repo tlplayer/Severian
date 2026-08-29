@@ -87,6 +87,7 @@ pub struct RoutedProgram {
     pub host_mlir: String,
     pub gpu_kernels: Vec<severian_compile::VerifiedGpuKernelBundle>,
     pub tensor_jit_source: String,
+    pub tensor_jit_requires_gpu: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -754,6 +755,9 @@ impl Compiler {
         let mut linker_arguments = linker_arguments;
         if !program.tensor_jit_source.is_empty() {
             stage_tensor_jit_provider(output)?;
+            if program.tensor_jit_requires_gpu {
+                stage_triton_bridge(output)?;
+            }
             let source = output.with_extension("tensor-jit.c");
             std::fs::write(&source, &program.tensor_jit_source).map_err(|error| {
                 CompileError::NativeLink(format!(
@@ -1104,11 +1108,15 @@ fn compose_region_artifacts(
     let host = severian_mlir::compose(ordinary, &cpu, target).map_err(CompileError::Mlir)?;
     let host_mlir =
         severian_mlir::compose_gpu_launchers(&host, &gpu, target).map_err(CompileError::Mlir)?;
+    let tensor_jit_requires_gpu = tensor_jit.iter().any(|artifact| {
+        artifact.bundle.placement == Some(severian_universal::ExecutionPlacement::Gpu)
+    });
     let tensor_jit_source = render_tensor_jit_launchers(&tensor_jit)?;
     Ok(RoutedProgram {
         host_mlir,
         gpu_kernels,
         tensor_jit_source,
+        tensor_jit_requires_gpu,
     })
 }
 
@@ -1153,7 +1161,10 @@ fn render_tensor_jit_launchers(
         }
         let target = match bundle.placement {
             Some(severian_universal::ExecutionPlacement::Gpu)
-                if bundle.architecture.starts_with("gfx") => 1u32,
+                if bundle.architecture.starts_with("gfx") =>
+            {
+                1u32
+            }
             Some(severian_universal::ExecutionPlacement::Gpu) => 2u32,
             _ => 0u32,
         };
@@ -1222,6 +1233,61 @@ fn stage_tensor_jit_provider(output: &Path) -> Result<(), CompileError> {
     Ok(())
 }
 
+fn stage_triton_bridge(output: &Path) -> Result<(), CompileError> {
+    #[cfg(target_os = "linux")]
+    const BRIDGE_NAME: &str = "libseverian_triton_bridge.so";
+    #[cfg(target_os = "macos")]
+    const BRIDGE_NAME: &str = "libseverian_triton_bridge.dylib";
+    #[cfg(target_os = "windows")]
+    const BRIDGE_NAME: &str = "severian_triton_bridge.dll";
+
+    let driver = std::env::current_exe().map_err(|error| {
+        CompileError::NativeLink(format!(
+            "could not locate the Severian driver while staging the Triton bridge: {error}"
+        ))
+    })?;
+    let driver_directory = driver.parent().ok_or_else(|| {
+        CompileError::NativeLink("Severian driver has no parent directory".into())
+    })?;
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("driver crate is nested below the repository root");
+    let configured = std::env::var_os("SEVERIAN_TRITON_BRIDGE_LIBRARY").map(PathBuf::from);
+    let candidates = configured.into_iter().chain([
+        driver_directory.join(BRIDGE_NAME),
+        driver_directory
+            .parent()
+            .unwrap_or(driver_directory)
+            .join(BRIDGE_NAME),
+        repository
+            .join("target/severian-triton-native-v5")
+            .join(BRIDGE_NAME),
+        repository
+            .join("target/severian-triton-native")
+            .join(BRIDGE_NAME),
+    ]);
+    let source = candidates.into_iter().find(|candidate| candidate.is_file()).ok_or_else(|| {
+        CompileError::NativeLink(format!(
+            "GPU Tensor-JIT requires {BRIDGE_NAME}; build compiler/boundaries/triton/native/build-native.sh once or set SEVERIAN_TRITON_BRIDGE_LIBRARY"
+        ))
+    })?;
+    let destination = output
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(BRIDGE_NAME);
+    if source != destination {
+        std::fs::copy(&source, &destination).map_err(|error| {
+            CompileError::NativeLink(format!(
+                "could not stage Triton bridge {} at {}: {error}",
+                source.display(),
+                destination.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 fn stage_tokenizer_provider(output: &Path) -> Result<(), CompileError> {
     #[cfg(target_os = "linux")]
     const PROVIDER_NAME: &str = "libseverian_tokenizer_provider.so";
@@ -1235,9 +1301,9 @@ fn stage_tokenizer_provider(output: &Path) -> Result<(), CompileError> {
             "could not locate the Severian driver while staging the tokenizer provider: {error}"
         ))
     })?;
-    let executable_directory = driver
-        .parent()
-        .ok_or_else(|| CompileError::NativeLink("Severian driver has no parent directory".into()))?;
+    let executable_directory = driver.parent().ok_or_else(|| {
+        CompileError::NativeLink("Severian driver has no parent directory".into())
+    })?;
     let candidates = [
         executable_directory.join(PROVIDER_NAME),
         executable_directory
@@ -1331,9 +1397,7 @@ fn render_tensor_jit_launcher(
                 .inputs
                 .iter()
                 .zip(&consumer.operand_roles)
-                .any(|(input, role)| {
-                    input == node && *role != severian_fusion::OperandRole::Data
-                })
+                .any(|(input, role)| input == node && *role != severian_fusion::OperandRole::Data)
         });
         body.push_str(&render_tensor_jit_input(
             index,
@@ -1382,19 +1446,54 @@ fn render_tensor_jit_launcher(
 fn c_tensor_jit_type(ty: &severian_mlir::LoweredType) -> Result<String, CompileError> {
     use severian_mlir::{LoweredFloatFormat, LoweredTensorShape, LoweredType};
     match ty {
-        LoweredType::Tensor { shape: LoweredTensorShape::Unranked, .. } => Ok("sev_unranked_memref".into()),
-        LoweredType::Tensor { shape: LoweredTensorShape::Ranked(dimensions), .. } => Ok(format!("sev_ranked_memref_{}", dimensions.len())),
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Unranked,
+            ..
+        } => Ok("sev_unranked_memref".into()),
+        LoweredType::Tensor {
+            shape: LoweredTensorShape::Ranked(dimensions),
+            ..
+        } => Ok(format!("sev_ranked_memref_{}", dimensions.len())),
         LoweredType::Bytes | LoweredType::String => Ok("void *".into()),
-        LoweredType::Integer { bits: 1..=8, signed: true } => Ok("int8_t".into()),
-        LoweredType::Integer { bits: 1..=8, signed: false } | LoweredType::Boolean => Ok("uint8_t".into()),
-        LoweredType::Integer { bits: 9..=16, signed: true } => Ok("int16_t".into()),
-        LoweredType::Integer { bits: 9..=16, signed: false } => Ok("uint16_t".into()),
-        LoweredType::Integer { bits: 17..=32, signed: true } => Ok("int32_t".into()),
-        LoweredType::Integer { bits: 17..=32, signed: false } => Ok("uint32_t".into()),
-        LoweredType::Integer { bits: 33..=64, signed: true } => Ok("int64_t".into()),
-        LoweredType::Integer { bits: 33..=64, signed: false } => Ok("uint64_t".into()),
-        LoweredType::Float { format: LoweredFloatFormat::Ieee(32) } => Ok("float".into()),
-        LoweredType::Float { format: LoweredFloatFormat::Ieee(64) } => Ok("double".into()),
+        LoweredType::Integer {
+            bits: 1..=8,
+            signed: true,
+        } => Ok("int8_t".into()),
+        LoweredType::Integer {
+            bits: 1..=8,
+            signed: false,
+        }
+        | LoweredType::Boolean => Ok("uint8_t".into()),
+        LoweredType::Integer {
+            bits: 9..=16,
+            signed: true,
+        } => Ok("int16_t".into()),
+        LoweredType::Integer {
+            bits: 9..=16,
+            signed: false,
+        } => Ok("uint16_t".into()),
+        LoweredType::Integer {
+            bits: 17..=32,
+            signed: true,
+        } => Ok("int32_t".into()),
+        LoweredType::Integer {
+            bits: 17..=32,
+            signed: false,
+        } => Ok("uint32_t".into()),
+        LoweredType::Integer {
+            bits: 33..=64,
+            signed: true,
+        } => Ok("int64_t".into()),
+        LoweredType::Integer {
+            bits: 33..=64,
+            signed: false,
+        } => Ok("uint64_t".into()),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(32),
+        } => Ok("float".into()),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        } => Ok("double".into()),
         unsupported => Err(CompileError::NativeLink(format!(
             "Tensor-JIT host ABI does not support {unsupported:?}"
         ))),
@@ -1412,7 +1511,9 @@ fn c_tensor_jit_parameter(
             ..
         }
     ) {
-        Ok(format!("int64_t arg{index}_rank, void *arg{index}_descriptor"))
+        Ok(format!(
+            "int64_t arg{index}_rank, void *arg{index}_descriptor"
+        ))
     } else if let severian_mlir::LoweredType::Tensor {
         shape: severian_mlir::LoweredTensorShape::Ranked(dimensions),
         ..
@@ -1439,12 +1540,21 @@ fn tensor_jit_value_kind(
     Ok(match ty {
         LoweredType::Tensor { .. } => "SEV_TENSOR_JIT_VALUE_STORAGE",
         LoweredType::Bytes | LoweredType::String
-            if element != severian_fusion::ElementKind::Opaque => "SEV_TENSOR_JIT_VALUE_STORAGE",
+            if element != severian_fusion::ElementKind::Opaque =>
+        {
+            "SEV_TENSOR_JIT_VALUE_STORAGE"
+        }
         LoweredType::Bytes | LoweredType::String => "SEV_TENSOR_JIT_VALUE_POINTER",
         LoweredType::Integer { signed: true, .. } => "SEV_TENSOR_JIT_VALUE_SIGNED",
-        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => "SEV_TENSOR_JIT_VALUE_UNSIGNED",
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => {
+            "SEV_TENSOR_JIT_VALUE_UNSIGNED"
+        }
         LoweredType::Float { .. } => "SEV_TENSOR_JIT_VALUE_FLOAT",
-        unsupported => return Err(CompileError::NativeLink(format!("unsupported Tensor-JIT value {unsupported:?}"))),
+        unsupported => {
+            return Err(CompileError::NativeLink(format!(
+                "unsupported Tensor-JIT value {unsupported:?}"
+            )))
+        }
     })
 }
 
@@ -1477,21 +1587,35 @@ fn render_tensor_jit_input(
     {
         let (element_kind, bits, float_format) = tensor_element_abi(*tensor_element)?;
         let rank = dimensions.len();
-        let sizes = (0..rank).map(|axis| format!("arg{index}_size{axis}")).collect::<Vec<_>>().join(",");
-        let strides = (0..rank).map(|axis| format!("arg{index}_stride{axis}")).collect::<Vec<_>>().join(",");
+        let sizes = (0..rank)
+            .map(|axis| format!("arg{index}_size{axis}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let strides = (0..rank)
+            .map(|axis| format!("arg{index}_stride{axis}"))
+            .collect::<Vec<_>>()
+            .join(",");
         return Ok(format!(
             "  int64_t arg{index}_dimensions[{rank}] = {{{sizes}}};\n  int64_t arg{index}_strides[{rank}] = {{{strides}}};\n  sev_jit_storage_view_abi arg{index}_view; memset(&arg{index}_view, 0, sizeof(arg{index}_view));\n  arg{index}_view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; arg{index}_view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; arg{index}_view.byte_size = sizeof(arg{index}_view);\n  arg{index}_view.owner = arg{index}_allocated; arg{index}_view.data = (const uint8_t *)arg{index}_aligned; arg{index}_view.rank = {rank}; arg{index}_view.offset = arg{index}_offset; arg{index}_view.dimensions = arg{index}_dimensions; arg{index}_view.strides = arg{index}_strides;\n  arg{index}_view.byte_length = ({bits} + 7) / 8; for (uint64_t axis = 0; axis < {rank}; ++axis) arg{index}_view.byte_length *= (uint64_t)arg{index}_dimensions[axis];\n  arg{index}_view.element.abi_version = 1; arg{index}_view.element.byte_size = sizeof(arg{index}_view.element); arg{index}_view.element.kind = {element_kind}; arg{index}_view.element.bits = {bits}; arg{index}_view.element.float_format = {float_format};\n  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION; inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi); inputs[{index}].kind = SEV_TENSOR_JIT_VALUE_STORAGE; inputs[{index}].bits = {bits}; inputs[{index}].value.storage = &arg{index}_view;\n"
         ));
     }
     let field = match ty {
-        LoweredType::Bytes | LoweredType::String if element != severian_fusion::ElementKind::Opaque => "storage",
+        LoweredType::Bytes | LoweredType::String
+            if element != severian_fusion::ElementKind::Opaque =>
+        {
+            "storage"
+        }
         LoweredType::Bytes | LoweredType::String => "pointer",
         LoweredType::Integer { signed: true, .. } => "signed_integer",
         LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => "unsigned_integer",
         LoweredType::Float { .. } => "floating",
         _ => unreachable!("validated by tensor_jit_value_kind"),
     };
-    let cast = if field == "storage" { "(sev_jit_storage_view_abi *)" } else { "" };
+    let cast = if field == "storage" {
+        "(sev_jit_storage_view_abi *)"
+    } else {
+        ""
+    };
     Ok(format!(
         "  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION;\n  inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi);\n  inputs[{index}].kind = {kind};\n  inputs[{index}].bits = {};\n  inputs[{index}].value.{field} = {cast}arg{index};\n",
         tensor_jit_bits(ty)
@@ -1501,9 +1625,13 @@ fn render_tensor_jit_input(
 fn tensor_jit_bits(ty: &severian_mlir::LoweredType) -> u16 {
     match ty {
         severian_mlir::LoweredType::Integer { bits, .. } => *bits,
-        severian_mlir::LoweredType::Float { format: severian_mlir::LoweredFloatFormat::Ieee(bits) } => *bits,
+        severian_mlir::LoweredType::Float {
+            format: severian_mlir::LoweredFloatFormat::Ieee(bits),
+        } => *bits,
         severian_mlir::LoweredType::Boolean => 1,
-        severian_mlir::LoweredType::Tensor { element, .. } => tensor_element_abi(*element).map(|(_, bits, _)| bits as u16).unwrap_or(0),
+        severian_mlir::LoweredType::Tensor { element, .. } => tensor_element_abi(*element)
+            .map(|(_, bits, _)| bits as u16)
+            .unwrap_or(0),
         _ => 0,
     }
 }
@@ -1514,18 +1642,38 @@ fn tensor_jit_result_expression(
 ) -> Result<String, CompileError> {
     use severian_mlir::LoweredType;
     Ok(match ty {
-        LoweredType::Tensor { shape: severian_mlir::LoweredTensorShape::Unranked, .. } => format!("__sev_jit_unranked_result(outputs[{index}].value.storage)"),
-        LoweredType::Tensor { shape: severian_mlir::LoweredTensorShape::Ranked(dimensions), .. } => {
+        LoweredType::Tensor {
+            shape: severian_mlir::LoweredTensorShape::Unranked,
+            ..
+        } => format!("__sev_jit_unranked_result(outputs[{index}].value.storage)"),
+        LoweredType::Tensor {
+            shape: severian_mlir::LoweredTensorShape::Ranked(dimensions),
+            ..
+        } => {
             let rank = dimensions.len();
-            let sizes = (0..rank).map(|axis| format!("outputs[{index}].value.storage->dimensions[{axis}]")).collect::<Vec<_>>().join(",");
-            let strides = (0..rank).map(|axis| format!("outputs[{index}].value.storage->strides[{axis}]")).collect::<Vec<_>>().join(",");
+            let sizes = (0..rank)
+                .map(|axis| format!("outputs[{index}].value.storage->dimensions[{axis}]"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let strides = (0..rank)
+                .map(|axis| format!("outputs[{index}].value.storage->strides[{axis}]"))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("(sev_ranked_memref_{rank}){{outputs[{index}].value.storage->owner != NULL ? outputs[{index}].value.storage->owner : (void *)outputs[{index}].value.storage->data, (void *)outputs[{index}].value.storage->data, outputs[{index}].value.storage->offset, {{{sizes}}}, {{{strides}}}}}")
         }
         LoweredType::Bytes | LoweredType::String => format!("outputs[{index}].value.pointer"),
-        LoweredType::Integer { signed: true, .. } => format!("outputs[{index}].value.signed_integer"),
-        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => format!("outputs[{index}].value.unsigned_integer"),
+        LoweredType::Integer { signed: true, .. } => {
+            format!("outputs[{index}].value.signed_integer")
+        }
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => {
+            format!("outputs[{index}].value.unsigned_integer")
+        }
         LoweredType::Float { .. } => format!("outputs[{index}].value.floating"),
-        unsupported => return Err(CompileError::NativeLink(format!("unsupported Tensor-JIT result {unsupported:?}"))),
+        unsupported => {
+            return Err(CompileError::NativeLink(format!(
+                "unsupported Tensor-JIT result {unsupported:?}"
+            )))
+        }
     })
 }
 
@@ -1545,12 +1693,23 @@ fn tensor_element_abi(
     use severian_mlir::{LoweredFloatFormat, LoweredTensorElement};
     Ok(match element {
         LoweredTensorElement::Integer { bits, signed: true } => (1, u32::from(bits), 0),
-        LoweredTensorElement::Integer { bits, signed: false } => (2, u32::from(bits), 0),
+        LoweredTensorElement::Integer {
+            bits,
+            signed: false,
+        } => (2, u32::from(bits), 0),
         LoweredTensorElement::Boolean => (2, 1, 0),
-        LoweredTensorElement::Float { format: LoweredFloatFormat::Ieee(bits) } => (3, u32::from(bits), 1),
-        LoweredTensorElement::Float { format: LoweredFloatFormat::BrainFloat16 } => (3, 16, 2),
-        LoweredTensorElement::Float { format: LoweredFloatFormat::Float8E4M3Fn } => (3, 8, 3),
-        LoweredTensorElement::Float { format: LoweredFloatFormat::Float8E5M2 } => (3, 8, 4),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Ieee(bits),
+        } => (3, u32::from(bits), 1),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::BrainFloat16,
+        } => (3, 16, 2),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E4M3Fn,
+        } => (3, 8, 3),
+        LoweredTensorElement::Float {
+            format: LoweredFloatFormat::Float8E5M2,
+        } => (3, 8, 4),
     })
 }
 
@@ -1561,7 +1720,12 @@ fn stable_tensor_jit_hash(bytes: &[u8]) -> [u64; 4] {
         9659303129496669493,
         2870177450012600261,
     ];
-    let primes = [1099511628211u64, 14029467366897019727, 1609587929392839161, 9650029242287828579];
+    let primes = [
+        1099511628211u64,
+        14029467366897019727,
+        1609587929392839161,
+        9650029242287828579,
+    ];
     for byte in bytes {
         for lane in 0..4 {
             hash[lane] ^= u64::from(*byte) + lane as u64 * 0x9d;
@@ -2161,10 +2325,7 @@ fn retain_reachable_functions(
 fn enqueue_function_references(
     instances: BTreeSet<severian_mir::FunctionId>,
     definitions: BTreeSet<severian_universal::DefId>,
-    functions_by_definition: &BTreeMap<
-        severian_universal::DefId,
-        Vec<severian_mir::FunctionId>,
-    >,
+    functions_by_definition: &BTreeMap<severian_universal::DefId, Vec<severian_mir::FunctionId>>,
     reachable: &mut BTreeSet<severian_mir::FunctionId>,
     queue: &mut std::collections::VecDeque<severian_mir::FunctionId>,
 ) {
@@ -2255,9 +2416,7 @@ fn collect_callee_functions(
 ) {
     match callee {
         severian_mir::Callee::Direct {
-            instance,
-            function,
-            ..
+            instance, function, ..
         } => {
             if let Some(instance) = instance {
                 instances.insert(*instance);
@@ -2544,13 +2703,9 @@ mod tests {
                 severian_mlir::LoweredTensorDimension::Known(4),
             ]),
         };
-        let source = render_tensor_jit_input(
-            3,
-            &ty,
-            severian_fusion::ElementKind::IeeeFloat,
-            false,
-        )
-        .unwrap();
+        let source =
+            render_tensor_jit_input(3, &ty, severian_fusion::ElementKind::IeeeFloat, false)
+                .unwrap();
         assert!(source.contains("arg3_view.owner = arg3_allocated"));
         assert!(source.contains("arg3_view.byte_length = (32 + 7) / 8"));
         assert!(source.contains("axis < 2"));
@@ -2720,11 +2875,7 @@ mod tests {
                     .check_file_to_mir(&source, CompileMode::Test)
                     .unwrap();
                 let compile_test = |name: &str| {
-                    let selected = mir
-                        .tests
-                        .iter()
-                        .find(|test| test.name == name)
-                        .unwrap();
+                    let selected = mir.tests.iter().find(|test| test.name == name).unwrap();
                     compiler
                         .compile_mir_to_mlir(&select_test(&mir, selected.function))
                         .unwrap()
@@ -2751,9 +2902,8 @@ mod tests {
             .all(|line| !line.contains("tensor<*x")));
         assert!(!mlir.contains("matmul_rank"));
         assert!(!mlir.contains("matmul_f32"));
-        assert!(load_mlir.contains(
-            "func.func private @__sev_safetensor_view(i64, !llvm.ptr) -> !llvm.ptr"
-        ));
+        assert!(load_mlir
+            .contains("func.func private @__sev_safetensor_view(i64, !llvm.ptr) -> !llvm.ptr"));
         assert!(!load_mlir.contains("load_bf16"));
         assert!(load_mlir
             .lines()

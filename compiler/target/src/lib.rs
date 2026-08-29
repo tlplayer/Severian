@@ -230,7 +230,7 @@ fn discover_host_devices(dev: &Path, drm: &Path) -> Vec<Device> {
     let rocm = dev.join("kfd").exists()
         && (Path::new("/usr/bin/rocminfo").exists()
             || Path::new("/opt/rocm/bin/rocminfo").exists());
-    let gpu_architecture = rocm_architecture().unwrap_or_else(|| "amdgpu".into());
+    let rocminfo_architecture = rocm_architecture();
     let Ok(entries) = std::fs::read_dir(drm) else {
         return devices;
     };
@@ -247,6 +247,13 @@ fn discover_host_devices(dev: &Path, drm: &Path) -> Vec<Device> {
         .collect::<Vec<_>>();
     render_nodes.sort();
     for name in render_nodes {
+        // KFD publishes the exact code-generation target independently of
+        // rocminfo and device-node access.  Prefer it so compilation remains
+        // deterministic in build sandboxes; rocminfo is only a fallback for
+        // systems whose kernel does not expose the topology hierarchy.
+        let architecture = kfd_architecture(&name)
+            .or_else(|| rocminfo_architecture.clone())
+            .unwrap_or_else(|| "amdgpu".into());
         let mut features = vec!["vendor.amd"];
         if rocm {
             features.extend(["driver.rocm", "mlir.rocdl"]);
@@ -254,11 +261,47 @@ fn discover_host_devices(dev: &Path, drm: &Path) -> Vec<Device> {
         devices.push(Device {
             name,
             kind: DeviceKind::Gpu,
-            architecture: gpu_architecture.clone(),
+            architecture,
             features: FeatureSet::from_names(features),
         });
     }
     devices
+}
+
+fn kfd_architecture(render_node: &str) -> Option<String> {
+    let render_minor = render_node.strip_prefix("renderD")?.parse::<u32>().ok()?;
+    let nodes = std::fs::read_dir("/sys/class/kfd/kfd/topology/nodes").ok()?;
+    for node in nodes.flatten() {
+        let properties = std::fs::read_to_string(node.path().join("properties")).ok()?;
+        if let Some(architecture) = parse_kfd_architecture(&properties, render_minor) {
+            return Some(architecture);
+        }
+    }
+    None
+}
+
+fn parse_kfd_architecture(properties: &str, render_minor: u32) -> Option<String> {
+    let property = |name: &str| {
+        properties.lines().find_map(|line| {
+            let mut fields = line.split_whitespace();
+            (fields.next()? == name)
+                .then(|| fields.next()?.parse::<u32>().ok())
+                .flatten()
+        })
+    };
+    if property("drm_render_minor")? != render_minor {
+        return None;
+    }
+    let packed = property("gfx_target_version")?;
+    if packed == 0 {
+        return None;
+    }
+    let major = packed / 10_000;
+    let minor = (packed / 100) % 100;
+    let stepping = packed % 100;
+    // LLVM spells the stepping as a hexadecimal digit (`10` -> `a`), as in
+    // gfx90a.  Major and minor remain decimal, yielding gfx1101 for 110001.
+    Some(format!("gfx{major}{minor}{stepping:x}"))
 }
 
 fn rocm_architecture() -> Option<String> {
@@ -401,5 +444,24 @@ mod tests {
                 .unwrap(),
             ExecutionBackend::Triton
         );
+    }
+
+    #[test]
+    fn kfd_target_version_preserves_amd_codegen_architecture() {
+        let properties = "gfx_target_version 110001\ndrm_render_minor 128\n";
+        assert_eq!(
+            parse_kfd_architecture(properties, 128).as_deref(),
+            Some("gfx1101")
+        );
+    }
+
+    #[test]
+    fn kfd_target_version_uses_hexadecimal_stepping_names() {
+        let properties = "drm_render_minor 129\ngfx_target_version 90010\n";
+        assert_eq!(
+            parse_kfd_architecture(properties, 129).as_deref(),
+            Some("gfx90a")
+        );
+        assert_eq!(parse_kfd_architecture(properties, 128), None);
     }
 }
