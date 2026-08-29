@@ -34,7 +34,8 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -56,6 +57,8 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+LLD_HAS_DRIVER(elf)
 
 namespace {
 
@@ -99,7 +102,7 @@ static void initializeCompiler() {
     mlir::registerAllPasses();
     mlir::triton::registerTritonPasses();
     mlir::triton::gpu::registerTritonGPUPasses();
-    mlir::triton::registerConvertTritonToTritonGPUPasses();
+    mlir::triton::registerConvertTritonToTritonGPUPass();
     mlir::triton::gpu::registerTritonGPUToLLVMPasses();
     mlir::registerTritonAMDGPUPasses();
     mlir::triton::registerTritonAMDGPUToLLVMPasses();
@@ -167,19 +170,26 @@ static bool optimizeTTGIR(ModuleOp module,
   mlir::PassManager pm(module.getContext());
   pm.enableVerifier(true);
   pm.addPass(createTritonGPUCoalesce());
-  pm.addPass(createTritonGPUF32DotTC(false));
+  TritonGPUF32DotTCOptions f32DotOptions;
+  f32DotOptions.emuTF32 = false;
+  pm.addPass(createTritonGPUF32DotTC(f32DotOptions));
   pm.addPass(createTritonGPURemoveLayoutConversions());
   pm.addPass(createTritonGPUOptimizeThreadLocality());
   // The generic accelerator dispatches on ttg.target. Rank and batch remain
   // properties of the tt.dot IR, never pass or symbol identities.
   pm.addPass(createTritonGPUAccelerateMatmul());
   pm.addPass(createTritonGPURemoveLayoutConversions());
-  pm.addPass(createTritonGPUOptimizeDotOperands(false));
+  TritonGPUOptimizeDotOperandsOptions dotOperandOptions;
+  dotOperandOptions.hoistLayoutConversion = false;
+  pm.addPass(createTritonGPUOptimizeDotOperands(dotOperandOptions));
   pm.addPass(createTritonGPUFuseNestedLoops());
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::triton::createTritonLoopInvariantCodeMotion());
   pm.addPass(createTritonGPUScheduleLoops());
-  pm.addPass(createTritonGPUPipeline(static_cast<int>(opt.num_stages), false));
+  TritonGPUPipelineOptions pipelineOptions;
+  pipelineOptions.numStages = static_cast<int>(opt.num_stages);
+  pipelineOptions.dumpIntermediateSteps = false;
+  pm.addPass(createTritonGPUPipeline(pipelineOptions));
   pm.addPass(createTritonGPURemoveLayoutConversions());
   pm.addPass(createTritonGPUReduceDataDuplication());
   pm.addPass(mlir::createCanonicalizerPass());
@@ -195,7 +205,7 @@ static bool lowerToLLVMDialect(ModuleOp module,
   mlir::PassManager pm(module.getContext());
   pm.enableVerifier(true);
   pm.addPass(mlir::triton::gpu::createTritonGPUAllocateWarpGroups());
-  pm.addPass(mlir::createConvertSCFToCFPass());
+  pm.addPass(mlir::createSCFToControlFlowPass());
   pm.addPass(mlir::createConvertIndexToLLVMPass());
   if (opt.target == SEV_TRITON_AMD_GPU) {
     const std::string arch = stringFrom(opt.architecture);
@@ -249,35 +259,33 @@ emitLLVM(llvm::Module &module, const std::string &triple,
          const std::string &processor, const std::string &features,
          llvm::CodeGenFileType fileType, std::string &diagnostic) {
   std::lock_guard<std::mutex> lock(llvmCodegenMutex);
+  const llvm::Triple targetTriple(triple);
   std::string lookupError;
   const llvm::Target *target =
-      llvm::TargetRegistry::lookupTarget(triple, lookupError);
+      llvm::TargetRegistry::lookupTarget(targetTriple, lookupError);
   if (!target) {
     diagnostic += "LLVM target lookup failed: " + lookupError + "\n";
     return std::nullopt;
   }
   llvm::TargetOptions targetOptions;
   std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-      triple, processor, features, targetOptions, llvm::Reloc::PIC_,
+      targetTriple, processor, features, targetOptions, llvm::Reloc::PIC_,
       std::nullopt, llvm::CodeGenOptLevel::Aggressive));
   if (!machine) {
     diagnostic += "LLVM could not construct a target machine\n";
     return std::nullopt;
   }
-  module.setTargetTriple(llvm::Triple(triple));
+  module.setTargetTriple(targetTriple);
   module.setDataLayout(machine->createDataLayout());
-  std::string artifact;
-  llvm::raw_string_ostream stream(artifact);
-  llvm::buffer_ostream buffered(stream);
+  llvm::SmallVector<char, 0> artifact;
+  llvm::raw_svector_ostream stream(artifact);
   llvm::legacy::PassManager passes;
-  if (machine->addPassesToEmitFile(passes, buffered, nullptr, fileType)) {
+  if (machine->addPassesToEmitFile(passes, stream, nullptr, fileType)) {
     diagnostic += "LLVM target cannot emit the requested artifact\n";
     return std::nullopt;
   }
   passes.run(module);
-  buffered.flush();
-  stream.flush();
-  return artifact;
+  return std::string(artifact.begin(), artifact.end());
 }
 
 static std::optional<std::vector<uint8_t>>
@@ -448,12 +456,12 @@ sev_triton_compile(const sev_triton_compile_request *request,
     stream.flush();
     return mlir::success();
   });
-  auto source = llvm::MemoryBuffer::getMemBuffer(
-      llvm::StringRef(reinterpret_cast<const char *>(request->ttir.data),
-                      request->ttir.len),
-      "severian.ttir", false);
+  mlir::ParserConfig parserConfig(&context);
   mlir::OwningOpRef<ModuleOp> module =
-      mlir::parseSourceFile<ModuleOp>(source->getMemBufferRef(), &context);
+      mlir::parseSourceString<ModuleOp>(
+          llvm::StringRef(reinterpret_cast<const char *>(request->ttir.data),
+                          request->ttir.len),
+          parserConfig, "severian.ttir");
   if (!module)
     return fail(output, SEV_TRITON_PARSE_FAILURE, std::move(diagnostics),
                 &options);

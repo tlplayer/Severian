@@ -1480,7 +1480,7 @@ fn render_tensor_jit_input(
         let sizes = (0..rank).map(|axis| format!("arg{index}_size{axis}")).collect::<Vec<_>>().join(",");
         let strides = (0..rank).map(|axis| format!("arg{index}_stride{axis}")).collect::<Vec<_>>().join(",");
         return Ok(format!(
-            "  int64_t arg{index}_dimensions[{rank}] = {{{sizes}}};\n  int64_t arg{index}_strides[{rank}] = {{{strides}}};\n  sev_jit_storage_view_abi arg{index}_view; memset(&arg{index}_view, 0, sizeof(arg{index}_view));\n  arg{index}_view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; arg{index}_view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; arg{index}_view.byte_size = sizeof(arg{index}_view);\n  arg{index}_view.data = (const uint8_t *)arg{index}_aligned; arg{index}_view.rank = {rank}; arg{index}_view.offset = arg{index}_offset; arg{index}_view.dimensions = arg{index}_dimensions; arg{index}_view.strides = arg{index}_strides;\n  arg{index}_view.element.abi_version = 1; arg{index}_view.element.byte_size = sizeof(arg{index}_view.element); arg{index}_view.element.kind = {element_kind}; arg{index}_view.element.bits = {bits}; arg{index}_view.element.float_format = {float_format};\n  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION; inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi); inputs[{index}].kind = SEV_TENSOR_JIT_VALUE_STORAGE; inputs[{index}].bits = {bits}; inputs[{index}].value.storage = &arg{index}_view;\n"
+            "  int64_t arg{index}_dimensions[{rank}] = {{{sizes}}};\n  int64_t arg{index}_strides[{rank}] = {{{strides}}};\n  sev_jit_storage_view_abi arg{index}_view; memset(&arg{index}_view, 0, sizeof(arg{index}_view));\n  arg{index}_view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; arg{index}_view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; arg{index}_view.byte_size = sizeof(arg{index}_view);\n  arg{index}_view.owner = arg{index}_allocated; arg{index}_view.data = (const uint8_t *)arg{index}_aligned; arg{index}_view.rank = {rank}; arg{index}_view.offset = arg{index}_offset; arg{index}_view.dimensions = arg{index}_dimensions; arg{index}_view.strides = arg{index}_strides;\n  arg{index}_view.byte_length = ({bits} + 7) / 8; for (uint64_t axis = 0; axis < {rank}; ++axis) arg{index}_view.byte_length *= (uint64_t)arg{index}_dimensions[axis];\n  arg{index}_view.element.abi_version = 1; arg{index}_view.element.byte_size = sizeof(arg{index}_view.element); arg{index}_view.element.kind = {element_kind}; arg{index}_view.element.bits = {bits}; arg{index}_view.element.float_format = {float_format};\n  inputs[{index}].abi_version = SEV_TENSOR_JIT_ABI_VERSION; inputs[{index}].byte_size = sizeof(sev_tensor_jit_value_abi); inputs[{index}].kind = SEV_TENSOR_JIT_VALUE_STORAGE; inputs[{index}].bits = {bits}; inputs[{index}].value.storage = &arg{index}_view;\n"
         ));
     }
     let field = match ty {
@@ -2531,6 +2531,29 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn ranked_tensor_jit_inputs_include_upload_byte_length() {
+        let ty = severian_mlir::LoweredType::Tensor {
+            element: severian_mlir::LoweredTensorElement::Float {
+                format: severian_mlir::LoweredFloatFormat::Ieee(32),
+            },
+            shape: severian_mlir::LoweredTensorShape::Ranked(vec![
+                severian_mlir::LoweredTensorDimension::Dynamic,
+                severian_mlir::LoweredTensorDimension::Known(4),
+            ]),
+        };
+        let source = render_tensor_jit_input(
+            3,
+            &ty,
+            severian_fusion::ElementKind::IeeeFloat,
+            false,
+        )
+        .unwrap();
+        assert!(source.contains("arg3_view.owner = arg3_allocated"));
+        assert!(source.contains("arg3_view.byte_length = (32 + 7) / 8"));
+        assert!(source.contains("axis < 2"));
     }
 
     #[test]

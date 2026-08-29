@@ -1,0 +1,568 @@
+#include <memory>
+#include <numeric>
+
+#include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Transforms/Passes.h"
+#include "triton/Analysis/Utility.h"
+#include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+#include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+#include "triton/Tools/LayoutUtils.h"
+
+namespace mlir {
+namespace triton {
+namespace gpu {
+
+#define GEN_PASS_DEF_TRITONGPUOPTIMIZETHREADLOCALITY
+#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+
+namespace {
+// Change the destination layout of reshape ops allowing reorder when used by a
+// reduction in order to minimize the amount of cross thread communication for
+// the reduction.
+struct OptimizeReshapeLayoutPattern : public OpRewritePattern<ReshapeOp> {
+  OptimizeReshapeLayoutPattern(MLIRContext *context)
+      : OpRewritePattern<ReshapeOp>(context, 1) {}
+
+  LogicalResult matchAndRewrite(ReshapeOp viewOp,
+                                PatternRewriter &rewriter) const override {
+    if (!viewOp.getAllowReorder())
+      return failure();
+    std::optional<int> reductionAxis;
+    for (Operation *user : viewOp.getResult().getUsers()) {
+      if (auto reduceOp = dyn_cast<triton::ReduceOp>(user)) {
+        if (reductionAxis) {
+          if (reductionAxis != reduceOp.getAxis())
+            return failure();
+        } else {
+          reductionAxis = reduceOp.getAxis();
+        }
+      }
+    }
+    if (!reductionAxis)
+      return failure();
+    RankedTensorType tensorType = viewOp.getType();
+    if (auto blocked =
+            mlir::dyn_cast<BlockedEncodingAttr>(tensorType.getEncoding())) {
+      // If the layout already has all the elements along the reduction
+      // dimension in the same thread we can skip.
+      if (blocked.getThreadsPerWarp()[*reductionAxis] == 1 &&
+          blocked.getWarpsPerCTA()[*reductionAxis] == 1 &&
+          blocked.getCGALayout().getCTAsPerCGA()[*reductionAxis] == 1)
+        return failure();
+    }
+    ArrayRef<int64_t> shape = tensorType.getShape();
+    SmallVector<unsigned> order;
+    for (int i : triton::gpu::getOrder(tensorType)) {
+      if (i != *reductionAxis)
+        order.push_back(i);
+    }
+    // Make the reduction axis last so that elements won't be distributed
+    // amongst threads along this dimension.
+    order.push_back(*reductionAxis);
+    SmallVector<unsigned> sizePerThread(shape.size(), 1);
+    auto mod = viewOp->getParentOfType<ModuleOp>();
+    int numWarps = lookupNumWarps(viewOp);
+    int threadsPerWarp = TritonGPUDialect::getThreadsPerWarp(mod);
+    int numCTAs = TritonGPUDialect::getNumCTAs(mod);
+    auto encoding =
+        BlockedEncodingAttr::get(viewOp.getContext(), shape, sizePerThread,
+                                 order, numWarps, threadsPerWarp, numCTAs);
+    if (encoding == tensorType.getEncoding())
+      return failure();
+    RankedTensorType newType =
+        RankedTensorType::get(shape, tensorType.getElementType(), encoding);
+    if (triton::gpu::isExpensiveView(viewOp.getSrc().getType(), newType))
+      return failure();
+    rewriter.setInsertionPointAfter(viewOp);
+    rewriter.modifyOpInPlace(viewOp, [&]() {
+      viewOp.getResult().setType(newType);
+      viewOp.setEfficientLayout(true);
+    });
+    auto cvt = ConvertLayoutOp::create(rewriter, viewOp.getLoc(), tensorType,
+                                       viewOp.getResult());
+    rewriter.replaceAllUsesExcept(viewOp.getResult(), cvt.getResult(), cvt);
+    return success();
+  }
+};
+} // namespace
+
+// This function considers a gather op in isolation and attempts to determine
+// whether an optimized layout can be applied to the source and index tensors.
+static LogicalResult setOptimizedGatherLayout(GatherOp op, RewriterBase &b) {
+  RankedTensorType srcType = op.getSrc().getType();
+  RankedTensorType idxType = op.getIndices().getType();
+
+  // Determine a warp-local gather layout that minimizes the number of emitted
+  // warp shuffles.
+  unsigned numThreadsPerWarp = lookupThreadsPerWarp(b);
+  unsigned numWarps = lookupNumWarps(op);
+
+  // If in a gather column, each thread owns `srcSizePerThread[axis]` elements
+  // in the source tensor and `idxSizePerThread[axis]` elements in the index
+  // tensor (including broadcasting), then the number of index shuffles per
+  // column is `srcSizePerThread[axis] * idxSizePerThread[axis]`. This is then
+  // replicated over the number of columns in which a thread owns (an equal
+  // number of) elements, which is `product(srcSizePerThread[i] for i != axis)`.
+  //
+  // Thus, the total number of index shuffles is `product(srcSizePerThread) *
+  // idxSizePerThread[axis]`. Since we cannot alter the number of threads per
+  // warp or the number of warps, `product(srcSizePerThread)` is just a function
+  // of the shape.
+  //
+  // So we want to minimize `idxSizePerThread[axis]`. Note that broadcasting is
+  // forbidden in the source tensor but allowed in the index tensor. Choose the
+  // smallest value while still ensuring that a warp spans whole columns.
+  //
+  // In order to prevent broadcasting in the source tensor layout, ensure
+  //
+  //   sizePerThread(i) * threadsPerWarp(i) * warpsPerCTA(i) = shape(i)
+  //
+  // For all i != axis in the source tensor. The same relationship must hold for
+  // the index tensor. This means we can't just set `idxSizePerThread[axis]` to
+  // 1 and compute the rest from that. Find the smallest value where this
+  // relationship is still respected.
+
+  // We know that the layouts will be the same between the two tensors except
+  // for `sizePerThread[axis]`.
+  unsigned axis = op.getAxis();
+  unsigned rank = srcType.getRank();
+  if (rank == 1)
+    return failure();
+  SmallVector<unsigned> threadsPerWarp(rank);
+  SmallVector<unsigned> warpsPerCTA(rank);
+  SmallVector<unsigned> order;
+  order.push_back(axis);
+
+  // Minimize `sizePerThread[axis]` by putting as many theads along the axis as
+  // possible, limited to the actual size of the dimension.
+  unsigned maxThreadsInAxis =
+      std::min<unsigned>(srcType.getDimSize(axis), numThreadsPerWarp);
+  threadsPerWarp[axis] = maxThreadsInAxis;
+
+  // Now spread them along the other dimensions. Do this according to order
+  // (arbitrary).
+  unsigned threadsToAlloc = numThreadsPerWarp / maxThreadsInAxis;
+  for (unsigned dim : getThreadOrder(srcType)) {
+    if (dim == axis)
+      continue;
+    // The gather axis is now the fastest-changing dimension.
+    order.push_back(dim);
+    unsigned nextThreadAlloc =
+        std::min<unsigned>(srcType.getDimSize(dim), threadsToAlloc);
+    threadsPerWarp[dim] = nextThreadAlloc;
+    threadsToAlloc /= nextThreadAlloc;
+  }
+  assert(llvm::none_of(threadsPerWarp, [](unsigned c) { return c == 0; }));
+
+  // There must be one warp along the gather axis.
+  warpsPerCTA[axis] = 1;
+  // Allocate the remaining warps in the same manner.
+  unsigned warpsToAlloc = numWarps;
+  for (unsigned dim : getWarpOrder(srcType)) {
+    if (dim == axis)
+      continue;
+    unsigned warpsCanFit = srcType.getDimSize(dim) / threadsPerWarp[dim];
+    assert(warpsCanFit != 0);
+    unsigned nextWarpAlloc = std::min<unsigned>(warpsCanFit, warpsToAlloc);
+    warpsPerCTA[dim] = nextWarpAlloc;
+    warpsToAlloc /= nextWarpAlloc;
+  }
+  assert(llvm::none_of(warpsPerCTA, [](unsigned c) { return c == 0; }));
+
+  // Just set `sizePerThread` to 1 along other dimensions and let broadcasting
+  // handle it. This also means we can use the same layout between the source
+  // and index tensors for simplicity. Along the gather axis, make sure the
+  // layout covers both tensors, which may have different dimension sizes.
+  SmallVector<unsigned> sizePerThread(rank, 1);
+  sizePerThread[axis] =
+      std::max(srcType.getDimSize(axis), idxType.getDimSize(axis)) /
+      threadsPerWarp[axis];
+
+  // Overflow by broadcasting along the gather axis since this is the most
+  // predictable.
+  threadsPerWarp[axis] *= threadsToAlloc;
+  warpsPerCTA[axis] *= warpsToAlloc;
+
+  assert(product(threadsPerWarp) == numThreadsPerWarp);
+  assert(product(warpsPerCTA) == numWarps);
+
+  // Construct the new layout.
+  MLIRContext *ctx = srcType.getContext();
+  auto baseLayout = cast<LayoutEncodingTrait>(srcType.getEncoding());
+  auto cgaLayout = getCGALayout(baseLayout);
+  auto newLayout = BlockedEncodingAttr::get(ctx, sizePerThread, threadsPerWarp,
+                                            warpsPerCTA, order, cgaLayout);
+
+  // Update the layout on the gather op and insert conversions.
+  auto cvtSrc = ConvertLayoutOp::create(
+      b, op.getLoc(), srcType.cloneWithEncoding(newLayout), op.getSrc());
+  auto cvtIdx = ConvertLayoutOp::create(
+      b, op.getLoc(), idxType.cloneWithEncoding(newLayout), op.getIndices());
+
+  b.setInsertionPointAfter(op);
+  auto cvtOut =
+      ConvertLayoutOp::create(b, op.getLoc(), op.getType(), op.getResult());
+  b.replaceAllUsesExcept(op.getResult(), cvtOut, cvtOut);
+
+  b.modifyOpInPlace(op, [&] {
+    op.getSrcMutable().set(cvtSrc);
+    op.getIndicesMutable().set(cvtIdx);
+    op.getResult().setType(op.getType().cloneWithEncoding(newLayout));
+
+    // Mark the layout as optimized on the op to prevent it from being changed.
+    op.setEfficientLayout(true);
+  });
+
+  // Make sure we did this right.
+  assert(GatherLoweringHelper(op).isWarpLocal());
+
+  return success();
+}
+
+namespace {
+struct OptimizeGatherLayoutPattern : public mlir::OpRewritePattern<GatherOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(GatherOp op,
+                                PatternRewriter &rewriter) const override {
+    if (op.getEfficientLayout())
+      return failure();
+    return setOptimizedGatherLayout(op, rewriter);
+  }
+};
+} // namespace
+
+namespace {
+// A reduction accumulated into an scf.for iter_arg:
+//
+//   %res = scf.for ... iter_args(.., %acc = %init, ..)  (forOp)
+//     %red = tt.reduce %src {axis = rank-1}             (reduce)
+//              [%a, %b] {return ⊕(%a, %b);}             (combiner)
+//     %upd = ⊕(%acc, %red)                              (update)
+//     scf.yield .., %upd, ..                            (slot argIdx)
+//
+struct AccumulatedReduce {
+  triton::ReduceOp reduce;
+  Operation *update;
+};
+
+std::optional<AccumulatedReduce> matchAccumulatedReduce(scf::ForOp forOp,
+                                                        unsigned argIdx) {
+  BlockArgument iterArg = forOp.getRegionIterArgs()[argIdx];
+  // The accumulator is only used at its own update in the loop
+  if (!iterArg.hasOneUse())
+    return std::nullopt;
+  Operation *update = forOp.getYieldedValues()[argIdx].getDefiningOp();
+  if (!update || !update->hasOneUse() ||
+      !update->hasTrait<OpTrait::IsCommutative>())
+    return std::nullopt;
+  // Match the reduce as the other operand of update
+  OpOperand &iterArgUse = llvm::getSingleElement(iterArg.getUses());
+  if (iterArgUse.getOwner() != update)
+    return std::nullopt;
+  auto reduce = update->getOperand(1 - iterArgUse.getOperandNumber())
+                    .getDefiningOp<triton::ReduceOp>();
+  if (!reduce || !reduce->hasOneUse() || reduce->getBlock() != forOp.getBody())
+    return std::nullopt;
+  Operation *combiner = reduce.getSingleCombiner();
+  // the combiner & the update needs to share the opcode, and it needs a neutral
+  // element to initialise the partial accumulator.
+  if (!combiner || update->getName() != combiner->getName() ||
+      !arith::getNeutralElement(combiner))
+    return std::nullopt;
+  auto srcType = cast<RankedTensorType>(reduce.getOperands()[0].getType());
+  auto rank = srcType.getShape().size();
+  unsigned axis = reduce.getAxis();
+  // TODO: relax this restriction
+  if (!(isa<triton::gpu::BlockedEncodingAttr>(srcType.getEncoding()) &&
+        rank > 1))
+    return std::nullopt;
+  // The code currently assumes that the reduction is happening on the most
+  // inner dim.
+  if (axis != rank - 1)
+    return std::nullopt;
+  // only profitable when there are inter-thread/warp/cta communication that
+  // can be deferred after the loop.
+  bool isThreadLocal = getThreadsPerWarp(srcType)[axis] == 1 &&
+                       getWarpsPerCTA(srcType)[axis] == 1 &&
+                       getCTASplitNum(srcType.getEncoding())[axis] == 1;
+  if (isThreadLocal)
+    return std::nullopt;
+  return AccumulatedReduce{reduce, update};
+}
+
+class TritonGPUOptimizeThreadLocalityPass
+    : public impl::TritonGPUOptimizeThreadLocalityBase<
+          TritonGPUOptimizeThreadLocalityPass> {
+  void runOnOperation() override {
+    ModuleOp mod = getOperation();
+
+    // First try to optimize the layout of views and gathers.
+    mlir::RewritePatternSet layoutPatterns(&getContext());
+    layoutPatterns.add<OptimizeReshapeLayoutPattern>(&getContext());
+    layoutPatterns.add<OptimizeGatherLayoutPattern>(&getContext());
+    if (mlir::applyPatternsGreedily(mod, std::move(layoutPatterns)).failed()) {
+      signalPassFailure();
+    }
+
+    // Collect the loops first: rewriting during the walk would invalidate it.
+    SmallVector<scf::ForOp> loops;
+    mod.walk([&](scf::ForOp forOp) -> void { loops.push_back(forOp); });
+
+    IRRewriter builder(&getContext());
+    for (scf::ForOp forOp : loops) {
+      // iterate over original iter args (each time forOp is rewritten, the
+      // new accumulator is appended to the arg list)
+      unsigned iterArgNum = forOp.getInitArgs().size();
+      for (unsigned argIdx = 0; argIdx != iterArgNum; ++argIdx) {
+        auto match = matchAccumulatedReduce(forOp, argIdx);
+        if (!match)
+          continue;
+        triton::ReduceOp reduce = match->reduce;
+        Operation *oldUpdate = match->update;
+        builder.setInsertionPoint(reduce);
+        auto srcType =
+            cast<RankedTensorType>(reduce.getOperands()[0].getType());
+        auto srcShape = srcType.getShape();
+        auto rank = srcShape.size();
+        // create new layouts
+        auto blocked3d = getThreadLocalityOptimizedEncoding(reduce);
+        auto viewOpTensorShape = getThreadLocalityOptimizedShape(reduce);
+        auto viewOpTensorType = RankedTensorType::get(
+            viewOpTensorShape, srcType.getElementType(), blocked3d);
+        auto slice2d = triton::gpu::SliceEncodingAttr::get(reduce.getContext(),
+                                                           rank, blocked3d);
+        auto blockArgNum = argIdx + forOp.getNumInductionVars();
+        // get oldAccum
+        auto oldAccum = forOp.getInitArgs()[argIdx];
+        // get old loop yield
+        auto oldYield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+        // create newAccum initialization
+        auto newAccum =
+            createAccum(builder, reduce, forOp, viewOpTensorShape, slice2d);
+        // create new loop by copying the old for op signature and appending
+        // newAccum to the block arguments
+        auto newLoop = replaceForOpWithNewSignature(
+            builder, forOp, ValueRange{newAccum->getResult(0)});
+        // create thread local reduction (also adds viewOps)
+        auto newReduce = createReduce(builder, reduce, viewOpTensorType);
+
+        // create new accum update
+        auto newUpdate = createUpdate(builder, newLoop, newReduce, oldUpdate);
+        // create new yield
+        createYield(builder, newLoop, oldYield, newUpdate->getResult(0),
+                    blockArgNum);
+        // create post loop reduction on the original reduce axis
+        auto newReduce2 = createPostLoopReduce(builder, newLoop, reduce);
+        // add convert_layout to get back to original layout, the result layout
+        // should now match the layout of the old accumulator (%init)
+        Type destType = newLoop.getResult(argIdx).getType();
+        auto cvtLayout = createConvertLayout(builder, destType, newReduce2);
+        // incorporate the original accumulator value into the final result
+        auto finalOp = incorporateOriginalAccumulatorValue(builder, oldUpdate,
+                                                           cvtLayout, oldAccum);
+        // Replace the old accumulator's uses with the final result
+        newLoop.getResult(argIdx).replaceAllUsesWith(finalOp->getResult(0));
+
+        // cleanup
+        oldYield.erase();
+        forOp.erase();
+        // continue matching other args on the replaced loop
+        forOp = newLoop;
+      }
+    }
+  };
+
+private:
+  Operation *incorporateOriginalAccumulatorValue(OpBuilder &builder,
+                                                 Operation *oldUpdate,
+                                                 Operation *cvtLayout,
+                                                 Value oldAccum) const {
+    builder.setInsertionPointAfter(cvtLayout);
+    IRMapping mapping;
+    mapping.map(oldUpdate->getOperand(0), oldAccum);
+    mapping.map(oldUpdate->getOperand(1), cvtLayout->getResult(0));
+    auto finalOp = cloneWithInferType(builder, &(*oldUpdate), mapping);
+    return finalOp;
+  }
+  Operation *createConvertLayout(OpBuilder &builder, Type destType,
+                                 Operation *newReduce) const {
+    builder.setInsertionPointAfter(newReduce);
+    auto newCvt = triton::gpu::ConvertLayoutOp::create(
+        builder, newReduce->getLoc(), destType, newReduce->getResult(0));
+    return newCvt;
+  }
+
+  Operation *createPostLoopReduce(OpBuilder &builder, scf::ForOp &loop,
+                                  triton::ReduceOp &reduce) const {
+    auto resultIndex =
+        loop.getBody()->getNumArguments() - 1 - loop.getNumInductionVars();
+    auto newLoopResult = loop.getResult(resultIndex);
+    builder.setInsertionPointAfter(loop);
+    IRMapping mapping;
+    mapping.map(reduce.getOperands()[0], newLoopResult);
+    auto newReduce2 = cloneWithInferType(builder, &(*reduce), mapping);
+    return newReduce2;
+  }
+
+  Operation *createYield(OpBuilder &builder, scf::ForOp &loop,
+                         scf::YieldOp &oldYield, Value newUpdate,
+                         int oldAccumBlockArgNum) const {
+    builder.setInsertionPoint(oldYield);
+    SmallVector<Value> yieldValues = llvm::to_vector(oldYield.getOperands());
+    yieldValues[oldAccumBlockArgNum - 1] =
+        loop.getBody()->getArgument(oldAccumBlockArgNum);
+    yieldValues.push_back(newUpdate);
+    auto newYield =
+        scf::YieldOp::create(builder, oldYield.getLoc(), yieldValues);
+    return newYield;
+  }
+
+  Operation *createUpdate(OpBuilder &builder, scf::ForOp &loop,
+                          Operation *newReduce, Operation *oldUpdate) const {
+    auto blockArgNum = loop.getBody()->getNumArguments() - 1;
+    auto newArg = loop.getBody()->getArgument(blockArgNum);
+    builder.setInsertionPointAfter(newReduce);
+    IRMapping mapping;
+    mapping.map(oldUpdate->getOperand(0), newArg);
+    mapping.map(oldUpdate->getOperand(1), newReduce->getResult(0));
+    auto newUpdate = cloneWithInferType(builder, oldUpdate, mapping);
+    return newUpdate;
+  }
+
+  Operation *createReduce(OpBuilder &builder, triton::ReduceOp reduce,
+                          Type viewOpTensorType) const {
+    auto srcType = cast<RankedTensorType>(reduce.getOperands()[0].getType());
+    auto dstType = cast<RankedTensorType>(viewOpTensorType);
+    auto dstShape = dstType.getShape();
+    auto rank = srcType.getShape().size();
+    auto blocked = cast<BlockedEncodingAttr>(srcType.getEncoding());
+    int64_t elemsPerThread = dstShape.back();
+    int64_t sizePerThread = std::min<int64_t>(
+        blocked.getSizePerThread()[reduce.getAxis()], elemsPerThread);
+
+    // Group register-owned elements without permuting non-reduction axes:
+    // [..., N] -> [..., R, H, S] -> [..., H, R, S] -> [..., H, R * S].
+    SmallVector<int64_t> factorShape(srcType.getShape().begin(),
+                                     srcType.getShape().end());
+    factorShape.back() = elemsPerThread / sizePerThread;
+    factorShape.push_back(dstShape[rank - 1]);
+    factorShape.push_back(sizePerThread);
+    SmallVector<int32_t> transposeOrder(rank + 2);
+    std::iota(transposeOrder.begin(), transposeOrder.end(), 0);
+    std::swap(transposeOrder[rank - 1], transposeOrder[rank]);
+
+    builder.setInsertionPointAfter(reduce);
+    Value operand = reduce.getOperands()[0];
+    auto factored = triton::ReshapeOp::create(builder, reduce.getLoc(),
+                                              factorShape, operand);
+    auto transposed = triton::TransOp::create(builder, reduce.getLoc(),
+                                              factored, transposeOrder);
+    auto viewOp = triton::ReshapeOp::create(builder, reduce.getLoc(), dstShape,
+                                            transposed);
+    viewOp.setEfficientLayout(true);
+    auto converted =
+        ConvertLayoutOp::create(builder, reduce.getLoc(), dstType, viewOp);
+    assert(cvtReordersRegisters(viewOp.getType(), converted.getType()) &&
+           "thread locality optimization requires a register-only layout "
+           "conversion");
+    IRMapping mapping;
+    mapping.map(operand, converted);
+
+    auto newReduce = cloneWithInferType(builder, &(*reduce), mapping);
+    newReduce->setAttr("axis", builder.getI32IntegerAttr(rank));
+    auto typeInfer = dyn_cast<InferTypeOpInterface>(newReduce);
+    if (typeInfer) {
+      SmallVector<Type, 1> newTypes;
+      auto success = typeInfer.inferReturnTypes(
+          newReduce->getContext(), newReduce->getLoc(),
+          newReduce->getOperands(), newReduce->getAttrDictionary(),
+          newReduce->getPropertiesStorage(), newReduce->getRegions(), newTypes);
+      if (succeeded(success))
+        newReduce->getResult(0).setType(newTypes[0]);
+    }
+    return newReduce;
+  }
+
+  Operation *createAccum(OpBuilder &builder, triton::ReduceOp reduce,
+                         scf::ForOp forOp, SmallVector<int64_t> &shape,
+                         Attribute &slice2d) const {
+    // Drop the last dimension (thread locality dimension)
+    SmallVector<int64_t> accumShape(shape.begin(), shape.end() - 1);
+    auto elemType = cast<RankedTensorType>(reduce.getOperands()[0].getType())
+                        .getElementType();
+    // Create tensor type for the new accumulator
+    auto accumType = RankedTensorType::get(accumShape, elemType, slice2d);
+    // Create new accumulator
+    builder.setInsertionPoint(forOp);
+    Operation *reductionOp = reduce.getSingleCombiner();
+    auto neutralVal = arith::getNeutralElement(reductionOp);
+    auto denseAttr = DenseElementsAttr::get(accumType, neutralVal.value());
+    auto newAccum = arith::ConstantOp::create(builder, forOp.getLoc(),
+                                              accumType, denseAttr);
+    return newAccum;
+  }
+
+  SmallVector<int64_t>
+  getThreadLocalityOptimizedShape(triton::ReduceOp reduce) const {
+    auto srcType = cast<RankedTensorType>(reduce.getOperands()[0].getType());
+    auto srcShape = srcType.getShape();
+    auto rank = srcShape.size();
+    auto elemsPerThread =
+        triton::gpu::getElemsPerThread(srcType)[reduce.getAxis()];
+    auto viewOpTensorShape = insertValue(srcShape, rank, 1);
+    viewOpTensorShape[reduce.getAxis()] /= elemsPerThread;
+    viewOpTensorShape[rank] = elemsPerThread;
+    return viewOpTensorShape;
+  }
+
+  BlockedEncodingAttr
+  getThreadLocalityOptimizedEncoding(triton::ReduceOp reduce) const {
+    auto srcType = cast<RankedTensorType>(reduce.getOperands()[0].getType());
+    auto rank = srcType.getShape().size();
+    auto srcEncoding = srcType.getEncoding();
+    auto blocked = dyn_cast<triton::gpu::BlockedEncodingAttr>(srcEncoding);
+    auto sizePerThread3d =
+        insertValue(blocked.getSizePerThread(), rank,
+                    blocked.getSizePerThread()[reduce.getAxis()]);
+    sizePerThread3d[reduce.getAxis()] = 1;
+    auto threadsPerWarp3d = insertValue(blocked.getThreadsPerWarp(), rank, 1);
+    auto warsPerCTA3d = insertValue(blocked.getWarpsPerCTA(), rank, 1);
+    auto order3d = insertValue(blocked.getOrder(), 0, rank);
+    auto cgaLl = blocked.getCGALayout().getLinearLayout();
+    auto kBlock = *cgaLl.getInDimNames().begin();
+    auto *ctx = kBlock.getContext();
+    auto dim = standardOutDimNames(ctx, rank + 1)[rank];
+    cgaLl *= LinearLayout::identity1D(1, kBlock, dim);
+    auto cgaLayout3d = CGAEncodingAttr::get(ctx, std::move(cgaLl));
+    auto blocked3d = triton::gpu::BlockedEncodingAttr::get(
+        reduce.getContext(), sizePerThread3d, threadsPerWarp3d, warsPerCTA3d,
+        order3d, cgaLayout3d);
+    return blocked3d;
+  }
+
+  template <typename T>
+  SmallVector<T> insertValue(ArrayRef<T> vec, unsigned index, int value) const {
+    SmallVector<T> res(vec.begin(), vec.end());
+    res.insert(res.begin() + index, static_cast<T>(value));
+    return res;
+  }
+  template <typename T>
+  SmallVector<T> insertValue(const SmallVector<T> &vec, unsigned index,
+                             int value) const {
+    SmallVector<T> res(vec.begin(), vec.end());
+    res.insert(res.begin() + index, static_cast<T>(value));
+    return res;
+  }
+};
+} // namespace
+
+} // namespace gpu
+} // namespace triton
+} // namespace mlir

@@ -2,9 +2,10 @@
 
 //! Stable Severian-to-Triton compiler boundary.
 //!
-//! Triton's compiler core remains an external MLIR/C++ component. Severian
-//! owns this versioned ABI, the full fusion graph, and the TTIR it submits.
-//! Pass ordering is adapted from Triton (MIT); see `THIRD_PARTY_NOTICES.md`.
+//! Severian owns the full fusion graph, TTIR construction, versioned compiler
+//! contract, and Rust ports of donor layout and target policy. Machine-code
+//! emission remains behind the compiler trait while donor lowering is moved
+//! into Rust in structural units. See `THIRD_PARTY_NOTICES.md`.
 
 use severian_fusion::{
     AliasKind, ElementKind, FusionGraph, FusionRegion, GpuTarget, KernelSpecialization, Mutation,
@@ -15,8 +16,14 @@ use std::fmt;
 
 #[allow(unsafe_code)]
 mod native;
+mod donor;
+mod linear_layout;
 mod ttir;
 
+pub use donor::{AmdIsaFamily, AmdTargetFeatures, LdsTransLoadParameters};
+pub use linear_layout::{
+    LayoutDimension, LayoutInputDimension, LinearLayout, LinearLayoutError,
+};
 pub use native::NativeTritonCompiler;
 pub use ttir::TtirModule;
 
@@ -54,11 +61,13 @@ pub struct CompileOptions {
 
 impl CompileOptions {
     pub fn amd(architecture: impl Into<String>) -> Self {
+        let architecture = architecture.into();
+        let warp_size = AmdTargetFeatures::new(&architecture).warp_size();
         Self {
             target: CompileTarget::AmdGpu,
-            architecture: architecture.into(),
+            architecture,
             num_warps: 4,
-            warp_size: 64,
+            warp_size,
             num_ctas: 1,
             num_stages: 2,
             emit: KernelFormat::Hsaco,

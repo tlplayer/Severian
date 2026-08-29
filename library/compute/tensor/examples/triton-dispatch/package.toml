@@ -1,0 +1,18 @@
+[package]
+name = "tensor-triton-dispatch"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "tensor-triton-dispatch"
+description = "Executable FusionRegion to Triton to GPU dispatch smoke test"
+
+[[bin]]
+name = "tensor-triton-dispatch"
+path = "src/main.sev"
+
+[dependencies]
+tensor = { path = "../..", version = "0.1.0" }
+
+[build]
+profile = "release"
+target = "host"

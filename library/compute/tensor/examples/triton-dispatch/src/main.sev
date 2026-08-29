@@ -1,0 +1,20 @@
+import tensor
+
+
+def main():
+    left = tensor.to_f_32(tensor.ranked([-1.0, 2.0, -3.0, 4.0], [4]))
+    right = tensor.to_f_32(tensor.ranked([0.5, 5.5, 1.0, 8.0], [4]))
+
+    # Both structural operations are explicitly GPU placed. Their dependent
+    # dispatches exercise StorageView specialization before Severian emits
+    # TTIR and transfer the intermediate through the GPU runtime contract.
+    with self and gpu:
+        summed = tensor.add(left, right)
+        activated = tensor.relu(summed)
+
+    values = tensor.values(activated)
+    assert(size(values) == 4)
+    assert(values[0] == 0.0)
+    assert(values[1] == 7.5)
+    assert(values[2] == 0.0)
+    assert(values[3] == 12.0)

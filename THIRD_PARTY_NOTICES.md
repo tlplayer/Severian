@@ -12,9 +12,11 @@ available at <https://www.apache.org/licenses/LICENSE-2.0>.
 
 ## Triton
 
-The pass-order descriptions and native bridge ABI in
+The pass-order descriptions, layout implementation, and compiler boundary in
 `compiler/boundaries/triton` are designed from Triton's TTIR, TritonGPU, AMD,
-and NVIDIA compiler pipelines.
+and NVIDIA compiler pipelines. The pinned core and AMD reference sources are
+vendored under `third_party/triton-donor` at revision
+`8957b9aac23e526fb1252c7c3b592e6f43c175c8`.
 
 Copyright 2018-2020 Philippe Tillet. Copyright 2020-2022 OpenAI.
 

@@ -204,7 +204,12 @@ impl GpuDriver for NativeGpuDriver {
             architecture: self.architecture.clone(),
             total_memory_bytes: 0,
             max_shared_memory_bytes: 0,
-            warp_size: if self.target == GpuTarget::Amd { 64 } else { 32 },
+            warp_size: match self.target {
+                GpuTarget::Amd => {
+                    severian_triton::AmdTargetFeatures::new(&self.architecture).warp_size()
+                }
+                GpuTarget::Nvidia => 32,
+            },
         }])
     }
 

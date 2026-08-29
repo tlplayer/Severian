@@ -419,7 +419,12 @@ fn compile_gpu(
         target,
         architecture: program.architecture.clone(),
         num_warps: 4,
-        warp_size: if program.target == TensorJitTarget::Amd { 64 } else { 32 },
+        warp_size: match target {
+            GpuTarget::Amd => {
+                severian_triton::AmdTargetFeatures::new(&program.architecture).warp_size()
+            }
+            GpuTarget::Nvidia => 32,
+        },
         num_ctas: 1,
         num_stages: 2,
         emit: if program.target == TensorJitTarget::Amd {

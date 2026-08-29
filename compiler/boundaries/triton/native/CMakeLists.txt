@@ -3,10 +3,17 @@ project(severian_triton_native LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# The donor libraries are static, but Severian loads them through this shared
+# bridge at runtime. Every embedded object therefore has to be position
+# independent, including Triton's optional AMD/NVIDIA subdirectories.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # GCC 15 diagnoses an APInt small-storage destructor path after inlining;
-  # the object is valid and older GCC/Clang do not emit this false positive.
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-error=free-nonheap-object>)
+  # GCC 15 diagnoses APInt small-storage destruction and generated MLIR
+  # operand-segment copies after inlining. The objects are valid and
+  # older GCC/Clang do not emit these false positives.
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-error=free-nonheap-object>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-error=stringop-overflow>)
 endif()
 
 set(SEVERIAN_TRITON_SOURCE_DIR "" CACHE PATH "Pinned Triton source checkout")
@@ -53,6 +60,13 @@ add_subdirectory("${SEVERIAN_TRITON_SOURCE_DIR}/third_party/amd"
                  triton/third_party/amd EXCLUDE_FROM_ALL)
 add_subdirectory("${SEVERIAN_TRITON_SOURCE_DIR}/third_party/nvidia"
                  triton/third_party/nvidia EXCLUDE_FROM_ALL)
+# Both conversion libraries have a private Utility.h included by sources in a
+# DotOpToLLVM subdirectory. Scope each parent include root to its own target so
+# the identically named AMD and NVIDIA headers cannot shadow one another.
+target_include_directories(TritonAMDGPUToLLVM PRIVATE
+  "${SEVERIAN_TRITON_SOURCE_DIR}/third_party/amd/lib/TritonAMDGPUToLLVM")
+target_include_directories(TritonNVIDIAGPUToLLVM PRIVATE
+  "${SEVERIAN_TRITON_SOURCE_DIR}/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM")
 add_dependencies(NVHopperTransforms TritonGPUTransformsIncGen)
 
 find_package(LLD REQUIRED CONFIG PATHS "${LLD_DIR}" NO_DEFAULT_PATH)
@@ -68,7 +82,11 @@ target_include_directories(severian_triton_bridge PRIVATE
   "${SEVERIAN_TRITON_SOURCE_DIR}/include"
   "${CMAKE_BINARY_DIR}/triton/include"
   "${SEVERIAN_TRITON_SOURCE_DIR}/third_party"
+  "${SEVERIAN_TRITON_SOURCE_DIR}/third_party/amd/include"
+  "${SEVERIAN_TRITON_SOURCE_DIR}/third_party/nvidia/include"
   "${CMAKE_BINARY_DIR}/triton/third_party"
+  "${CMAKE_BINARY_DIR}/triton/third_party/amd/include"
+  "${CMAKE_BINARY_DIR}/triton/third_party/nvidia/include"
   ${MLIR_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS})
 target_link_libraries(severian_triton_bridge PRIVATE
