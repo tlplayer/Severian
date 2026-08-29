@@ -56,10 +56,23 @@ const REQUIRED_TOPOLOGY: &[&str] = &[
     "library/network",
     "library/tensor",
     "library/process",
+    "library/compute",
+    "library/core",
+    "library/data",
+    "library/harness",
+    "library/interop",
+    "library/media",
+    "library/model",
+    "library/system",
+    "library/testing",
     "compiler/compile_types",
     "compiler/hooks",
     "compiler/directives",
     "compiler/backends",
+    "compiler/targets",
+    "compiler/artifacts",
+    "compiler/passes",
+    "compiler/runtime",
 ];
 
 #[derive(Clone)]
@@ -114,13 +127,14 @@ pub fn run(arguments: Vec<String>) -> Result<(), String> {
             }
             let report = check(&root)?;
             println!(
-                "API check passed: {} features, {} snippets, {} topology sections; coverage: {} Rust enums, {} primitive registries, {} structural IDs, {} library export surfaces (100% source agreement)",
+                "API check passed: {} features, {} snippets, {} topology sections; coverage: {} Rust enums, {} primitive registries, {} structural IDs, {} library packages, {} library export surfaces (100% source agreement)",
                 report.features,
                 report.snippets,
                 report.sections,
                 report.rust_enums,
                 report.rust_registries,
                 report.source_tokens,
+                report.library_packages,
                 report.export_surfaces,
             );
             Ok(())
@@ -152,7 +166,7 @@ fn normalize_root(path: PathBuf) -> Result<PathBuf, String> {
     let candidate = if path.join("index.toml").is_file() {
         path
     } else {
-        path.join("api")
+        path.join("docs/api")
     };
     if candidate.join("index.toml").is_file() {
         fs::canonicalize(&candidate)
@@ -168,12 +182,18 @@ fn normalize_root(path: PathBuf) -> Result<PathBuf, String> {
 fn discover_root() -> Result<PathBuf, String> {
     let cwd = env::current_dir().map_err(|error| error.to_string())?;
     for directory in cwd.ancestors() {
-        let candidate = directory.join("api");
+        let candidate = directory.join("docs/api");
         if candidate.join("index.toml").is_file() {
             return Ok(candidate);
         }
     }
-    Err("could not find api/index.toml; run inside a Severian checkout or pass --root".into())
+    Err("could not find docs/api/index.toml; run inside a Severian checkout or pass --root".into())
+}
+
+fn repository_root(root: &Path) -> Result<&Path, String> {
+    root.ancestors()
+        .find(|candidate| candidate.join("Cargo.toml").is_file() && candidate.join("compiler").is_dir())
+        .ok_or_else(|| format!("{} is not inside a Severian repository", root.display()))
 }
 
 struct CheckReport {
@@ -183,6 +203,7 @@ struct CheckReport {
     rust_enums: usize,
     rust_registries: usize,
     source_tokens: usize,
+    library_packages: usize,
     export_surfaces: usize,
 }
 
@@ -199,6 +220,16 @@ fn check(root: &Path) -> Result<CheckReport, String> {
             return Err(format!(
                 "{}: missing `{field}`",
                 root.join("index.toml").display()
+            ));
+        }
+    }
+    if string_field(&index, "root")? != "docs/api" {
+        return Err("docs/api/index.toml: `root` must be `docs/api`".into());
+    }
+    for document in string_array(&index, "documents")? {
+        if !root.join(document).is_file() {
+            return Err(format!(
+                "docs/api/index.toml references missing document `{document}`"
             ));
         }
     }
@@ -350,6 +381,10 @@ fn check(root: &Path) -> Result<CheckReport, String> {
             .get("source_token")
             .and_then(toml::Value::as_array)
             .map_or(0, Vec::len),
+        library_packages: coverage
+            .get("library_package")
+            .and_then(toml::Value::as_array)
+            .map_or(0, Vec::len),
         export_surfaces,
     })
 }
@@ -359,9 +394,7 @@ fn validate_compiler_coverage(
     index: &toml::Value,
     features: &BTreeMap<String, Feature>,
 ) -> Result<(), String> {
-    let repository = root
-        .parent()
-        .ok_or_else(|| format!("{} has no repository parent", root.display()))?;
+    let repository = repository_root(root)?;
     let coverage = index
         .get("coverage")
         .ok_or("api/index.toml: missing [coverage]")?;
@@ -454,6 +487,64 @@ fn validate_compiler_coverage(
             }
         }
     }
+    if let Some(packages) = coverage
+        .get("library_package")
+        .and_then(toml::Value::as_array)
+    {
+        let mut documented_sources = BTreeSet::new();
+        for contract in packages {
+            let source = string_field(contract, "source")?;
+            let id = string_field(contract, "id")?;
+            let path = repository.join(source);
+            if !path.is_file() {
+                return Err(format!(
+                    "library package contract references missing {}",
+                    path.display()
+                ));
+            }
+            if !features.contains_key(id) {
+                return Err(format!(
+                    "library package `{source}` references missing API feature `{id}`"
+                ));
+            }
+            documented_sources.insert(PathBuf::from(source));
+        }
+        let mut actual = Vec::new();
+        collect_named_files(&repository.join("library"), "package.toml", &mut actual)?;
+        let actual = actual
+            .into_iter()
+            .filter_map(|path| path.strip_prefix(repository).ok().map(Path::to_path_buf))
+            .collect::<BTreeSet<_>>();
+        let missing = actual
+            .difference(&documented_sources)
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let stale = documented_sources
+            .difference(&actual)
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() || !stale.is_empty() {
+            return Err(format!(
+                "library package API coverage mismatch; missing={missing:?}, stale={stale:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn collect_named_files(path: &Path, name: &str, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in
+        fs::read_dir(path).map_err(|error| format!("could not read {}: {error}", path.display()))?
+    {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|value| value.to_str()) != Some("target") {
+                collect_named_files(&path, name, output)?;
+            }
+        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
+            output.push(path);
+        }
+    }
     Ok(())
 }
 
@@ -532,11 +623,9 @@ fn load_features(root: &Path) -> Result<BTreeMap<String, Feature>, String> {
 
 fn diff(root: &Path, arguments: &[String]) -> Result<(), String> {
     if arguments.is_empty() {
-        let repository = root
-            .parent()
-            .ok_or_else(|| format!("{} has no repository parent", root.display()))?;
+        let repository = repository_root(root)?;
         let output = Command::new("git")
-            .args(["status", "--short", "--", "api"])
+            .args(["status", "--short", "--", "docs/api"])
             .current_dir(repository)
             .output()
             .map_err(|error| format!("could not inspect API workspace changes: {error}"))?;
@@ -666,9 +755,7 @@ fn validate_source_exports(root: &Path, value: &toml::Value, file: &Path) -> Res
             .map(source_symbol_from_syntax)
             .collect()
     };
-    let repository = root
-        .parent()
-        .ok_or_else(|| format!("{} has no repository parent", root.display()))?;
+    let repository = repository_root(root)?;
     let mut actual = BTreeSet::new();
     for source in sources {
         let relative = source

@@ -1,9 +1,9 @@
 # Severian API specification
 
-This first-class specification lives under `api/`; examples elsewhere in
+This first-class specification lives under `docs/api/`; examples elsewhere in
 the repository demonstrate usage but do not independently define the API.
 
-`api/` is the normative specification of Severian's public surface. It
+`docs/api/` is the normative specification of Severian's public surface. It
 answers **what exists, what it means, and what is promised**. Focused Markdown
 pages are the human contract; TOML records are the machine-checkable index.
 `docs/examples/` answers **how larger programs use the features together**.
@@ -32,6 +32,7 @@ surface:
 - [Python/Rust symmetry methodology](SYMMETRY.md)
 - [Generic notation](APPENDIX.md)
 - [Weakness ledger](WEAKNESSES.md)
+- [Completeness and relationship audit](AUDIT.md)
 
 The catalogue currently materializes 430 queryable feature records. Exact
 members are inherited from documented families so `primitive.i32` and
@@ -89,7 +90,7 @@ sev api list
 sev api show operator.add
 sev api show primitive.i32
 sev api check
-sev api diff path/to/old/api api
+sev api diff path/to/old/docs/api docs/api
 sev run api --bin api-check
 sev run api --bin api-symmetry
 ```

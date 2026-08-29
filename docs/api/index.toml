@@ -1,5 +1,5 @@
 specification_version = 1
-root = "api"
+root = "docs/api"
 edition = "2026"
 schema = "schema/feature.schema.json"
 record_globs = [
@@ -8,7 +8,7 @@ record_globs = [
   "library/**/*.toml",
   "prelude/**/*.toml",
 ]
-documents = ["README.md", "APPENDIX.md", "SYMMETRY.md", "WEAKNESSES.md"]
+documents = ["README.md", "APPENDIX.md", "SYMMETRY.md", "WEAKNESSES.md", "AUDIT.md"]
 statuses = ["specified", "implemented", "partial", "experimental", "deprecated", "unavailable"]
 
 [editor]
@@ -185,3 +185,184 @@ token = "OpId::named(\"tensor\", \"convert\")"
 id = "tensor.storage_view"
 source = "compiler/universal/src/tensor.rs"
 token = "OpId::named(\"tensor\", \"storage_view\")"
+
+[[coverage.library_package]]
+source = "library/compute/package.toml"
+id = "library.compute"
+[[coverage.library_package]]
+source = "library/compute/distributed/package.toml"
+id = "library.compute.distributed"
+[[coverage.library_package]]
+source = "library/compute/parallel/package.toml"
+id = "library.compute.parallel"
+[[coverage.library_package]]
+source = "library/compute/tensor/package.toml"
+id = "library.tensor"
+[[coverage.library_package]]
+source = "library/core/package.toml"
+id = "library.core"
+[[coverage.library_package]]
+source = "library/core/bits/package.toml"
+id = "library.core.bits"
+[[coverage.library_package]]
+source = "library/core/compile/package.toml"
+id = "library.core.compile"
+[[coverage.library_package]]
+source = "library/core/error/package.toml"
+id = "library.core.error"
+[[coverage.library_package]]
+source = "library/core/hash/package.toml"
+id = "library.core.hash"
+[[coverage.library_package]]
+source = "library/core/math/package.toml"
+id = "library.core.math"
+[[coverage.library_package]]
+source = "library/core/memory/package.toml"
+id = "library.core.memory"
+[[coverage.library_package]]
+source = "library/core/random/package.toml"
+id = "library.core.random"
+[[coverage.library_package]]
+source = "library/core/regex/package.toml"
+id = "library.core.regex"
+[[coverage.library_package]]
+source = "library/core/size/package.toml"
+id = "library.core.size"
+[[coverage.library_package]]
+source = "library/core/text/package.toml"
+id = "library.core.text"
+[[coverage.library_package]]
+source = "library/core/time/package.toml"
+id = "library.core.time"
+[[coverage.library_package]]
+source = "library/core/collections/array/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/deque/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/heap/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/list/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/map/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/queue/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/set/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/stack/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/traits/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/data/package.toml"
+id = "library.data"
+[[coverage.library_package]]
+source = "library/data/csv/package.toml"
+id = "library.data.csv"
+[[coverage.library_package]]
+source = "library/data/database/package.toml"
+id = "library.data.database"
+[[coverage.library_package]]
+source = "library/data/json/package.toml"
+id = "library.data.json"
+[[coverage.library_package]]
+source = "library/data/pql/package.toml"
+id = "library.data.pql"
+[[coverage.library_package]]
+source = "library/data/sql/package.toml"
+id = "library.data.sql"
+[[coverage.library_package]]
+source = "library/data/storage/package.toml"
+id = "library.data.storage"
+[[coverage.library_package]]
+source = "library/data/yaml/package.toml"
+id = "library.data.yaml"
+[[coverage.library_package]]
+source = "library/harness/package.toml"
+id = "library.harness"
+[[coverage.library_package]]
+source = "library/interop/abi/package.toml"
+id = "library.interop.abi"
+[[coverage.library_package]]
+source = "library/interop/ffi/package.toml"
+id = "library.interop.ffi"
+[[coverage.library_package]]
+source = "library/media/audio/package.toml"
+id = "library.media.audio"
+[[coverage.library_package]]
+source = "library/media/graphics/package.toml"
+id = "library.media.graphics"
+[[coverage.library_package]]
+source = "library/media/plot/package.toml"
+id = "library.media.plot"
+[[coverage.library_package]]
+source = "library/model/package.toml"
+id = "library.model"
+[[coverage.library_package]]
+source = "library/model/codecs/higgs_audio_v2/package.toml"
+id = "library.model.higgs_audio_v2"
+[[coverage.library_package]]
+source = "library/model/examples/omnivoice/package.toml"
+id = "library.model.omnivoice"
+[[coverage.library_package]]
+source = "library/network/package.toml"
+id = "library.network"
+[[coverage.library_package]]
+source = "library/network/http/package.toml"
+id = "library.network.http"
+[[coverage.library_package]]
+source = "library/network/tls/package.toml"
+id = "library.network.tls"
+[[coverage.library_package]]
+source = "library/system/package.toml"
+id = "library.system"
+[[coverage.library_package]]
+source = "library/system/cli/package.toml"
+id = "library.system.cli"
+[[coverage.library_package]]
+source = "library/system/container/package.toml"
+id = "library.system.container"
+[[coverage.library_package]]
+source = "library/system/device/package.toml"
+id = "library.system.device"
+[[coverage.library_package]]
+source = "library/system/driver/package.toml"
+id = "library.system.driver"
+[[coverage.library_package]]
+source = "library/system/environment/package.toml"
+id = "library.system.environment"
+[[coverage.library_package]]
+source = "library/system/file/package.toml"
+id = "library.file"
+[[coverage.library_package]]
+source = "library/system/io/package.toml"
+id = "library.system.io"
+[[coverage.library_package]]
+source = "library/system/oci/package.toml"
+id = "library.system.oci"
+[[coverage.library_package]]
+source = "library/system/orchestrator/package.toml"
+id = "library.system.orchestrator"
+[[coverage.library_package]]
+source = "library/system/os/package.toml"
+id = "library.system.os"
+[[coverage.library_package]]
+source = "library/system/path/package.toml"
+id = "library.system.path"
+[[coverage.library_package]]
+source = "library/system/platform/package.toml"
+id = "library.system.platform"
+[[coverage.library_package]]
+source = "library/system/process/package.toml"
+id = "library.process"
+[[coverage.library_package]]
+source = "library/testing/package.toml"
+id = "library.testing"
