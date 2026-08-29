@@ -14,6 +14,7 @@ use severian_fusion::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeviceId(pub u32);
@@ -1262,6 +1263,15 @@ pub enum RuntimeError {
     InvalidDevice(DeviceId),
     TargetMismatch,
     InvalidAlignment(u64),
+    GpuSingleAllocationLimit {
+        requested: u64,
+        limit: u64,
+    },
+    GpuMemoryLimit {
+        requested: u64,
+        live: u64,
+        limit: u64,
+    },
     AddressOverflow,
     GridOverflow,
     MissingOutputShape(NodeId),
@@ -1296,6 +1306,18 @@ impl fmt::Display for RuntimeError {
                     "invalid GPU argument/buffer alignment {alignment}"
                 )
             }
+            Self::GpuSingleAllocationLimit { requested, limit } => write!(
+                formatter,
+                "GPU allocation of {requested} bytes exceeds the per-allocation limit of {limit} bytes"
+            ),
+            Self::GpuMemoryLimit {
+                requested,
+                live,
+                limit,
+            } => write!(
+                formatter,
+                "GPU allocation of {requested} bytes with {live} live bytes would exceed the {limit}-byte runtime budget"
+            ),
             Self::AddressOverflow => formatter.write_str("GPU buffer address overflow"),
             Self::GridOverflow => formatter.write_str("GPU launch grid overflow"),
             Self::MissingOutputShape(node) => {
@@ -1396,6 +1418,18 @@ pub fn schedule_fusion_regions(
 
 impl std::error::Error for RuntimeError {}
 
+fn env_u64(name: &str, fallback: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(fallback)
+}
+
+fn allocation_pressure(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("memory") || error.contains("alloc") || error.contains("resource")
+}
+
 pub struct RegionInvocation<'a> {
     pub id: RegionExecutionId,
     pub graph: &'a FusionGraph,
@@ -1411,6 +1445,7 @@ pub struct ExecutionResult {
     pub events: BTreeMap<RegionExecutionId, EventId>,
     pub cache_hits: usize,
     pub cache_misses: usize,
+    temporary_buffers: Vec<BufferId>,
 }
 
 pub struct GpuRuntime<D, C> {
@@ -1418,16 +1453,41 @@ pub struct GpuRuntime<D, C> {
     jit: TensorJit<C>,
     devices: Vec<DeviceInfo>,
     loaded: BTreeMap<(DeviceId, CacheKey), KernelId>,
+    allocations: BTreeMap<BufferId, u64>,
+    live_allocation_bytes: u64,
+    max_live_allocation_bytes: u64,
+    max_single_allocation_bytes: u64,
 }
 
 impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
     pub fn new(driver: D, compiler: C, cache: KernelCache) -> Result<Self, RuntimeError> {
         let devices = driver.discover_devices().map_err(RuntimeError::Driver)?;
+        let available = devices
+            .iter()
+            .map(|device| device.total_memory_bytes)
+            .min()
+            .unwrap_or(0);
+        let reserved = 1u64 << 30;
+        let default_live = available
+            .saturating_sub(reserved)
+            .min(available.saturating_mul(3) / 4);
+        let max_live_allocation_bytes = env_u64(
+            "SEVERIAN_GPU_MAX_LIVE_BYTES",
+            default_live.max(256 << 20),
+        );
+        let max_single_allocation_bytes = env_u64(
+            "SEVERIAN_GPU_MAX_SINGLE_ALLOCATION_BYTES",
+            (max_live_allocation_bytes / 2).max(64 << 20),
+        );
         Ok(Self {
             driver,
             jit: TensorJit::new(compiler, cache),
             devices,
             loaded: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            live_allocation_bytes: 0,
+            max_live_allocation_bytes,
+            max_single_allocation_bytes,
         })
     }
 
@@ -1453,13 +1513,52 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         if alignment == 0 || !alignment.is_power_of_two() {
             return Err(RuntimeError::InvalidAlignment(alignment));
         }
-        self.driver
-            .allocate(device, bytes, alignment)
-            .map_err(RuntimeError::Driver)
+        if bytes > self.max_single_allocation_bytes {
+            return Err(RuntimeError::GpuSingleAllocationLimit {
+                requested: bytes,
+                limit: self.max_single_allocation_bytes,
+            });
+        }
+        let projected = self
+            .live_allocation_bytes
+            .checked_add(bytes)
+            .ok_or(RuntimeError::GpuMemoryLimit {
+                requested: bytes,
+                live: self.live_allocation_bytes,
+                limit: self.max_live_allocation_bytes,
+            })?;
+        if projected > self.max_live_allocation_bytes {
+            return Err(RuntimeError::GpuMemoryLimit {
+                requested: bytes,
+                live: self.live_allocation_bytes,
+                limit: self.max_live_allocation_bytes,
+            });
+        }
+        let retries = env_u64("SEVERIAN_GPU_ALLOCATION_RETRIES", 3);
+        let initial_backoff_ms = env_u64("SEVERIAN_GPU_ALLOCATION_BACKOFF_MS", 1000);
+        let mut attempt = 0;
+        let buffer = loop {
+            match self.driver.allocate(device, bytes, alignment) {
+                Ok(buffer) => break buffer,
+                Err(error) if allocation_pressure(&error) && attempt < retries => {
+                    let delay = initial_backoff_ms.saturating_mul(1u64 << attempt.min(20));
+                    std::thread::sleep(Duration::from_millis(delay));
+                    attempt += 1;
+                }
+                Err(error) => return Err(RuntimeError::Driver(error)),
+            }
+        };
+        self.allocations.insert(buffer, bytes);
+        self.live_allocation_bytes = projected;
+        Ok(buffer)
     }
 
     pub fn deallocate(&mut self, buffer: BufferId) -> Result<(), RuntimeError> {
-        self.driver.deallocate(buffer).map_err(RuntimeError::Driver)
+        self.driver.deallocate(buffer).map_err(RuntimeError::Driver)?;
+        if let Some(bytes) = self.allocations.remove(&buffer) {
+            self.live_allocation_bytes = self.live_allocation_bytes.saturating_sub(bytes);
+        }
+        Ok(())
     }
 
     pub fn upload(
@@ -1637,6 +1736,7 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         let mut events = BTreeMap::new();
         let mut cache_hits = 0;
         let mut cache_misses = 0;
+        let mut temporary_buffers = Vec::new();
         for invocation in invocations {
             if events.contains_key(&invocation.id) {
                 return Err(RuntimeError::DuplicateExecution(invocation.id));
@@ -1716,6 +1816,7 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
                     invocation_arguments.push(KernelArgument::scalar(0u64));
                 } else {
                     let buffer = self.allocate(device, bytes, alignment.max(1))?;
+                    temporary_buffers.push(buffer);
                     invocation_arguments.push(KernelArgument::Buffer {
                         buffer,
                         byte_offset: 0,
@@ -1740,13 +1841,18 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
             events,
             cache_hits,
             cache_misses,
+            temporary_buffers,
         })
     }
 
     pub fn synchronize(&mut self, result: &ExecutionResult) -> Result<(), RuntimeError> {
         self.driver
             .wait(&result.events.values().copied().collect::<Vec<_>>())
-            .map_err(RuntimeError::Driver)
+            .map_err(RuntimeError::Driver)?;
+        for buffer in &result.temporary_buffers {
+            self.deallocate(*buffer)?;
+        }
+        Ok(())
     }
 
     pub fn unload_all(&mut self) -> Result<(), RuntimeError> {

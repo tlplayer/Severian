@@ -773,6 +773,97 @@ fn storage_view_to_specialization_cache_launcher_and_execution_is_one_path() {
 }
 
 #[test]
+fn gpu_allocation_budget_rejects_before_the_driver_is_overcommitted() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut runtime = GpuRuntime::new(
+        MockDriver::default(),
+        MockCompiler { count },
+        KernelCache::memory(),
+    )
+    .unwrap();
+    runtime.max_live_allocation_bytes = 100;
+    runtime.max_single_allocation_bytes = 64;
+
+    assert!(matches!(
+        runtime.allocate(DeviceId(0), 65, 1),
+        Err(RuntimeError::GpuSingleAllocationLimit { .. })
+    ));
+    let first = runtime.allocate(DeviceId(0), 60, 1).unwrap();
+    assert!(matches!(
+        runtime.allocate(DeviceId(0), 50, 1),
+        Err(RuntimeError::GpuMemoryLimit { .. })
+    ));
+    runtime.deallocate(first).unwrap();
+    assert!(runtime.allocate(DeviceId(0), 50, 1).is_ok());
+}
+
+#[test]
+fn bounded_tensor_scalar_path_plateaus_across_one_hundred_launches() {
+    let tensor = Shape::typed([Dimension::Known(16)], ElementKind::IeeeFloat, 32);
+    let scalar = Shape::typed([], ElementKind::IeeeFloat, 32);
+    let mut scale = FusionNode::structural(
+        2,
+        NodeKind::Elementwise,
+        [NodeId(0), NodeId(1)],
+        tensor.clone(),
+    );
+    scale.operation = "scale".into();
+    let graph = FusionGraph::new(vec![
+        FusionNode::structural(0, NodeKind::Parameter, [], tensor),
+        FusionNode::structural(1, NodeKind::Parameter, [], scalar),
+        scale,
+    ])
+    .unwrap();
+    let fusion = plan(&graph, DeviceModel::conservative_gpu());
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut runtime = GpuRuntime::new(
+        MockDriver::default(),
+        MockCompiler {
+            count: Arc::clone(&count),
+        },
+        KernelCache::memory(),
+    )
+    .unwrap();
+    runtime.max_live_allocation_bytes = 1 << 20;
+    runtime.max_single_allocation_bytes = 1 << 20;
+    let bytes = vec![1u8; 64];
+    let storage = [HostStorageInput {
+        node: NodeId(0),
+        view: f32_storage_view(vec![16]),
+        bytes: &bytes,
+    }];
+    let scalars = [HostScalarInput {
+        node: NodeId(1),
+        bytes: 0.5f32.to_ne_bytes().to_vec(),
+        alignment: 4,
+    }];
+
+    for _ in 0..100 {
+        let execution = runtime
+            .execute_storage_graph(
+                DeviceId(0),
+                &graph,
+                &fusion,
+                &storage,
+                &scalars,
+                &options(),
+            )
+            .unwrap();
+        runtime.synchronize(&execution.execution).unwrap();
+        let mut buffers = execution.buffers.values().copied().collect::<Vec<_>>();
+        buffers.sort_unstable();
+        buffers.dedup();
+        for buffer in buffers {
+            runtime.deallocate(buffer).unwrap();
+        }
+        assert_eq!(runtime.live_allocation_bytes, 0);
+        assert!(runtime.driver().buffers.is_empty());
+    }
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(runtime.driver().loaded, 1);
+}
+
+#[test]
 fn derives_cross_region_dependencies_from_graph_values() {
     let shape = || Shape::typed([Dimension::Known(64)], ElementKind::IeeeFloat, 32);
     let mut producer = FusionNode::structural(1, NodeKind::Elementwise, [NodeId(0)], shape());

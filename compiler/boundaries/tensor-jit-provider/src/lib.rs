@@ -24,6 +24,7 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 pub const PROVIDER_ABI_VERSION: u32 = 1;
 const ABI_VERSION: u32 = PROVIDER_ABI_VERSION;
@@ -217,6 +218,10 @@ unsafe fn compile_region_inner(
     let graph = program.graph().map_err(|error| error.to_string())?;
     let materialized = unsafe { materialize_from_elements(&from_elements, input_values) }?;
     let specialization = specialize_program(&program, &graph, input_values, &materialized)?;
+    wait_for_host_capacity(env_u64(
+        "SEVERIAN_TENSOR_JIT_COMPILE_HEADROOM_BYTES",
+        1 << 30,
+    ))?;
     let graph_summary = || {
         graph
             .nodes()
@@ -497,15 +502,15 @@ unsafe fn materialize_from_elements_input(
             boundary.node.0, boundary.element_bits
         ));
     }
+    let byte_count = values
+        .length
+        .checked_mul(mem::size_of::<usize>())
+        .ok_or_else(|| format!("from_elements node {} byte size overflows", boundary.node.0))?;
+    wait_for_host_capacity(byte_count as u64)?;
     let bytes = unsafe {
         slice::from_raw_parts(
             values.values.cast::<u8>(),
-            values
-                .length
-                .checked_mul(mem::size_of::<usize>())
-                .ok_or_else(|| {
-                    format!("from_elements node {} byte size overflows", boundary.node.0)
-                })?,
+            byte_count,
         )
     }
     .to_vec();
@@ -731,9 +736,16 @@ unsafe extern "C" fn destroy_region(instance: *mut c_void) {
     if instance.is_null() {
         return;
     }
-    let instance = unsafe { Box::from_raw(instance.cast::<CompiledInstance>()) };
-    if let CompiledInstance::Cpu { library, .. } = *instance {
-        unsafe { dlclose(library) };
+    let mut instance = unsafe { Box::from_raw(instance.cast::<CompiledInstance>()) };
+    match &mut *instance {
+        CompiledInstance::Cpu { library, .. } => {
+            unsafe { dlclose(*library) };
+        }
+        CompiledInstance::Gpu(instance) => {
+            if let Ok(mut instance) = instance.lock() {
+                let _ = instance.runtime.unload_all();
+            }
+        }
     }
 }
 
@@ -875,6 +887,12 @@ unsafe fn launch_gpu(
             .strides
             .clone();
         let bytes = tensor_byte_length(node, &dimensions, descriptor.shape.element_bits)?;
+        wait_for_host_capacity(
+            u64::try_from(bytes)
+                .ok()
+                .and_then(|bytes| bytes.checked_mul(2))
+                .ok_or_else(|| format!("GPU output {} host allocation overflows", node.0))?,
+        )?;
         let mut host = vec![0u8; bytes];
         let buffer = execution
             .buffers
@@ -893,7 +911,7 @@ unsafe fn launch_gpu(
             .runtime
             .download(buffer, 0, &mut host)
             .map_err(|error| error.to_string())?;
-        outputs[index] = leak_gpu_output(descriptor, host, dimensions, strides)?;
+        outputs[index] = owned_gpu_output(descriptor, host, dimensions, strides)?;
     }
     let mut buffers = execution.buffers.values().copied().collect::<Vec<_>>();
     buffers.sort_unstable();
@@ -962,9 +980,19 @@ fn tensor_byte_length(node: NodeId, dimensions: &[u64], bits: u16) -> Result<usi
         .ok_or_else(|| format!("tensor {} byte size overflows the host ABI", node.0))
 }
 
-fn leak_gpu_output(
+fn owned_gpu_output(
     node: &severian_fusion::FusionNode,
-    mut bytes: Vec<u8>,
+    bytes: Vec<u8>,
+    dimensions: Vec<u64>,
+    strides: Vec<i64>,
+) -> Result<ValueAbi, String> {
+    wait_for_host_capacity(bytes.len() as u64)?;
+    allocate_owned_gpu_output(node, bytes, dimensions, strides)
+}
+
+fn allocate_owned_gpu_output(
+    node: &severian_fusion::FusionNode,
+    bytes: Vec<u8>,
     dimensions: Vec<u64>,
     strides: Vec<i64>,
 ) -> Result<ValueAbi, String> {
@@ -972,35 +1000,160 @@ fn leak_gpu_output(
         .into_iter()
         .map(|dimension| i64::try_from(dimension).map_err(|_| "GPU dimension exceeds i64"))
         .collect::<Result<Vec<_>, _>>()?;
-    let data = bytes.as_mut_ptr();
     let byte_length = bytes.len() as u64;
-    mem::forget(bytes);
-    let dimensions = Box::leak(dimensions.into_boxed_slice());
-    let strides = Box::leak(strides.into_boxed_slice());
     let element = storage_element_representation(node.shape.element_kind, node.shape.element_bits)?;
-    let view = Box::new(StorageViewAbi {
-        magic: STORAGE_VIEW_ABI_MAGIC,
-        abi_version: STORAGE_VIEW_ABI_VERSION,
-        byte_size: mem::size_of::<StorageViewAbi>() as u32,
-        flags: STORAGE_VIEW_CONTIGUOUS,
-        data,
-        byte_length,
-        rank: dimensions.len() as u64,
-        dimensions: dimensions.as_ptr(),
-        strides: strides.as_ptr(),
-        offset: 0,
-        element,
-        owner: data.cast(),
-    });
+    let rank = dimensions.len();
+    let metadata_bytes = mem::size_of::<StorageViewAbi>()
+        .checked_add(
+            rank.checked_mul(2)
+                .and_then(|values| values.checked_mul(mem::size_of::<i64>()))
+                .ok_or_else(|| format!("GPU output {} metadata size overflows", node.id.0))?,
+        )
+        .ok_or_else(|| format!("GPU output {} metadata size overflows", node.id.0))?;
+    let metadata = unsafe { malloc(metadata_bytes) }.cast::<u8>();
+    if metadata.is_null() {
+        return Err(format!("GPU output {} metadata allocation failed", node.id.0));
+    }
+    let data = unsafe { malloc(bytes.len().max(1)) }.cast::<u8>();
+    if data.is_null() {
+        unsafe { free(metadata.cast()) };
+        return Err(format!("GPU output {} payload allocation failed", node.id.0));
+    }
+    if !bytes.is_empty() {
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len()) };
+    }
+    let dimension_storage = unsafe { metadata.add(mem::size_of::<StorageViewAbi>()) }.cast::<i64>();
+    let stride_storage = unsafe { dimension_storage.add(rank) };
+    if rank != 0 {
+        unsafe {
+            ptr::copy_nonoverlapping(dimensions.as_ptr(), dimension_storage, rank);
+            ptr::copy_nonoverlapping(strides.as_ptr(), stride_storage, rank);
+        }
+    }
+    let view = metadata.cast::<StorageViewAbi>();
+    unsafe {
+        view.write(StorageViewAbi {
+            magic: STORAGE_VIEW_ABI_MAGIC,
+            abi_version: STORAGE_VIEW_ABI_VERSION,
+            byte_size: mem::size_of::<StorageViewAbi>() as u32,
+            flags: STORAGE_VIEW_CONTIGUOUS,
+            data,
+            byte_length,
+            rank: rank as u64,
+            dimensions: dimension_storage,
+            strides: stride_storage,
+            offset: 0,
+            element,
+            owner: data.cast(),
+        });
+    }
     Ok(ValueAbi {
         abi_version: ABI_VERSION,
         byte_size: mem::size_of::<ValueAbi>() as u32,
         kind: VALUE_STORAGE,
         bits: u32::from(node.shape.element_bits),
         value: ValuePayloadAbi {
-            storage: Box::into_raw(view),
+            storage: view,
         },
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HostMemorySnapshot {
+    available: u64,
+    resident: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HostMemoryPolicy {
+    minimum_available: u64,
+    maximum_resident: u64,
+    maximum_single_allocation: u64,
+    retries: u64,
+    initial_backoff_ms: u64,
+}
+
+impl HostMemoryPolicy {
+    fn from_environment() -> Self {
+        Self {
+            minimum_available: env_u64("SEVERIAN_MIN_AVAILABLE_HOST_BYTES", 4 << 30),
+            maximum_resident: env_u64("SEVERIAN_MAX_RESIDENT_HOST_BYTES", 8 << 30),
+            maximum_single_allocation: env_u64(
+                "SEVERIAN_MAX_SINGLE_HOST_ALLOCATION_BYTES",
+                1 << 30,
+            ),
+            retries: env_u64("SEVERIAN_MEMORY_PRESSURE_RETRIES", 3),
+            initial_backoff_ms: env_u64("SEVERIAN_MEMORY_BACKOFF_MS", 1000),
+        }
+    }
+
+    fn permits(self, snapshot: HostMemorySnapshot, requested: u64) -> bool {
+        requested <= self.maximum_single_allocation
+            && snapshot.available.saturating_sub(requested) >= self.minimum_available
+            && snapshot.resident.saturating_add(requested) <= self.maximum_resident
+    }
+}
+
+fn wait_for_host_capacity(requested: u64) -> Result<(), String> {
+    let policy = HostMemoryPolicy::from_environment();
+    if requested > policy.maximum_single_allocation {
+        return Err(format!(
+            "host allocation of {requested} bytes exceeds the {}-byte per-allocation limit",
+            policy.maximum_single_allocation
+        ));
+    }
+    for attempt in 0..=policy.retries {
+        let snapshot = host_memory_snapshot()?;
+        if policy.permits(snapshot, requested) {
+            return Ok(());
+        }
+        if attempt == policy.retries {
+            return Err(format!(
+                "host memory pressure remained above policy after {} retries: requested {requested}, available {}, resident {}, required reserve {}, resident limit {}",
+                policy.retries,
+                snapshot.available,
+                snapshot.resident,
+                policy.minimum_available,
+                policy.maximum_resident,
+            ));
+        }
+        let delay = exponential_backoff_ms(policy.initial_backoff_ms, attempt);
+        std::thread::sleep(Duration::from_millis(delay));
+    }
+    unreachable!()
+}
+
+fn exponential_backoff_ms(initial: u64, attempt: u64) -> u64 {
+    initial.saturating_mul(1u64 << attempt.min(20))
+}
+
+fn host_memory_snapshot() -> Result<HostMemorySnapshot, String> {
+    let meminfo = fs::read_to_string("/proc/meminfo")
+        .map_err(|error| format!("cannot read host memory availability: {error}"))?;
+    let status = fs::read_to_string("/proc/self/status")
+        .map_err(|error| format!("cannot read Tensor-JIT resident memory: {error}"))?;
+    let available = proc_kib_value(&meminfo, "MemAvailable:")
+        .ok_or_else(|| "host memory availability is missing from /proc/meminfo".to_owned())?;
+    let resident = proc_kib_value(&status, "VmRSS:")
+        .ok_or_else(|| "Tensor-JIT resident memory is missing from /proc/self/status".to_owned())?;
+    Ok(HostMemorySnapshot {
+        available: available.saturating_mul(1024),
+        resident: resident.saturating_mul(1024),
+    })
+}
+
+fn proc_kib_value(source: &str, field: &str) -> Option<u64> {
+    source.lines().find_map(|line| {
+        let value = line.strip_prefix(field)?.trim();
+        value.split_whitespace().next()?.parse().ok()
+    })
+}
+
+fn env_u64(name: &str, fallback: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(fallback)
 }
 
 fn storage_element_representation(
@@ -1344,6 +1497,8 @@ fn dl_error() -> String {
 
 unsafe extern "C" {
     fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+    fn malloc(size: usize) -> *mut c_void;
+    fn free(pointer: *mut c_void);
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
     fn dlerror() -> *const c_char;
@@ -1354,3 +1509,75 @@ const _: () = {
     assert!(mem::size_of::<RegionAbi>() == 112);
     assert!(mem::size_of::<CompiledAbi>() == 32);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_memory_policy_preserves_reserve_and_resident_ceiling() {
+        let policy = HostMemoryPolicy {
+            minimum_available: 4 << 30,
+            maximum_resident: 8 << 30,
+            maximum_single_allocation: 1 << 30,
+            retries: 3,
+            initial_backoff_ms: 1000,
+        };
+        assert!(policy.permits(
+            HostMemorySnapshot {
+                available: 6 << 30,
+                resident: 2 << 30,
+            },
+            512 << 20,
+        ));
+        assert!(!policy.permits(
+            HostMemorySnapshot {
+                available: 4 << 30,
+                resident: 2 << 30,
+            },
+            512 << 20,
+        ));
+        assert!(!policy.permits(
+            HostMemorySnapshot {
+                available: 16 << 30,
+                resident: 8 << 30,
+            },
+            1,
+        ));
+    }
+
+    #[test]
+    fn memory_pressure_backoff_is_one_two_four_seconds() {
+        assert_eq!(
+            (0..3)
+                .map(|attempt| exponential_backoff_ms(1000, attempt))
+                .collect::<Vec<_>>(),
+            [1000, 2000, 4000]
+        );
+    }
+
+    #[test]
+    fn owned_gpu_output_uses_one_releasable_metadata_block() {
+        let node = severian_fusion::FusionNode::structural(
+            0,
+            NodeKind::Elementwise,
+            [],
+            severian_fusion::Shape::typed(
+                [severian_fusion::Dimension::Known(4)],
+                ElementKind::IeeeFloat,
+                32,
+            ),
+        );
+        let output = allocate_owned_gpu_output(&node, vec![0; 16], vec![4], vec![1]).unwrap();
+        let view = unsafe { output.value.storage };
+        assert!(!view.is_null());
+        assert_eq!(unsafe { (*view).byte_length }, 16);
+        assert_eq!(unsafe { *(*view).dimensions }, 4);
+        let data = unsafe { (*view).owner };
+        assert_eq!(data, unsafe { (*view).data.cast_mut().cast() });
+        unsafe {
+            free(data);
+            free(view.cast());
+        }
+    }
+}

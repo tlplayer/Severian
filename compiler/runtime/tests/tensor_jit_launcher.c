@@ -101,8 +101,16 @@ int main(void) {
     assert(rank2_outputs[0].value.storage->rank == 2 && rank4_outputs[0].value.storage->rank == 4);
     assert(rank2_outputs[0].value.storage->element.bits == rank4_outputs[0].value.storage->element.bits);
 
+    sev_tensor_jit_value_abi scalar_a[] = {{SEV_TENSOR_JIT_ABI_VERSION, sizeof(sev_tensor_jit_value_abi), SEV_TENSOR_JIT_VALUE_FLOAT, 64, {.floating = 1.0}}};
+    sev_tensor_jit_value_abi scalar_b[] = {{SEV_TENSOR_JIT_ABI_VERSION, sizeof(sev_tensor_jit_value_abi), SEV_TENSOR_JIT_VALUE_FLOAT, 64, {.floating = 1024.0}}};
+    uint64_t scalar_key_a[4], scalar_key_b[4];
+    assert(sev_tensor_jit_key(&region, scalar_a, 1, scalar_key_a) == SEV_TENSOR_JIT_OK);
+    assert(sev_tensor_jit_key(&region, scalar_b, 1, scalar_key_b) == SEV_TENSOR_JIT_OK);
+    assert(memcmp(scalar_key_a, scalar_key_b, sizeof(scalar_key_a)) == 0);
+
     region.graph_hash[0] = UINT64_C(0x51a9e);
     region.output_count = 0;
+    assert(setenv("SEVERIAN_TENSOR_JIT_CACHE_CAPACITY", "2", 1) == 0);
     int64_t first_shape_values[] = {1, 16, 512, 128};
     int64_t equal_shape_values[] = {1, 16, 512, 128};
     int64_t changed_shape_values[] = {1, 16, 256, 128};
@@ -115,7 +123,13 @@ int main(void) {
     assert(__sev_tensor_jit_launch_v1(&region, first_shape_input, 1, NULL, 0) == SEV_TENSOR_JIT_OK);
     assert(__sev_tensor_jit_launch_v1(&region, equal_shape_input, 1, NULL, 0) == SEV_TENSOR_JIT_OK);
     assert(__sev_tensor_jit_launch_v1(&region, changed_shape_input, 1, NULL, 0) == SEV_TENSOR_JIT_OK);
-    assert(compile_count == 4 && launch_count == 6 && __sev_tensor_jit_cache_entries_v1() == 4);
+    assert(compile_count == 4 && launch_count == 6 && __sev_tensor_jit_cache_entries_v1() == 2);
+    assert(setenv("SEVERIAN_TENSOR_JIT_CACHE_TTL_MS", "1", 1) == 0);
+    for (sev_tensor_jit_cache_entry *entry = sev_tensor_jit_cache; entry != NULL; entry = entry->next) {
+        entry->last_used_ms = 0;
+    }
+    assert(__sev_tensor_jit_launch_v1(&region, changed_shape_input, 1, NULL, 0) == SEV_TENSOR_JIT_OK);
+    assert(compile_count == 5 && __sev_tensor_jit_cache_entries_v1() == 1);
     __sev_tensor_jit_shutdown_v1();
     assert(__sev_tensor_jit_cache_entries_v1() == 0);
     return 0;

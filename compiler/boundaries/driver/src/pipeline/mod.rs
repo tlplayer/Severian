@@ -1117,6 +1117,10 @@ fn render_tensor_jit_launchers(
         "#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include \"{}\"\n\ntypedef struct {{ int64_t rank; void *descriptor; }} sev_unranked_memref;\nstatic sev_jit_storage_view_abi __sev_jit_memref_view(int64_t rank, void *descriptor, uint32_t kind, uint32_t bits, uint32_t float_format) {{\n  int64_t *fields = (int64_t *)descriptor;\n  sev_jit_storage_view_abi view;\n  memset(&view, 0, sizeof(view));\n  view.magic = SEV_STORAGE_VIEW_ABI_MAGIC; view.abi_version = SEV_STORAGE_VIEW_ABI_VERSION; view.byte_size = sizeof(view);\n  view.owner = ((void **)descriptor)[0]; view.data = ((const uint8_t **)descriptor)[1]; view.rank = (uint64_t)rank; view.offset = fields[2];\n  view.dimensions = fields + 3; view.strides = fields + 3 + rank;\n  view.element.abi_version = 1; view.element.byte_size = sizeof(view.element); view.element.kind = kind; view.element.bits = bits; view.element.float_format = float_format;\n  uint64_t elements = 1; for (int64_t axis = 0; axis < rank; ++axis) elements *= (uint64_t)view.dimensions[axis];\n  view.byte_length = elements * ((bits + 7) / 8);\n  return view;\n}}\nstatic sev_unranked_memref __sev_jit_unranked_result(sev_jit_storage_view_abi *view) {{\n  size_t words = (size_t)(3 + 2 * view->rank);\n  int64_t *descriptor = (int64_t *)malloc(words * sizeof(int64_t));\n  if (descriptor == NULL) abort();\n  ((void **)descriptor)[0] = view->owner != NULL ? view->owner : (void *)view->data;\n  ((void **)descriptor)[1] = (void *)view->data; descriptor[2] = view->offset;\n  memcpy(descriptor + 3, view->dimensions, view->rank * sizeof(int64_t));\n  memcpy(descriptor + 3 + view->rank, view->strides, view->rank * sizeof(int64_t));\n  sev_unranked_memref result = {{(int64_t)view->rank, descriptor}}; return result;\n}}\n",
         header.display()
     );
+    source = source.replace(
+        "sev_unranked_memref result = {(int64_t)view->rank, descriptor}; return result;",
+        "sev_unranked_memref result = {(int64_t)view->rank, descriptor}; free(view); return result;",
+    );
     let ranked_abis = launchers
         .iter()
         .flat_map(|launcher| {
@@ -1130,7 +1134,7 @@ fn render_tensor_jit_launchers(
         .collect::<BTreeSet<_>>();
     for rank in ranked_abis {
         source.push_str(&format!(
-            "typedef struct {{ void *allocated; void *aligned; int64_t offset; int64_t sizes[{rank}]; int64_t strides[{rank}]; }} sev_ranked_memref_{rank};\n"
+            "typedef struct {{ void *allocated; void *aligned; int64_t offset; int64_t sizes[{rank}]; int64_t strides[{rank}]; }} sev_ranked_memref_{rank};\nstatic sev_ranked_memref_{rank} __sev_jit_ranked_result_{rank}(sev_jit_storage_view_abi *view) {{\n  sev_ranked_memref_{rank} result; result.allocated = view->owner != NULL ? view->owner : (void *)view->data; result.aligned = (void *)view->data; result.offset = view->offset;\n  memcpy(result.sizes, view->dimensions, sizeof(result.sizes)); memcpy(result.strides, view->strides, sizeof(result.strides)); free(view); return result;\n}}\n"
         ));
     }
     for launcher in launchers {
@@ -1633,15 +1637,7 @@ fn tensor_jit_result_expression(
             ..
         } => {
             let rank = dimensions.len();
-            let sizes = (0..rank)
-                .map(|axis| format!("outputs[{index}].value.storage->dimensions[{axis}]"))
-                .collect::<Vec<_>>()
-                .join(",");
-            let strides = (0..rank)
-                .map(|axis| format!("outputs[{index}].value.storage->strides[{axis}]"))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("(sev_ranked_memref_{rank}){{outputs[{index}].value.storage->owner != NULL ? outputs[{index}].value.storage->owner : (void *)outputs[{index}].value.storage->data, (void *)outputs[{index}].value.storage->data, outputs[{index}].value.storage->offset, {{{sizes}}}, {{{strides}}}}}")
+            format!("__sev_jit_ranked_result_{rank}(outputs[{index}].value.storage)")
         }
         LoweredType::Bytes | LoweredType::String => format!("outputs[{index}].value.pointer"),
         LoweredType::Integer { signed: true, .. } => {

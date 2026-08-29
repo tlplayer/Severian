@@ -8,12 +8,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "tensor_jit.h"
 
 typedef struct sev_tensor_jit_cache_entry {
     uint64_t key[4];
+    uint64_t last_used_ms;
     sev_tensor_jit_compiled_abi compiled;
     struct sev_tensor_jit_cache_entry *next;
 } sev_tensor_jit_cache_entry;
@@ -30,6 +32,9 @@ static void *sev_tensor_jit_compile_context = NULL;
 static sev_tensor_jit_cache_entry *sev_tensor_jit_cache = NULL;
 static uint64_t sev_tensor_jit_cache_size = 0;
 static void *sev_tensor_jit_library = NULL;
+
+#define SEV_TENSOR_JIT_DEFAULT_CACHE_CAPACITY UINT64_C(32)
+#define SEV_TENSOR_JIT_DEFAULT_CACHE_TTL_MS UINT64_C(300000)
 
 typedef const sev_tensor_jit_provider_abi *(*sev_tensor_jit_provider_fn)(void);
 
@@ -98,6 +103,51 @@ static void sev_tensor_jit_hash_bytes(uint64_t key[4], const void *data, size_t 
     }
 }
 
+static uint64_t sev_tensor_jit_now_ms(void) {
+    struct timespec value;
+    if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) return 0;
+    return (uint64_t)value.tv_sec * UINT64_C(1000) + (uint64_t)value.tv_nsec / UINT64_C(1000000);
+}
+
+static uint64_t sev_tensor_jit_env_u64(const char *name, uint64_t fallback) {
+    const char *text = getenv(name);
+    if (text == NULL || *text == '\0') return fallback;
+    char *end = NULL;
+    unsigned long long value = strtoull(text, &end, 10);
+    return end != text && *end == '\0' ? (uint64_t)value : fallback;
+}
+
+static void sev_tensor_jit_destroy_entry(sev_tensor_jit_cache_entry *entry) {
+    if (entry->compiled.destroy != NULL) entry->compiled.destroy(entry->compiled.instance);
+    free(entry);
+    --sev_tensor_jit_cache_size;
+}
+
+static void sev_tensor_jit_prune_expired_locked(uint64_t now_ms, uint64_t ttl_ms) {
+    if (ttl_ms == 0) return;
+    sev_tensor_jit_cache_entry **link = &sev_tensor_jit_cache;
+    while (*link != NULL) {
+        sev_tensor_jit_cache_entry *entry = *link;
+        if (now_ms >= entry->last_used_ms && now_ms - entry->last_used_ms >= ttl_ms) {
+            *link = entry->next;
+            sev_tensor_jit_destroy_entry(entry);
+        } else {
+            link = &entry->next;
+        }
+    }
+}
+
+static void sev_tensor_jit_enforce_capacity_locked(uint64_t capacity) {
+    while (sev_tensor_jit_cache_size > capacity) {
+        sev_tensor_jit_cache_entry **link = &sev_tensor_jit_cache;
+        if (*link == NULL) break;
+        while ((*link)->next != NULL) link = &(*link)->next;
+        sev_tensor_jit_cache_entry *entry = *link;
+        *link = NULL;
+        sev_tensor_jit_destroy_entry(entry);
+    }
+}
+
 static int32_t sev_tensor_jit_validate_view(const sev_jit_storage_view_abi *view) {
     if (view == NULL || view->magic != SEV_STORAGE_VIEW_ABI_MAGIC ||
         view->abi_version != SEV_STORAGE_VIEW_ABI_VERSION ||
@@ -162,8 +212,6 @@ static int32_t sev_tensor_jit_key(
                 list->values,
                 (size_t)list->length * sizeof(*list->values)
             );
-        } else {
-            sev_tensor_jit_hash_bytes(key, &value->value, sizeof(value->value));
         }
     }
     return SEV_TENSOR_JIT_OK;
@@ -203,8 +251,27 @@ int32_t __sev_tensor_jit_launch_v1(
 
     pthread_mutex_lock(&sev_tensor_jit_mutex);
     sev_tensor_jit_load_provider_locked();
-    sev_tensor_jit_cache_entry *entry = sev_tensor_jit_cache;
-    while (entry != NULL && memcmp(entry->key, key, sizeof(key)) != 0) entry = entry->next;
+    uint64_t now_ms = sev_tensor_jit_now_ms();
+    uint64_t ttl_ms = sev_tensor_jit_env_u64(
+        "SEVERIAN_TENSOR_JIT_CACHE_TTL_MS",
+        SEV_TENSOR_JIT_DEFAULT_CACHE_TTL_MS
+    );
+    uint64_t capacity = sev_tensor_jit_env_u64(
+        "SEVERIAN_TENSOR_JIT_CACHE_CAPACITY",
+        SEV_TENSOR_JIT_DEFAULT_CACHE_CAPACITY
+    );
+    if (capacity == 0) capacity = 1;
+    sev_tensor_jit_prune_expired_locked(now_ms, ttl_ms);
+    sev_tensor_jit_cache_entry **link = &sev_tensor_jit_cache;
+    while (*link != NULL && memcmp((*link)->key, key, sizeof(key)) != 0) {
+        link = &(*link)->next;
+    }
+    sev_tensor_jit_cache_entry *entry = *link;
+    if (entry != NULL && link != &sev_tensor_jit_cache) {
+        *link = entry->next;
+        entry->next = sev_tensor_jit_cache;
+        sev_tensor_jit_cache = entry;
+    }
     if (entry == NULL) {
         if (sev_tensor_jit_compile == NULL) {
             pthread_mutex_unlock(&sev_tensor_jit_mutex);
@@ -226,9 +293,13 @@ int32_t __sev_tensor_jit_launch_v1(
             return SEV_TENSOR_JIT_COMPILE_FAILED;
         }
         memcpy(entry->key, key, sizeof(key));
+        entry->last_used_ms = now_ms;
         entry->next = sev_tensor_jit_cache;
         sev_tensor_jit_cache = entry;
         ++sev_tensor_jit_cache_size;
+        sev_tensor_jit_enforce_capacity_locked(capacity);
+    } else {
+        entry->last_used_ms = now_ms;
     }
     status = entry->compiled.launch(entry->compiled.instance, inputs, input_count, outputs, output_count);
     pthread_mutex_unlock(&sev_tensor_jit_mutex);
