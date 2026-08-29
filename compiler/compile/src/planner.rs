@@ -104,6 +104,14 @@ fn extract_cfg_compile_operations(
             }
         }
 
+        // CFG construction makes source expression temporaries explicit with
+        // StorageLive and copy-forwarding assignments. Those administrative
+        // statements must not split a same-compiler tensor expression into
+        // separate regions. Move lifetimes before the run, forward compile-op
+        // operands to their producer, and retain the copies after the run so
+        // drop elaboration still observes every initialized local.
+        coalesce_compile_operation_runs(&mut block.statements, &mut block.statement_spans);
+
         let old_statements = std::mem::take(&mut block.statements);
         let old_spans = std::mem::take(&mut block.statement_spans);
         let mut statements = Vec::with_capacity(old_statements.len());
@@ -303,6 +311,118 @@ fn extract_cfg_compile_operations(
         block.statement_spans = spans;
     }
     Ok(())
+}
+
+fn coalesce_compile_operation_runs<S: Clone>(
+    statements: &mut Vec<severian_mir::CfgStatement>,
+    spans: &mut Vec<Option<S>>,
+) {
+    spans.resize(statements.len(), None);
+    let mut start = 0usize;
+    while start < statements.len() {
+        let Some(compiler) = cfg_statement_compiler(&statements[start]) else {
+            start += 1;
+            continue;
+        };
+        let mut cursor = start + 1;
+        let mut last_operation = start;
+        let mut operation_count = 1usize;
+        while cursor < statements.len() {
+            if cfg_statement_compiler(&statements[cursor]) == Some(compiler) {
+                last_operation = cursor;
+                operation_count += 1;
+                cursor += 1;
+            } else if transparent_compile_glue(&statements[cursor]) {
+                cursor += 1;
+            } else {
+                break;
+            }
+        }
+        if operation_count == 1 {
+            start += 1;
+            continue;
+        }
+
+        let old_statements = statements[start..=last_operation].to_vec();
+        let old_spans = spans[start..=last_operation].to_vec();
+        let mut aliases = BTreeMap::<severian_mir::Place, severian_mir::Place>::new();
+        let mut lifetimes = Vec::new();
+        let mut operations = Vec::new();
+        let mut forwarding = Vec::new();
+        for (mut statement, span) in old_statements.into_iter().zip(old_spans) {
+            match &mut statement {
+                severian_mir::CfgStatement::StorageLive(_) => {
+                    lifetimes.push((statement, span));
+                }
+                severian_mir::CfgStatement::Assign(
+                    destination,
+                    severian_mir::Rvalue::Use(severian_mir::Operand::Copy(source)),
+                ) => {
+                    let resolved = resolve_forwarded_place(source, &aliases);
+                    aliases.insert(destination.clone(), resolved);
+                    forwarding.push((statement, span));
+                }
+                severian_mir::CfgStatement::Operation {
+                    operands, results, ..
+                } => {
+                    for operand in operands {
+                        if let severian_mir::Operand::Copy(place) = operand {
+                            *place = resolve_forwarded_place(place, &aliases);
+                        }
+                    }
+                    for result in results {
+                        aliases.remove(result);
+                    }
+                    operations.push((statement, span));
+                }
+                _ => unreachable!("compile run admitted non-transparent glue"),
+            }
+        }
+        let replacement = lifetimes
+            .into_iter()
+            .chain(operations)
+            .chain(forwarding)
+            .collect::<Vec<_>>();
+        let replacement_len = replacement.len();
+        statements.splice(
+            start..=last_operation,
+            replacement.iter().map(|(statement, _)| statement.clone()),
+        );
+        spans.splice(
+            start..=last_operation,
+            replacement.into_iter().map(|(_, span)| span),
+        );
+        start += replacement_len;
+    }
+}
+
+fn transparent_compile_glue(statement: &severian_mir::CfgStatement) -> bool {
+    match statement {
+        severian_mir::CfgStatement::StorageLive(_) => true,
+        severian_mir::CfgStatement::Assign(
+            severian_mir::Place { projection, .. },
+            severian_mir::Rvalue::Use(severian_mir::Operand::Copy(severian_mir::Place {
+                projection: source_projection,
+                ..
+            })),
+        ) => projection.is_empty() && source_projection.is_empty(),
+        _ => false,
+    }
+}
+
+fn resolve_forwarded_place(
+    place: &severian_mir::Place,
+    aliases: &BTreeMap<severian_mir::Place, severian_mir::Place>,
+) -> severian_mir::Place {
+    let mut resolved = place.clone();
+    let mut visited = BTreeSet::new();
+    while visited.insert(resolved.clone()) {
+        let Some(next) = aliases.get(&resolved) else {
+            break;
+        };
+        resolved = next.clone();
+    }
+    resolved
 }
 
 fn cfg_statement_compiler(statement: &severian_mir::CfgStatement) -> Option<CompilerId> {

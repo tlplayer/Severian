@@ -142,8 +142,6 @@ pub enum TensorJitRequirement {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TensorJitReason {
     UnresolvedRank { slot: u32 },
-    DynamicGpuExtent { slot: u32, axis: usize },
-    RuntimeGpuLayout { slot: u32 },
 }
 
 impl std::fmt::Display for RegionSpecializationError {
@@ -156,11 +154,10 @@ impl std::error::Error for RegionSpecializationError {}
 
 impl CompileRegion {
     /// Classifies specialization without looking at source function names.
-    /// CPU MLIR accepts ranked dynamic extents directly. The current TTIR
-    /// contract still bakes dynamic extents/layout into indexing, so only
-    /// those GPU facts request a cached runtime compilation.
+    /// Ranked MLIR accepts dynamic extents and strided buffers directly on
+    /// both CPU and GPU. Only unresolved rank requires runtime compilation;
+    /// dynamic dimensions are launch data and runtime strides are memref data.
     pub fn tensor_jit_requirement(&self) -> TensorJitRequirement {
-        let gpu = self.placement == Some(ExecutionPlacement::Gpu);
         let mut reasons = std::collections::BTreeSet::new();
         for contract in &self.value_contracts {
             let Some(tensor) = &contract.tensor else {
@@ -172,22 +169,7 @@ impl CompileRegion {
                         slot: contract.slot,
                     });
                 }
-                severian_fusion::Rank::Ranked(dimensions) if gpu => {
-                    for (axis, dimension) in dimensions.iter().enumerate() {
-                        if matches!(dimension, severian_fusion::Dimension::Dynamic) {
-                            reasons.insert(TensorJitReason::DynamicGpuExtent {
-                                slot: contract.slot,
-                                axis,
-                            });
-                        }
-                    }
-                }
                 severian_fusion::Rank::Ranked(_) => {}
-            }
-            if gpu && matches!(tensor.layout, severian_fusion::StorageLayout::Runtime) {
-                reasons.insert(TensorJitReason::RuntimeGpuLayout {
-                    slot: contract.slot,
-                });
             }
         }
         if reasons.is_empty() {

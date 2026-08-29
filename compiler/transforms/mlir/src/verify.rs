@@ -11,6 +11,7 @@ pub struct VerifiedMlirArtifact {
     id: ArtifactId,
     module: String,
     target: String,
+    gpu_architecture: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,10 +46,13 @@ pub fn verify_artifact(
     module.verify("artifact module")?;
     module.verify_allowed_dialects(target)?;
     verify_entry_signature(&context, entry, &artifact.inputs, &artifact.outputs)?;
+    let gpu_architecture =
+        operation_string_attribute(module.operation(), "severian.gpu.architecture");
     Ok(VerifiedMlirArtifact {
         id,
         module: module.print(),
         target: target.triple.clone(),
+        gpu_architecture,
     })
 }
 
@@ -80,6 +84,26 @@ pub fn compose(
     let symbol_table = SymbolTable::new(&module)?;
     let mut artifact_ids = BTreeSet::new();
     let mut composed_declarations = BTreeSet::new();
+    let gpu_architectures = artifacts
+        .iter()
+        .filter_map(|artifact| artifact.gpu_architecture.as_deref())
+        .collect::<BTreeSet<_>>();
+    if gpu_architectures.len() > 1 {
+        return Err(MlirError::TargetMismatch {
+            artifact: gpu_architectures.into_iter().collect::<Vec<_>>().join(","),
+            composition: target.triple.clone(),
+        });
+    }
+    if let Some(architecture) = gpu_architectures.into_iter().next() {
+        let value = unsafe { ffi::mlirStringAttrGet(context.raw, ffi::string_ref(architecture)) };
+        unsafe {
+            ffi::mlirOperationSetAttributeByName(
+                module.operation(),
+                ffi::string_ref("severian.gpu.architecture"),
+                value,
+            )
+        };
+    }
     for artifact in artifacts {
         if artifact.target != target.triple {
             return Err(MlirError::TargetMismatch {

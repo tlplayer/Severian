@@ -1,0 +1,18 @@
+[package]
+name = "tensor-severian-gpu-mlir"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "tensor-severian-gpu-mlir"
+description = "Severian-owned fused elementwise GPU MLIR slice"
+
+[[bin]]
+name = "tensor-severian-gpu-mlir"
+path = "src/main.sev"
+
+[dependencies]
+tensor = { path = "../..", version = "0.1.0" }
+
+[build]
+profile = "debug"
+target = "host"

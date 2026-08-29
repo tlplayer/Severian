@@ -1,0 +1,81 @@
+# Severian-owned GPU layout planning.
+#
+# The XOR-basis representation and default blocked policy are translated from
+# Triton's LinearLayout and getDefaultBlockedEncoding donor sources. This is
+# compiler data written in Severian: it does not call or link Triton.
+
+class LayoutDimension:
+    name: string
+    size: int
+
+class LayoutInputDimension:
+    name: string
+    bases: list[list[int]]
+
+class LinearLayout:
+    inputs: list[LayoutInputDimension]
+    outputs: list[LayoutDimension]
+
+class ElementwiseSchedule:
+    element_count: int
+    warp_size: int
+    warps_per_block: int
+    threads_per_block: int
+    block_count: int
+    layout: LinearLayout
+
+def is_power_of_two(value: int) -> bool:
+    return value > 0 and (value & (value - 1)) == 0
+
+def bit_bases(size: int, stride: int) -> list[list[int]]:
+    assert(is_power_of_two(size), "layout input size must be a power of two")
+    bases: list[list[int]] := []
+    bit := 1
+    while bit < size:
+        bases.append([bit * stride])
+        bit *= 2
+    return bases
+
+def apply(layout: LinearLayout, values: list[int]) -> list[int]:
+    assert(size(values) == size(layout.inputs), "linear-layout input rank mismatch")
+    coordinates: list[int] := []
+    for output in layout.outputs:
+        coordinates.append(0)
+    for input_index in range(0, int(size(layout.inputs))):
+        input = layout.inputs[input_index]
+        value = values[input_index]
+        input_size := 1
+        for basis in input.bases:
+            input_size *= 2
+        assert(value >= 0 and value < input_size, "linear-layout input is out of bounds")
+        bit := 1
+        for bit_index in range(0, int(size(input.bases))):
+            if (value / bit) % 2 != 0:
+                basis = input.bases[bit_index]
+                assert(size(basis) == size(coordinates), "linear-layout basis rank mismatch")
+                for output_index in range(0, int(size(coordinates))):
+                    coordinates[output_index] = coordinates[output_index] ^ basis[output_index]
+            bit *= 2
+    return coordinates
+
+def blocked_elementwise_schedule(element_count: int, warp_size: int, warps_per_block: int = 4) -> ElementwiseSchedule:
+    assert(element_count >= 0, "element count cannot be negative")
+    assert(is_power_of_two(warp_size), "warp size must be a power of two")
+    assert(is_power_of_two(warps_per_block), "warps per block must be a power of two")
+    threads_per_block = warp_size * warps_per_block
+    block_count = int((element_count + threads_per_block - 1) / threads_per_block)
+    layout = LinearLayout(
+        [
+            LayoutInputDimension("lane", bit_bases(warp_size, 1)),
+            LayoutInputDimension("warp", bit_bases(warps_per_block, warp_size)),
+        ],
+        [LayoutDimension("element", threads_per_block)],
+    )
+    return ElementwiseSchedule(
+        element_count,
+        warp_size,
+        warps_per_block,
+        threads_per_block,
+        block_count,
+        layout,
+    )

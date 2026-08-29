@@ -1,0 +1,15 @@
+import tensor
+
+
+# This is the first donor-derived Severian GPU slice. The ranked source
+# contract reaches one masked gpu.launch through Tensor IR and FusionRegion.
+# No operation name contains its rank or element representation.
+def fused_add_relu(left: Tensor[f32, 2, 4], right: Tensor[f32, 2, 4]) -> Tensor[f32, 2, 4]:
+    with self and gpu:
+        summed = tensor.add(left, right)
+        activated = tensor.relu(summed)
+    return activated
+
+
+def main():
+    pass

@@ -46,15 +46,17 @@ pub(crate) fn ensure_for_plan(
     if !placements.contains(&ExecutionPlacement::Gpu) {
         return Ok(resolved);
     }
-    let device = resolved.triton_gpu().ok_or_else(|| {
+    let device = resolved.compute_gpu().ok_or_else(|| {
         "GPU placement requires an AMD or NVIDIA device; it cannot fall back to CPU compilation"
             .to_owned()
     })?;
     let architecture = device.architecture.clone();
-    resolved.capabilities.insert("compiler.triton");
+    resolved.capabilities.insert("compiler.severian.gpu");
+    resolved.capabilities.insert("mlir.dialect.gpu");
+    resolved.capabilities.insert("mlir.dialect.memref");
     resolved
         .capabilities
-        .insert(format!("compiler.triton.{architecture}"));
+        .insert(format!("compiler.severian.gpu.{architecture}"));
     Ok(resolved)
 }
 

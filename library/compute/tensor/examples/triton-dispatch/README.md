@@ -1,4 +1,9 @@
-# Triton dispatch smoke test
+# Retired Triton dispatch fixture
+
+This fixture documents the previous external bridge and is no longer the
+production GPU route. New work belongs in
+`../severian-gpu-mlir`: donor algorithms are translated into Severian and the
+Rust bootstrap lowers them directly to standard MLIR.
 
 This executable validates the production GPU boundary:
 

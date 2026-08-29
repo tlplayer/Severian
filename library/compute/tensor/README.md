@@ -13,17 +13,19 @@ last-axis mean and softmax, exact exponential/log/tanh/SILU operations, RMS and
 layer-normalization primitives, and rotary position encoding. These are enough
 to express transformer attention and MLP blocks as normal `.sev` functions.
 
-`rankedAdd` implements trailing-axis broadcasting, and `rankedSum` is an MLIR
-reduction. Runtime shape checks reject incompatible broadcasts, tensor products,
-and malformed slices before entering a kernel.
+Ranked elementwise regions now use Severian-owned blocked layout planning and
+lower directly to masked GPU/memref MLIR. Runtime shape checks reject
+incompatible broadcasts, tensor products, and malformed slices before entering
+a kernel.
 
 ## Lowering direction
 
 Tensor calls are recognized as typed universal operations. Their shapes and
-scalar arguments flow through Severian IR into emitted MLIR, which binds the
-host implementation through the tensor runtime ABI. Native builds then use the
-LLVM host pipeline. This keeps the model graph visible to the compiler instead
-of delegating inference to another framework or command-line program.
+scalar arguments flow through Severian IR into emitted MLIR. Ranked GPU regions
+are fused before direct `gpu.launch` emission; they do not invoke Triton or a C
+JIT provider. This keeps the model graph and its device schedule visible to the
+compiler instead of delegating them to another framework or command-line
+program.
 Severian decorators
 import a package's syntax symbols; they are not Python-style wrappers or
 execution-policy annotations. The `parallel` package enables task-local `simd`,
@@ -32,5 +34,6 @@ activation chains fuse automatically; direct tensor-dialect bufferization and
 typed GPU kernels are the next compiler stages.
 
 The API keeps mathematical behavior independent of execution placement. The
-current implementation is CPU-first; StableHLO/ROCm placement can refine the
-same operations without rewriting model architecture code.
+current direct GPU slice covers fused equal-shape elementwise arithmetic and
+ReLU. Reductions, contractions, richer layouts, and genuinely unranked runtime
+specialization remain explicit unsupported boundaries.

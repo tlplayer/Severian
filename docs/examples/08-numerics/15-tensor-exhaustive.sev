@@ -23,7 +23,7 @@ exceptions. A failing cell remains visible until this complete route works:
     StorageViewAbi
         -> source shape-pack and dimension inference
         -> compile-time ranked tensor specialization
-        -> CPU MLIR or GPU TTIR
+        -> CPU MLIR or Severian GPU MLIR
         -> compiled-kernel cache
         -> launcher
         -> execution

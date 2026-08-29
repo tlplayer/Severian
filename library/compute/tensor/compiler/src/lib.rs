@@ -1,18 +1,20 @@
 #![forbid(unsafe_code)]
 
 mod fusion;
+mod gpu;
 
 pub use fusion::{fusion_graph, fusion_graph_with_slots, FusionGraphError};
+pub use gpu::lower_gpu_bundle_to_mlir;
 
+use severian_artifact::CompiledRegionId;
 use severian_compile::{
     CompileContext, CompileError, CompileHandler, CompileOperation, CompileRegion,
     CompileRegionSpecialization, CompiledRegionArtifact, EffectSet, GpuKernelBundle, GpuTarget,
     TensorJitBundle, TensorJitRequirement,
 };
-use severian_artifact::CompiledRegionId;
 use severian_fusion::{
-    plan as plan_fusion, DeviceModel, ElementKind, FusionGraph, KernelSpecialization, NodeId,
-    NodeKind,
+    plan_with_outputs as plan_fusion_with_outputs, DeviceModel, ElementKind, FusionGraph,
+    KernelSpecialization, NodeId, NodeKind,
 };
 use severian_mir::{Value as MirValue, ValueId as MirValueId};
 use severian_mlir::{
@@ -36,10 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TensorCompiler;
 
-fn gpu_execution_requested(
-    region: &CompileRegion,
-    context: &CompileContext<'_>,
-) -> bool {
+fn gpu_execution_requested(region: &CompileRegion, context: &CompileContext<'_>) -> bool {
     if region.placement == Some(ExecutionPlacement::Gpu) {
         return true;
     }
@@ -62,13 +61,18 @@ impl CompileHandler for TensorCompiler {
         region: &CompileRegion,
         context: &CompileContext<'_>,
     ) -> Result<CompiledRegionArtifact, CompileError> {
+        let gpu = gpu_execution_requested(region, context);
         if let TensorJitRequirement::Required { reasons } = region.tensor_jit_requirement() {
-            let _ = reasons;
+            if gpu {
+                return Err(invalid(format!(
+                    "GPU tensor region requires Severian rank specialization ({reasons:?}); the retired C/Triton Tensor-JIT route is not a fallback"
+                )));
+            }
             return self
                 .compile_tensor_jit(region, context)
                 .map(CompiledRegionArtifact::TensorJit);
         }
-        if gpu_execution_requested(region, context) {
+        if gpu {
             return self
                 .compile_gpu(region, context)
                 .map(CompiledRegionArtifact::GpuKernel);
@@ -157,7 +161,7 @@ impl TensorCompiler {
         let architecture = if gpu {
             context
                 .target
-                .triton_gpu()
+                .compute_gpu()
                 .map(|device| device.architecture.clone())
                 .ok_or_else(|| {
                     CompileError::Target(
@@ -428,7 +432,7 @@ impl TensorCompiler {
         if region.compile_operations.is_empty() {
             return Err(invalid("the tensor compiler requires a non-empty region"));
         }
-        let device = context.target.triton_gpu().ok_or_else(|| {
+        let device = context.target.compute_gpu().ok_or_else(|| {
             CompileError::Target(
                 "GPU placement requires an AMD or NVIDIA device in the target".into(),
             )
@@ -443,7 +447,7 @@ impl TensorCompiler {
                 GpuTarget::Nvidia
             } else {
                 return Err(CompileError::Target(format!(
-                    "GPU `{}` with architecture `{}` is not a Triton AMD/NVIDIA target",
+                    "GPU `{}` with architecture `{}` is not a supported AMD/NVIDIA MLIR target",
                     device.name, device.architecture
                 )));
             };
@@ -459,7 +463,13 @@ impl TensorCompiler {
             .collect::<Result<Vec<_>, _>>()?;
         let (graph, value_nodes) = fusion_graph_with_slots(region, context.types)
             .map_err(|error| CompileError::InvalidArtifact(error.to_string()))?;
-        let plan = plan_fusion(&graph, DeviceModel::conservative_gpu());
+        let required_outputs = region
+            .output_slots
+            .iter()
+            .filter_map(|slot| value_nodes.get(slot).copied())
+            .collect::<Vec<_>>();
+        let plan =
+            plan_fusion_with_outputs(&graph, DeviceModel::conservative_gpu(), required_outputs);
         Ok(GpuKernelBundle {
             target,
             architecture: device.architecture.clone(),
@@ -5342,7 +5352,7 @@ mod tests {
     }
 
     #[test]
-    fn ranked_dynamic_cpu_regions_are_aot_but_unknown_gpu_facts_request_the_tensor_jit() {
+    fn ranked_dynamic_regions_are_aot_and_only_unknown_rank_requests_the_tensor_jit() {
         let (mut types, constructor) = types();
         let f32 = types.resolve_name("f32").unwrap();
         let ranked = types
@@ -5364,11 +5374,7 @@ mod tests {
         assert_eq!(region.tensor_jit_requirement(), TensorJitRequirement::None);
 
         region.placement = Some(ExecutionPlacement::Gpu);
-        let TensorJitRequirement::Required { reasons } = region.tensor_jit_requirement() else {
-            panic!("GPU dynamic extents and runtime input layouts require specialization")
-        };
-        assert!(reasons.contains(&TensorJitReason::DynamicGpuExtent { slot: 0, axis: 0 }));
-        assert!(reasons.contains(&TensorJitReason::RuntimeGpuLayout { slot: 0 }));
+        assert_eq!(region.tensor_jit_requirement(), TensorJitRequirement::None);
 
         let unranked = types
             .instantiate_tensor(constructor, f32, TensorShape::Unranked)
@@ -5818,7 +5824,7 @@ mod tests {
         let (mut types, constructor) = types();
         let element = types.resolve_name("f32").unwrap();
         let tensor_type = types
-            .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+            .instantiate_tensor(constructor, element, TensorShape::dynamic(2))
             .unwrap();
         let mut region = region(
             tensor_type,
@@ -5848,11 +5854,11 @@ mod tests {
     }
 
     #[test]
-    fn gpu_unranked_permute_bypasses_the_cpu_mlir_emitter() {
+    fn gpu_ranked_permute_bypasses_the_cpu_mlir_emitter() {
         let (mut types, constructor) = types();
         let element = types.resolve_name("f32").unwrap();
         let tensor_type = types
-            .instantiate_tensor(constructor, element, TensorShape::Unranked)
+            .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
             .unwrap();
         let mut region = region(
             tensor_type,
@@ -5887,6 +5893,104 @@ mod tests {
             bundle.graph.node(severian_fusion::NodeId(1)).kind,
             severian_fusion::NodeKind::Permute
         );
+    }
+
+    #[test]
+    fn unresolved_gpu_rank_does_not_fall_back_to_the_retired_c_triton_jit() {
+        let (mut types, constructor) = types();
+        let element = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, element, TensorShape::Unranked)
+            .unwrap();
+        let mut region = region(
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            2,
+        );
+        region.placement = Some(ExecutionPlacement::Gpu);
+        region.rebuild_value_contracts(&types).unwrap();
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "gfx1100".into(),
+            features: FeatureSet::from_names(["vendor.amd"]),
+        });
+
+        let error = TensorCompiler
+            .compile(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("Severian rank specialization"),
+            "{message}"
+        );
+        assert!(message.contains("not a fallback"), "{message}");
+    }
+
+    #[test]
+    fn ranked_sev_elementwise_fusion_lowers_directly_to_verifier_valid_gpu_mlir() {
+        let (mut types, constructor) = types();
+        let element = types.resolve_name("f32").unwrap();
+        let tensor_type = types
+            .instantiate_tensor(constructor, element, TensorShape::ranked([2, 4]))
+            .unwrap();
+        let mut region = region(
+            tensor_type,
+            tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Add),
+            2,
+        );
+        let mut relu_attributes = Attrs::new();
+        let relu = tensor::TensorOp::Elementwise(tensor::ElementwiseOp::Relu);
+        region.compile_operations.push(CompileOperation {
+            id: relu.apply(&mut relu_attributes),
+            operands: vec![tensor_type],
+            results: vec![tensor_type],
+            operand_slots: vec![2],
+            result_slots: vec![3],
+            attributes: relu_attributes,
+        });
+        region.output_slots = vec![3];
+        region.outputs[0].id = ValueId(3);
+        region.placement = Some(ExecutionPlacement::Gpu);
+        region.rebuild_value_contracts(&types).unwrap();
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(Device {
+            name: "gpu0".into(),
+            kind: DeviceKind::Gpu,
+            architecture: "gfx1100".into(),
+            features: FeatureSet::from_names(["vendor.amd"]),
+        });
+        for capability in ["mlir.dialect.gpu", "mlir.dialect.memref"] {
+            target.capabilities.insert(capability);
+        }
+
+        let artifact = TensorCompiler
+            .compile(
+                &region,
+                &CompileContext {
+                    types: &types,
+                    target: &target,
+                },
+            )
+            .unwrap();
+        let CompiledRegionArtifact::GpuKernel(bundle) = artifact else {
+            panic!("ranked GPU fusion did not retain its structural graph")
+        };
+        let mlir = lower_gpu_bundle_to_mlir(&bundle).unwrap();
+        assert!(mlir.module.contains("gpu.launch blocks"));
+        assert!(mlir.module.contains("arith.addf"));
+        assert!(mlir.module.contains("arith.select"));
+        assert!(mlir.module.contains("arith.cmpi ult"));
+        assert!(!mlir.module.contains("tt."));
+        assert!(!mlir.module.contains("triton"));
+        severian_mlir::verify_artifact(ArtifactId::for_region(region.id), mlir, &target).unwrap();
     }
 
     #[test]

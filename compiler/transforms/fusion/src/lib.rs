@@ -10,6 +10,13 @@
 //! Copyright 2017-2018 The OpenXLA Authors. Donor portions are licensed under
 //! Apache-2.0; see `THIRD_PARTY_NOTICES.md` at the repository root.
 
+mod layout;
+
+pub use layout::{
+    blocked_elementwise_schedule, ElementwiseSchedule, LayoutDimension, LayoutInputDimension,
+    LinearLayout, LinearLayoutError,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use serde::{Deserialize, Serialize};

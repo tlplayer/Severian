@@ -37,6 +37,9 @@ pub enum ExecutionBackend {
     MlirVector,
     Rocdl,
     StableHloXla,
+    GpuMlir,
+    /// Legacy compatibility value for artifacts produced before Severian
+    /// owned GPU MLIR lowering. New placement selection never returns it.
     Triton,
 }
 
@@ -47,6 +50,7 @@ impl ExecutionBackend {
             Self::MlirVector => "mlir-vector",
             Self::Rocdl => "rocdl",
             Self::StableHloXla => "stablehlo-xla",
+            Self::GpuMlir => "gpu-mlir",
             Self::Triton => "triton",
         }
     }
@@ -159,7 +163,7 @@ impl TargetSpec {
             .find(|device| device.kind == DeviceKind::Gpu && device.features.contains("vendor.amd"))
     }
 
-    pub fn triton_gpu(&self) -> Option<&Device> {
+    pub fn compute_gpu(&self) -> Option<&Device> {
         self.devices.iter().find(|device| {
             device.kind == DeviceKind::Gpu
                 && (device.features.contains("vendor.amd")
@@ -168,6 +172,11 @@ impl TargetSpec {
                     || device.architecture.starts_with("sm_")
                     || device.architecture.starts_with("compute_"))
         })
+    }
+
+    /// Compatibility query for the retired external compiler route.
+    pub fn triton_gpu(&self) -> Option<&Device> {
+        self.compute_gpu()
     }
 
     pub fn rediscover_devices(&self) -> Self {
@@ -185,8 +194,8 @@ impl TargetSpec {
             ExecutionPlacement::Host => Ok(ExecutionBackend::Native),
             ExecutionPlacement::Simd => Ok(ExecutionBackend::MlirVector),
             ExecutionPlacement::Gpu => self
-                .triton_gpu()
-                .map(|_| ExecutionBackend::Triton)
+                .compute_gpu()
+                .map(|_| ExecutionBackend::GpuMlir)
                 .ok_or(TargetError::MissingGpuDevice),
         }
     }
@@ -396,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn discovered_rocm_device_selects_triton() {
+    fn discovered_rocm_device_selects_severian_gpu_mlir() {
         let mut target = TargetSpec::new("x86_64-unknown-linux");
         target.devices.push(Device {
             name: "renderD128".into(),
@@ -408,12 +417,12 @@ mod tests {
             target
                 .select_execution_backend(severian_universal::ExecutionPlacement::Gpu,)
                 .unwrap(),
-            ExecutionBackend::Triton
+            ExecutionBackend::GpuMlir
         );
     }
 
     #[test]
-    fn amd_hardware_without_rocm_still_selects_the_triton_compiler() {
+    fn amd_hardware_without_rocm_can_still_compile_severian_gpu_mlir() {
         let mut target = TargetSpec::new("x86_64-unknown-linux");
         target.devices.push(Device {
             name: "renderD128".into(),
@@ -425,12 +434,12 @@ mod tests {
             target
                 .select_execution_backend(severian_universal::ExecutionPlacement::Gpu)
                 .unwrap(),
-            ExecutionBackend::Triton
+            ExecutionBackend::GpuMlir
         );
     }
 
     #[test]
-    fn nvidia_hardware_selects_the_same_triton_backend() {
+    fn nvidia_hardware_selects_the_same_severian_gpu_mlir_backend() {
         let mut target = TargetSpec::new("x86_64-unknown-linux");
         target.devices.push(Device {
             name: "gpu0".into(),
@@ -442,7 +451,7 @@ mod tests {
             target
                 .select_execution_backend(severian_universal::ExecutionPlacement::Gpu)
                 .unwrap(),
-            ExecutionBackend::Triton
+            ExecutionBackend::GpuMlir
         );
     }
 

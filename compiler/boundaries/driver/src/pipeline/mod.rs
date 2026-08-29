@@ -1070,26 +1070,24 @@ fn compose_region_artifacts(
     target: &TargetSpec,
 ) -> Result<RoutedProgram, CompileError> {
     let mut cpu = Vec::new();
-    let mut gpu = Vec::new();
-    let mut gpu_kernels = Vec::new();
+    let gpu_kernels = Vec::new();
     let mut tensor_jit = Vec::new();
     for artifact in artifacts {
         match artifact {
             VerifiedCompiledRegionArtifact::CpuMlir(artifact) => cpu.push(artifact),
             VerifiedCompiledRegionArtifact::GpuKernel(artifact) => {
-                gpu.push(severian_mlir::GpuLaunchArtifact {
-                    id: artifact.id,
-                    inputs: artifact.bundle.inputs.clone(),
-                    outputs: artifact.bundle.outputs.clone(),
-                });
-                gpu_kernels.push(artifact);
+                let id = artifact.id;
+                let generated =
+                    severian_tensor_compiler::lower_gpu_bundle_to_mlir(&artifact.bundle)
+                        .map_err(CompileError::Compile)?;
+                let verified = severian_mlir::verify_artifact(id, generated, target)
+                    .map_err(CompileError::Mlir)?;
+                cpu.push(verified);
             }
             VerifiedCompiledRegionArtifact::TensorJit(artifact) => tensor_jit.push(artifact),
         }
     }
-    let host = severian_mlir::compose(ordinary, &cpu, target).map_err(CompileError::Mlir)?;
-    let host_mlir =
-        severian_mlir::compose_gpu_launchers(&host, &gpu, target).map_err(CompileError::Mlir)?;
+    let host_mlir = severian_mlir::compose(ordinary, &cpu, target).map_err(CompileError::Mlir)?;
     let tensor_jit_requires_gpu = tensor_jit.iter().any(|artifact| {
         artifact.bundle.placement == Some(severian_universal::ExecutionPlacement::Gpu)
     });
@@ -2738,6 +2736,52 @@ mod tests {
         assert!(source.contains("arg3_view.owner = arg3_allocated"));
         assert!(source.contains("arg3_view.byte_length = (32 + 7) / 8"));
         assert!(source.contains("axis < 2"));
+    }
+
+    #[test]
+    fn sev_ranked_elementwise_source_reaches_direct_gpu_mlir_without_triton() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        let source =
+            repository.join("library/compute/tensor/examples/severian-gpu-mlir/src/main.sev");
+        let mut target = TargetSpec::new("x86_64-unknown-linux");
+        target.devices.push(severian_target::Device {
+            name: "test-amd-gpu".into(),
+            kind: severian_target::DeviceKind::Gpu,
+            architecture: "gfx1100".into(),
+            features: severian_target::FeatureSet::from_names(["vendor.amd", "driver.rocm"]),
+        });
+        for capability in ["mlir.dialect.gpu", "mlir.dialect.memref"] {
+            target.capabilities.insert(capability);
+        }
+
+        let mlir = std::thread::Builder::new()
+            .name("severian-gpu-mlir-slice".into())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let compiler = Compiler::new(target).unwrap();
+                let mir = compiler
+                    .check_file_to_mir(&source, CompileMode::Build)
+                    .unwrap();
+                compiler.compile_mir_to_mlir(&mir).unwrap()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(
+            mlir.contains("severian.gpu.architecture = \"gfx1100\""),
+            "{mlir}"
+        );
+        assert!(mlir.contains("gpu.launch blocks"));
+        assert_eq!(mlir.matches("gpu.launch blocks").count(), 1, "{mlir}");
+        assert!(mlir.contains("arith.addf"));
+        assert!(mlir.contains("arith.select"));
+        assert!(mlir.contains("memref.store"));
+        assert!(!mlir.contains("__sev_gpu_launch_"));
+        assert!(!mlir.contains("triton"));
+        assert!(!mlir.contains("tt."));
     }
 
     #[test]
