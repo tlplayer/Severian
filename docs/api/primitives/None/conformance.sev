@@ -1,0 +1,8 @@
+def lookup(found: bool) -> string | None:
+    if found:
+        return "value"
+    return None
+
+test "None is the absence member":
+    missing ?= lookup(false)
+    assert(not missing)

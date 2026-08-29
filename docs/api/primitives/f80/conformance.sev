@@ -1,0 +1,2 @@
+def preserve(value: f80) -> f80:
+    return +value

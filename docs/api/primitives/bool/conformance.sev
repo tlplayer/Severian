@@ -1,0 +1,6 @@
+def preserve(value: bool) -> bool:
+    return not not value
+
+test "bool logic and equality":
+    assert(preserve(true))
+    assert(true != false)

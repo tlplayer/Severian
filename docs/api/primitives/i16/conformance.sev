@@ -1,0 +1,2 @@
+def combine(left: i16, right: i16) -> i16:
+    return left | right

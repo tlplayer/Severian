@@ -1,0 +1,6 @@
+def safe(value: temperature) -> bool:
+    return value < 90C
+
+test "temperature suffixes normalize to Celsius":
+    assert(32F == 0C)
+    assert(273.15K == 0C)

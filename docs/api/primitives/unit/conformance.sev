@@ -1,0 +1,5 @@
+def completed() -> unit:
+    return
+
+test "unit marks successful completion":
+    completed()

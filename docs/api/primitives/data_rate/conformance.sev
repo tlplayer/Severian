@@ -1,0 +1,2 @@
+def throughput(transferred: data_size, elapsed: duration) -> data_rate:
+    return transferred / elapsed

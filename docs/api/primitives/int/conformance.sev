@@ -1,0 +1,6 @@
+def mix(left: int, right: int) -> int:
+    return (left + right) ^ (left - right)
+
+test "int is the default integer literal":
+    value := 42
+    assert(value == 42)

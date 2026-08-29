@@ -2,7 +2,7 @@
   "name": "severian-language",
   "displayName": "Severian Language",
   "description": "Syntax highlighting, editor behavior, and native coverage gutters for the Severian programming language.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "severian",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
@@ -41,7 +41,7 @@
     "programming language"
   ],
   "scripts": {
-    "check": "python3 tests/check_grammar.py && node --test tests/coverage-data.test.js",
+    "check": "../../target/debug/sev run . --bin vscode-grammar-check && node --test tests/coverage-data.test.js",
     "package": "vsce package --out severian-language.vsix",
     "publish": "vsce publish"
   },

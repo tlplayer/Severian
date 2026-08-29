@@ -1,0 +1,2 @@
+def preserve(value: i128) -> i128:
+    return +value

@@ -1,0 +1,74 @@
+[[feature]]
+id = "type.tensor"
+kind = "type_constructor"
+syntax = "Tensor[T, S...]"
+type_params = ["T", "S..."]
+parameters = ["T: element type", "S...: zero or more dimension terms"]
+constraints = ["T has a PrimitiveRepresentation", "each D in S... is non-negative"]
+returns = "Tensor[T, S...]"
+effects = []
+errors = ["InvalidElementType", "InvalidTensorShape"]
+ownership = "Tensor values carry storage ownership/aliasing independently of element type and rank."
+universal = "TensorType { element, shape }"
+lowering = "Ranked tensor/memref after specialization; StorageViewAbi at host storage boundaries"
+status = "partial"
+since = "2026"
+tests = ["docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev", "docs/examples/08-numerics/06-shapes.sev"]
+limitations = ["Fully unranked execution still requires a complete Severian-owned runtime specialization and launcher path."]
+snippets = ["types.tensor_and_union"]
+
+[[feature]]
+id = "type.union"
+kind = "type_constructor"
+syntax = "T | U"
+type_params = ["T", "U"]
+parameters = ["T: member type", "U: member type"]
+constraints = []
+returns = "Union[T, U]"
+effects = []
+errors = []
+ownership = "A union value follows the active member's ownership contract."
+universal = "TypeKind.Union"
+lowering = "Tagged representation selected by ABI lowering"
+status = "implemented"
+since = "2026"
+tests = ["docs/examples/02-functions/01-basic/03-union-parameters.sev"]
+examples = ["docs/examples/01-types/01-basic/08-optionals.sev"]
+limitations = []
+snippets = ["types.tensor_and_union"]
+
+[[feature]]
+id = "type.raw_pointer"
+kind = "type_constructor"
+syntax = "*[T]"
+type_params = ["T"]
+parameters = ["T: pointee type"]
+constraints = ["raw access occurs inside an unsafe or native boundary"]
+returns = "*[T]"
+effects = ["unsafe"]
+errors = ["InvalidPointerAccess"]
+ownership = "Raw pointers do not imply ownership; FFI declarations specify borrowed/owned/transferred behavior."
+universal = "raw_pointer_type_id(T)"
+lowering = "!llvm.ptr plus ABI pointee contract"
+status = "implemented"
+since = "2026"
+tests = ["docs/examples/04-systems/03-pointers/01-address-dereference.sev"]
+examples = ["docs/examples/04-systems/03-pointers/README.md"]
+limitations = []
+snippets = ["types.tensor_and_union"]
+
+[[snippet]]
+id = "types.tensor_and_union"
+covers = ["type.tensor", "type.union", "type.raw_pointer"]
+source = '''
+import tensor
+
+def maybe_tensor[T: tensor.TensorElement, Rows: tensor.Dim, Columns: tensor.Dim](
+    value: Tensor[T, Rows, Columns],
+    address: *[T] | None,
+) -> Tensor[T, Rows, Columns] | None:
+    if address == None:
+        return None
+    return value
+'''

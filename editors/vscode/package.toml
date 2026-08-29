@@ -1,0 +1,18 @@
+[package]
+name = "severian-vscode-conformance"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "vscode-grammar-check"
+
+[[bin]]
+name = "vscode-grammar-check"
+path = "tests/check_grammar.sev"
+
+[dependencies]
+file = { path = "../../library/system/file", version = "0.1.0" }
+
+[test]
+coverage-min = 0
+memory-max = "256MB"
+leaks = "deny"

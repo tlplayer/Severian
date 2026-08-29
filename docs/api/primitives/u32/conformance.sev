@@ -1,0 +1,2 @@
+def advance(value: u32, amount: u32) -> u32:
+    return value + amount

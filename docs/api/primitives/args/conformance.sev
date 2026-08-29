@@ -1,0 +1,4 @@
+import process
+
+def argument_count() -> usize:
+    return size(process.arguments())

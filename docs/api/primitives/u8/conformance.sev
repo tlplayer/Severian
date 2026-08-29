@@ -1,0 +1,2 @@
+def mask(value: u8, bits: u8) -> u8:
+    return value & bits

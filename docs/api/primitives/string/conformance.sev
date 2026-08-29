@@ -1,0 +1,6 @@
+def greeting(name: string) -> string:
+    return "hello " + name
+
+test "string ordering and concatenation":
+    assert(greeting("Severian") == "hello Severian")
+    assert("a" < "b")

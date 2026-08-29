@@ -8,6 +8,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#formatted-strings" },
+    { "include": "#characters" },
     { "include": "#strings" },
     { "include": "#decorators" },
     { "include": "#native-declarations" },
@@ -132,6 +133,14 @@
         }
       ]
     },
+    "characters": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.character.severian",
+          "match": "'(?:\\\\[nrt'\\\\]|[^'\\\\])'"
+        }
+      ]
+    },
     "decorators": {
       "patterns": [
         {
@@ -197,7 +206,7 @@
     "type-declarations": {
       "patterns": [
         {
-          "match": "\\b(class|trait|enum)\\s+([A-Z][A-Za-z0-9_]*)",
+          "match": "\\b(class|trait|enum|extend|type)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.severian" },
             "2": { "name": "entity.name.type.severian" }
@@ -214,7 +223,7 @@
           }
         },
         {
-          "match": "\\b(property|bench|chaos|integ|profile)\\b",
+          "match": "\\b(compiler|accept|reject|property|bench|chaos|integ|profile|differential|timeout|skip|repeat|mock)\\b",
           "name": "storage.modifier.test.severian"
         }
       ]
@@ -236,23 +245,23 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|elif|else|while|for|in|switch|match|case|when|return|throw|break|continue|unsafe|defer|operator)\\b",
+          "match": "\\b(if|elif|else|while|for|in|switch|match|case|when|always|return|throw|break|continue|pass|try|catch|unsafe|defer|with|select|limit|operator)\\b",
           "name": "keyword.control.severian"
         },
         {
-          "match": "\\b(async|await|send)\\b",
+          "match": "\\b(async|await|send|parallel|distributed|tasks|simd|simt|gpu)\\b",
           "name": "keyword.control.flow.severian"
         },
         {
-          "match": "\\b(with|from)\\b",
+          "match": "\\b(with|from|as)\\b",
           "name": "keyword.control.resource.severian"
         },
         {
-          "match": "\\b(and|or|not)\\b",
+          "match": "\\b(and|or|not|is)\\b",
           "name": "keyword.operator.logical.severian"
         },
         {
-          "match": "\\b(assert)\\b",
+          "match": "\\b(assert|throws)\\b",
           "name": "keyword.other.assert.severian"
         }
       ]
@@ -260,7 +269,7 @@
     "ownership": {
       "patterns": [
         {
-          "match": "\\b(view|borrow|clone|move)\\b",
+          "match": "\\b(view|borrow|clone|move|mut|drop|copy|lock)\\b",
           "name": "storage.modifier.ownership.severian"
         },
         {
@@ -272,7 +281,7 @@
     "constants": {
       "patterns": [
         {
-          "match": "\\b(true|false|absent|invalid|dynamic)\\b",
+          "match": "\\b(true|false|None|absent|invalid|dynamic)\\b",
           "name": "constant.language.severian"
         },
         {
@@ -292,11 +301,11 @@
     "types": {
       "patterns": [
         {
-          "match": "\\b(int|float|string|bool|unit|u8|u16|u32|u64|i8|i16|i32|i64|f16|f32|f64|list|map|set)\\b",
+          "match": "\\b(bool|char|int|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|float|f8e4m3fn|f8e5m2|f16|bf16|f32|f64|f80|f128|string|bytes|Error|None|unit|args|data_size|duration|data_rate|frequency|percentage|temperature|voltage|current|power)\\b",
           "name": "storage.type.primitive.severian"
         },
         {
-          "match": "\\b(Tensor|Result|TestResult|Option|Function|Channel|Buffer|Path)\\b",
+          "match": "\\b(Any|Tensor|Result|TestResult|Option|Function|Channel|Buffer|Path|list|map|set|tuple|pointer)\\b",
           "name": "support.type.builtin.severian"
         },
         {
@@ -308,7 +317,7 @@
     "builtins": {
       "patterns": [
         {
-          "match": "\\b(panic|exception|print|range|size|enumerate|zip|indices|present)\\b(?=\\s*\\()",
+          "match": "\\b(assert|panic|exception|print|range|size|enumerate|zip|indices|present|throws)\\b(?=\\s*\\()",
           "name": "support.function.builtin.severian"
         }
       ]
@@ -332,7 +341,7 @@
     "operators": {
       "patterns": [
         {
-          "match": "\\?=|:=|==|!=|<=|>=|->|\\+=|-=|\\*=|/=|%=|\\*\\*|[=+\\-*/%<>|@^]",
+          "match": "\\.\\.\\.|\\.\\.|\\?=|:=|==|!=|<=|>=|->|\\+=|-=|\\*=|/=|%=|\\*\\*|[=+\\-*/%<>|&@^]",
           "name": "keyword.operator.severian"
         },
         {

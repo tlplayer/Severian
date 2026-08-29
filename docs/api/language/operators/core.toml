@@ -1,0 +1,53 @@
+[[feature]]
+id = "operator.unary"
+kind = "operator_family"
+syntax = "+V | -V | not V"
+type_params = ["T", "O"]
+parameters = ["V: T", "O in {Positive, Negative, Not}"]
+constraints = ["T provides a unary operator declaration matching O"]
+returns = "operator result declared for T and O"
+effects = []
+errors = ["UnsupportedOperator", "AmbiguousOperator"]
+ownership = "The selected operator declaration determines whether V is copied, borrowed, or moved."
+universal = "UnaryOperator.Positive | UnaryOperator.Negative | UnaryOperator.Not"
+lowering = "Resolved operator call; primitive cases select the corresponding arith operation"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/operator.rs"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = ["Backend legality still depends on the concrete primitive representation; not every registered numeric width supports every unary operation on every target."]
+snippets = ["operators.scalar"]
+
+[[feature]]
+id = "operator.binary"
+kind = "operator_family"
+syntax = "L O R, where O in {|, &, ^, +, -, *, /, %, **, ==, !=, <, <=, >, >=, in, and, or}"
+type_params = ["L", "R", "O"]
+parameters = ["left: L", "right: R", "O: universal binary operation identity"]
+constraints = ["one visible operator signature accepts L and R for O"]
+returns = "result type declared by the selected signature"
+effects = ["effects(selected operator)"]
+errors = ["UnsupportedOperator", "AmbiguousOperator", "CheckedIntegerOverflow", "DivisionByZero"]
+ownership = "The selected signature controls borrowing, copying, and moves for both operands."
+universal = "BinaryOperator.BitwiseOr | BinaryOperator.BitwiseAnd | BinaryOperator.BitwiseXor | BinaryOperator.Add | BinaryOperator.Subtract | BinaryOperator.Multiply | BinaryOperator.Divide | BinaryOperator.Remainder | BinaryOperator.Power | BinaryOperator.Equal | BinaryOperator.NotEqual | BinaryOperator.Less | BinaryOperator.LessEqual | BinaryOperator.Greater | BinaryOperator.GreaterEqual | BinaryOperator.Contains | BinaryOperator.And | BinaryOperator.Or"
+lowering = "Resolved operator call; primitives select representation-correct integer, float, comparison, membership, or boolean lowering"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/operator.rs"]
+examples = ["docs/examples/01-types/01-basic/01-primitives.sev"]
+limitations = ["The universal operator catalogue is complete, but backend/type conformance is not yet exhaustively recorded as a matrix."]
+snippets = ["operators.scalar"]
+
+[[snippet]]
+id = "operators.scalar"
+covers = ["operator.unary", "operator.binary"]
+source = '''
+def operator_surface(left: int, right: int, values: list[int]) -> int:
+    arithmetic = +left + -right + left * right + left / right + left % right + left ** 2
+    bits = (left | right) & (left ^ right)
+    if left == right or left != right and left <= right or left >= right:
+        arithmetic += 1
+    if left in values and not false:
+        arithmetic += bits
+    return arithmetic
+'''

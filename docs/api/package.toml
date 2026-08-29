@@ -1,0 +1,23 @@
+[package]
+name = "severian-api-specification"
+version = "0.1.0"
+edition = "2026"
+publish = false
+default-run = "api-check"
+
+[[bin]]
+name = "api-check"
+path = "check.sev"
+
+[[bin]]
+name = "api-symmetry"
+path = "symmetry.sev"
+
+[dependencies]
+file = { path = "../../library/system/file", version = "0.1.0" }
+process = { path = "../../library/system/process", version = "0.1.0" }
+
+[test]
+coverage-min = 0
+memory-max = "512MB"
+leaks = "deny"

@@ -44,13 +44,9 @@ It is publicly distributable under the same Severian license as the compiler.
 The complete terms are bundled in [`LICENSE.md`](LICENSE.md); this extension is
 not offered under an alternate license.
 
-The grammar is intended to track `compiler/lexer/src/lib.rs`. Run the grammar check from the repository root after changing language tokens:
-
-```bash
-python3 editors/vscode/tests/check_grammar.py
-```
-
-Or, from this directory after `npm install`:
+The grammar vocabulary is checked against the first-class API specification in
+`docs/api/index.toml` and exercised by `tests/highlighting.sev`. The validator is
+written in Severian. Run it from this extension directory:
 
 ```bash
 npm run check

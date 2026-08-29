@@ -1,0 +1,42 @@
+import file
+
+
+def check_grammar() -> int:
+    grammar = file.raw("syntaxes/severian.tmLanguage.json")
+    index = file.raw("../../docs/api/index.toml")
+    fixture = file.raw("tests/highlighting.sev")
+    failures := 0
+
+    for token in [
+        "def", "class", "trait", "enum", "extend", "type", "property", "operator", "extern",
+        "try", "catch", "always", "select", "limit", "pass", "compiler", "accept", "reject",
+        "view", "borrow", "clone", "move", "mut", "copy", "lock",
+        "i128", "u128", "f8e4m3fn", "f8e5m2", "bf16", "f80", "f128", "duration",
+    ]:
+        if token not in index:
+            print("editor check: API vocabulary omits " + token)
+            failures += 1
+        if token not in grammar:
+            print("editor check: grammar omits " + token)
+            failures += 1
+        if token not in fixture:
+            print("editor check: highlighting fixture omits " + token)
+            failures += 1
+
+    for marker in ["formatted-strings", "characters", "\\\\.\\\\.\\\\.", "\\\\?=", ":=", "\\\\*\\\\*"]:
+        if marker not in grammar:
+            print("editor check: grammar omits syntax marker " + marker)
+            failures += 1
+
+    if not (failures == 0):
+        return 1
+    print("VS Code grammar agrees with the documented API vocabulary")
+    return 0
+
+
+def main():
+    assert(check_grammar() == 0)
+
+
+test "documented API vocabulary is highlighted":
+    assert(check_grammar() == 0)

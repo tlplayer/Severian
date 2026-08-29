@@ -1,0 +1,8 @@
+def require(found: bool) -> string | Error:
+    if not found:
+        throw Error("not found")
+    return "value"
+
+test "Error remains a result member":
+    result ?= require(false)
+    assert(result is Error)

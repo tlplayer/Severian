@@ -1,0 +1,5 @@
+def saturated(value: percentage) -> bool:
+    return value >= 100pct
+
+test "percentage literals are ratios":
+    assert(80pct == 0.8)

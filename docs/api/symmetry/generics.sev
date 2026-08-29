@@ -1,0 +1,12 @@
+trait Numeric:
+    def add(other: Self) -> Self
+    def multiply(other: Self) -> Self
+
+
+def affine[T: Numeric](value: T, scale: T, bias: T) -> T:
+    return value * scale + bias
+
+
+def main():
+    print(affine[int](4, 3, 2))
+    print(affine[i64](10, 4, 2))

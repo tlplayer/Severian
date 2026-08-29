@@ -1,0 +1,156 @@
+import file
+import process
+
+
+def require_marker(path: string, source: string, marker: string, label: string) -> int:
+    if marker in source:
+        return 0
+    print("api check: " + path + " is missing " + label + " (`" + marker + "`)")
+    return 1
+
+
+def check_record(path: string, expected_features: usize) -> int:
+    source = file.raw(path)
+    failures := 0
+    feature_count = size(source.split("[[feature]]")) - 1
+    feature_snippet_count = size(source.split("snippets = [")) - 1
+    embedded_snippet_count = size(source.split("[[snippet]]")) - 1
+    if not (feature_count == expected_features):
+        print("api check: " + path + " has " + string(feature_count) + " features; expected " + string(expected_features))
+        failures += 1
+    if not (feature_snippet_count == feature_count):
+        print("api check: every feature in " + path + " must cite a snippet")
+        failures += 1
+    if embedded_snippet_count == 0:
+        print("api check: " + path + " has no embedded Severian snippet")
+        failures += 1
+    failures += require_marker(path, source, "source = '''", "embedded .sev source")
+    failures += require_marker(path, source, "status = ", "status")
+    failures += require_marker(path, source, "limitations = ", "limitations")
+    return failures
+
+
+def check_markdown(path: string) -> int:
+    source = file.raw(path)
+    failures := 0
+    failures += require_marker(path, source, "```sev", "a tested Severian code block")
+    failures += require_marker(path, source, "API ID", "a stable API ID")
+    failures += require_marker(path, source, "Current weakness", "an explicit current-weakness statement")
+    sections = source.split("```sev")
+    for index in range(int(size(sections))):
+        if index == 0:
+            continue
+        snippet = sections[index].split("```")[0]
+        temporary = "/tmp/severian-api-documentation-snippet.sev"
+        if not (file.write(temporary, snippet) == 0):
+            print("api check: could not materialize snippet " + string(index) + " from " + path)
+            failures += 1
+        else not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 target/debug/sev check " + temporary) == 0):
+            print("api check: Severian rejected snippet " + string(index) + " from " + path)
+            failures += 1
+    return failures
+
+
+def check_primitive_contract(name: string) -> int:
+    folder = "docs/api/primitives/" + name
+    page = folder + "/README.md"
+    conformance = folder + "/conformance.sev"
+    source = file.raw(page)
+    failures := check_markdown(page)
+    for heading in ["## Representation", "## Source semantics", "## ABI and lowering", "## Tensor", "## Current weakness"]:
+        failures += require_marker(page, source, heading, "required primitive section")
+    failures += require_marker(page, source, "universal.primitive." + name, "the exact Universal path")
+    if not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 target/debug/sev check " + conformance) == 0):
+        print("api check: primitive conformance failed for " + name)
+        failures += 1
+    return failures
+
+
+def check_editor_vocabulary() -> int:
+    index = file.raw("docs/api/index.toml")
+    grammar = file.raw("editors/vscode/syntaxes/severian.tmLanguage.json")
+    failures := 0
+    for line in file.raw("compiler/universal/src/primitive/mod.rs").split("\n"):
+        if "name: \"" not in line:
+            continue
+        name = line.split("\"")[1]
+        if ("\"" + name + "\"") not in index:
+            print("api check: editor vocabulary omits universal primitive " + name)
+            failures += 1
+        if name not in grammar:
+            print("api check: VS Code grammar omits universal primitive " + name)
+            failures += 1
+        failures += check_primitive_contract(name)
+    for keyword in ["def", "class", "trait", "enum", "extend", "try", "catch", "always", "select", "compiler", "accept", "reject", "copy", "lock"]:
+        if keyword not in grammar:
+            print("api check: VS Code grammar omits keyword " + keyword)
+            failures += 1
+    return failures
+
+
+def check_structural_tensor_ids() -> int:
+    records = file.raw("docs/api/compiler/tensor/operations.toml")
+    universal = file.raw("compiler/universal/src/tensor.rs")
+    failures := 0
+    for operation in ["elementwise", "reduce", "matmul", "reshape_view", "permute", "slice", "broadcast", "gather", "scatter", "concatenate", "convert", "storage_view"]:
+        identity = "tensor." + operation
+        if ("id = \"" + identity + "\"") not in records:
+            print("api check: records omit " + identity)
+            failures += 1
+        if ("OpId::named(\"tensor\", \"" + operation + "\")") not in universal:
+            print("api check: documented tensor identity is absent from Universal: " + identity)
+            failures += 1
+    return failures
+
+
+def check_api() -> int:
+    failures := 0
+    failures += check_record("docs/api/language/generics/core.toml", 4)
+    failures += check_record("docs/api/language/primitives/families.toml", 6)
+    failures += check_record("docs/api/language/types/tensor.toml", 3)
+    failures += check_record("docs/api/language/operators/core.toml", 2)
+    failures += check_record("docs/api/compiler/tensor/operations.toml", 12)
+
+    for page in [
+        "docs/api/primitives/boolean.md",
+        "docs/api/primitives/signed-integers.md",
+        "docs/api/primitives/unsigned-integers.md",
+        "docs/api/primitives/floating-point.md",
+        "docs/api/primitives/text.md",
+        "docs/api/primitives/storage-and-unit.md",
+        "docs/api/primitives/measured.md",
+        "docs/api/generics/type-parameters.md",
+        "docs/api/generics/dimensions.md",
+        "docs/api/generics/shapes.md",
+        "docs/api/generics/type-application.md",
+        "docs/api/operators/unary.md",
+        "docs/api/operators/arithmetic.md",
+        "docs/api/operators/bitwise.md",
+        "docs/api/operators/comparison.md",
+        "docs/api/operators/logical-and-membership.md",
+        "docs/api/tensor/type-and-shape.md",
+        "docs/api/tensor/elementwise.md",
+        "docs/api/tensor/reductions.md",
+        "docs/api/tensor/matmul.md",
+        "docs/api/tensor/views-and-layout.md",
+        "docs/api/tensor/indexing.md",
+        "docs/api/tensor/conversion.md",
+        "docs/api/tensor/storage-view.md",
+    ]:
+        failures += check_markdown(page)
+
+    failures += check_editor_vocabulary()
+    failures += check_structural_tensor_ids()
+    if not (failures == 0):
+        print("Severian API check failed with " + string(failures) + " contract violations")
+        return 1
+    print("Severian API check passed: 39 primitive folders, records, Markdown snippets, Universal identities, and editor vocabulary agree")
+    return 0
+
+
+def main():
+    assert(check_api() == 0)
+
+
+test "API records and documentation remain structurally aligned":
+    assert(check_api() == 0)

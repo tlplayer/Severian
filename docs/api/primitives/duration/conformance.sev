@@ -1,0 +1,5 @@
+def fraction(elapsed: duration, budget: duration) -> float:
+    return elapsed / budget
+
+test "duration literals normalize to seconds":
+    assert(1000ms == 1s)

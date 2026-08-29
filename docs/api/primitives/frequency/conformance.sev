@@ -1,0 +1,5 @@
+def inverse(period: duration) -> frequency:
+    return 1.0 / period
+
+test "frequency literals normalize to hertz":
+    assert(1kHz == 1000Hz)

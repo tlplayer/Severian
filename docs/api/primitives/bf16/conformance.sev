@@ -1,0 +1,2 @@
+def residual(left: bf16, right: bf16) -> bf16:
+    return left + right
