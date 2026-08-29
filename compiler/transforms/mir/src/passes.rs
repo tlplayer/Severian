@@ -20,6 +20,36 @@ pub enum PassKind {
     Operation,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Invariant {
+    WellFormed,
+    DropsElaborated,
+    OwnershipValid,
+    LoweringReady,
+}
+
+pub type InvariantSet = BTreeSet<Invariant>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EntityKind {
+    Function,
+    Global,
+    BasicBlock,
+    Local,
+    Statement,
+}
+
+pub type EntitySet = BTreeSet<EntityKind>;
+
+#[derive(Debug, Clone, Default)]
+pub struct PassContract {
+    pub requires: InvariantSet,
+    pub preserves: InvariantSet,
+    pub establishes: InvariantSet,
+    pub may_remove: EntitySet,
+    pub may_introduce: EntitySet,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AnalysisId(pub u128);
 
@@ -33,6 +63,7 @@ pub struct PassMetadata {
     pub produced_stage: IrStage,
     pub parallel: bool,
     pub deterministic: bool,
+    pub contract: PassContract,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +149,7 @@ impl PassManager {
         stage: &mut IrStage,
     ) -> Result<(), PassError> {
         let mut analyses = AnalysisManager::default();
+        let mut invariants = stage_invariants(*stage);
         for pass in &self.passes {
             let metadata = pass.metadata();
             if metadata.accepted_stage != *stage {
@@ -129,6 +161,33 @@ impl PassManager {
                     ),
                 });
             }
+            let missing = metadata
+                .contract
+                .requires
+                .difference(&invariants)
+                .copied()
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(PassError {
+                    pass: metadata.name,
+                    message: format!("required invariants are not established: {missing:?}"),
+                });
+            }
+            let unavailable_preservation = metadata
+                .contract
+                .preserves
+                .difference(&invariants)
+                .copied()
+                .collect::<Vec<_>>();
+            if !unavailable_preservation.is_empty() {
+                return Err(PassError {
+                    pass: metadata.name,
+                    message: format!(
+                        "pass claims to preserve unavailable invariants: {unavailable_preservation:?}"
+                    ),
+                });
+            }
+            let before = entity_counts(module);
             match metadata.kind {
                 PassKind::Module => pass.run_module(module, context, &mut analyses)?,
                 PassKind::Function | PassKind::Region | PassKind::Operation => {
@@ -152,11 +211,107 @@ impl PassManager {
                     }
                 }
             }
+            enforce_entity_contract(metadata, &before, &entity_counts(module))?;
+            let must_verify = metadata.contract.preserves.contains(&Invariant::WellFormed)
+                || metadata
+                    .contract
+                    .establishes
+                    .contains(&Invariant::WellFormed);
+            if must_verify {
+                verify(module, context.universal).map_err(|error| PassError {
+                    pass: metadata.name,
+                    message: format!("post-pass MIR verification failed: {error}"),
+                })?;
+            }
             analyses.invalidate_except(&metadata.preserved_analyses);
+            invariants.retain(|invariant| metadata.contract.preserves.contains(invariant));
+            invariants.extend(metadata.contract.establishes.iter().copied());
             *stage = metadata.produced_stage;
         }
         Ok(())
     }
+}
+
+fn stage_invariants(stage: IrStage) -> InvariantSet {
+    match stage {
+        IrStage::Constructed => InvariantSet::new(),
+        IrStage::DropElaborated => {
+            BTreeSet::from([Invariant::WellFormed, Invariant::DropsElaborated])
+        }
+        IrStage::OwnershipChecked | IrStage::Optimized => BTreeSet::from([
+            Invariant::WellFormed,
+            Invariant::DropsElaborated,
+            Invariant::OwnershipValid,
+        ]),
+        IrStage::LoweringReady => BTreeSet::from([
+            Invariant::WellFormed,
+            Invariant::DropsElaborated,
+            Invariant::OwnershipValid,
+            Invariant::LoweringReady,
+        ]),
+    }
+}
+
+fn entity_counts(module: &Module) -> BTreeMap<EntityKind, usize> {
+    let bodies = std::iter::once(&module.initializer).chain(
+        module
+            .functions
+            .iter()
+            .filter_map(|function| function.body.as_ref()),
+    );
+    let mut counts = BTreeMap::from([
+        (EntityKind::Function, module.functions.len()),
+        (EntityKind::Global, module.globals.len()),
+        (EntityKind::BasicBlock, 0),
+        (EntityKind::Local, 0),
+        (EntityKind::Statement, 0),
+    ]);
+    for body in bodies {
+        *counts.entry(EntityKind::BasicBlock).or_default() += body.blocks.len();
+        *counts.entry(EntityKind::Local).or_default() += body.locals.len();
+        *counts.entry(EntityKind::Statement).or_default() += body
+            .blocks
+            .iter()
+            .map(|block| block.statements.len())
+            .sum::<usize>();
+    }
+    counts
+}
+
+fn enforce_entity_contract(
+    metadata: &PassMetadata,
+    before: &BTreeMap<EntityKind, usize>,
+    after: &BTreeMap<EntityKind, usize>,
+) -> Result<(), PassError> {
+    for kind in [
+        EntityKind::Function,
+        EntityKind::Global,
+        EntityKind::BasicBlock,
+        EntityKind::Local,
+        EntityKind::Statement,
+    ] {
+        let old = before.get(&kind).copied().unwrap_or(0);
+        let new = after.get(&kind).copied().unwrap_or(0);
+        if new > old && !metadata.contract.may_introduce.contains(&kind) {
+            return Err(PassError {
+                pass: metadata.name,
+                message: format!(
+                    "introduced {} {kind:?} entities without declaring it",
+                    new - old
+                ),
+            });
+        }
+        if old > new && !metadata.contract.may_remove.contains(&kind) {
+            return Err(PassError {
+                pass: metadata.name,
+                message: format!(
+                    "removed {} {kind:?} entities without declaring it",
+                    old - new
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 struct VerifyPass {
@@ -165,6 +320,27 @@ struct VerifyPass {
 
 impl VerifyPass {
     fn new(accepted_stage: IrStage, produced_stage: IrStage) -> Self {
+        let contract = if accepted_stage == IrStage::Constructed {
+            PassContract {
+                establishes: BTreeSet::from([Invariant::WellFormed]),
+                ..PassContract::default()
+            }
+        } else {
+            PassContract {
+                requires: BTreeSet::from([
+                    Invariant::WellFormed,
+                    Invariant::DropsElaborated,
+                    Invariant::OwnershipValid,
+                ]),
+                preserves: BTreeSet::from([
+                    Invariant::WellFormed,
+                    Invariant::DropsElaborated,
+                    Invariant::OwnershipValid,
+                ]),
+                establishes: BTreeSet::from([Invariant::LoweringReady]),
+                ..PassContract::default()
+            }
+        };
         Self {
             metadata: PassMetadata {
                 name: "verify",
@@ -175,6 +351,7 @@ impl VerifyPass {
                 produced_stage,
                 parallel: false,
                 deterministic: true,
+                contract,
             },
         }
     }
@@ -214,6 +391,13 @@ impl DropElaborationPass {
                 produced_stage: IrStage::DropElaborated,
                 parallel: false,
                 deterministic: true,
+                contract: PassContract {
+                    requires: BTreeSet::from([Invariant::WellFormed]),
+                    preserves: BTreeSet::from([Invariant::WellFormed]),
+                    establishes: BTreeSet::from([Invariant::DropsElaborated]),
+                    may_introduce: BTreeSet::from([EntityKind::Statement]),
+                    ..PassContract::default()
+                },
             },
         }
     }
@@ -257,6 +441,12 @@ impl OwnershipPass {
                 produced_stage: IrStage::OwnershipChecked,
                 parallel: false,
                 deterministic: true,
+                contract: PassContract {
+                    requires: BTreeSet::from([Invariant::WellFormed, Invariant::DropsElaborated]),
+                    preserves: BTreeSet::from([Invariant::WellFormed, Invariant::DropsElaborated]),
+                    establishes: BTreeSet::from([Invariant::OwnershipValid]),
+                    ..PassContract::default()
+                },
             },
         }
     }
@@ -302,4 +492,42 @@ pub fn run_required_pipeline(
     ));
     manager.run(module, &context, &mut stage)?;
     Ok(stage)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metadata(contract: PassContract) -> PassMetadata {
+        PassMetadata {
+            name: "test",
+            kind: PassKind::Module,
+            accepted_stage: IrStage::Constructed,
+            required_analyses: BTreeSet::new(),
+            preserved_analyses: BTreeSet::new(),
+            produced_stage: IrStage::Constructed,
+            parallel: false,
+            deterministic: true,
+            contract,
+        }
+    }
+
+    #[test]
+    fn undeclared_entity_introduction_is_rejected() {
+        let pass = metadata(PassContract::default());
+        let before = BTreeMap::from([(EntityKind::Statement, 1)]);
+        let after = BTreeMap::from([(EntityKind::Statement, 2)]);
+        assert!(enforce_entity_contract(&pass, &before, &after).is_err());
+    }
+
+    #[test]
+    fn declared_entity_introduction_is_accepted() {
+        let pass = metadata(PassContract {
+            may_introduce: BTreeSet::from([EntityKind::Statement]),
+            ..PassContract::default()
+        });
+        let before = BTreeMap::from([(EntityKind::Statement, 1)]);
+        let after = BTreeMap::from([(EntityKind::Statement, 2)]);
+        assert!(enforce_entity_contract(&pass, &before, &after).is_ok());
+    }
 }

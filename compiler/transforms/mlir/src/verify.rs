@@ -435,7 +435,17 @@ impl<'context> Module<'context> {
 
     fn verify_allowed_dialects(&self, target: &TargetSpec) -> Result<(), MlirError> {
         let mut allowed = [
-            "builtin", "arith", "async", "bufferization", "cf", "func", "linalg", "llvm", "math", "scf", "tensor",
+            "builtin",
+            "arith",
+            "async",
+            "bufferization",
+            "cf",
+            "func",
+            "linalg",
+            "llvm",
+            "math",
+            "scf",
+            "tensor",
         ]
         .into_iter()
         .map(str::to_owned)

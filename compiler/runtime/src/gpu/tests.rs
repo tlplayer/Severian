@@ -840,14 +840,7 @@ fn bounded_tensor_scalar_path_plateaus_across_one_hundred_launches() {
 
     for _ in 0..100 {
         let execution = runtime
-            .execute_storage_graph(
-                DeviceId(0),
-                &graph,
-                &fusion,
-                &storage,
-                &scalars,
-                &options(),
-            )
+            .execute_storage_graph(DeviceId(0), &graph, &fusion, &storage, &scalars, &options())
             .unwrap();
         runtime.synchronize(&execution.execution).unwrap();
         let mut buffers = execution.buffers.values().copied().collect::<Vec<_>>();

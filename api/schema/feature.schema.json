@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://severian.dev/api/feature.schema.json",
+  "title": "Severian API feature file",
+  "type": "object",
+  "required": ["feature"],
+  "properties": {
+    "feature": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "kind", "syntax", "type_params", "parameters",
+          "constraints", "returns", "effects", "errors", "ownership",
+          "universal", "lowering", "status", "since", "tests",
+          "examples", "limitations", "snippets"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"},
+          "kind": {"type": "string"},
+          "syntax": {"type": "string"},
+          "type_params": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "parameters": {"type": "array", "items": {"type": "string"}},
+          "constraints": {"type": "array", "items": {"type": "string"}},
+          "returns": {"type": "string"},
+          "effects": {"type": "array", "items": {"type": "string"}},
+          "errors": {"type": "array", "items": {"type": "string"}},
+          "ownership": {"type": "string"},
+          "universal": {"type": "string"},
+          "lowering": {"type": "string"},
+          "status": {"enum": ["specified", "implemented", "partial", "experimental", "deprecated", "unavailable"]},
+          "since": {"type": "string"},
+          "tests": {"type": "array", "items": {"type": "string"}},
+          "examples": {"type": "array", "items": {"type": "string"}},
+          "limitations": {"type": "array", "items": {"type": "string"}},
+          "snippets": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "backend_status": {"type": "object", "additionalProperties": {"type": "string"}}
+          ,"members": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"type": "string"},
+                {
+                  "type": "object",
+                  "required": ["id", "syntax", "universal"],
+                  "properties": {
+                    "id": {"type": "string"},
+                    "syntax": {"type": "string"},
+                    "universal": {"type": "string"}
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "uniqueItems": true
+          },
+          "export_sources": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "export_symbols": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "member_namespace": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "snippet": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "covers", "source"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"},
+          "covers": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "source": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

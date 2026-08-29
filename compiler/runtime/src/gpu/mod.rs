@@ -1471,10 +1471,8 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         let default_live = available
             .saturating_sub(reserved)
             .min(available.saturating_mul(3) / 4);
-        let max_live_allocation_bytes = env_u64(
-            "SEVERIAN_GPU_MAX_LIVE_BYTES",
-            default_live.max(256 << 20),
-        );
+        let max_live_allocation_bytes =
+            env_u64("SEVERIAN_GPU_MAX_LIVE_BYTES", default_live.max(256 << 20));
         let max_single_allocation_bytes = env_u64(
             "SEVERIAN_GPU_MAX_SINGLE_ALLOCATION_BYTES",
             (max_live_allocation_bytes / 2).max(64 << 20),
@@ -1519,14 +1517,14 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
                 limit: self.max_single_allocation_bytes,
             });
         }
-        let projected = self
-            .live_allocation_bytes
-            .checked_add(bytes)
-            .ok_or(RuntimeError::GpuMemoryLimit {
-                requested: bytes,
-                live: self.live_allocation_bytes,
-                limit: self.max_live_allocation_bytes,
-            })?;
+        let projected =
+            self.live_allocation_bytes
+                .checked_add(bytes)
+                .ok_or(RuntimeError::GpuMemoryLimit {
+                    requested: bytes,
+                    live: self.live_allocation_bytes,
+                    limit: self.max_live_allocation_bytes,
+                })?;
         if projected > self.max_live_allocation_bytes {
             return Err(RuntimeError::GpuMemoryLimit {
                 requested: bytes,
@@ -1554,7 +1552,9 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
     }
 
     pub fn deallocate(&mut self, buffer: BufferId) -> Result<(), RuntimeError> {
-        self.driver.deallocate(buffer).map_err(RuntimeError::Driver)?;
+        self.driver
+            .deallocate(buffer)
+            .map_err(RuntimeError::Driver)?;
         if let Some(bytes) = self.allocations.remove(&buffer) {
             self.live_allocation_bytes = self.live_allocation_bytes.saturating_sub(bytes);
         }

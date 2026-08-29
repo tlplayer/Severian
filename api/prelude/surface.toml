@@ -1,0 +1,61 @@
+[[feature]]
+id = "prelude.surface"
+kind = "prelude_family"
+syntax = "always-visible symbol"
+members = [
+  { id = "prelude.type.any", syntax = "Any", universal = "prelude type Any" },
+  { id = "prelude.type.result", syntax = "Result[T, E]", universal = "prelude type Result" },
+  { id = "prelude.type.option", syntax = "Option[T]", universal = "prelude type Option" },
+  { id = "prelude.type.function", syntax = "Function[P..., R]", universal = "prelude type Function" },
+  { id = "prelude.type.channel", syntax = "Channel[T]", universal = "prelude type Channel" },
+  { id = "prelude.type.buffer", syntax = "Buffer[T]", universal = "prelude type Buffer" },
+  { id = "prelude.type.path", syntax = "Path", universal = "prelude type Path" },
+  { id = "prelude.type.pointer", syntax = "pointer[T]", universal = "prelude type pointer" },
+  { id = "prelude.type.list", syntax = "list[T]", universal = "prelude type list" },
+  { id = "prelude.type.map", syntax = "map[K, V]", universal = "prelude type map" },
+  { id = "prelude.type.set", syntax = "set[T]", universal = "prelude type set" },
+  { id = "prelude.type.tuple", syntax = "tuple[T...]", universal = "prelude type tuple" },
+  { id = "prelude.function.assert", syntax = "assert(condition[, message])", universal = "prelude function assert" },
+  { id = "prelude.function.panic", syntax = "panic(message)", universal = "prelude function panic" },
+  { id = "prelude.function.print", syntax = "print(value)", universal = "prelude function print" },
+  { id = "prelude.function.range", syntax = "range(start, stop[, step])", universal = "prelude function range" },
+  { id = "prelude.function.size", syntax = "size(value)", universal = "prelude function size" },
+  { id = "prelude.function.enumerate", syntax = "enumerate(values)", universal = "prelude function enumerate" },
+  { id = "prelude.function.zip", syntax = "zip(left, right)", universal = "prelude function zip" },
+  { id = "prelude.function.indices", syntax = "indices(value)", universal = "prelude function indices" },
+  { id = "prelude.function.present", syntax = "present(value)", universal = "prelude function present" },
+  { id = "prelude.function.throws", syntax = "throws(call -> ErrorType)", universal = "prelude function throws" },
+  { id = "prelude.trait.error", syntax = "Error", universal = "prelude trait Error" },
+  { id = "prelude.trait.iterable", syntax = "Iterable[T]", universal = "prelude iteration contract" },
+  { id = "prelude.constant.true", syntax = "true", universal = "LiteralValue::Boolean(true)" },
+  { id = "prelude.constant.false", syntax = "false", universal = "LiteralValue::Boolean(false)" },
+  { id = "prelude.constant.none", syntax = "None", universal = "LiteralValue::None" },
+  { id = "prelude.constant.self", syntax = "self", universal = "contextual self binding" },
+  { id = "prelude.constant.runtime", syntax = "runtime", universal = "TaskOwner::Runtime" },
+]
+type_params = ["T..."]
+parameters = ["symbol-specific arguments"]
+constraints = ["prelude symbol is valid for the supplied types"]
+returns = "symbol-specific result"
+effects = ["symbol-specific effects"]
+errors = ["symbol-specific errors"]
+ownership = "Each prelude signature controls moves, copies, and borrows."
+universal = "bootstrap prelude catalogue"
+lowering = "ordinary resolved symbol; no name-specialized ABI"
+status = "partial"
+since = "2026"
+tests = ["compiler/bootstrap/src", "docs/examples"]
+examples = ["docs/examples/01-types/01-basic/01-primitives.sev"]
+limitations = ["The prelude catalogue is now explicit, but several collection traits still need deeper per-method contracts."]
+snippets = ["prelude.smoke"]
+
+[[snippet]]
+id = "prelude.smoke"
+covers = ["prelude.surface"]
+source = '''
+def prelude_surface(values: list[int]) -> int:
+    assert(size(values) >= 0)
+    for index in range(0, int(size(values))):
+        print(values[index])
+    return int(size(values))
+'''

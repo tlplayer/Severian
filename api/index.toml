@@ -1,0 +1,187 @@
+specification_version = 1
+root = "api"
+edition = "2026"
+schema = "schema/feature.schema.json"
+record_globs = [
+  "language/**/*.toml",
+  "compiler/**/*.toml",
+  "library/**/*.toml",
+  "prelude/**/*.toml",
+]
+documents = ["README.md", "APPENDIX.md", "SYMMETRY.md", "WEAKNESSES.md"]
+statuses = ["specified", "implemented", "partial", "experimental", "deprecated", "unavailable"]
+
+[editor]
+declarations = ["def", "class", "trait", "enum", "extend", "type", "property", "operator", "extern"]
+control = ["if", "else", "while", "for", "in", "match", "case", "return", "break", "continue", "pass", "when", "always", "try", "catch", "throw", "unsafe", "defer", "with", "select", "limit"]
+imports = ["import", "from", "as"]
+concurrency = ["async", "await", "send", "parallel", "distributed", "tasks", "simd", "simt", "gpu"]
+ownership = ["view", "borrow", "clone", "move", "mut", "drop", "copy", "lock"]
+testing = ["test", "compiler", "accept", "reject", "property", "bench", "chaos", "integ", "profile", "differential", "timeout", "skip", "repeat", "mock"]
+logical = ["and", "or", "not", "is"]
+constants = ["true", "false", "None", "absent", "invalid", "dynamic", "self", "runtime"]
+primitive_types = ["bool", "char", "int", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "float", "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64", "f80", "f128", "string", "bytes", "Error", "None", "unit", "args", "data_size", "duration", "data_rate", "frequency", "percentage", "temperature", "voltage", "current", "power"]
+builtin_types = ["Any", "Tensor", "Result", "TestResult", "Option", "Function", "Channel", "Buffer", "Path", "pointer", "list", "map", "set", "tuple"]
+builtin_functions = ["assert", "panic", "exception", "print", "range", "size", "enumerate", "zip", "indices", "present", "throws"]
+operators = ["?=", ":=", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=", "%=", "**", "..", "...", "=", "+", "-", "*", "/", "%", "<", ">", "|", "&", "^", "@"]
+
+[coverage]
+required_feature_ids = [
+  "generic.function",
+  "generic.dimension",
+  "generic.shape",
+  "generic.type_application",
+  "type.tensor",
+  "operator.unary",
+  "operator.binary",
+  "tensor.elementwise",
+  "tensor.reduce",
+  "tensor.matmul",
+  "tensor.reshape_view",
+  "tensor.permute",
+  "tensor.slice",
+  "tensor.broadcast",
+  "tensor.gather",
+  "tensor.scatter",
+  "tensor.concatenate",
+  "tensor.convert",
+  "tensor.storage_view",
+]
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/literal.rs"
+enumeration = "LiteralKind"
+feature_prefix = "literal"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/operator.rs"
+enumeration = "UnaryOperator"
+feature_prefix = "operator"
+family_id = "operator.unary"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/operator.rs"
+enumeration = "BinaryOperator"
+feature_prefix = "operator"
+family_id = "operator.binary"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/conversion.rs"
+enumeration = "ConversionKind"
+feature_prefix = "conversion"
+
+[[coverage.rust_enum]]
+source = "compiler/frontend/ast/src/expression/mod.rs"
+enumeration = "ExpressionKind"
+feature_prefix = "expression"
+
+[[coverage.rust_enum]]
+source = "compiler/frontend/ast/src/statement/mod.rs"
+enumeration = "Statement"
+feature_prefix = "statement"
+
+[[coverage.rust_enum]]
+source = "compiler/frontend/ast/src/lib.rs"
+enumeration = "Item"
+feature_prefix = "declaration"
+
+[[coverage.rust_string_registry]]
+source = "compiler/universal/src/primitive/mod.rs"
+marker = "name: \""
+feature_prefix = "primitive"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "ElementwiseOp"
+feature_prefix = "tensor.elementwise"
+family_id = "tensor.elementwise"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "ReductionOp"
+feature_prefix = "tensor.reduce"
+family_id = "tensor.reduce"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "ReshapeViewOp"
+feature_prefix = "tensor.reshape_view"
+family_id = "tensor.reshape_view"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "PermuteOp"
+feature_prefix = "tensor.permute"
+family_id = "tensor.permute"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "BroadcastOp"
+feature_prefix = "tensor.broadcast"
+family_id = "tensor.broadcast"
+
+[[coverage.rust_enum]]
+source = "compiler/universal/src/tensor.rs"
+enumeration = "StorageViewOp"
+feature_prefix = "tensor.storage_view"
+family_id = "tensor.storage_view"
+
+[[coverage.source_token]]
+id = "tensor.elementwise"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"elementwise\")"
+
+[[coverage.source_token]]
+id = "tensor.reduce"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"reduce\")"
+
+[[coverage.source_token]]
+id = "tensor.matmul"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"matmul\")"
+
+[[coverage.source_token]]
+id = "tensor.reshape_view"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"reshape_view\")"
+
+[[coverage.source_token]]
+id = "tensor.permute"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"permute\")"
+
+[[coverage.source_token]]
+id = "tensor.slice"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"slice\")"
+
+[[coverage.source_token]]
+id = "tensor.broadcast"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"broadcast\")"
+
+[[coverage.source_token]]
+id = "tensor.gather"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"gather\")"
+
+[[coverage.source_token]]
+id = "tensor.scatter"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"scatter\")"
+
+[[coverage.source_token]]
+id = "tensor.concatenate"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"concatenate\")"
+
+[[coverage.source_token]]
+id = "tensor.convert"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"convert\")"
+
+[[coverage.source_token]]
+id = "tensor.storage_view"
+source = "compiler/universal/src/tensor.rs"
+token = "OpId::named(\"tensor\", \"storage_view\")"

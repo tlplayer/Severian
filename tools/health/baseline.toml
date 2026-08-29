@@ -1,0 +1,1403 @@
+# Existing health debt. Every entry needs an owner, reason, issue, and expiry.
+
+[[finding]]
+fingerprint = "forbidden_dependency:0ff8d87455a1f722"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:1b9037bf92b14a0a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:1fdc1084035803b2"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:2d8de738123a9bad"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:485d866ee92c9d79"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:48fe047a35da4510"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:4f8319125f960571"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:66af76aac897e789"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:6eff9af9c0e57433"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:722dc0df6d8e229d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:83c148845e878390"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:87264cb9dc03de90"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:a5f0b0eb51d172bd"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:aff1333fad526231"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:cdc590ab2cc0da56"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:d72929e7bf6526db"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "forbidden_dependency:e584eeb34f516391"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:02cb319139ca439c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:02eae375d8e5bd63"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:048d223fe549cc50"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:1693226bb87bf4cb"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:17f9bbcf3235c4d5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:1e6681e7944bfd26"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:21a8e44e4b8b7019"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:32c5e529e344058a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:33a0a5dfec0b1756"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:34e44cafb1931698"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:3fcaee86127d082a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:42964cdd29c0b933"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:4491fa449783caf6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:6c25125b4c96415e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:75ad77d02ede0826"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:7a5ecf8cab3c9be5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:83cec519cf95080c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:8ec2da69dac234fc"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:954b7d1d6c82b8e9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:a217bf6487c421c1"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:a6728712e4508db5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:b22066147cb600a7"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:c95037603fbc64af"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:cd9e569a239aefed"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:d4a09181a98b795f"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:e3b69184382704aa"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:ee8fb1941f9d74aa"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "source_file_limit:f5aca6a4241863f7"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0119eb4a8e4f561c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:01d88d7857e8ed91"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:02f39e167cf16c66"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:040eb3303a3ac436"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:047c21a8bf6c8818"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:04efe62189746fe3"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0575addafedafd95"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:06aa9568623ea534"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0819eafa58f3b1c9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:085e23851616fa9d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0aa7cb85c21c4217"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0e01cc919efd9b70"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:0f0376d3be862562"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:13df39d65c26b0a7"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:167185c987c3cabb"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:19c6b62c31322c1d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:1b2ca543625fb449"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:1b31084a1481804d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:1d36adfca9a0c7df"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:1e972b7159fdd487"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:2372d27badb260b9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:262749275208465e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:267e7562106eb632"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:26fed6e0b0101f01"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:273af4cc834abcbd"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:27f43dde42a522ba"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:284af807325ab5b5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:286a0bf97a1038fa"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:2a9f4f9ab42cd544"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:2bdc5a93aac232b5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:2faa23c2a57e94fe"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:32aad0e465779a13"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:33779b0cb73dd991"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:3be11c5884072d06"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:3e4a4d6e18c32f21"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:3fb9f32f9d6f0100"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:40e369070b13bd51"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:43253e2355a7d9a4"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:474736948cc4f43b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:48adcac16b4604ce"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:4a0233aba38037e4"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:4e041cabd23d58d7"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:4e1a9a70550fdecd"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5102644ed0d2cd81"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:511b7e2a411fe513"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:54aaa8d73e6150b0"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:572405c67c2c8532"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:59a0ba2fa335940d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:59baed1a0fbee374"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5a73db7e06282656"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5b07fcb0ae18bf5d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5c86ad2f1c59c527"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5dfbaaad18dd43d8"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:5e92914e8d841d41"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:61788b072ec64407"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:61c6f43c3130f4e6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:62371252a505daa7"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:6337210abe72de6d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:65324199fd40d8da"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:694d8b6d6c57aa3f"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:694de99234ad52e9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:6b0050f632f92235"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:748e7b36c5c24e48"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:752d0e98f9b2e17c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:76ac7945d7f7b19b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:76dbdf7e8292d7ea"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:7955a6645c201ac8"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:799af8ea2bc178cf"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:7b1a9be27745ed1c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:7b8774074e81f7cc"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:7de1365822b059d2"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:7eaa25b5fc518333"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:80153bf7dc25e9c6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8092f47b51c6190a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:83836642a8fb1c50"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:857ead56368fcf0d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:876e52ea6b8826fb"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:895e363b24b2477c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8a05c32adf5384dd"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8b949c434f79daa8"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8c83c31d8766265a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8d09446d7c219124"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:8edd0bebe3ccc3f8"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:90afe0feec5f88ca"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:91a9c56b4473986e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:91b81c2c75f32670"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:91e2acb92ac836ab"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:971b2bf20c2b4cf2"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:99d734e707d7d21e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:9cf57c7086063998"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:9f074d46a8463f3d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a03336fa5796673a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a1c5026ed7322a04"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a2af9ea450e4bec4"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a39645fea52c46be"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a3b61d286d7e1868"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a5cd8a97cef84adc"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a62f79800712761a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a685ff3aaf521eee"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:a7d3f3a18e43855a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:aa35bd0f428b3461"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ab3a5c3e0fe07c93"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ab66dbdb57b4f6e6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:abde080647430ee9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ac38f5578f8cc5c9"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ac504ad30f466e0b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ad76010c43f29e16"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b44a19c225b192ac"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b4ddb1c160eb954b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b5dd5999685f9e0a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b6d1d9aaa92a1ad2"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b730ec43b0303e40"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b88a160902459bdc"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b90257a7cf9d3202"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:b9152d64175bba80"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ba1a62526b237cf5"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ba86ede92ac9fb9a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bb0ae52b671d4f87"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bb47dfa61e53d0d1"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bb56b8cfdf679bd6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bc4872bf7b600a99"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bf3613c2ea59d7d4"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:bf8e874970a057b2"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:c4015e852103f662"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:c4830b678fc6b42a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:c4e2c87fe96dd80b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:c59e3b6b4ccdbf0d"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:c92488c4b28cef9a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ca8318c1a9a0d1e6"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:cc33205bda283871"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:cc367ef3ee5a238e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:cc731c05d5624aaa"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:cd6b39f1d36c8f33"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:cd93632b287aa004"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ce3f35368ed2ad55"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:d28036bd3cea6d3c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:d3e3459eb3c053bc"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:d8473b4a8c961c9e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:df42046aa2c6fa36"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e1faafcd2278bd56"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e2a05828cbf7712a"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e352ee2a4ce29709"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e4988381561e8f2e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e6c2550a14796bd0"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e7dfbc41832d641b"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:e90e92cef1d35a1f"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ea3ea3db3fddd8be"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ea9c43e9b86ae28c"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:eb1e6d8c43d14acb"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:f47fd01f01b051fe"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:f6ae01e5a62a9e24"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:f814a3457fb59233"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:fd47383b7bbc9c9e"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ff56569c98059b58"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+[[finding]]
+fingerprint = "unsafe_without_contract:ffb87d5eddf80428"
+owner = "compiler"
+reason = "Existing hard debt at initial code-health baseline"
+issue = "HEALTH-BASELINE"
+expires = "2026-11-30"
+
+

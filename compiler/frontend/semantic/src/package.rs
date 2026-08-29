@@ -714,15 +714,17 @@ fn visible_class_names(
     names
 }
 
-fn class_lexical_modules(
-    source: ModuleId,
-    classes: &[PackageClass],
-) -> BTreeSet<ModuleId> {
+fn class_lexical_modules(source: ModuleId, classes: &[PackageClass]) -> BTreeSet<ModuleId> {
     let mut modules = BTreeSet::from([source]);
     let mut selected = classes
         .iter()
         .enumerate()
-        .filter(|(_, class)| class.lookups.get(&source).is_some_and(|names| !names.is_empty()))
+        .filter(|(_, class)| {
+            class
+                .lookups
+                .get(&source)
+                .is_some_and(|names| !names.is_empty())
+        })
         .map(|(index, _)| index)
         .collect::<BTreeSet<_>>();
     loop {
@@ -733,13 +735,16 @@ fn class_lexical_modules(
                 let owner = &classes[*index];
                 owner.declaration.fields.iter().filter_map(move |field| {
                     let name = field.annotation.named_parts()?.0;
-                    classes.iter().enumerate().find_map(|(candidate_index, candidate)| {
-                        candidate
-                            .lookups
-                            .get(&owner.module)
-                            .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
-                            .then_some(candidate_index)
-                    })
+                    classes
+                        .iter()
+                        .enumerate()
+                        .find_map(|(candidate_index, candidate)| {
+                            candidate
+                                .lookups
+                                .get(&owner.module)
+                                .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
+                                .then_some(candidate_index)
+                        })
                 })
             })
             .collect::<Vec<_>>();
@@ -1297,7 +1302,11 @@ fn module_constant_bindings(
     index: &ProgramIndex,
 ) -> Vec<PackageConstant> {
     let mut constants = imported_constant_bindings(module, module_graph, index);
-    let Some(source) = module_graph.modules.iter().find(|source| source.id == module) else {
+    let Some(source) = module_graph
+        .modules
+        .iter()
+        .find(|source| source.id == module)
+    else {
         return constants;
     };
     constants.extend(source.ast.items.iter().filter_map(|item| {

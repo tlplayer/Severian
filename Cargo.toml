@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    # Repository health and developer automation
+    "tools/health",
+
     # Universal semantic authority
     "compiler/universal",
     "compiler/target",

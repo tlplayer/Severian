@@ -145,7 +145,8 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         output.push_str("module {\n");
     }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
-    output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
+    output
+        .push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
     output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
     output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
     if !runtime_signatures.contains_key("__sev_tensor_local_release") {
@@ -427,7 +428,8 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         output.push_str("module {\n");
     }
     output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
-    output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
+    output
+        .push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
     output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
     output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
     if !runtime_signatures.contains_key("__sev_tensor_local_release") {
@@ -683,9 +685,11 @@ fn render_cfg_body_function(
                     cfg_local_storage_type(&local.ty)?
                 ));
             }
-            if body.locals.iter().any(|local| {
-                !local.argument && matches!(local.ty, LoweredType::Tensor { .. })
-            }) {
+            if body
+                .locals
+                .iter()
+                .any(|local| !local.argument && matches!(local.ty, LoweredType::Tensor { .. }))
+            {
                 output.push_str("    %sev_null_tensor_box = llvm.mlir.zero : !llvm.ptr\n");
                 for local in body.locals.iter().filter(|local| {
                     !local.argument && matches!(local.ty, LoweredType::Tensor { .. })
@@ -874,10 +878,7 @@ fn cfg_branch_target(
                     local.0, target.0
                 ))
             })?;
-            Ok((
-                value.clone(),
-                mlir_type(&body.locals[local.0 as usize].ty)?,
-            ))
+            Ok((value.clone(), mlir_type(&body.locals[local.0 as usize].ty)?))
         })
         .collect::<Result<Vec<_>, MlirError>>()?;
     if arguments.is_empty() {
@@ -1100,10 +1101,8 @@ fn render_gpu_terminator(
                 )));
             }
             let mut lowered_arguments = Vec::with_capacity(arguments.len());
-            for (index, (value, target_type)) in arguments
-                .iter()
-                .zip(&callee.parameter_types)
-                .enumerate()
+            for (index, (value, target_type)) in
+                arguments.iter().zip(&callee.parameter_types).enumerate()
             {
                 let source_type = value_type(module, *value)?;
                 let source = format!("%v{}", value.0);
@@ -1255,7 +1254,8 @@ fn render_cfg_operation(
                         format!("%aggregate_{}_{}", result.0, index + 1)
                     };
                     let field_type = value_type(module, *field)?;
-                    let target_type = aggregate_declaration_field_type(module, &aggregate_type, index)?;
+                    let target_type =
+                        aggregate_declaration_field_type(module, &aggregate_type, index)?;
                     let field_value = if tensor_aggregate_abi_type(&target_type).is_some() {
                         let converted = format!("%aggregate_field_{}_{}", result.0, index);
                         render_tensor_aggregate_box(
@@ -1838,10 +1838,8 @@ fn render_cfg_terminator(
                 )));
             }
             let mut lowered_arguments = Vec::with_capacity(arguments.len());
-            for (index, (value, target_type)) in arguments
-                .iter()
-                .zip(&callee.parameter_types)
-                .enumerate()
+            for (index, (value, target_type)) in
+                arguments.iter().zip(&callee.parameter_types).enumerate()
             {
                 let source_type = value_type(module, *value)?;
                 let source = format!("%v{}", value.0);
@@ -2198,24 +2196,34 @@ fn render_named_conversion(
                 bits: target_bits, ..
             },
         ) if target_bits > source_bits => {
-            if *signed { "arith.extsi" } else { "arith.extui" }
+            if *signed {
+                "arith.extsi"
+            } else {
+                "arith.extui"
+            }
         }
         (
-            LoweredType::Integer { bits: source_bits, .. },
-            LoweredType::Integer { bits: target_bits, .. },
+            LoweredType::Integer {
+                bits: source_bits, ..
+            },
+            LoweredType::Integer {
+                bits: target_bits, ..
+            },
         ) if target_bits < source_bits => "arith.trunci",
         (LoweredType::Integer { signed: true, .. }, LoweredType::Float { .. }) => "arith.sitofp",
         (LoweredType::Integer { signed: false, .. }, LoweredType::Float { .. }) => "arith.uitofp",
         (LoweredType::Float { .. }, LoweredType::Integer { signed: true, .. }) => "arith.fptosi",
         (LoweredType::Float { .. }, LoweredType::Integer { signed: false, .. }) => "arith.fptoui",
-        (
-            LoweredType::Float { format: source },
-            LoweredType::Float { format: target },
-        ) if float_bits(*target) > float_bits(*source) => "arith.extf",
-        (
-            LoweredType::Float { format: source },
-            LoweredType::Float { format: target },
-        ) if float_bits(*target) < float_bits(*source) => "arith.truncf",
+        (LoweredType::Float { format: source }, LoweredType::Float { format: target })
+            if float_bits(*target) > float_bits(*source) =>
+        {
+            "arith.extf"
+        }
+        (LoweredType::Float { format: source }, LoweredType::Float { format: target })
+            if float_bits(*target) < float_bits(*source) =>
+        {
+            "arith.truncf"
+        }
         _ => {
             return Err(MlirError::UnsupportedOperation(format!(
                 "aggregate conversion from {source:?} to {target:?}"
@@ -2684,10 +2692,8 @@ fn render_block(
                     )));
                 }
                 let mut lowered_arguments = Vec::with_capacity(arguments.len());
-                for (index, (value, target_type)) in arguments
-                    .iter()
-                    .zip(&target.parameter_types)
-                    .enumerate()
+                for (index, (value, target_type)) in
+                    arguments.iter().zip(&target.parameter_types).enumerate()
                 {
                     let source_type = value_type(module, *value)?;
                     let source = format!("%v{}", value.0);
@@ -3491,9 +3497,7 @@ fn aggregate_declaration_field_type<'a>(
         .and_then(|class| class.fields.get(field))
         .map(|field| &field.ty)
         .ok_or_else(|| {
-            MlirError::UnsupportedOperation(format!(
-                "aggregate {id} has no field {field}"
-            ))
+            MlirError::UnsupportedOperation(format!("aggregate {id} has no field {field}"))
         })
 }
 

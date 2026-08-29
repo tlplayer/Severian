@@ -75,13 +75,7 @@ struct RegionAbi {
     reserved: u32,
 }
 
-type LaunchFn = unsafe extern "C" fn(
-    *mut c_void,
-    *const ValueAbi,
-    u32,
-    *mut ValueAbi,
-    u32,
-) -> i32;
+type LaunchFn = unsafe extern "C" fn(*mut c_void, *const ValueAbi, u32, *mut ValueAbi, u32) -> i32;
 type DestroyFn = unsafe extern "C" fn(*mut c_void);
 type CompileFn = unsafe extern "C" fn(
     *mut c_void,
@@ -261,11 +255,8 @@ unsafe fn hydrate_runtime_operands(
     inputs: &[ValueAbi],
 ) -> Result<(), String> {
     for node in &mut program.nodes {
-        for (operand_index, (input_node, role)) in node
-            .inputs
-            .iter()
-            .zip(&node.operand_roles)
-            .enumerate()
+        for (operand_index, (input_node, role)) in
+            node.inputs.iter().zip(&node.operand_roles).enumerate()
         {
             if *role == OperandRole::Data
                 || node
@@ -342,8 +333,8 @@ fn specialize_program(
                 _ => ptr::null_mut(),
             }
         };
-        let view = unsafe { copy_storage_view(raw) }
-            .map_err(|error| format!("input {index}: {error}"))?;
+        let view =
+            unsafe { copy_storage_view(raw) }.map_err(|error| format!("input {index}: {error}"))?;
         bindings.push(StorageSpecializationBinding {
             node: node_id,
             view,
@@ -507,13 +498,7 @@ unsafe fn materialize_from_elements_input(
         .checked_mul(mem::size_of::<usize>())
         .ok_or_else(|| format!("from_elements node {} byte size overflows", boundary.node.0))?;
     wait_for_host_capacity(byte_count as u64)?;
-    let bytes = unsafe {
-        slice::from_raw_parts(
-            values.values.cast::<u8>(),
-            byte_count,
-        )
-    }
-    .to_vec();
+    let bytes = unsafe { slice::from_raw_parts(values.values.cast::<u8>(), byte_count) }.to_vec();
     let mut stride = 1i64;
     let mut strides = vec![0; dimensions.len()];
     for axis in (0..dimensions.len()).rev() {
@@ -640,7 +625,8 @@ fn compile_gpu(
     if plan.regions.is_empty() {
         return Err("Triton Tensor-JIT graph produced no fusion regions".into());
     }
-    let compiler = severian_triton::NativeTritonCompiler::load().map_err(|error| error.to_string())?;
+    let compiler =
+        severian_triton::NativeTritonCompiler::load().map_err(|error| error.to_string())?;
     let target = match program.target {
         TensorJitTarget::Amd => GpuTarget::Amd,
         TensorJitTarget::Nvidia => GpuTarget::Nvidia,
@@ -679,7 +665,8 @@ fn compile_gpu(
 }
 
 fn jit_directory() -> Result<PathBuf, String> {
-    let directory = std::env::temp_dir().join(format!("severian-tensor-jit-{}", std::process::id()));
+    let directory =
+        std::env::temp_dir().join(format!("severian-tensor-jit-{}", std::process::id()));
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     Ok(directory)
 }
@@ -719,9 +706,7 @@ unsafe extern "C" fn launch_region(
             let Ok(mut instance) = instance.lock() else {
                 return COMPILE_FAILED;
             };
-            match unsafe {
-                launch_gpu(&mut instance, inputs, input_count, outputs, output_count)
-            } {
+            match unsafe { launch_gpu(&mut instance, inputs, input_count, outputs, output_count) } {
                 Ok(()) => OK,
                 Err(error) => {
                     eprintln!("Severian GPU Tensor-JIT launch failed: {error}");
@@ -894,19 +879,15 @@ unsafe fn launch_gpu(
                 .ok_or_else(|| format!("GPU output {} host allocation overflows", node.0))?,
         )?;
         let mut host = vec![0u8; bytes];
-        let buffer = execution
-            .buffers
-            .get(&node)
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "GPU output {} ({:?}.{}) has no device buffer; available buffers {:?}",
-                    node.0,
-                    descriptor.kind,
-                    descriptor.operation,
-                    execution.buffers.keys().collect::<Vec<_>>()
-                )
-            })?;
+        let buffer = execution.buffers.get(&node).copied().ok_or_else(|| {
+            format!(
+                "GPU output {} ({:?}.{}) has no device buffer; available buffers {:?}",
+                node.0,
+                descriptor.kind,
+                descriptor.operation,
+                execution.buffers.keys().collect::<Vec<_>>()
+            )
+        })?;
         instance
             .runtime
             .download(buffer, 0, &mut host)
@@ -936,9 +917,9 @@ fn scalar_host_input(
             let value = unsafe { value.value.floating } as f32;
             value.to_ne_bytes().to_vec()
         }
-        ElementKind::IeeeFloat if bits == 64 => unsafe { value.value.floating }
-            .to_ne_bytes()
-            .to_vec(),
+        ElementKind::IeeeFloat if bits == 64 => {
+            unsafe { value.value.floating }.to_ne_bytes().to_vec()
+        }
         ElementKind::SignedInteger if bits <= 64 => {
             let bytes = unsafe { value.value.signed_integer }.to_ne_bytes();
             bytes[..usize::from(bits.div_ceil(8))].to_vec()
@@ -1012,12 +993,18 @@ fn allocate_owned_gpu_output(
         .ok_or_else(|| format!("GPU output {} metadata size overflows", node.id.0))?;
     let metadata = unsafe { malloc(metadata_bytes) }.cast::<u8>();
     if metadata.is_null() {
-        return Err(format!("GPU output {} metadata allocation failed", node.id.0));
+        return Err(format!(
+            "GPU output {} metadata allocation failed",
+            node.id.0
+        ));
     }
     let data = unsafe { malloc(bytes.len().max(1)) }.cast::<u8>();
     if data.is_null() {
         unsafe { free(metadata.cast()) };
-        return Err(format!("GPU output {} payload allocation failed", node.id.0));
+        return Err(format!(
+            "GPU output {} payload allocation failed",
+            node.id.0
+        ));
     }
     if !bytes.is_empty() {
         unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len()) };
@@ -1052,9 +1039,7 @@ fn allocate_owned_gpu_output(
         byte_size: mem::size_of::<ValueAbi>() as u32,
         kind: VALUE_STORAGE,
         bits: u32::from(node.shape.element_bits),
-        value: ValuePayloadAbi {
-            storage: view,
-        },
+        value: ValuePayloadAbi { storage: view },
     })
 }
 
@@ -1162,17 +1147,14 @@ fn storage_element_representation(
 ) -> Result<StorageElementRepresentationAbi, String> {
     let (kind, float_format) = match kind {
         ElementKind::SignedInteger => (StorageElementKind::SignedInteger, StorageFloatFormat::None),
-        ElementKind::UnsignedInteger | ElementKind::Boolean => {
-            (StorageElementKind::UnsignedInteger, StorageFloatFormat::None)
-        }
+        ElementKind::UnsignedInteger | ElementKind::Boolean => (
+            StorageElementKind::UnsignedInteger,
+            StorageFloatFormat::None,
+        ),
         ElementKind::IeeeFloat => (StorageElementKind::Float, StorageFloatFormat::Ieee),
         ElementKind::BrainFloat => (StorageElementKind::Float, StorageFloatFormat::BrainFloat),
-        ElementKind::Float8E4M3Fn => {
-            (StorageElementKind::Float, StorageFloatFormat::Float8E4M3Fn)
-        }
-        ElementKind::Float8E5M2 => {
-            (StorageElementKind::Float, StorageFloatFormat::Float8E5M2)
-        }
+        ElementKind::Float8E4M3Fn => (StorageElementKind::Float, StorageFloatFormat::Float8E4M3Fn),
+        ElementKind::Float8E5M2 => (StorageElementKind::Float, StorageFloatFormat::Float8E5M2),
         ElementKind::Opaque => return Err("opaque GPU tensor has no storage representation".into()),
     };
     Ok(StorageElementRepresentationAbi {
@@ -1240,14 +1222,29 @@ fn render_cpu_launcher(
             _ => format!("{} arg{index}", c_type(ty)?),
         });
     }
-    writeln!(source, "extern void _mlir_ciface_entry({});", prototype.join(", ")).unwrap();
+    writeln!(
+        source,
+        "extern void _mlir_ciface_entry({});",
+        prototype.join(", ")
+    )
+    .unwrap();
     source.push_str("int32_t sev_tensor_jit_invoke(const sev_tensor_jit_value_abi *inputs, uint32_t input_count, sev_tensor_jit_value_abi *outputs, uint32_t output_count) {\n");
-    writeln!(source, "  if (input_count != {} || output_count != {}) return {INVALID_ARGUMENT};", artifact.inputs.len(), artifact.outputs.len()).unwrap();
+    writeln!(
+        source,
+        "  if (input_count != {} || output_count != {}) return {INVALID_ARGUMENT};",
+        artifact.inputs.len(),
+        artifact.outputs.len()
+    )
+    .unwrap();
     for (index, (ty, node)) in artifact.inputs.iter().zip(&program.inputs).enumerate() {
         render_input(&mut source, index, ty, graph.node(*node))?;
     }
     if !artifact.outputs.is_empty() {
-        writeln!(source, "  {result_type} result; memset(&result, 0, sizeof(result));").unwrap();
+        writeln!(
+            source,
+            "  {result_type} result; memset(&result, 0, sizeof(result));"
+        )
+        .unwrap();
     }
     let mut call = Vec::new();
     if !artifact.outputs.is_empty() {
@@ -1264,8 +1261,10 @@ fn render_cpu_launcher(
     for (index, (ty, node)) in artifact.outputs.iter().zip(&program.outputs).enumerate() {
         let output_node = graph.node(*node);
         let tensor_node = if output_node.kind == NodeKind::StorageView
-            && matches!(output_node.operation.as_str(), "shape" | "strides" | "values")
-        {
+            && matches!(
+                output_node.operation.as_str(),
+                "shape" | "strides" | "values"
+            ) {
             graph.node(
                 *output_node
                     .inputs
@@ -1300,20 +1299,55 @@ fn tensor_rank(ty: &LoweredType) -> Option<usize> {
 
 fn c_type(ty: &LoweredType) -> Result<String, String> {
     Ok(match ty {
-        LoweredType::Tensor { .. } => format!("sev_memref_{}", tensor_rank(ty).ok_or("unranked JIT artifact")?),
+        LoweredType::Tensor { .. } => format!(
+            "sev_memref_{}",
+            tensor_rank(ty).ok_or("unranked JIT artifact")?
+        ),
         LoweredType::Bytes | LoweredType::String => "void *".into(),
         LoweredType::Boolean => "uint8_t".into(),
-        LoweredType::Integer { bits: 1..=8, signed: true } => "int8_t".into(),
-        LoweredType::Integer { bits: 1..=8, signed: false } => "uint8_t".into(),
-        LoweredType::Integer { bits: 9..=16, signed: true } => "int16_t".into(),
-        LoweredType::Integer { bits: 9..=16, signed: false } => "uint16_t".into(),
-        LoweredType::Integer { bits: 17..=32, signed: true } => "int32_t".into(),
-        LoweredType::Integer { bits: 17..=32, signed: false } => "uint32_t".into(),
-        LoweredType::Integer { bits: 33..=64, signed: true } => "int64_t".into(),
-        LoweredType::Integer { bits: 33..=64, signed: false } => "uint64_t".into(),
-        LoweredType::Float { format: LoweredFloatFormat::Ieee(32) } => "float".into(),
-        LoweredType::Float { format: LoweredFloatFormat::Ieee(64) } => "double".into(),
-        unsupported => return Err(format!("unsupported CPU Tensor-JIT ABI type {unsupported:?}")),
+        LoweredType::Integer {
+            bits: 1..=8,
+            signed: true,
+        } => "int8_t".into(),
+        LoweredType::Integer {
+            bits: 1..=8,
+            signed: false,
+        } => "uint8_t".into(),
+        LoweredType::Integer {
+            bits: 9..=16,
+            signed: true,
+        } => "int16_t".into(),
+        LoweredType::Integer {
+            bits: 9..=16,
+            signed: false,
+        } => "uint16_t".into(),
+        LoweredType::Integer {
+            bits: 17..=32,
+            signed: true,
+        } => "int32_t".into(),
+        LoweredType::Integer {
+            bits: 17..=32,
+            signed: false,
+        } => "uint32_t".into(),
+        LoweredType::Integer {
+            bits: 33..=64,
+            signed: true,
+        } => "int64_t".into(),
+        LoweredType::Integer {
+            bits: 33..=64,
+            signed: false,
+        } => "uint64_t".into(),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(32),
+        } => "float".into(),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        } => "double".into(),
+        unsupported => {
+            return Err(format!(
+                "unsupported CPU Tensor-JIT ABI type {unsupported:?}"
+            ))
+        }
     })
 }
 
@@ -1339,7 +1373,11 @@ fn render_input(
 ) -> Result<(), String> {
     if let Some(rank) = tensor_rank(ty) {
         writeln!(source, "  sev_jit_storage_view_abi *view{index} = inputs[{index}].kind == SEV_TENSOR_JIT_VALUE_STORAGE ? inputs[{index}].value.storage : (sev_jit_storage_view_abi *)inputs[{index}].value.pointer;").unwrap();
-        writeln!(source, "  if (view{index} == NULL || view{index}->rank != {rank}) return {INVALID_ARGUMENT};").unwrap();
+        writeln!(
+            source,
+            "  if (view{index} == NULL || view{index}->rank != {rank}) return {INVALID_ARGUMENT};"
+        )
+        .unwrap();
         writeln!(source, "  sev_memref_{rank} arg{index}; arg{index}.allocated = view{index}->owner != NULL ? view{index}->owner : (void *)view{index}->data; arg{index}.aligned = (void *)view{index}->data; arg{index}.offset = view{index}->offset;").unwrap();
         for axis in 0..rank {
             writeln!(source, "  arg{index}.sizes[{axis}] = view{index}->dimensions[{axis}]; arg{index}.strides[{axis}] = view{index}->strides[{axis}];").unwrap();
@@ -1355,8 +1393,12 @@ fn render_input(
                 format!("inputs[{index}].value.storage")
             }
         }
-        LoweredType::Integer { signed: true, .. } => format!("inputs[{index}].value.signed_integer"),
-        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => format!("inputs[{index}].value.unsigned_integer"),
+        LoweredType::Integer { signed: true, .. } => {
+            format!("inputs[{index}].value.signed_integer")
+        }
+        LoweredType::Integer { signed: false, .. } | LoweredType::Boolean => {
+            format!("inputs[{index}].value.unsigned_integer")
+        }
         LoweredType::Float { .. } => format!("inputs[{index}].value.floating"),
         _ => return Err(format!("unsupported launcher input {ty:?}")),
     };
@@ -1387,11 +1429,19 @@ fn render_output(
         writeln!(source, "  void *list{index} = __sev_list_create();").unwrap();
         if node.operation == "shape" {
             for axis in 0..rank {
-                writeln!(source, "  __sev_list_push_i64(list{index}, {value}.sizes[{axis}]);").unwrap();
+                writeln!(
+                    source,
+                    "  __sev_list_push_i64(list{index}, {value}.sizes[{axis}]);"
+                )
+                .unwrap();
             }
         } else if node.operation == "strides" {
             for axis in 0..rank {
-                writeln!(source, "  __sev_list_push_i64(list{index}, {value}.strides[{axis}]);").unwrap();
+                writeln!(
+                    source,
+                    "  __sev_list_push_i64(list{index}, {value}.strides[{axis}]);"
+                )
+                .unwrap();
             }
         } else {
             writeln!(source, "  uint64_t value_count{index} = 1; for (uint32_t axis = 0; axis < {rank}; ++axis) value_count{index} *= (uint64_t){value}.sizes[axis];").unwrap();
@@ -1415,7 +1465,11 @@ fn render_output(
         } else {
             "SEV_TENSOR_JIT_VALUE_POINTER"
         };
-        writeln!(source, "  outputs[{index}].kind = {kind}; outputs[{index}].value.pointer = list{index};").unwrap();
+        writeln!(
+            source,
+            "  outputs[{index}].kind = {kind}; outputs[{index}].value.pointer = list{index};"
+        )
+        .unwrap();
         return Ok(());
     }
     if let Some(rank) = tensor_rank(ty) {
@@ -1469,19 +1523,45 @@ fn c_element_as_f64(kind: ElementKind, bits: u16, value: &str) -> Result<String,
 
 fn tensor_element(kind: ElementKind, bits: u16) -> Result<(u32, u16, u32), String> {
     Ok(match kind {
-        ElementKind::SignedInteger => (StorageElementKind::SignedInteger as u32, bits, StorageFloatFormat::None as u32),
-        ElementKind::UnsignedInteger | ElementKind::Boolean => (StorageElementKind::UnsignedInteger as u32, bits, StorageFloatFormat::None as u32),
-        ElementKind::IeeeFloat => (StorageElementKind::Float as u32, bits, StorageFloatFormat::Ieee as u32),
-        ElementKind::BrainFloat => (StorageElementKind::Float as u32, bits, StorageFloatFormat::BrainFloat as u32),
-        ElementKind::Float8E4M3Fn => (StorageElementKind::Float as u32, bits, StorageFloatFormat::Float8E4M3Fn as u32),
-        ElementKind::Float8E5M2 => (StorageElementKind::Float as u32, bits, StorageFloatFormat::Float8E5M2 as u32),
+        ElementKind::SignedInteger => (
+            StorageElementKind::SignedInteger as u32,
+            bits,
+            StorageFloatFormat::None as u32,
+        ),
+        ElementKind::UnsignedInteger | ElementKind::Boolean => (
+            StorageElementKind::UnsignedInteger as u32,
+            bits,
+            StorageFloatFormat::None as u32,
+        ),
+        ElementKind::IeeeFloat => (
+            StorageElementKind::Float as u32,
+            bits,
+            StorageFloatFormat::Ieee as u32,
+        ),
+        ElementKind::BrainFloat => (
+            StorageElementKind::Float as u32,
+            bits,
+            StorageFloatFormat::BrainFloat as u32,
+        ),
+        ElementKind::Float8E4M3Fn => (
+            StorageElementKind::Float as u32,
+            bits,
+            StorageFloatFormat::Float8E4M3Fn as u32,
+        ),
+        ElementKind::Float8E5M2 => (
+            StorageElementKind::Float as u32,
+            bits,
+            StorageFloatFormat::Float8E5M2 as u32,
+        ),
         ElementKind::Opaque => return Err("opaque tensor output has no element ABI".into()),
     })
 }
 
 fn float_bits(ty: &LoweredType) -> Result<u16, String> {
     match ty {
-        LoweredType::Float { format: LoweredFloatFormat::Ieee(bits) } => Ok(*bits),
+        LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(bits),
+        } => Ok(*bits),
         _ => Err(format!("unsupported scalar float {ty:?}")),
     }
 }
@@ -1491,7 +1571,9 @@ fn dl_error() -> String {
     if error.is_null() {
         "dynamic loader returned no diagnostic".into()
     } else {
-        unsafe { CStr::from_ptr(error) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(error) }
+            .to_string_lossy()
+            .into_owned()
     }
 }
 

@@ -1,0 +1,33 @@
+[[feature]]
+id = "library.file"
+kind = "library_module"
+syntax = "import file"
+member_namespace = "library.file"
+members = ["File", "TextFile", "write", "raw", "open", "read", "map", "native_lock", "lock", "unlock"]
+export_sources = ["library/system/file/src/lib.sev"]
+export_symbols = ["File", "TextFile", "write", "raw", "open", "read", "map", "native_lock", "lock", "unlock"]
+type_params = []
+parameters = ["path, contents, handle, count, or lock depending on the operation"]
+constraints = ["the path and handle are valid for the requested operation"]
+returns = "file value, bytes, text, status, handle, or optional lock"
+effects = ["filesystem", "io"]
+errors = ["FileError", "PermissionDenied", "InvalidHandle"]
+ownership = "Mapped/read buffers are returned as owned collection values; handles require explicit lifecycle management."
+universal = "file package export"
+lowering = "versioned native file ABI"
+status = "partial"
+since = "2026"
+tests = ["library/system/file"]
+examples = ["docs/examples"]
+limitations = ["The public handle API still exposes integers and needs an opaque owned resource contract."]
+snippets = ["library.file.smoke"]
+
+[[snippet]]
+id = "library.file.smoke"
+covers = ["library.file"]
+source = '''
+import file
+
+def read_text(path: string) -> string:
+    return file.raw(path)
+'''

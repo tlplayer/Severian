@@ -1,8 +1,8 @@
+use severian_fusion::GpuTarget;
 use severian_runtime::gpu::{
     BufferId, DeviceId, DeviceInfo, EventId, GpuDriver, KernelArtifact, KernelBinaryFormat,
     KernelId, LaunchCommand,
 };
-use severian_fusion::GpuTarget;
 use std::collections::BTreeMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::mem;
@@ -85,7 +85,11 @@ impl Library {
     unsafe fn symbol(&self, name: &'static CStr) -> Result<*mut c_void, String> {
         let value = unsafe { dlsym(self.0, name.as_ptr()) };
         if value.is_null() {
-            Err(format!("GPU driver symbol {} is unavailable: {}", name.to_string_lossy(), loader_error()))
+            Err(format!(
+                "GPU driver symbol {} is unavailable: {}",
+                name.to_string_lossy(),
+                loader_error()
+            ))
         } else {
             Ok(value)
         }
@@ -174,7 +178,9 @@ impl NativeGpuDriver {
 
     fn activate(&self) -> Result<(), String> {
         match &self.backend {
-            Backend::Hip(hip) => status("hipSetDevice", unsafe { (hip.set_device)(0) }, HIP_SUCCESS),
+            Backend::Hip(hip) => {
+                status("hipSetDevice", unsafe { (hip.set_device)(0) }, HIP_SUCCESS)
+            }
             Backend::Cuda(cuda) => status(
                 "cuCtxSetCurrent",
                 unsafe { (cuda.set_current)(cuda.context) },
@@ -213,18 +219,32 @@ impl GpuDriver for NativeGpuDriver {
         }])
     }
 
-    fn allocate(&mut self, _device: DeviceId, bytes: u64, _alignment: u64) -> Result<BufferId, String> {
+    fn allocate(
+        &mut self,
+        _device: DeviceId,
+        bytes: u64,
+        _alignment: u64,
+    ) -> Result<BufferId, String> {
         self.activate()?;
-        let bytes = usize::try_from(bytes.max(1)).map_err(|_| "GPU allocation exceeds usize".to_owned())?;
+        let bytes =
+            usize::try_from(bytes.max(1)).map_err(|_| "GPU allocation exceeds usize".to_owned())?;
         let raw = match &self.backend {
             Backend::Hip(hip) => {
                 let mut raw = ptr::null_mut();
-                status("hipMalloc", unsafe { (hip.malloc)(&mut raw, bytes) }, HIP_SUCCESS)?;
+                status(
+                    "hipMalloc",
+                    unsafe { (hip.malloc)(&mut raw, bytes) },
+                    HIP_SUCCESS,
+                )?;
                 raw as usize as u64
             }
             Backend::Cuda(cuda) => {
                 let mut raw = 0;
-                status("cuMemAlloc", unsafe { (cuda.mem_alloc)(&mut raw, bytes) }, CUDA_SUCCESS)?;
+                status(
+                    "cuMemAlloc",
+                    unsafe { (cuda.mem_alloc)(&mut raw, bytes) },
+                    CUDA_SUCCESS,
+                )?;
                 raw
             }
         };
@@ -236,36 +256,73 @@ impl GpuDriver for NativeGpuDriver {
 
     fn deallocate(&mut self, buffer: BufferId) -> Result<(), String> {
         self.activate()?;
-        let raw = self.buffers.remove(&buffer).ok_or_else(|| format!("unknown GPU buffer {}", buffer.0))?;
+        let raw = self
+            .buffers
+            .remove(&buffer)
+            .ok_or_else(|| format!("unknown GPU buffer {}", buffer.0))?;
         match &self.backend {
-            Backend::Hip(hip) => status("hipFree", unsafe { (hip.free)(raw as usize as *mut c_void) }, HIP_SUCCESS),
-            Backend::Cuda(cuda) => status("cuMemFree", unsafe { (cuda.mem_free)(raw) }, CUDA_SUCCESS),
+            Backend::Hip(hip) => status(
+                "hipFree",
+                unsafe { (hip.free)(raw as usize as *mut c_void) },
+                HIP_SUCCESS,
+            ),
+            Backend::Cuda(cuda) => {
+                status("cuMemFree", unsafe { (cuda.mem_free)(raw) }, CUDA_SUCCESS)
+            }
         }
     }
 
     fn upload(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), String> {
         self.activate()?;
-        let raw = self.raw_buffer(buffer)?.checked_add(offset).ok_or_else(|| "GPU upload address overflow".to_owned())?;
+        let raw = self
+            .raw_buffer(buffer)?
+            .checked_add(offset)
+            .ok_or_else(|| "GPU upload address overflow".to_owned())?;
         match &self.backend {
-            Backend::Hip(hip) => status("hipMemcpyHtoD", unsafe {
-                (hip.memcpy)(raw as usize as *mut c_void, data.as_ptr().cast(), data.len(), 1)
-            }, HIP_SUCCESS),
-            Backend::Cuda(cuda) => status("cuMemcpyHtoD", unsafe {
-                (cuda.memcpy_htod)(raw, data.as_ptr().cast(), data.len())
-            }, CUDA_SUCCESS),
+            Backend::Hip(hip) => status(
+                "hipMemcpyHtoD",
+                unsafe {
+                    (hip.memcpy)(
+                        raw as usize as *mut c_void,
+                        data.as_ptr().cast(),
+                        data.len(),
+                        1,
+                    )
+                },
+                HIP_SUCCESS,
+            ),
+            Backend::Cuda(cuda) => status(
+                "cuMemcpyHtoD",
+                unsafe { (cuda.memcpy_htod)(raw, data.as_ptr().cast(), data.len()) },
+                CUDA_SUCCESS,
+            ),
         }
     }
 
     fn download(&mut self, buffer: BufferId, offset: u64, data: &mut [u8]) -> Result<(), String> {
         self.activate()?;
-        let raw = self.raw_buffer(buffer)?.checked_add(offset).ok_or_else(|| "GPU download address overflow".to_owned())?;
+        let raw = self
+            .raw_buffer(buffer)?
+            .checked_add(offset)
+            .ok_or_else(|| "GPU download address overflow".to_owned())?;
         match &self.backend {
-            Backend::Hip(hip) => status("hipMemcpyDtoH", unsafe {
-                (hip.memcpy)(data.as_mut_ptr().cast(), raw as usize as *const c_void, data.len(), 2)
-            }, HIP_SUCCESS),
-            Backend::Cuda(cuda) => status("cuMemcpyDtoH", unsafe {
-                (cuda.memcpy_dtoh)(data.as_mut_ptr().cast(), raw, data.len())
-            }, CUDA_SUCCESS),
+            Backend::Hip(hip) => status(
+                "hipMemcpyDtoH",
+                unsafe {
+                    (hip.memcpy)(
+                        data.as_mut_ptr().cast(),
+                        raw as usize as *const c_void,
+                        data.len(),
+                        2,
+                    )
+                },
+                HIP_SUCCESS,
+            ),
+            Backend::Cuda(cuda) => status(
+                "cuMemcpyDtoH",
+                unsafe { (cuda.memcpy_dtoh)(data.as_mut_ptr().cast(), raw, data.len()) },
+                CUDA_SUCCESS,
+            ),
         }
     }
 
@@ -273,35 +330,65 @@ impl GpuDriver for NativeGpuDriver {
         self.raw_buffer(buffer)
     }
 
-    fn load_kernel(&mut self, _device: DeviceId, artifact: &KernelArtifact) -> Result<KernelId, String> {
+    fn load_kernel(
+        &mut self,
+        _device: DeviceId,
+        artifact: &KernelArtifact,
+    ) -> Result<KernelId, String> {
         self.activate()?;
-        let entry = CString::new(artifact.entry_point.as_bytes()).map_err(|_| "kernel entry point contains NUL".to_owned())?;
+        let entry = CString::new(artifact.entry_point.as_bytes())
+            .map_err(|_| "kernel entry point contains NUL".to_owned())?;
         let (module, function) = match &self.backend {
             Backend::Hip(hip) => {
                 if artifact.format != KernelBinaryFormat::Hsaco {
-                    return Err(format!("HIP requires HSACO, received {:?}", artifact.format));
+                    return Err(format!(
+                        "HIP requires HSACO, received {:?}",
+                        artifact.format
+                    ));
                 }
                 let mut module = ptr::null_mut();
-                status("hipModuleLoadData", unsafe { (hip.module_load_data)(&mut module, artifact.code.as_ptr().cast()) }, HIP_SUCCESS)?;
+                status(
+                    "hipModuleLoadData",
+                    unsafe { (hip.module_load_data)(&mut module, artifact.code.as_ptr().cast()) },
+                    HIP_SUCCESS,
+                )?;
                 let mut function = ptr::null_mut();
-                if let Err(error) = status("hipModuleGetFunction", unsafe { (hip.module_get_function)(&mut function, module, entry.as_ptr()) }, HIP_SUCCESS) {
+                if let Err(error) = status(
+                    "hipModuleGetFunction",
+                    unsafe { (hip.module_get_function)(&mut function, module, entry.as_ptr()) },
+                    HIP_SUCCESS,
+                ) {
                     unsafe { (hip.module_unload)(module) };
                     return Err(error);
                 }
                 (module, function)
             }
             Backend::Cuda(cuda) => {
-                if !matches!(artifact.format, KernelBinaryFormat::Ptx | KernelBinaryFormat::Cubin) {
-                    return Err(format!("CUDA requires PTX or CUBIN, received {:?}", artifact.format));
+                if !matches!(
+                    artifact.format,
+                    KernelBinaryFormat::Ptx | KernelBinaryFormat::Cubin
+                ) {
+                    return Err(format!(
+                        "CUDA requires PTX or CUBIN, received {:?}",
+                        artifact.format
+                    ));
                 }
                 let mut image = artifact.code.clone();
                 if artifact.format == KernelBinaryFormat::Ptx && !image.ends_with(&[0]) {
                     image.push(0);
                 }
                 let mut module = ptr::null_mut();
-                status("cuModuleLoadData", unsafe { (cuda.module_load_data)(&mut module, image.as_ptr().cast()) }, CUDA_SUCCESS)?;
+                status(
+                    "cuModuleLoadData",
+                    unsafe { (cuda.module_load_data)(&mut module, image.as_ptr().cast()) },
+                    CUDA_SUCCESS,
+                )?;
                 let mut function = ptr::null_mut();
-                if let Err(error) = status("cuModuleGetFunction", unsafe { (cuda.module_get_function)(&mut function, module, entry.as_ptr()) }, CUDA_SUCCESS) {
+                if let Err(error) = status(
+                    "cuModuleGetFunction",
+                    unsafe { (cuda.module_get_function)(&mut function, module, entry.as_ptr()) },
+                    CUDA_SUCCESS,
+                ) {
                     unsafe { (cuda.module_unload)(module) };
                     return Err(error);
                 }
@@ -316,24 +403,75 @@ impl GpuDriver for NativeGpuDriver {
 
     fn unload_kernel(&mut self, kernel: KernelId) -> Result<(), String> {
         self.activate()?;
-        let kernel = self.kernels.remove(&kernel).ok_or_else(|| format!("unknown GPU kernel {}", kernel.0))?;
+        let kernel = self
+            .kernels
+            .remove(&kernel)
+            .ok_or_else(|| format!("unknown GPU kernel {}", kernel.0))?;
         match &self.backend {
-            Backend::Hip(hip) => status("hipModuleUnload", unsafe { (hip.module_unload)(kernel.module) }, HIP_SUCCESS),
-            Backend::Cuda(cuda) => status("cuModuleUnload", unsafe { (cuda.module_unload)(kernel.module) }, CUDA_SUCCESS),
+            Backend::Hip(hip) => status(
+                "hipModuleUnload",
+                unsafe { (hip.module_unload)(kernel.module) },
+                HIP_SUCCESS,
+            ),
+            Backend::Cuda(cuda) => status(
+                "cuModuleUnload",
+                unsafe { (cuda.module_unload)(kernel.module) },
+                CUDA_SUCCESS,
+            ),
         }
     }
 
     fn launch(&mut self, command: &LaunchCommand) -> Result<EventId, String> {
         self.activate()?;
-        let function = self.kernels.get(&command.kernel).ok_or_else(|| format!("unknown GPU kernel {}", command.kernel.0))?.function;
-        let grid = command.grid.map(|value| u32::try_from(value).map_err(|_| "GPU grid exceeds driver ABI".to_owned())).into_iter().collect::<Result<Vec<_>, _>>()?;
-        let shared = u32::try_from(command.shared_memory_bytes).map_err(|_| "GPU shared-memory request exceeds driver ABI".to_owned())?;
-        let mut parameters = command.arguments.offsets.iter().map(|offset| unsafe {
-            command.arguments.storage.as_ptr().add(*offset) as *mut c_void
-        }).collect::<Vec<_>>();
+        let function = self
+            .kernels
+            .get(&command.kernel)
+            .ok_or_else(|| format!("unknown GPU kernel {}", command.kernel.0))?
+            .function;
+        let grid = command
+            .grid
+            .map(|value| u32::try_from(value).map_err(|_| "GPU grid exceeds driver ABI".to_owned()))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let shared = u32::try_from(command.shared_memory_bytes)
+            .map_err(|_| "GPU shared-memory request exceeds driver ABI".to_owned())?;
+        let mut parameters = command
+            .arguments
+            .offsets
+            .iter()
+            .map(|offset| unsafe { command.arguments.storage.as_ptr().add(*offset) as *mut c_void })
+            .collect::<Vec<_>>();
         let result = match &self.backend {
-            Backend::Hip(hip) => unsafe { (hip.module_launch_kernel)(function, grid[0], grid[1], grid[2], command.block[0], command.block[1], command.block[2], shared, ptr::null_mut(), parameters.as_mut_ptr(), ptr::null_mut()) },
-            Backend::Cuda(cuda) => unsafe { (cuda.launch_kernel)(function, grid[0], grid[1], grid[2], command.block[0], command.block[1], command.block[2], shared, ptr::null_mut(), parameters.as_mut_ptr(), ptr::null_mut()) },
+            Backend::Hip(hip) => unsafe {
+                (hip.module_launch_kernel)(
+                    function,
+                    grid[0],
+                    grid[1],
+                    grid[2],
+                    command.block[0],
+                    command.block[1],
+                    command.block[2],
+                    shared,
+                    ptr::null_mut(),
+                    parameters.as_mut_ptr(),
+                    ptr::null_mut(),
+                )
+            },
+            Backend::Cuda(cuda) => unsafe {
+                (cuda.launch_kernel)(
+                    function,
+                    grid[0],
+                    grid[1],
+                    grid[2],
+                    command.block[0],
+                    command.block[1],
+                    command.block[2],
+                    shared,
+                    ptr::null_mut(),
+                    parameters.as_mut_ptr(),
+                    ptr::null_mut(),
+                )
+            },
         };
         status("GPU kernel launch", result, 0)?;
         let event = EventId(self.next_event);
@@ -344,8 +482,16 @@ impl GpuDriver for NativeGpuDriver {
     fn wait(&mut self, _events: &[EventId]) -> Result<(), String> {
         self.activate()?;
         match &self.backend {
-            Backend::Hip(hip) => status("hipDeviceSynchronize", unsafe { (hip.synchronize)() }, HIP_SUCCESS),
-            Backend::Cuda(cuda) => status("cuCtxSynchronize", unsafe { (cuda.synchronize)() }, CUDA_SUCCESS),
+            Backend::Hip(hip) => status(
+                "hipDeviceSynchronize",
+                unsafe { (hip.synchronize)() },
+                HIP_SUCCESS,
+            ),
+            Backend::Cuda(cuda) => status(
+                "cuCtxSynchronize",
+                unsafe { (cuda.synchronize)() },
+                CUDA_SUCCESS,
+            ),
         }
     }
 }
@@ -355,18 +501,28 @@ impl Drop for NativeGpuDriver {
         let _ = self.activate();
         for (_, kernel) in mem::take(&mut self.kernels) {
             match &self.backend {
-                Backend::Hip(hip) => unsafe { (hip.module_unload)(kernel.module); },
-                Backend::Cuda(cuda) => unsafe { (cuda.module_unload)(kernel.module); },
+                Backend::Hip(hip) => unsafe {
+                    (hip.module_unload)(kernel.module);
+                },
+                Backend::Cuda(cuda) => unsafe {
+                    (cuda.module_unload)(kernel.module);
+                },
             }
         }
         for (_, buffer) in mem::take(&mut self.buffers) {
             match &self.backend {
-                Backend::Hip(hip) => unsafe { (hip.free)(buffer as usize as *mut c_void); },
-                Backend::Cuda(cuda) => unsafe { (cuda.mem_free)(buffer); },
+                Backend::Hip(hip) => unsafe {
+                    (hip.free)(buffer as usize as *mut c_void);
+                },
+                Backend::Cuda(cuda) => unsafe {
+                    (cuda.mem_free)(buffer);
+                },
             }
         }
         if let Backend::Cuda(cuda) = &self.backend {
-            unsafe { (cuda.destroy_context)(cuda.context); }
+            unsafe {
+                (cuda.destroy_context)(cuda.context);
+            }
         }
     }
 }
@@ -379,7 +535,9 @@ fn load_hip() -> Result<Hip, String> {
         let get_count: HipGetDeviceCount = mem::transmute(library.symbol(c"hipGetDeviceCount")?);
         let mut count = 0;
         status("hipGetDeviceCount", get_count(&mut count), HIP_SUCCESS)?;
-        if count == 0 { return Err("HIP reported no devices".into()); }
+        if count == 0 {
+            return Err("HIP reported no devices".into());
+        }
         Ok(Hip {
             set_device: mem::transmute(library.symbol(c"hipSetDevice")?),
             malloc: mem::transmute(library.symbol(c"hipMalloc")?),
@@ -403,7 +561,9 @@ fn load_cuda() -> Result<Cuda, String> {
         let get_count: CuDeviceGetCount = mem::transmute(library.symbol(c"cuDeviceGetCount")?);
         let mut count = 0;
         status("cuDeviceGetCount", get_count(&mut count), CUDA_SUCCESS)?;
-        if count == 0 { return Err("CUDA reported no devices".into()); }
+        if count == 0 {
+            return Err("CUDA reported no devices".into());
+        }
         let device_get: CuDeviceGet = mem::transmute(library.symbol(c"cuDeviceGet")?);
         let mut device = 0;
         status("cuDeviceGet", device_get(&mut device, 0), CUDA_SUCCESS)?;
@@ -429,12 +589,22 @@ fn load_cuda() -> Result<Cuda, String> {
 }
 
 fn status(operation: &str, found: i32, expected: i32) -> Result<(), String> {
-    if found == expected { Ok(()) } else { Err(format!("{operation} failed with driver status {found}")) }
+    if found == expected {
+        Ok(())
+    } else {
+        Err(format!("{operation} failed with driver status {found}"))
+    }
 }
 
 fn loader_error() -> String {
     let value = unsafe { dlerror() };
-    if value.is_null() { "dynamic loader returned no diagnostic".into() } else { unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned() }
+    if value.is_null() {
+        "dynamic loader returned no diagnostic".into()
+    } else {
+        unsafe { CStr::from_ptr(value) }
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 unsafe extern "C" {

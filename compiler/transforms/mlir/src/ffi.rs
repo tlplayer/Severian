@@ -46,7 +46,10 @@ pub type MlirStringCallback = unsafe extern "C" fn(MlirStringRef, *mut c_void);
 )]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIIR", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIArith", kind = "static"))]
-#[cfg_attr(target_os = "macos", link(name = "MLIRCAPIRegisterEverything", kind = "static"))]
+#[cfg_attr(
+    target_os = "macos",
+    link(name = "MLIRCAPIRegisterEverything", kind = "static")
+)]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIAsync", kind = "static"))]
 #[cfg_attr(
     target_os = "macos",

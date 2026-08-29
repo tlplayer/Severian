@@ -1,3 +1,4 @@
+mod api;
 mod example_validation;
 mod mutation;
 mod test_runner;
@@ -76,6 +77,7 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
             test(options, &catalog, mutate)
         }
         "doctor" => doctor(arguments),
+        "api" => api::run(arguments),
         "config" => config(arguments, &catalog),
         "publish" => publish_package(parse_common(arguments)?, &catalog),
         "add" => edit_dependency(DependencyEdit::Add, arguments, &catalog),
@@ -99,6 +101,7 @@ fn is_command(argument: &str) -> bool {
             | "run"
             | "test"
             | "doctor"
+            | "api"
             | "new"
             | "init"
             | "config"
@@ -1905,7 +1908,7 @@ fn help(catalog: &Catalog) -> String {
     let mut output = String::from(
         "usage: sev [command] [path] [options] [-- application-args]\n\n\
 default:\n  sev [path] [-- args...]       Check, build, and run the default binary.\n\n\
-commands:\n  check   build   compile   run   test   doctor   publish   add   remove   update   install   new   init   config <show|sync|defaults>\n\n\
+commands:\n  check   build   compile   run   test   doctor   api <list|show|check|diff>   publish   add   remove   update   install   new   init   config <show|sync|defaults>\n\n\
 package lifecycle:\n  sev add NAME[@VERSION]       Add a project dependency and refresh sev.lock.\n  sev remove NAME              Remove a project dependency and refresh sev.lock.\n  sev update NAME              Resolve the newest package and refresh sev.lock.\n  sev run NAME[@VERSION]       Resolve temporarily and run now.\n  sev install NAME[@VERSION]   Install a package executable for the machine.\n\n\
 build options:\n",
     );

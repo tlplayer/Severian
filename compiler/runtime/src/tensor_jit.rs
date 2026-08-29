@@ -33,7 +33,10 @@ impl std::fmt::Display for ProgramError {
         match self {
             Self::Header => formatter.write_str("invalid Tensor-JIT program header"),
             Self::Version(version) => {
-                write!(formatter, "unsupported Tensor-JIT program version {version}")
+                write!(
+                    formatter,
+                    "unsupported Tensor-JIT program version {version}"
+                )
             }
             Self::Codec(message) => formatter.write_str(message),
             Self::Graph(error) => error.fmt(formatter),

@@ -2,9 +2,15 @@ import file
 
 
 def check_grammar() -> int:
-    grammar = file.raw("syntaxes/severian.tmLanguage.json")
-    index = file.raw("../../docs/api/index.toml")
-    fixture = file.raw("tests/highlighting.sev")
+    grammar := file.raw("syntaxes/severian.tmLanguage.json")
+    index := file.raw("../../api/index.toml")
+    fixture := file.raw("tests/highlighting.sev")
+    if grammar == "":
+        grammar = file.raw("editors/vscode/syntaxes/severian.tmLanguage.json")
+    if index == "":
+        index = file.raw("api/index.toml")
+    if fixture == "":
+        fixture = file.raw("editors/vscode/tests/highlighting.sev")
     failures := 0
 
     for token in [

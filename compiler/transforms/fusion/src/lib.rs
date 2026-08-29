@@ -17,9 +17,9 @@ pub use layout::{
     LinearLayout, LinearLayoutError,
 };
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -1003,9 +1003,8 @@ fn decide(
             limit: device.max_nodes_per_region,
         });
     }
-    let parameters =
-        external_inputs(graph, &combined).len()
-            + external_outputs(graph, &combined, required_outputs).len();
+    let parameters = external_inputs(graph, &combined).len()
+        + external_outputs(graph, &combined, required_outputs).len();
     if parameters > device.max_kernel_parameters {
         return FusionDecision::Forbid(FusionRejection::ParameterLimit {
             required: parameters,

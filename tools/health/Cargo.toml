@@ -1,0 +1,16 @@
+[package]
+name = "severian-health"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "severian-health"
+path = "src/main.rs"

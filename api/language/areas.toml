@@ -1,0 +1,58 @@
+[[feature]]
+id = "language.area"
+kind = "language_surface_family"
+syntax = "source-level construct"
+members = [
+  { id = "syntax.module", syntax = "module items separated by newlines and indentation", universal = "lexer + parser::parse_module" },
+  { id = "constraint.generic_bound", syntax = "T: Bound", universal = "ast::GenericConstraint::Parameter" },
+  { id = "constraint.shape_pack", syntax = "*Shape: Dim", universal = "ast::GenericConstraint::VariadicPack" },
+  { id = "constraint.predicate", syntax = "where predicate", universal = "ast::GenericConstraint::Predicate" },
+  { id = "ownership.borrow", syntax = "borrow value", universal = "ast::UnaryOperator::Borrow" },
+  { id = "ownership.borrow_mut", syntax = "borrow mut value", universal = "ast::UnaryOperator::BorrowMut" },
+  { id = "ownership.address_of", syntax = "address value", universal = "ast::UnaryOperator::AddressOf" },
+  { id = "ownership.copy", syntax = "copy value", universal = "ast::UnaryOperator::Copy" },
+  { id = "ownership.move", syntax = "move value", universal = "ast::UnaryOperator::Move" },
+  { id = "error.preserve", syntax = "value ?= expression", universal = "ast::Binding::preserve_error" },
+  { id = "error.throw", syntax = "throw error", universal = "ast::ExpressionKind::Throw" },
+  { id = "effect.unsafe", syntax = "unsafe: body", universal = "ast::Statement::Unsafe" },
+  { id = "effect.placement", syntax = "with policy: body", universal = "ast::Statement::Placement" },
+  { id = "control.conditional", syntax = "if/else, while, for, match", universal = "ast::Statement control variants" },
+  { id = "concurrency.async", syntax = "async expression", universal = "ast::ExpressionKind::Async" },
+  { id = "concurrency.await", syntax = "await expression", universal = "ast::ExpressionKind::Await" },
+  { id = "concurrency.select", syntax = "select limit: cases", universal = "ast::Statement::Select" },
+  { id = "decorator.compile_policy", syntax = "@compile(policy)", universal = "ast::Decorator::is_compile_policy" },
+  { id = "pattern.destructure", syntax = "(names...) = value", universal = "ast::Statement::Destructure" },
+  { id = "pattern.match_case", syntax = "case binding: body", universal = "ast::MatchCase" },
+  { id = "introspection.type", syntax = "type metadata query", universal = "semantic type context" },
+  { id = "unsafe.scope", syntax = "unsafe: body", universal = "ast::Statement::Unsafe" },
+  { id = "testing.declaration", syntax = "test name: body", universal = "ast::TestDeclaration" },
+  { id = "testing.compiler_case", syntax = "compiler accept|reject: body", universal = "ast::CompilerTestCase" },
+]
+type_params = ["T..."]
+parameters = ["construct-specific values, types, or blocks"]
+constraints = ["the construct is valid in its lexical and semantic context"]
+returns = "construct-specific result"
+effects = ["construct-specific effects preserved in HIR"]
+errors = ["ParseError", "SemanticError"]
+ownership = "Ownership is explicit and survives semantic lowering."
+universal = "AST and Universal language surface"
+lowering = "parser to typed HIR to structural MIR/LIR"
+status = "partial"
+since = "2026"
+tests = ["compiler/frontend/parser/src", "compiler/frontend/semantic/src", "docs/examples"]
+examples = ["docs/examples"]
+limitations = ["Introspection remains specified but incomplete; backend availability for placement policies varies."]
+snippets = ["language.areas"]
+
+[[snippet]]
+id = "language.areas"
+covers = ["language.area"]
+source = '''
+def choose[T](value: T | None, fallback: T) -> T:
+    if value == None:
+        return fallback
+    return value
+
+test "language area smoke":
+    assert(choose[int](None, 4) == 4)
+'''

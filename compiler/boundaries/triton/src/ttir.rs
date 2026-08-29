@@ -374,7 +374,10 @@ fn coerce_value(
     if value.scalar == target_scalar {
         return Ok(value.clone());
     }
-    let source_float = value.scalar.strip_prefix('f').and_then(|bits| bits.parse::<u16>().ok());
+    let source_float = value
+        .scalar
+        .strip_prefix('f')
+        .and_then(|bits| bits.parse::<u16>().ok());
     let target_float = target_scalar
         .strip_prefix('f')
         .and_then(|bits| bits.parse::<u16>().ok());
@@ -1071,11 +1074,13 @@ fn arguments(graph: &FusionGraph, region: &FusionRegion) -> Result<KernelArgumen
         let index = declarations.len();
         let node = graph.node(*id);
         let scalar = scalar_type(node)?;
-        declarations.push(if matches!(&node.shape.rank, Rank::Ranked(axes) if axes.is_empty()) {
-            format!("%arg{index}: {scalar}")
-        } else {
-            format!("%arg{index}: !tt.ptr<{scalar}>")
-        });
+        declarations.push(
+            if matches!(&node.shape.rank, Rank::Ranked(axes) if axes.is_empty()) {
+                format!("%arg{index}: {scalar}")
+            } else {
+                format!("%arg{index}: !tt.ptr<{scalar}>")
+            },
+        );
         inputs.push((*id, index));
     }
     for id in &region.outputs {

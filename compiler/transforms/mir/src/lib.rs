@@ -20,8 +20,9 @@ pub use ownership::{
     analyze_ownership, elaborate_drops, Loan, LoanKind, OwnershipError, OwnershipReport,
 };
 pub use passes::{
-    run_required_pipeline, AnalysisId, AnalysisManager, IrStage, Pass, PassContext, PassError,
-    PassKind, PassManager, PassMetadata,
+    run_required_pipeline, AnalysisId, AnalysisManager, EntityKind, EntitySet, Invariant,
+    InvariantSet, IrStage, Pass, PassContext, PassContract, PassError, PassKind, PassManager,
+    PassMetadata,
 };
 pub use severian_hir::{CallType, FunctionId, TaskOwner};
 pub use value::{Value, ValueId};

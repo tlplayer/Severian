@@ -888,10 +888,7 @@ fn install_specialization_environment(
         names.insert(format!("$type:{parameter}"), actual.clone());
     }
     for (parameter, actual) in &substitution.dimensions {
-        names.insert(
-            format!("$dimension:{parameter}"),
-            format_dim_expr(actual),
-        );
+        names.insert(format!("$dimension:{parameter}"), format_dim_expr(actual));
     }
     for (parameter, shape) in &substitution.shapes {
         for (axis, dimension) in shape.iter().enumerate() {

@@ -10,8 +10,8 @@ pub use model::{
     CompileContext, CompileOperation, CompilePlan, CompileRegion, CompileRegionSpecialization,
     CompileValueContract, CompiledRegionArtifact, EffectSet, GpuKernelBundle, PlanSegment,
     PlannedBlock, PlannedFunction, RegionSpecializationError, RuntimeValueSpecialization,
-    StandardRegion, TensorJitReason, TensorJitRequirement, TensorValueContract, ValueAlias,
-    TensorJitBundle, ValueMutation, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
+    StandardRegion, TensorJitBundle, TensorJitReason, TensorJitRequirement, TensorValueContract,
+    ValueAlias, ValueMutation, VerifiedCompiledRegionArtifact, VerifiedGpuKernelBundle,
     VerifiedTensorJitBundle,
 };
 pub use planner::plan;

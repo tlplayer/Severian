@@ -1,0 +1,142 @@
+[[feature]]
+id = "primitive.boolean"
+members = ["bool"]
+kind = "primitive"
+syntax = "bool"
+type_params = []
+parameters = []
+constraints = []
+returns = "bool"
+effects = []
+errors = []
+ownership = "Copy value."
+universal = "PrimitiveRepresentation.Boolean"
+lowering = "i1"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs"]
+examples = ["docs/examples/01-types/01-basic/01-primitives.sev"]
+limitations = []
+snippets = ["primitives.registered"]
+
+[[feature]]
+id = "primitive.signed_integer"
+members = ["int", "i8", "i16", "i32", "i64", "i128", "isize"]
+kind = "primitive_family"
+syntax = "int | i8 | i16 | i32 | i64 | i128 | isize"
+type_params = ["B"]
+parameters = ["B: fixed, machine, or pointer width"]
+constraints = ["B in {8,16,32,64,128,machine,pointer}"]
+returns = "SignedInteger[B]"
+effects = []
+errors = ["CheckedIntegerOverflow", "DivisionByZero"]
+ownership = "Copy value."
+universal = "PrimitiveRepresentation.Integer { signed: true } or PointerInteger"
+lowering = "iB"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = []
+snippets = ["primitives.registered"]
+
+[[feature]]
+id = "primitive.unsigned_integer"
+members = ["u8", "u16", "u32", "u64", "u128", "usize"]
+kind = "primitive_family"
+syntax = "u8 | u16 | u32 | u64 | u128 | usize"
+type_params = ["B"]
+parameters = ["B: fixed or pointer width"]
+constraints = ["B in {8,16,32,64,128,pointer}"]
+returns = "UnsignedInteger[B]"
+effects = []
+errors = ["CheckedIntegerOverflow", "DivisionByZero"]
+ownership = "Copy value."
+universal = "PrimitiveRepresentation.Integer { signed: false } or PointerInteger"
+lowering = "iB with unsigned operation selection"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = []
+snippets = ["primitives.registered"]
+
+[[feature]]
+id = "primitive.floating_point"
+members = ["float", "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64", "f80", "f128"]
+kind = "primitive_family"
+syntax = "float | f8e4m3fn | f8e5m2 | f16 | bf16 | f32 | f64 | f80 | f128"
+type_params = ["K", "B"]
+parameters = ["K: IEEE, BrainFloat, or Float8 format", "B: representation width"]
+constraints = ["K/B is one of the registered PrimitiveRepresentation float formats"]
+returns = "Float[K, B]"
+effects = []
+errors = ["InvalidRuntimeConversion"]
+ownership = "Copy value."
+universal = "PrimitiveRepresentation.Float"
+lowering = "MLIR scalar float type; FP8 arithmetic requires explicit widening/accumulation policy"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = ["Not every backend supports arithmetic for every registered float representation."]
+snippets = ["primitives.registered"]
+
+[[feature]]
+id = "primitive.text_and_storage"
+members = ["char", "string", "bytes", "Error", "None", "unit", "args"]
+kind = "primitive_family"
+syntax = "char | string | bytes | Error | None | unit | args"
+type_params = []
+parameters = []
+constraints = []
+returns = "registered primitive"
+effects = []
+errors = []
+ownership = "Representation-specific; string/bytes storage is not assumed Copy."
+universal = "PrimitiveRepresentation.Character/String/Bytes/None/Unit/Arguments"
+lowering = "ABI-selected scalar, pointer, or unit representation"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs"]
+examples = ["docs/examples/01-types/01-basic/01-primitives.sev", "docs/examples/01-types/01-basic/04-strings.sev"]
+limitations = []
+snippets = ["primitives.registered"]
+
+[[feature]]
+id = "primitive.measured"
+members = ["data_size", "duration", "data_rate", "frequency", "percentage", "temperature", "voltage", "current", "power"]
+kind = "primitive_family"
+syntax = "data_size | duration | data_rate | frequency | percentage | temperature | voltage | current | power"
+type_params = ["K"]
+parameters = ["K: registered physical or ratio quantity"]
+constraints = ["quantities must use dimensionally valid operators"]
+returns = "Measured[K]"
+effects = []
+errors = ["DimensionMismatch"]
+ownership = "Copy value."
+universal = "PrimitiveCategory.Measured"
+lowering = "f64 representation with semantic quantity checking before lowering"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/primitive/mod.rs"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = ["The primitive registry is complete, but this API revision does not yet enumerate the valid dimensional algebra for every quantity pair."]
+snippets = ["primitives.registered"]
+
+[[snippet]]
+id = "primitives.registered"
+covers = ["primitive.boolean", "primitive.signed_integer", "primitive.unsigned_integer", "primitive.floating_point", "primitive.text_and_storage", "primitive.measured"]
+source = '''
+def primitive_surface(
+    signed: i128,
+    unsigned: u128,
+    low: f8e4m3fn,
+    brain: bf16,
+    wide: f128,
+    text: string,
+    raw: bytes,
+    elapsed: duration,
+) -> bool:
+    return signed >= 0 and unsigned >= 0 and text != "" and elapsed >= 0.0
+'''

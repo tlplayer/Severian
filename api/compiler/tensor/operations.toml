@@ -1,0 +1,283 @@
+[[feature]]
+id = "tensor.elementwise"
+member_namespace = "tensor.elementwise"
+members = ["Add", "Subtract", "Multiply", "Divide", "Exp", "Log", "Sin", "Tanh", "Rsqrt", "Relu", "Scale", "AddScalar"]
+kind = "compiler_operation"
+syntax = "Elementwise[O](inputs...)"
+type_params = ["T", "S...", "O"]
+parameters = ["inputs: Tensor[T, S...]", "O: add, subtract, multiply, divide, exp, log, sin, tanh, rsqrt, relu, scale, or add_scalar"]
+constraints = ["rank is known at rank-dependent emission", "broadcasting and element legality are proven before lowering"]
+returns = "Tensor[R, S...]"
+effects = []
+errors = ["UnknownRank", "IncompatibleShape", "UnsupportedElementRepresentation"]
+ownership = "Produces a new logical value; fusion may elide intermediate storage without changing alias semantics."
+universal = "tensor.elementwise"
+lowering = "linalg.generic/arith on CPU; fused blocked elementwise GPU MLIR where supported"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["GPU lowering currently covers only the initial blocked elementwise slice; the complete representation matrix is not implemented."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "experimental", nvidia = "experimental" }
+
+[[feature]]
+id = "tensor.reduce"
+member_namespace = "tensor.reduce"
+members = ["Sum", "SumAxis", "MeanLast", "MaxLast"]
+kind = "compiler_operation"
+syntax = "Reduce[O, A...](input)"
+type_params = ["T", "S...", "A...", "O"]
+parameters = ["input: Tensor[T, S...]", "O: sum, sum_axis, mean_last, or max_last", "A...: compile-time axis identities"]
+constraints = ["rank and reduction axes are known", "dimension sizes may remain dynamic"]
+returns = "Tensor[R, ReducedShape[S..., A...]]"
+effects = []
+errors = ["UnknownRank", "InvalidAxis", "UnsupportedAccumulator"]
+ownership = "Produces a new logical tensor value."
+universal = "tensor.reduce"
+lowering = "structured reduction with representation-specific identity, combiner, and accumulator"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["The GPU reduction schedule and full accumulator policy are not yet complete."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.matmul"
+kind = "compiler_operation"
+syntax = "Matmul(lhs, rhs; batch_dimensions, contraction_dimensions)"
+type_params = ["T", "LS...", "RS..."]
+parameters = ["lhs: Tensor[T, LS...]", "rhs: Tensor[T, RS...]", "batch_dimensions", "contraction_dimensions"]
+constraints = ["operand ranks and contraction identities are known", "batch and contraction sizes are compatible", "dimension sizes may be dynamic"]
+returns = "Tensor[R, MatmulShape[LS..., RS...]]"
+effects = []
+errors = ["UnknownRank", "InvalidContraction", "IncompatibleShape"]
+ownership = "Produces a new logical tensor value."
+universal = "tensor.matmul"
+lowering = "one rank-generic contraction emitter; rank and batch are data, never operation identity"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["Optimized GPU contraction scheduling is not yet implemented end to end."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.reshape_view"
+member_namespace = "tensor.reshape_view"
+members = ["Reshape", "Materialize"]
+kind = "compiler_operation"
+syntax = "ReshapeView[O](input, target_shape)"
+type_params = ["T", "S...", "R...", "O"]
+parameters = ["input: Tensor[T, S...]", "target_shape: Shape[R...]", "O: reshape or materialize"]
+constraints = ["source and target element counts agree", "view requires representable layout/strides"]
+returns = "Tensor[T, R...]"
+effects = []
+errors = ["IncompatibleShape", "UnsupportedViewLayout"]
+ownership = "Reshape may alias input storage; materialize produces independent storage."
+universal = "tensor.reshape_view"
+lowering = "metadata-only view when legal, otherwise explicit materialization"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/06-shapes.sev"]
+limitations = ["Non-contiguous view legality is not complete across all layouts and backends."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.permute"
+member_namespace = "tensor.permute"
+members = ["Axes", "Reverse"]
+kind = "compiler_operation"
+syntax = "Permute[O](input, axes)"
+type_params = ["T", "S...", "A...", "O"]
+parameters = ["input: Tensor[T, S...]", "axes: permutation", "O: axes or reverse"]
+constraints = ["rank and axis identities are known", "axes form a valid permutation or reversal selection"]
+returns = "Tensor[T, PermutedShape[S..., A...]]"
+effects = []
+errors = ["UnknownRank", "InvalidAxis", "InvalidPermutation"]
+ownership = "May return an aliasing view; materialization is an explicit separate operation."
+universal = "tensor.permute"
+lowering = "layout/stride transformation or indexed copy when a view is not legal"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/06-shapes.sev"]
+limitations = ["GPU indexed-copy lowering is not yet available."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.slice"
+kind = "compiler_operation"
+syntax = "Slice(input, starts, limits, strides)"
+type_params = ["T", "S..."]
+parameters = ["input: Tensor[T, S...]", "starts/limits/strides: per-axis index expressions"]
+constraints = ["rank is known", "slice operands match rank", "strides are non-zero"]
+returns = "Tensor[T, SliceShape[S...]]"
+effects = []
+errors = ["UnknownRank", "InvalidSlice", "OutOfBounds"]
+ownership = "May be an aliasing view when layout permits; otherwise materialization is explicit."
+universal = "tensor.slice"
+lowering = "rank-generic offset/size/stride indexing"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["Dynamic slicing and GPU mask generation are not complete end to end."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.broadcast"
+member_namespace = "tensor.broadcast"
+members = ["Like", "Repeat"]
+kind = "compiler_operation"
+syntax = "Broadcast[O](input, target_shape)"
+type_params = ["T", "S...", "R...", "O"]
+parameters = ["input: Tensor[T, S...]", "target_shape: Shape[R...]", "O: like or repeat"]
+constraints = ["broadcast dimensions are compatible", "target rank is known"]
+returns = "Tensor[T, R...]"
+effects = []
+errors = ["UnknownRank", "IncompatibleShape"]
+ownership = "Logical broadcast may alias repeated input values; mutation must respect alias metadata."
+universal = "tensor.broadcast"
+lowering = "affine/projected indexing with no source duplication unless materialized"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["GPU broadcast lowering is limited to the elementwise fusion slice."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "experimental", nvidia = "experimental" }
+
+[[feature]]
+id = "tensor.gather"
+kind = "compiler_operation"
+syntax = "Gather(input, indices, axis)"
+type_params = ["T", "I", "S...", "IS..."]
+parameters = ["input: Tensor[T, S...]", "indices: Tensor[I, IS...]", "axis: compile-time axis identity"]
+constraints = ["input rank and axis are known", "I is a supported integer representation"]
+returns = "Tensor[T, GatherShape[S..., IS...]]"
+effects = []
+errors = ["UnknownRank", "InvalidAxis", "OutOfBounds"]
+ownership = "Produces a new logical tensor value."
+universal = "tensor.gather"
+lowering = "indexed load with target-specific bounds policy and GPU masks"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["GPU gather lowering and its mask policy are not yet implemented."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.scatter"
+kind = "compiler_operation"
+syntax = "Scatter(destination, indices, updates, axis)"
+type_params = ["T", "I", "S...", "IS..."]
+parameters = ["destination: Tensor[T, S...]", "indices: Tensor[I, IS...]", "updates: Tensor[T, ...]", "axis"]
+constraints = ["ranks and axis are known", "update shape matches the scatter contract", "mutation/alias effects are legal"]
+returns = "Tensor[T, S...]"
+effects = ["write(destination storage)"]
+errors = ["UnknownRank", "InvalidAxis", "IncompatibleShape", "AliasingViolation", "OutOfBounds"]
+ownership = "Effectful boundary; destination mutation and aliases are explicit in the region contract."
+universal = "tensor.scatter"
+lowering = "indexed stores/atomics selected from effect and collision policy"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["Collision policy, atomic lowering, and GPU execution are not complete."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.concatenate"
+kind = "compiler_operation"
+syntax = "Concatenate(inputs, axis)"
+type_params = ["T", "S..."]
+parameters = ["inputs: non-empty sequence of Tensor[T, S...]", "axis: compile-time axis identity"]
+constraints = ["ranks and axis are known", "non-concatenated dimensions agree"]
+returns = "Tensor[T, ConcatenatedShape[S...]]"
+effects = []
+errors = ["UnknownRank", "InvalidAxis", "IncompatibleShape"]
+ownership = "Produces a new logical tensor value."
+universal = "tensor.concatenate"
+lowering = "piecewise indexed copies or fusion into consumers"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["GPU concatenate lowering and consumer fusion are not yet implemented."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.convert"
+kind = "compiler_operation"
+syntax = "Convert[T, U](input)"
+type_params = ["T", "U", "S..."]
+parameters = ["input: Tensor[T, S...]", "U: target PrimitiveRepresentation"]
+constraints = ["the T to U conversion is registered and target-legal"]
+returns = "Tensor[U, S...]"
+effects = []
+errors = ["UnsupportedConversion", "InvalidRuntimeConversion"]
+ownership = "Produces a new logical value; storage may be reused only when representation and alias rules permit."
+universal = "tensor.convert"
+lowering = "one conversion operation whose source/target representations are IR data"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/05-tensor.sev"]
+limitations = ["The complete i8-i128/u8-u128/f8-f128 backend conversion matrix is not implemented."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[feature]]
+id = "tensor.storage_view"
+member_namespace = "tensor.storage_view"
+members = ["FromElements", "FromAbi", "Shape", "Strides", "Values"]
+kind = "compiler_operation"
+syntax = "StorageView[O](storage, metadata...)"
+type_params = ["T", "S...", "O"]
+parameters = ["O: from_elements, from_abi, shape, strides, or values", "storage/metadata: versioned descriptor fields"]
+constraints = ["descriptor representation agrees with T", "rank, dimensions, strides, offset, ownership, and layout are preserved"]
+returns = "StorageView[T, S...] or metadata projection"
+effects = ["read(storage metadata)", "optional read(storage bytes)"]
+errors = ["AbiVersionMismatch", "RepresentationMismatch", "InvalidStorageView"]
+ownership = "The descriptor records ownership and aliasing; a raw pointer does not imply either."
+universal = "tensor.storage_view"
+lowering = "versioned StorageViewAbi at host boundaries; specialized tensor/memref or GPU argument pack only after rank/shape specialization"
+status = "partial"
+since = "2026"
+tests = ["compiler/universal/src/tensor.rs", "docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+examples = ["docs/examples/08-numerics/15-tensor-exhaustive.sev"]
+limitations = ["The executable StorageViewAbi to specialization to cached launcher path is not complete end to end."]
+snippets = ["tensor.structural"]
+backend_status = { cpu = "partial", amd = "unavailable", nvidia = "unavailable" }
+
+[[snippet]]
+id = "tensor.structural"
+covers = ["tensor.elementwise", "tensor.reduce", "tensor.matmul", "tensor.reshape_view", "tensor.permute", "tensor.slice", "tensor.broadcast", "tensor.gather", "tensor.scatter", "tensor.concatenate", "tensor.convert", "tensor.storage_view"]
+source = '''
+import tensor
+
+def structural[T: tensor.TensorElement, *S: tensor.Dim, *I: tensor.Dim](
+    left: Tensor[T, *S],
+    right: Tensor[T, *S],
+    indices: Tensor[i64, *I],
+):
+    added = tensor.add(copy left, copy right)
+    reduced = tensor.sum(copy added)
+    product = tensor.matmul(copy added, copy right)
+    shaped = tensor.reshape(product, tensor.shape(copy left))
+    selected = tensor.gather(copy shaped, copy indices)
+    updated = tensor.scatter(shaped, indices, selected)
+    return tensor.convert_like(updated, left)
+'''

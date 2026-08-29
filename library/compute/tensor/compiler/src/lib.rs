@@ -536,7 +536,8 @@ pub fn compile_specialized_fusion_cpu(
         .collect::<BTreeMap<_, _>>();
     let mut node_types = BTreeMap::new();
     for node in graph.nodes() {
-        let primitive = fusion_primitive_type(&types, node.shape.element_kind, node.shape.element_bits)?;
+        let primitive =
+            fusion_primitive_type(&types, node.shape.element_kind, node.shape.element_bits)?;
         let type_id = if fusion_node_is_tensor(node) {
             let dimensions = runtime_shapes.get(&node.id).ok_or_else(|| {
                 invalid(format!(
@@ -570,7 +571,10 @@ pub fn compile_specialized_fusion_cpu(
             Ok(MirValue {
                 id: MirValueId(index as u32),
                 type_id: *node_types.get(node).ok_or_else(|| {
-                    invalid(format!("Tensor-JIT input references unknown node {}", node.0))
+                    invalid(format!(
+                        "Tensor-JIT input references unknown node {}",
+                        node.0
+                    ))
                 })?,
             })
         })
@@ -582,7 +586,10 @@ pub fn compile_specialized_fusion_cpu(
             Ok(MirValue {
                 id: MirValueId(index as u32),
                 type_id: *node_types.get(node).ok_or_else(|| {
-                    invalid(format!("Tensor-JIT output references unknown node {}", node.0))
+                    invalid(format!(
+                        "Tensor-JIT output references unknown node {}",
+                        node.0
+                    ))
                 })?,
             })
         })
@@ -617,11 +624,7 @@ pub fn compile_specialized_fusion_cpu(
         }
         compile_operations.push(CompileOperation {
             id,
-            operands: node
-                .inputs
-                .iter()
-                .map(|input| node_types[input])
-                .collect(),
+            operands: node.inputs.iter().map(|input| node_types[input]).collect(),
             results: vec![node_types[&node.id]],
             operand_slots: node.inputs.iter().map(|input| input.0).collect(),
             result_slots: vec![node.id.0],
@@ -648,12 +651,28 @@ pub fn compile_specialized_fusion_cpu(
         let lowered_inputs = region
             .inputs
             .iter()
-            .map(|value| lower_type(value.type_id, &CompileContext { types: &types, target }))
+            .map(|value| {
+                lower_type(
+                    value.type_id,
+                    &CompileContext {
+                        types: &types,
+                        target,
+                    },
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let lowered_outputs = region
             .outputs
             .iter()
-            .map(|value| lower_type(value.type_id, &CompileContext { types: &types, target }))
+            .map(|value| {
+                lower_type(
+                    value.type_id,
+                    &CompileContext {
+                        types: &types,
+                        target,
+                    },
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let parameters = lowered_inputs
             .iter()
@@ -713,8 +732,13 @@ pub fn compile_specialized_fusion_cpu(
 fn fusion_node_is_tensor(node: &severian_fusion::FusionNode) -> bool {
     match node.kind {
         NodeKind::StorageView
-            if matches!(node.operation.as_str(), "shape" | "strides" | "values") => false,
-        NodeKind::Parameter => !matches!(node.shape.rank, severian_fusion::Rank::Ranked(ref axes) if axes.is_empty()),
+            if matches!(node.operation.as_str(), "shape" | "strides" | "values") =>
+        {
+            false
+        }
+        NodeKind::Parameter => {
+            !matches!(node.shape.rank, severian_fusion::Rank::Ranked(ref axes) if axes.is_empty())
+        }
         NodeKind::Constant => false,
         _ => node.shape.element_kind != ElementKind::Opaque,
     }
@@ -748,11 +772,17 @@ fn fusion_primitive_type(
 fn fusion_tensor_operation(
     node: &severian_fusion::FusionNode,
 ) -> Result<tensor::TensorOp, CompileError> {
-    use tensor::{BroadcastOp, ElementwiseOp, PermuteOp, ReductionOp, ReshapeViewOp, StorageViewOp};
+    use tensor::{
+        BroadcastOp, ElementwiseOp, PermuteOp, ReductionOp, ReshapeViewOp, StorageViewOp,
+    };
     let operation = match (node.kind, node.operation.as_str()) {
         (NodeKind::Elementwise, "add") => tensor::TensorOp::Elementwise(ElementwiseOp::Add),
-        (NodeKind::Elementwise, "subtract") => tensor::TensorOp::Elementwise(ElementwiseOp::Subtract),
-        (NodeKind::Elementwise, "multiply") => tensor::TensorOp::Elementwise(ElementwiseOp::Multiply),
+        (NodeKind::Elementwise, "subtract") => {
+            tensor::TensorOp::Elementwise(ElementwiseOp::Subtract)
+        }
+        (NodeKind::Elementwise, "multiply") => {
+            tensor::TensorOp::Elementwise(ElementwiseOp::Multiply)
+        }
         (NodeKind::Elementwise, "divide") => tensor::TensorOp::Elementwise(ElementwiseOp::Divide),
         (NodeKind::Elementwise, "exp") => tensor::TensorOp::Elementwise(ElementwiseOp::Exp),
         (NodeKind::Elementwise, "log") => tensor::TensorOp::Elementwise(ElementwiseOp::Log),
@@ -761,14 +791,18 @@ fn fusion_tensor_operation(
         (NodeKind::Elementwise, "rsqrt") => tensor::TensorOp::Elementwise(ElementwiseOp::Rsqrt),
         (NodeKind::Elementwise, "relu") => tensor::TensorOp::Elementwise(ElementwiseOp::Relu),
         (NodeKind::Elementwise, "scale") => tensor::TensorOp::Elementwise(ElementwiseOp::Scale),
-        (NodeKind::Elementwise, "add_scalar") => tensor::TensorOp::Elementwise(ElementwiseOp::AddScalar),
+        (NodeKind::Elementwise, "add_scalar") => {
+            tensor::TensorOp::Elementwise(ElementwiseOp::AddScalar)
+        }
         (NodeKind::Reduction, "sum") => tensor::TensorOp::Reduce(ReductionOp::Sum),
         (NodeKind::Reduction, "sum_axis") => tensor::TensorOp::Reduce(ReductionOp::SumAxis),
         (NodeKind::Reduction, "mean_last") => tensor::TensorOp::Reduce(ReductionOp::MeanLast),
         (NodeKind::Reduction, "max_last") => tensor::TensorOp::Reduce(ReductionOp::MaxLast),
         (NodeKind::Contraction, "matmul") => tensor::TensorOp::Matmul,
         (NodeKind::Reshape, "reshape") => tensor::TensorOp::ReshapeView(ReshapeViewOp::Reshape),
-        (NodeKind::Reshape, "materialize") => tensor::TensorOp::ReshapeView(ReshapeViewOp::Materialize),
+        (NodeKind::Reshape, "materialize") => {
+            tensor::TensorOp::ReshapeView(ReshapeViewOp::Materialize)
+        }
         (NodeKind::Permute, "axes") => tensor::TensorOp::Permute(PermuteOp::Axes),
         (NodeKind::Permute, "reverse") => tensor::TensorOp::Permute(PermuteOp::Reverse),
         (NodeKind::Slice, "slice") => tensor::TensorOp::Slice,
@@ -778,11 +812,18 @@ fn fusion_tensor_operation(
         (NodeKind::Scatter, "scatter") => tensor::TensorOp::Scatter,
         (NodeKind::Concatenate, "concatenate") => tensor::TensorOp::Concatenate,
         (NodeKind::Convert, "convert") => tensor::TensorOp::Convert,
-        (NodeKind::StorageView, "from_elements") => tensor::TensorOp::StorageView(StorageViewOp::FromElements),
+        (NodeKind::StorageView, "from_elements") => {
+            tensor::TensorOp::StorageView(StorageViewOp::FromElements)
+        }
         (NodeKind::StorageView, "shape") => tensor::TensorOp::StorageView(StorageViewOp::Shape),
         (NodeKind::StorageView, "strides") => tensor::TensorOp::StorageView(StorageViewOp::Strides),
         (NodeKind::StorageView, "values") => tensor::TensorOp::StorageView(StorageViewOp::Values),
-        _ => return Err(invalid(format!("unsupported serialized Tensor-JIT operation {:?}.{}", node.kind, node.operation))),
+        _ => {
+            return Err(invalid(format!(
+                "unsupported serialized Tensor-JIT operation {:?}.{}",
+                node.kind, node.operation
+            )))
+        }
     };
     Ok(operation)
 }
@@ -960,12 +1001,9 @@ fn compile_structured_cpu_region(
                 &operation.attributes,
                 *result_slot,
             )?,
-            tensor::TensorOp::Matmul => lower_structured_matmul(
-                &mut function,
-                &operands,
-                result_type,
-                *result_slot,
-            )?,
+            tensor::TensorOp::Matmul => {
+                lower_structured_matmul(&mut function, &operands, result_type, *result_slot)?
+            }
             tensor::TensorOp::Slice => lower_structured_slice(
                 &mut function,
                 &operands,
@@ -1143,9 +1181,7 @@ fn lower_structured_matmul(
         shape: LoweredTensorShape::Ranked(output_shape),
     } = result_type
     else {
-        return Err(invalid(
-            "structured Matmul requires a ranked tensor result",
-        ));
+        return Err(invalid("structured Matmul requires a ranked tensor result"));
     };
     let left_shape = ranked_dimensions(
         left.lowered_type()
@@ -5402,7 +5438,13 @@ mod tests {
         let CompiledRegionArtifact::TensorJit(bundle) = artifact else {
             panic!("unranked CPU tensor regions must cross the Tensor-JIT boundary")
         };
-        assert!(matches!(bundle.inputs[0], LoweredType::Tensor { shape: LoweredTensorShape::Unranked, .. }));
+        assert!(matches!(
+            bundle.inputs[0],
+            LoweredType::Tensor {
+                shape: LoweredTensorShape::Unranked,
+                ..
+            }
+        ));
         assert!(bundle
             .graph
             .nodes()

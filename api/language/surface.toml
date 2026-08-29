@@ -1,0 +1,258 @@
+[[feature]]
+id = "literal.kind"
+kind = "literal_family"
+syntax = "integer | float | boolean | character | string | bytes | None | unit"
+members = [
+  { id = "literal.integer", syntax = "42", universal = "LiteralKind.Integer" },
+  { id = "literal.float", syntax = "3.5", universal = "LiteralKind.Float" },
+  { id = "literal.boolean", syntax = "true | false", universal = "LiteralKind.Boolean" },
+  { id = "literal.character", syntax = "'x'", universal = "LiteralKind.Character" },
+  { id = "literal.string", syntax = "\"text\"", universal = "LiteralKind.String" },
+  { id = "literal.bytes", syntax = "b\"bytes\"", universal = "LiteralKind.Bytes" },
+  { id = "literal.none", syntax = "None", universal = "LiteralKind.None" },
+  { id = "literal.unit", syntax = "()", universal = "LiteralKind.Unit" },
+]
+type_params = ["T"]
+parameters = ["source spelling"]
+constraints = ["the spelling is valid for its literal kind", "semantic analysis selects a compatible T"]
+returns = "T"
+effects = []
+errors = ["InvalidLiteral", "LiteralOutOfRange"]
+ownership = "Literal values produce owned values; primitive copy behavior follows T."
+universal = "LiteralKind"
+lowering = "LiteralValue preserved until semantic type selection, then representation-correct constant lowering"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/literal.rs", "compiler/frontend/parser/src/tests.rs"]
+examples = ["docs/examples/01-types/01-basic/01-primitives.sev"]
+limitations = ["Measured literals are an AST spelling resolved to a measured primitive rather than a separate Universal LiteralKind."]
+snippets = ["surface.literals"]
+
+[[feature]]
+id = "expression.kind"
+kind = "expression_family"
+syntax = "literal, collection, access, application, call, concurrency, conditional, error, or operator expression"
+members = [
+  { id = "expression.literal", syntax = "literal", universal = "ast::ExpressionKind::Literal" },
+  { id = "expression.list", syntax = "[values...]", universal = "ast::ExpressionKind::List" },
+  { id = "expression.set", syntax = "{values...}", universal = "ast::ExpressionKind::Set" },
+  { id = "expression.map", syntax = "{key: value, ...}", universal = "ast::ExpressionKind::Map" },
+  { id = "expression.list_comprehension", syntax = "[value for binding in values]", universal = "ast::ExpressionKind::ListComprehension" },
+  { id = "expression.set_comprehension", syntax = "{value for binding in values}", universal = "ast::ExpressionKind::SetComprehension" },
+  { id = "expression.map_comprehension", syntax = "{key: value for binding in values}", universal = "ast::ExpressionKind::MapComprehension" },
+  { id = "expression.mock", syntax = "mock cases fallback", universal = "ast::ExpressionKind::Mock" },
+  { id = "expression.lambda", syntax = "(parameters) => expression", universal = "ast::ExpressionKind::Lambda" },
+  { id = "expression.tuple", syntax = "(values...)", universal = "ast::ExpressionKind::Tuple" },
+  { id = "expression.name", syntax = "name", universal = "ast::ExpressionKind::Name" },
+  { id = "expression.member", syntax = "object.member", universal = "ast::ExpressionKind::Member" },
+  { id = "expression.index", syntax = "object[index]", universal = "ast::ExpressionKind::Index" },
+  { id = "expression.slice", syntax = "object[start:end:step]", universal = "ast::ExpressionKind::Slice" },
+  { id = "expression.type_application", syntax = "callee[T, D, S...]", universal = "ast::ExpressionKind::TypeApplication" },
+  { id = "expression.call", syntax = "callee(arguments...)", universal = "ast::ExpressionKind::Call" },
+  { id = "expression.async", syntax = "async expression", universal = "ast::ExpressionKind::Async" },
+  { id = "expression.await", syntax = "await expression", universal = "ast::ExpressionKind::Await" },
+  { id = "expression.conditional", syntax = "value if condition else fallback", universal = "ast::ExpressionKind::Conditional" },
+  { id = "expression.fallback", syntax = "value else fallback", universal = "ast::ExpressionKind::Fallback" },
+  { id = "expression.throw", syntax = "throw error", universal = "ast::ExpressionKind::Throw" },
+  { id = "expression.unary", syntax = "unary_operator operand", universal = "ast::ExpressionKind::Unary" },
+  { id = "expression.binary", syntax = "left binary_operator right", universal = "ast::ExpressionKind::Binary" },
+]
+type_params = ["T"]
+parameters = ["child expressions and syntax-specific operands"]
+constraints = ["each child is semantically valid for the selected expression kind"]
+returns = "T"
+effects = ["union of child and selected operation effects"]
+errors = ["ParseError", "TypeError", "EffectError", "OwnershipError"]
+ownership = "HIR records the move, copy, or borrow selected for every consumed child."
+universal = "ast::ExpressionKind"
+lowering = "AST expression to typed HIR expression without source-name dispatch"
+status = "partial"
+since = "2026"
+tests = ["compiler/frontend/parser/src", "compiler/frontend/semantic/src"]
+examples = ["docs/examples"]
+limitations = ["Some specialized testing and concurrency expressions remain experimental even though their AST identity is stable."]
+snippets = ["surface.expressions"]
+
+[[feature]]
+id = "statement.kind"
+kind = "statement_family"
+syntax = "binding, mutation, control, error, placement, or concurrency statement"
+members = [
+  { id = "statement.binding", syntax = "name = value | name := value | name ?= value", universal = "ast::Statement::Binding" },
+  { id = "statement.destructure", syntax = "(names...) = value", universal = "ast::Statement::Destructure" },
+  { id = "statement.field_assignment", syntax = "object.field = value", universal = "ast::Statement::FieldAssignment" },
+  { id = "statement.index_assignment", syntax = "object[index] = value", universal = "ast::Statement::IndexAssignment" },
+  { id = "statement.expression", syntax = "expression", universal = "ast::Statement::Expression" },
+  { id = "statement.defer", syntax = "defer expression", universal = "ast::Statement::Defer" },
+  { id = "statement.return", syntax = "return value", universal = "ast::Statement::Return" },
+  { id = "statement.assert", syntax = "assert(condition)", universal = "ast::Statement::Assert" },
+  { id = "statement.unsafe", syntax = "unsafe: body", universal = "ast::Statement::Unsafe" },
+  { id = "statement.placement", syntax = "with placement: body", universal = "ast::Statement::Placement" },
+  { id = "statement.try", syntax = "try: body catch error: body", universal = "ast::Statement::Try" },
+  { id = "statement.fallible_else", syntax = "value else error: body", universal = "ast::Statement::FallibleElse" },
+  { id = "statement.if", syntax = "if condition: body else: body", universal = "ast::Statement::If" },
+  { id = "statement.while", syntax = "while condition: body", universal = "ast::Statement::While" },
+  { id = "statement.for", syntax = "for binding in iterable: body", universal = "ast::Statement::For" },
+  { id = "statement.break", syntax = "break", universal = "ast::Statement::Break" },
+  { id = "statement.continue", syntax = "continue", universal = "ast::Statement::Continue" },
+  { id = "statement.match", syntax = "match subject: cases", universal = "ast::Statement::Match" },
+  { id = "statement.select", syntax = "select limit: cases", universal = "ast::Statement::Select" },
+]
+type_params = []
+parameters = ["syntax-specific child expressions, bindings, and blocks"]
+constraints = ["control placement and child expressions are valid in the surrounding callable"]
+returns = "unit or control-flow transfer"
+effects = ["union of contained operation effects"]
+errors = ["ParseError", "TypeError", "ControlFlowError", "OwnershipError"]
+ownership = "Bindings and mutation preserve explicit mutable/immutable and error-preservation flags."
+universal = "ast::Statement"
+lowering = "typed HIR statement and explicit control-flow graph"
+status = "partial"
+since = "2026"
+tests = ["compiler/frontend/parser/src", "compiler/transforms/mir/src"]
+examples = ["docs/examples/03-control-flow"]
+limitations = ["Backend support for every placement policy is not complete."]
+snippets = ["surface.statements"]
+
+[[feature]]
+id = "declaration.item"
+kind = "declaration_family"
+syntax = "module item"
+members = [
+  { id = "declaration.import", syntax = "import subject | from source import subject", universal = "ast::Item::Import" },
+  { id = "declaration.trait", syntax = "trait Name: ...", universal = "ast::Item::Trait" },
+  { id = "declaration.class", syntax = "class Name: ...", universal = "ast::Item::Class" },
+  { id = "declaration.extension", syntax = "extend Type: ...", universal = "ast::Item::Extension" },
+  { id = "declaration.enum", syntax = "enum Name: ...", universal = "ast::Item::Enum" },
+  { id = "declaration.binding", syntax = "name = value", universal = "ast::Item::Binding" },
+  { id = "declaration.expression", syntax = "expression", universal = "ast::Item::Expression" },
+  { id = "declaration.function", syntax = "def name(parameters...) -> Result: ...", universal = "ast::Item::Function" },
+  { id = "declaration.type", syntax = "type Name = Definition", universal = "ast::Item::Type" },
+  { id = "declaration.test", syntax = "test name: ...", universal = "ast::Item::Test" },
+]
+type_params = ["T..."]
+parameters = ["declaration-specific names, generic parameters, contracts, and bodies"]
+constraints = ["the declaration is unique and all referenced symbols resolve"]
+returns = "module symbol or executable test"
+effects = ["declaration bodies record effects independently"]
+errors = ["DuplicateDefinition", "UnknownSymbol", "InvalidDeclaration"]
+ownership = "Signatures explicitly declare ownership-relevant parameter and result types."
+universal = "ast::Item"
+lowering = "module symbol table plus HIR declaration"
+status = "partial"
+since = "2026"
+tests = ["compiler/frontend/parser/src", "compiler/frontend/semantic/src"]
+examples = ["docs/examples/02-functions", "docs/examples/01-types"]
+limitations = ["Public visibility is currently package-oriented rather than a complete per-declaration visibility grammar."]
+snippets = ["surface.declarations"]
+
+[[feature]]
+id = "conversion.kind"
+kind = "conversion_family"
+syntax = "Target(value[, mode])"
+members = [
+  { id = "conversion.identity", syntax = "Target(value, identity)", universal = "ConversionKind.Identity" },
+  { id = "conversion.promote", syntax = "Target(value, promote)", universal = "ConversionKind.Promote" },
+  { id = "conversion.checked", syntax = "Target(value, checked)", universal = "ConversionKind.Checked" },
+  { id = "conversion.lossy", syntax = "Target(value, lossy)", universal = "ConversionKind.Lossy" },
+]
+type_params = ["From", "To"]
+parameters = ["value: From", "mode: optional conversion policy"]
+constraints = ["Universal registers a conversion from From to To", "the selected mode permits its required safety class"]
+returns = "To"
+effects = []
+errors = ["UnsupportedConversion", "OutOfRange", "InvalidRuntimeConversion"]
+ownership = "Conversion consumes or borrows according to the selected constructor signature."
+universal = "ConversionKind"
+lowering = "HIR Conversion { from, to, kind } followed by representation-correct scalar or aggregate conversion"
+status = "implemented"
+since = "2026"
+tests = ["compiler/universal/src/conversion.rs"]
+examples = ["docs/examples/08-numerics/01-numeric-types.sev"]
+limitations = ["Aggregate and user-defined conversion matrices are not yet documented to the same depth as numeric conversions."]
+snippets = ["surface.conversions"]
+
+[[feature]]
+id = "type.annotation"
+kind = "type_syntax_family"
+syntax = "named type, dimension, shape spread, function, or union annotation"
+members = [
+  { id = "type.named", syntax = "Name[Arguments...]", universal = "ast::TypeAnnotationKind::Named" },
+  { id = "type.dimension_constant", syntax = "N", universal = "ast::TypeAnnotationKind::DimensionConstant" },
+  { id = "type.dimension_runtime", syntax = "dynamic", universal = "ast::TypeAnnotationKind::DimensionRuntime" },
+  { id = "type.shape_spread", syntax = "*Shape", universal = "ast::TypeAnnotationKind::ShapeSpread" },
+  { id = "type.function", syntax = "Function[Parameters..., Result]", universal = "ast::TypeAnnotationKind::Function" },
+  { id = "type.union_annotation", syntax = "T | E", universal = "ast::TypeAnnotationKind::Union" },
+]
+type_params = ["T...", "D...", "S..."]
+parameters = ["annotation terms"]
+constraints = ["generic argument kinds match their parameters"]
+returns = "TypeId plus shape/value generic terms"
+effects = []
+errors = ["UnknownType", "GenericKindMismatch", "InvalidDimension"]
+ownership = "Annotations describe ownership-bearing value types but do not own runtime storage."
+universal = "ast::TypeAnnotationKind"
+lowering = "semantic type resolution plus separate dimension/shape terms"
+status = "partial"
+since = "2026"
+tests = ["compiler/frontend/parser/src", "compiler/universal/src/generic.rs"]
+examples = ["docs/examples/08-numerics/06-shapes.sev"]
+limitations = ["Runtime dimension spelling and constraint diagnostics remain under active stabilization."]
+snippets = ["surface.types"]
+
+[[snippet]]
+id = "surface.literals"
+covers = ["literal.kind"]
+source = '''
+def literals() -> bool:
+    return 42 > 0 and 3.5 > 0.0 and true and 'x' == 'x' and "text" != ""
+'''
+
+[[snippet]]
+id = "surface.expressions"
+covers = ["expression.kind"]
+source = '''
+def expressions(values: list[int]) -> int:
+    chosen = values[0] if size(values) > 0 else 0
+    return chosen + 1
+'''
+
+[[snippet]]
+id = "surface.statements"
+covers = ["statement.kind"]
+source = '''
+def statements(values: list[int]) -> int:
+    total := 0
+    for value in values:
+        if value < 0:
+            continue
+        total += value
+    return total
+'''
+
+[[snippet]]
+id = "surface.declarations"
+covers = ["declaration.item"]
+source = '''
+trait Identity[T]:
+    def identity(value: T) -> T
+
+def identity[T](value: T) -> T:
+    return value
+'''
+
+[[snippet]]
+id = "surface.conversions"
+covers = ["conversion.kind"]
+source = '''
+def conversions(value: i32) -> i64:
+    return i64(value)
+'''
+
+[[snippet]]
+id = "surface.types"
+covers = ["type.annotation"]
+source = '''
+def union(value: int | None) -> int | None:
+    return value
+'''
