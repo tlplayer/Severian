@@ -1,0 +1,372 @@
+# Severian kernel IR.
+#
+# Fusion produces LogicalKernel objects. Donor-derived layout and scheduling
+# passes transform those objects into ScheduledKernel objects. No MLIR or
+# target-dialect text is stored in this IR.
+
+import fusion
+
+enum KernelDimension:
+    KnownDimension(value: int)
+    DynamicDimension
+
+
+enum KernelElementKind:
+    SignedInteger
+    UnsignedInteger
+    IeeeFloat
+    BrainFloat
+    Float8E4M3Fn
+    Float8E5M2
+    BooleanElement
+
+
+class TensorContract:
+    dimensions: list[KernelDimension]
+    element: KernelElementKind
+    bits: int
+
+
+enum BufferAccess:
+    ReadOnly
+    WriteOnly
+    ReadWrite
+
+
+class KernelBuffer:
+    id: int
+    contract: TensorContract
+    access: BufferAccess
+
+
+enum ScalarOpcode:
+    Add
+    Subtract
+    Multiply
+    Divide
+    Relu
+
+
+enum KernelOperation:
+    ScalarLoad(result: int, buffer: int)
+    ScalarApply(result: int, opcode: ScalarOpcode, operands: list[int])
+    ScalarStore(buffer: int, value: int)
+
+
+class LogicalKernel:
+    name: string
+    architecture: string
+    buffers: list[KernelBuffer]
+    domain_buffer: int
+    operations: list[KernelOperation]
+
+
+# Index expressions use an arena/SSA graph rather than recursive syntax trees.
+# This makes transformation cost linear and gives MLIR lowering stable values.
+class IndexValue:
+    index: int
+
+
+enum IndexOperation:
+    IndexConstant(result: IndexValue, value: int)
+    TensorDimension(result: IndexValue, buffer: int, axis: int)
+    GpuBlockX(result: IndexValue)
+    GpuThreadX(result: IndexValue)
+    GpuBlockSizeX(result: IndexValue)
+    IndexAdd(result: IndexValue, left: IndexValue, right: IndexValue)
+    IndexMultiply(result: IndexValue, left: IndexValue, right: IndexValue)
+    IndexDivideUnsigned(result: IndexValue, left: IndexValue, right: IndexValue)
+    IndexRemainderUnsigned(result: IndexValue, left: IndexValue, right: IndexValue)
+    IndexCeilDivideUnsigned(result: IndexValue, left: IndexValue, right: IndexValue)
+
+
+class ScheduledKernel:
+    logical: LogicalKernel
+    schedule: fusion.ElementwiseSchedule
+    index_operations: list[IndexOperation]
+    launch_blocks_x: IndexValue
+    launch_one: IndexValue
+    launch_threads: IndexValue
+    launch_threads_x: int
+    linear_index: IndexValue
+    active_limit: IndexValue
+    tensor_indices: list[IndexValue]
+
+
+enum KernelTransformError:
+    MissingDomainBuffer(buffer: int)
+    DuplicateBuffer(buffer: int)
+    InvalidBufferReference(buffer: int)
+    InvalidScalarReference(value: int)
+    InvalidScalarArity(operation: ScalarOpcode, arity: int)
+    InvalidElementWidth(bits: int)
+    EmptyIterationDomain
+
+
+class KernelDimensionRecord:
+    dynamic: bool
+    value: int
+
+
+class KernelOperationRecord:
+    kind: string
+    result: int
+    buffer: int
+    value: int
+    opcode: string
+    operands: list[int]
+
+
+class IndexOperationRecord:
+    kind: string
+    result: IndexValue
+    value: int
+    buffer: int
+    axis: int
+    left: IndexValue
+    right: IndexValue
+
+
+def buffer_by_id(kernel: LogicalKernel, id: int) -> KernelBuffer | None:
+    for buffer in kernel.buffers:
+        if buffer.id == id:
+            return buffer
+    return None
+
+
+def opcode_arity(opcode: ScalarOpcode) -> int:
+    match opcode:
+        case Relu: return 1
+        case Add: return 2
+        case Subtract: return 2
+        case Multiply: return 2
+        case Divide: return 2
+
+
+def scalar_opcode_name(opcode: ScalarOpcode) -> string:
+    match opcode:
+        case Add: return "add"
+        case Subtract: return "subtract"
+        case Multiply: return "multiply"
+        case Divide: return "divide"
+        case Relu: return "relu"
+
+
+def element_name(element: KernelElementKind) -> string:
+    match element:
+        case SignedInteger: return "signed_integer"
+        case UnsignedInteger: return "unsigned_integer"
+        case IeeeFloat: return "ieee_float"
+        case BrainFloat: return "brain_float"
+        case Float8E4M3Fn: return "float8_e4m3fn"
+        case Float8E5M2: return "float8_e5m2"
+        case BooleanElement: return "boolean"
+
+
+def element_is_floating(element: KernelElementKind) -> bool:
+    name = element_name(element)
+    return name == "ieee_float" or name == "brain_float" or name.starts_with("float8_")
+
+
+def buffer_access_name(access: BufferAccess) -> string:
+    match access:
+        case ReadOnly: return "read_only"
+        case WriteOnly: return "write_only"
+        case ReadWrite: return "read_write"
+
+
+def dimension_record(dimension: KernelDimension) -> KernelDimensionRecord:
+    match dimension:
+        case KnownDimension: return KernelDimensionRecord(false, value)
+        case DynamicDimension: return KernelDimensionRecord(true, 0)
+
+
+def operation_record(operation: KernelOperation) -> KernelOperationRecord:
+    match operation:
+        case ScalarLoad: return KernelOperationRecord("load", result, buffer, 0, "", [])
+        case ScalarApply: return KernelOperationRecord("apply", result, 0, 0, scalar_opcode_name(opcode), operands)
+        case ScalarStore: return KernelOperationRecord("store", 0, buffer, value, "", [])
+
+
+def index_operation_record(operation: IndexOperation) -> IndexOperationRecord:
+    empty = IndexValue(0)
+    match operation:
+        case IndexConstant: return IndexOperationRecord("constant", result, value, 0, 0, empty, empty)
+        case TensorDimension: return IndexOperationRecord("tensor_dimension", result, 0, buffer, axis, empty, empty)
+        case GpuBlockX: return IndexOperationRecord("gpu_block_x", result, 0, 0, 0, empty, empty)
+        case GpuThreadX: return IndexOperationRecord("gpu_thread_x", result, 0, 0, 0, empty, empty)
+        case GpuBlockSizeX: return IndexOperationRecord("gpu_block_size_x", result, 0, 0, 0, empty, empty)
+        case IndexAdd: return IndexOperationRecord("add", result, 0, 0, 0, left, right)
+        case IndexMultiply: return IndexOperationRecord("multiply", result, 0, 0, 0, left, right)
+        case IndexDivideUnsigned: return IndexOperationRecord("divide_unsigned", result, 0, 0, 0, left, right)
+        case IndexRemainderUnsigned: return IndexOperationRecord("remainder_unsigned", result, 0, 0, 0, left, right)
+        case IndexCeilDivideUnsigned: return IndexOperationRecord("ceil_divide_unsigned", result, 0, 0, 0, left, right)
+
+
+def validate(kernel: LogicalKernel) -> bool | KernelTransformError:
+    known_buffers: set[int] = set()
+    for buffer in kernel.buffers:
+        if buffer.id in known_buffers:
+            return error(DuplicateBuffer(buffer.id))
+        if buffer.contract.bits <= 0:
+            return error(InvalidElementWidth(buffer.contract.bits))
+        known_buffers.add(buffer.id)
+    if buffer_by_id(kernel, kernel.domain_buffer) == None:
+        return error(MissingDomainBuffer(kernel.domain_buffer))
+    domain = buffer_by_id(kernel, kernel.domain_buffer)
+    if len(domain.contract.dimensions) == 0:
+        return error(EmptyIterationDomain)
+
+    scalars: set[int] = set()
+    for operation in kernel.operations:
+        match operation:
+            case ScalarLoad:
+                if buffer not in known_buffers:
+                    return error(InvalidBufferReference(buffer))
+                scalars.add(result)
+            case ScalarApply:
+                if int(len(operands)) != opcode_arity(opcode):
+                    return error(InvalidScalarArity(opcode, int(len(operands))))
+                for operand in operands:
+                    if operand not in scalars:
+                        return error(InvalidScalarReference(operand))
+                scalars.add(result)
+            case ScalarStore:
+                if buffer not in known_buffers:
+                    return error(InvalidBufferReference(buffer))
+                if value not in scalars:
+                    return error(InvalidScalarReference(value))
+    return true
+
+
+def new_index_value(operations: list[IndexOperation]) -> IndexValue:
+    return IndexValue(int(len(operations)))
+
+
+def emit_dimension(operations: list[IndexOperation], buffer: int, axis: int, dimension: KernelDimension) -> IndexValue:
+    result = new_index_value(operations)
+    match dimension:
+        case KnownDimension:
+            operations.append(IndexConstant(result, value))
+        case DynamicDimension:
+            operations.append(TensorDimension(result, buffer, axis))
+    return result
+
+
+def emit_dimensions(operations: list[IndexOperation], buffer: KernelBuffer) -> list[IndexValue]:
+    dimensions: list[IndexValue] = []
+    for axis in range(0, int(len(buffer.contract.dimensions))):
+        dimensions.append(emit_dimension(operations, buffer.id, axis, buffer.contract.dimensions[axis]))
+    return dimensions
+
+
+def emit_element_count(operations: list[IndexOperation], dimensions: list[IndexValue]) -> IndexValue:
+    total := new_index_value(operations)
+    operations.append(IndexConstant(total, 1))
+    for dimension in dimensions:
+        result = new_index_value(operations)
+        operations.append(IndexMultiply(result, total, dimension))
+        total = result
+    return total
+
+
+def static_element_count(buffer: KernelBuffer) -> int:
+    total := 1
+    for dimension in buffer.contract.dimensions:
+        match dimension:
+            case KnownDimension:
+                total *= value
+            case DynamicDimension:
+                return 1
+    return total
+
+
+def emit_delinearize(operations: list[IndexOperation], linear: IndexValue, dimensions: list[IndexValue]) -> list[IndexValue]:
+    rank = int(len(dimensions))
+    indices: list[IndexValue] = []
+    for axis in range(0, rank):
+        indices.append(IndexValue(0))
+    remaining := linear
+    axis := rank - 1
+    while axis >= 0:
+        dimension = dimensions[axis]
+        index = new_index_value(operations)
+        operations.append(IndexRemainderUnsigned(index, remaining, dimension))
+        indices[axis] = index
+        if axis > 0:
+            quotient = new_index_value(operations)
+            operations.append(IndexDivideUnsigned(quotient, remaining, dimension))
+            remaining = quotient
+        axis -= 1
+    return indices
+
+
+# First donor-derived kernel transformation. It maps one logical element per
+# thread, retains the tail as a runtime predicate, and keeps rank as data.
+def schedule_validated_blocked_elementwise(kernel: LogicalKernel, warp_size: int, warps_per_block: int = 4) -> ScheduledKernel:
+    domain := kernel.buffers[0]
+    found := false
+    for buffer in kernel.buffers:
+        if buffer.id == kernel.domain_buffer:
+            domain = buffer
+            found = true
+    assert(found, "validated kernel domain buffer is missing")
+    schedule = fusion.blocked_elementwise_schedule(static_element_count(domain), warp_size, warps_per_block)
+    index_operations: list[IndexOperation] = []
+    dimensions = emit_dimensions(index_operations, domain)
+    total = emit_element_count(index_operations, dimensions)
+    threads = new_index_value(index_operations)
+    index_operations.append(IndexConstant(threads, schedule.threads_per_block))
+    blocks = new_index_value(index_operations)
+    index_operations.append(IndexCeilDivideUnsigned(blocks, total, threads))
+    one = new_index_value(index_operations)
+    index_operations.append(IndexConstant(one, 1))
+    block = new_index_value(index_operations)
+    index_operations.append(GpuBlockX(block))
+    thread = new_index_value(index_operations)
+    index_operations.append(GpuThreadX(thread))
+    block_size = new_index_value(index_operations)
+    index_operations.append(GpuBlockSizeX(block_size))
+    block_offset = new_index_value(index_operations)
+    index_operations.append(IndexMultiply(block_offset, block, block_size))
+    linear = new_index_value(index_operations)
+    index_operations.append(IndexAdd(linear, block_offset, thread))
+    indices = emit_delinearize(index_operations, linear, dimensions)
+    return ScheduledKernel(
+        kernel,
+        schedule,
+        index_operations,
+        blocks,
+        one,
+        threads,
+        schedule.threads_per_block,
+        linear,
+        total,
+        indices,
+    )
+
+
+def schedule_blocked_elementwise(kernel: LogicalKernel, warp_size: int, warps_per_block: int = 4) -> ScheduledKernel | KernelTransformError:
+    validate(kernel)
+    return schedule_validated_blocked_elementwise(kernel, warp_size, warps_per_block)
+
+
+def example_dynamic_relu_kernel() -> LogicalKernel:
+    tensor = TensorContract([DynamicDimension, KnownDimension(128)], BrainFloat, 16)
+    return LogicalKernel(
+        "entry",
+        "gfx1100",
+        [KernelBuffer(0, tensor, ReadOnly), KernelBuffer(1, tensor, WriteOnly)],
+        0,
+        [ScalarLoad(0, 0), ScalarApply(1, Relu, [0]), ScalarStore(1, 1)],
+    )
+
+
+def example_scheduled_dynamic_relu_kernel() -> ScheduledKernel:
+    return schedule_validated_blocked_elementwise(example_dynamic_relu_kernel(), 32)
+
+
+test "blocked kernel scheduling preserves dynamic rank as index expressions":
+    scheduled = example_scheduled_dynamic_relu_kernel()
+    assert(scheduled.launch_threads_x == 128, "four wave32 warps must schedule 128 threads")
+    assert(len(scheduled.tensor_indices) == 2, "rank two must remain rank two")

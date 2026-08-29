@@ -1,0 +1,15 @@
+# Minimal consumer of the Severian-owned kernel transformation pipeline.
+# The example constructs kernel objects, schedules them, lowers them to MLIR
+# operation objects, and only then serializes the final standard MLIR module.
+
+import gpu_mlir
+
+def dynamic_relu_gpu_mlir() -> string:
+    return gpu_mlir.example_dynamic_relu_mlir()
+
+
+test "kernel transformation is implemented in Severian":
+    module = dynamic_relu_gpu_mlir()
+    assert(module.contains("gpu.launch"))
+    assert(module.contains("tensor<?x128xbf16>"))
+    assert(not module.contains("triton"))

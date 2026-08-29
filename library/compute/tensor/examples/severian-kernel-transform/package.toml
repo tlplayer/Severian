@@ -1,0 +1,11 @@
+[package]
+name = "tensor-severian-kernel-transform"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+gpu_mlir = { path = "../../../../../sev_compiler/transforms/gpu_mlir" }

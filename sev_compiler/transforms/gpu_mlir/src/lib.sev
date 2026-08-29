@@ -1,0 +1,388 @@
+# Object-level lowering from Severian's scheduled kernel IR to standard GPU
+# MLIR. Rendering is deliberately the final operation; transformation passes
+# consume and produce objects from the kernel package.
+
+import kernel
+
+class MlirPredicate:
+    index: int
+
+
+enum MlirIndexBinaryOpcode:
+    IndexAdd
+    IndexMultiply
+    IndexDivideUnsigned
+    IndexRemainderUnsigned
+    IndexCeilDivideUnsigned
+
+
+enum MlirScalarBinaryOpcode:
+    AddFloat
+    AddInteger
+    SubtractFloat
+    SubtractInteger
+    MultiplyFloat
+    MultiplyInteger
+    DivideFloat
+    DivideSigned
+    DivideUnsigned
+
+
+enum GpuMlirOperation:
+    MlirIndexConstant(result: kernel.IndexValue, value: int)
+    MlirTensorDimension(result: kernel.IndexValue, buffer: int, axis: int)
+    MlirGpuBlockX(result: kernel.IndexValue)
+    MlirGpuThreadX(result: kernel.IndexValue)
+    MlirGpuBlockSizeX(result: kernel.IndexValue)
+    MlirIndexBinary(result: kernel.IndexValue, opcode: MlirIndexBinaryOpcode, left: kernel.IndexValue, right: kernel.IndexValue)
+    MlirTensorEmpty(buffer: int, dynamic_sizes: list[kernel.IndexValue])
+    MlirTensorToBuffer(buffer: int, read_only: bool)
+    MlirGpuLaunch(blocks_x: kernel.IndexValue, one: kernel.IndexValue, threads_x: kernel.IndexValue, body_region: int)
+    MlirIndexCompareUlt(result: MlirPredicate, left: kernel.IndexValue, right: kernel.IndexValue)
+    MlirScfIf(condition: MlirPredicate, body_region: int)
+    MlirScalarLoad(result: int, buffer: int, indices: list[kernel.IndexValue])
+    MlirScalarConstant(result: string, literal: string, contract: kernel.TensorContract)
+    MlirScalarBinary(result: string, opcode: MlirScalarBinaryOpcode, left: string, right: string, contract: kernel.TensorContract)
+    MlirScalarComparePositive(result: string, value: string, zero: string, contract: kernel.TensorContract)
+    MlirScalarSelect(result: string, condition: string, positive: string, negative: string, contract: kernel.TensorContract)
+    MlirScalarStore(buffer: int, value: string, indices: list[kernel.IndexValue])
+    MlirGpuTerminator
+    MlirReturnBuffers(buffers: list[int])
+
+
+class GpuMlirRegion:
+    id: int
+    operations: list[GpuMlirOperation]
+
+
+class GpuMlirFunction:
+    name: string
+    buffers: list[kernel.KernelBuffer]
+    result_buffers: list[int]
+    regions: list[GpuMlirRegion]
+    entry_region: int
+
+
+class GpuMlirModule:
+    architecture: string
+    function: GpuMlirFunction
+
+
+def mlir_region(regions: list[GpuMlirRegion], id: int) -> GpuMlirRegion:
+    selected := regions[0]
+    found := false
+    for region in regions:
+        if region.id == id:
+            selected = region
+            found = true
+    assert(found, "GPU MLIR region is missing")
+    return selected
+
+
+def kernel_buffer(buffers: list[kernel.KernelBuffer], id: int) -> kernel.KernelBuffer:
+    selected := buffers[0]
+    found := false
+    for buffer in buffers:
+        if buffer.id == id:
+            selected = buffer
+            found = true
+    assert(found, "GPU MLIR buffer is missing")
+    return selected
+
+
+def is_floating(kind: kernel.KernelElementKind) -> bool:
+    return kernel.element_is_floating(kind)
+
+
+def is_unsigned_integer(kind: kernel.KernelElementKind) -> bool:
+    return kernel.element_name(kind) == "unsigned_integer"
+
+
+def is_write_only(access: kernel.BufferAccess) -> bool:
+    return kernel.buffer_access_name(access) == "write_only"
+
+
+def scalar_binary_opcode(name: string, contract: kernel.TensorContract) -> MlirScalarBinaryOpcode:
+    floating = is_floating(contract.element)
+    if name == "add":
+        return AddFloat if floating else AddInteger
+    if name == "subtract":
+        return SubtractFloat if floating else SubtractInteger
+    if name == "multiply":
+        return MultiplyFloat if floating else MultiplyInteger
+    if name == "divide":
+        if floating:
+            return DivideFloat
+        if is_unsigned_integer(contract.element):
+            return DivideUnsigned
+        return DivideSigned
+    assert(false, "unsupported scalar operation")
+    return AddInteger
+
+
+def lower_index_operation(operation: kernel.IndexOperation) -> GpuMlirOperation:
+    record = kernel.index_operation_record(operation)
+    if record.kind == "constant":
+        return MlirIndexConstant(record.result, record.value)
+    if record.kind == "tensor_dimension":
+        return MlirTensorDimension(record.result, record.buffer, record.axis)
+    if record.kind == "gpu_block_x":
+        return MlirGpuBlockX(record.result)
+    if record.kind == "gpu_thread_x":
+        return MlirGpuThreadX(record.result)
+    if record.kind == "gpu_block_size_x":
+        return MlirGpuBlockSizeX(record.result)
+    if record.kind == "add":
+        return MlirIndexBinary(record.result, MlirIndexBinaryOpcode.IndexAdd, record.left, record.right)
+    if record.kind == "multiply":
+        return MlirIndexBinary(record.result, MlirIndexBinaryOpcode.IndexMultiply, record.left, record.right)
+    if record.kind == "divide_unsigned":
+        return MlirIndexBinary(record.result, MlirIndexBinaryOpcode.IndexDivideUnsigned, record.left, record.right)
+    if record.kind == "remainder_unsigned":
+        return MlirIndexBinary(record.result, MlirIndexBinaryOpcode.IndexRemainderUnsigned, record.left, record.right)
+    return MlirIndexBinary(record.result, MlirIndexBinaryOpcode.IndexCeilDivideUnsigned, record.left, record.right)
+
+
+def dynamic_sizes(scheduled: kernel.ScheduledKernel, buffer: kernel.KernelBuffer) -> list[kernel.IndexValue]:
+    sizes: list[kernel.IndexValue] = []
+    for operation in scheduled.index_operations:
+        record = kernel.index_operation_record(operation)
+        if record.kind == "tensor_dimension" and record.buffer == scheduled.logical.domain_buffer:
+            sizes.append(record.result)
+    return sizes
+
+
+def lower_scalar_operations(scheduled: kernel.ScheduledKernel) -> list[GpuMlirOperation]:
+    operations: list[GpuMlirOperation] = []
+    domain = kernel_buffer(scheduled.logical.buffers, scheduled.logical.domain_buffer)
+    for operation in scheduled.logical.operations:
+        record = kernel.operation_record(operation)
+        if record.kind == "load":
+            operations.append(MlirScalarLoad(record.result, record.buffer, scheduled.tensor_indices))
+        if record.kind == "apply":
+            if record.opcode == "relu":
+                if int(len(record.operands)) != 1:
+                    assert(false, "invalid ReLU scalar arity")
+                zero = "s" + string(i64(record.result)) + "_zero"
+                positive = "s" + string(i64(record.result)) + "_positive"
+                operations.append(MlirScalarConstant(zero, "0.0" if is_floating(domain.contract.element) else "0", domain.contract))
+                operations.append(MlirScalarComparePositive(positive, "s" + string(i64(record.operands[0])), zero, domain.contract))
+                operations.append(MlirScalarSelect("s" + string(i64(record.result)), positive, "s" + string(i64(record.operands[0])), zero, domain.contract))
+            else:
+                if int(len(record.operands)) != 2:
+                    assert(false, "invalid binary scalar arity")
+                operations.append(MlirScalarBinary("s" + string(i64(record.result)), scalar_binary_opcode(record.opcode, domain.contract), "s" + string(i64(record.operands[0])), "s" + string(i64(record.operands[1])), domain.contract))
+        if record.kind == "store":
+            operations.append(MlirScalarStore(record.buffer, "s" + string(i64(record.value)), scheduled.tensor_indices))
+    return operations
+
+
+def lower_scheduled_kernel(scheduled: kernel.ScheduledKernel) -> GpuMlirModule:
+    host: list[GpuMlirOperation] = []
+    launch: list[GpuMlirOperation] = []
+    active = lower_scalar_operations(scheduled)
+
+    # The scheduling pass deliberately creates host index values before the
+    # first GPU builtin. Values after that point belong to the launch body.
+    in_launch := false
+    for operation in scheduled.index_operations:
+        if kernel.index_operation_record(operation).kind == "gpu_block_x":
+            in_launch = true
+        if in_launch:
+            launch.append(lower_index_operation(operation))
+        else:
+            host.append(lower_index_operation(operation))
+
+    result_buffers: list[int] = []
+    for buffer in scheduled.logical.buffers:
+        access = kernel.buffer_access_name(buffer.access)
+        if access == "write_only":
+            result_buffers.append(buffer.id)
+            host.append(MlirTensorEmpty(buffer.id, dynamic_sizes(scheduled, buffer)))
+        if access == "read_only":
+            host.append(MlirTensorToBuffer(buffer.id, true))
+        if access == "read_write":
+            host.append(MlirTensorToBuffer(buffer.id, false))
+    for buffer in result_buffers:
+        host.append(MlirTensorToBuffer(buffer, false))
+
+    predicate = MlirPredicate(0)
+    host.append(MlirGpuLaunch(scheduled.launch_blocks_x, scheduled.launch_one, scheduled.launch_threads, 1))
+    host.append(MlirReturnBuffers(result_buffers))
+    launch.append(MlirIndexCompareUlt(predicate, scheduled.linear_index, scheduled.active_limit))
+    launch.append(MlirScfIf(predicate, 2))
+    launch.append(MlirGpuTerminator)
+
+    regions = [GpuMlirRegion(0, host), GpuMlirRegion(1, launch), GpuMlirRegion(2, active)]
+    function = GpuMlirFunction(scheduled.logical.name, scheduled.logical.buffers, result_buffers, regions, 0)
+    return GpuMlirModule(scheduled.logical.architecture, function)
+
+
+def element_type(contract: kernel.TensorContract) -> string:
+    name = kernel.element_name(contract.element)
+    if name == "signed_integer" or name == "unsigned_integer":
+        return "i" + string(i64(contract.bits))
+    if name == "ieee_float":
+        return "f" + string(i64(contract.bits))
+    if name == "brain_float":
+        if contract.bits != 16:
+            assert(false, "BF16 kernel values must be 16 bits")
+        return "bf16"
+    if name == "float8_e4m3fn":
+        if contract.bits != 8:
+            assert(false, "E4M3 kernel values must be 8 bits")
+        return "f8E4M3FN"
+    if name == "float8_e5m2":
+        if contract.bits != 8:
+            assert(false, "E5M2 kernel values must be 8 bits")
+        return "f8E5M2"
+    return "i1"
+
+
+def tensor_type(contract: kernel.TensorContract, memref: bool = false) -> string:
+    dimensions: list[string] = []
+    for dimension in contract.dimensions:
+        record = kernel.dimension_record(dimension)
+        dimensions.append("?" if record.dynamic else string(i64(record.value)))
+    prefix = "memref<" if memref else "tensor<"
+    return prefix + dimensions.join("x") + "x" + element_type(contract) + ">"
+
+
+def parameter_index(function: GpuMlirFunction, buffer_id: int) -> int:
+    index := 0
+    for buffer in function.buffers:
+        if not is_write_only(buffer.access):
+            if buffer.id == buffer_id:
+                return index
+            index += 1
+    assert(false, "GPU MLIR parameter buffer is missing")
+    return 0
+
+
+def index_name(value: kernel.IndexValue) -> string:
+    return "%i" + string(i64(value.index))
+
+
+def scalar_binary_name(opcode: MlirScalarBinaryOpcode) -> string:
+    match opcode:
+        case AddFloat: return "arith.addf"
+        case AddInteger: return "arith.addi"
+        case SubtractFloat: return "arith.subf"
+        case SubtractInteger: return "arith.subi"
+        case MultiplyFloat: return "arith.mulf"
+        case MultiplyInteger: return "arith.muli"
+        case DivideFloat: return "arith.divf"
+        case DivideSigned: return "arith.divsi"
+        case DivideUnsigned: return "arith.divui"
+
+
+def index_binary_name(opcode: MlirIndexBinaryOpcode) -> string:
+    match opcode:
+        case IndexAdd: return "arith.addi"
+        case IndexMultiply: return "arith.muli"
+        case IndexDivideUnsigned: return "arith.divui"
+        case IndexRemainderUnsigned: return "arith.remui"
+        case IndexCeilDivideUnsigned: return "arith.ceildivui"
+
+
+def render_indices(indices: list[kernel.IndexValue]) -> string:
+    names: list[string] = []
+    for index in indices:
+        names.append(index_name(index))
+    return names.join(", ")
+
+
+def render_region(module: GpuMlirModule, id: int, indentation: string) -> string:
+    region = mlir_region(module.function.regions, id)
+    output := ""
+    for operation in region.operations:
+        match operation:
+            case MlirIndexConstant:
+                output += indentation + index_name(result) + " = arith.constant " + string(i64(value)) + " : index\n"
+            case MlirTensorDimension:
+                parameter = parameter_index(module.function, buffer)
+                contract = kernel_buffer(module.function.buffers, buffer).contract
+                output += indentation + index_name(result) + " = tensor.dim %arg" + string(i64(parameter)) + ", " + string(i64(axis)) + " : " + tensor_type(contract) + "\n"
+            case MlirGpuBlockX:
+                output += indentation + index_name(result) + " = gpu.block_id x\n"
+            case MlirGpuThreadX:
+                output += indentation + index_name(result) + " = gpu.thread_id x\n"
+            case MlirGpuBlockSizeX:
+                output += indentation + index_name(result) + " = gpu.block_dim x\n"
+            case MlirIndexBinary:
+                output += indentation + index_name(result) + " = " + index_binary_name(opcode) + " " + index_name(left) + ", " + index_name(right) + " : index\n"
+            case MlirTensorEmpty:
+                contract = kernel_buffer(module.function.buffers, buffer).contract
+                output += indentation + "%tensor" + string(i64(buffer)) + " = tensor.empty(" + render_indices(dynamic_sizes) + ") : " + tensor_type(contract) + "\n"
+            case MlirTensorToBuffer:
+                contract = kernel_buffer(module.function.buffers, buffer).contract
+                source = "%arg" + string(i64(parameter_index(module.function, buffer))) if read_only else "%tensor" + string(i64(buffer))
+                marker = " read_only" if read_only else ""
+                output += indentation + "%buffer" + string(i64(buffer)) + " = bufferization.to_buffer " + source + marker + " : " + tensor_type(contract) + " to " + tensor_type(contract, true) + "\n"
+            case MlirGpuLaunch:
+                output += indentation + "gpu.launch blocks(%block_x, %block_y, %block_z) in (%grid_x = " + index_name(blocks_x) + ", %grid_y = " + index_name(one) + ", %grid_z = " + index_name(one) + ") threads(%thread_x, %thread_y, %thread_z) in (%block_size_x = " + index_name(threads_x) + ", %block_size_y = " + index_name(one) + ", %block_size_z = " + index_name(one) + ") {\n"
+                output += render_region(module, body_region, indentation + "  ")
+                output += indentation + "}\n"
+            case MlirIndexCompareUlt:
+                output += indentation + "%p" + string(i64(result.index)) + " = arith.cmpi ult, " + index_name(left) + ", " + index_name(right) + " : index\n"
+            case MlirScfIf:
+                output += indentation + "scf.if %p" + string(i64(condition.index)) + " {\n"
+                output += render_region(module, body_region, indentation + "  ")
+                output += indentation + "}\n"
+            case MlirScalarLoad:
+                contract = kernel_buffer(module.function.buffers, buffer).contract
+                output += indentation + "%s" + string(i64(result)) + " = memref.load %buffer" + string(i64(buffer)) + "[" + render_indices(indices) + "] : " + tensor_type(contract, true) + "\n"
+            case MlirScalarConstant:
+                output += indentation + "%" + result + " = arith.constant " + literal + " : " + element_type(contract) + "\n"
+            case MlirScalarBinary:
+                output += indentation + "%" + result + " = " + scalar_binary_name(opcode) + " %" + left + ", %" + right + " : " + element_type(contract) + "\n"
+            case MlirScalarComparePositive:
+                mnemonic = "cmpf ogt," if is_floating(contract.element) else "cmpi sgt,"
+                output += indentation + "%" + result + " = arith." + mnemonic + " %" + value + ", %" + zero + " : " + element_type(contract) + "\n"
+            case MlirScalarSelect:
+                output += indentation + "%" + result + " = arith.select %" + condition + ", %" + positive + ", %" + negative + " : " + element_type(contract) + "\n"
+            case MlirScalarStore:
+                contract = kernel_buffer(module.function.buffers, buffer).contract
+                output += indentation + "memref.store %" + value + ", %buffer" + string(i64(buffer)) + "[" + render_indices(indices) + "] : " + tensor_type(contract, true) + "\n"
+            case MlirGpuTerminator:
+                output += indentation + "gpu.terminator\n"
+            case MlirReturnBuffers:
+                values: list[string] = []
+                types: list[string] = []
+                for buffer in buffers:
+                    values.append("%tensor" + string(i64(buffer)))
+                    types.append(tensor_type(kernel_buffer(module.function.buffers, buffer).contract))
+                output += indentation + "return " + values.join(", ") + " : " + types.join(", ") + "\n"
+    return output
+
+
+def render_gpu_module(module: GpuMlirModule) -> string:
+    parameters: list[string] = []
+    results: list[string] = []
+    parameter_index := 0
+    for buffer in module.function.buffers:
+        if not is_write_only(buffer.access):
+            parameters.append("%arg" + string(i64(parameter_index)) + ": " + tensor_type(buffer.contract) + " {bufferization.access = \"read\"}")
+            parameter_index += 1
+    for buffer in module.function.result_buffers:
+        results.append(tensor_type(kernel_buffer(module.function.buffers, buffer).contract))
+    result_signature = " -> " + results[0] if len(results) == 1 else " -> (" + results.join(", ") + ")"
+    body = render_region(module, module.function.entry_region, "    ")
+    return "module attributes {severian.gpu.architecture = \"" + module.architecture + "\"} {\n  func.func @" + module.function.name + "(" + parameters.join(", ") + ")" + result_signature + " {\n" + body + "  }\n}"
+
+
+def emit_validated_elementwise_kernel(logical: kernel.LogicalKernel, warp_size: int, warps_per_block: int = 4) -> string:
+    scheduled = kernel.schedule_validated_blocked_elementwise(logical, warp_size, warps_per_block)
+    return render_gpu_module(lower_scheduled_kernel(scheduled))
+
+
+def example_dynamic_relu_mlir() -> string:
+    return emit_validated_elementwise_kernel(kernel.example_dynamic_relu_kernel(), 32)
+
+
+test "scheduled kernel lowers through MLIR operation objects":
+    text = example_dynamic_relu_mlir()
+    assert(text.contains("gpu.launch"), "GPU MLIR must contain a launch")
+    assert(text.contains("tensor<?x128xbf16>"), "dynamic ranked BF16 type must survive lowering")
+    assert(text.contains("arith.select"), "ReLU must lower structurally")
+    assert(not text.contains("triton"), "Severian kernel lowering must not emit Triton IR")
