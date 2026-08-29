@@ -346,7 +346,7 @@ The Licensor may audit those records no more than once per calendar year through
 If an audit identifies an underpayment greater than five percent for the audited period, the licensee shall pay:
 
 * the unpaid royalty;
-* reasonable interest;
+* reasonable interest of 20% APR of amount unpaid (principal);
 * the reasonable cost of the audit; and
 * any other amount permitted by the commercial license.
 
