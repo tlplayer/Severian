@@ -7,7 +7,7 @@ use severian_fusion::{
 use severian_mlir::{LoweredFloatFormat, LoweredType, MlirArtifact};
 use severian_runtime::gpu::{
     specialize_storage_views, CompilerOptions as GpuCompilerOptions, DeviceId, GpuRuntime,
-    HostStorageInput, KernelCache, StorageSpecializationBinding,
+    HostScalarInput, HostStorageInput, KernelCache, StorageSpecializationBinding,
 };
 use severian_runtime::tensor_jit::{TensorJitProgram, TensorJitTarget};
 use severian_runtime::{
@@ -131,6 +131,22 @@ struct GpuInstance {
     graph: FusionGraph,
     plan: FusionPlan,
     options: GpuCompilerOptions,
+    from_elements: Vec<FromElementsBoundary>,
+}
+
+#[derive(Debug, Clone)]
+struct FromElementsBoundary {
+    node: NodeId,
+    values_input: usize,
+    shape_input: usize,
+    element_kind: ElementKind,
+    element_bits: u16,
+}
+
+struct MaterializedHostInput {
+    node: NodeId,
+    view: StorageView,
+    bytes: Vec<u8>,
 }
 
 type NativeLaunch = unsafe extern "C" fn(*const ValueAbi, u32, *mut ValueAbi, u32) -> i32;
@@ -197,12 +213,33 @@ unsafe fn compile_region_inner(
     }
     let input_values = unsafe { slice::from_raw_parts(inputs, input_count as usize) };
     unsafe { hydrate_runtime_operands(&mut program, input_values) }?;
+    let from_elements = promote_from_elements_boundaries(&mut program)?;
     let graph = program.graph().map_err(|error| error.to_string())?;
-    let specialization = specialize_program(&program, &graph, input_values)?;
+    let materialized = unsafe { materialize_from_elements(&from_elements, input_values) }?;
+    let specialization = specialize_program(&program, &graph, input_values, &materialized)?;
+    let graph_summary = || {
+        graph
+            .nodes()
+            .iter()
+            .map(|node| {
+                format!(
+                    "{}:{:?}.{} inputs={:?} rank={:?}",
+                    node.id.0, node.kind, node.operation, node.inputs, node.shape.rank
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     match program.target {
-        TensorJitTarget::Cpu => compile_cpu(&program, &graph, &specialization),
+        TensorJitTarget::Cpu => compile_cpu(&program, &graph, &specialization).map_err(|error| {
+            format!(
+                "{error}; CPU Tensor-JIT graph [{}], outputs {:?}",
+                graph_summary(),
+                program.outputs
+            )
+        }),
         TensorJitTarget::Amd | TensorJitTarget::Nvidia => {
-            compile_gpu(&program, &graph, &specialization)
+            compile_gpu(&program, &graph, &specialization, from_elements)
         }
     }
 }
@@ -281,6 +318,7 @@ fn specialize_program(
     program: &TensorJitProgram,
     graph: &FusionGraph,
     inputs: &[ValueAbi],
+    materialized: &[MaterializedHostInput],
 ) -> Result<KernelSpecialization, String> {
     if inputs.len() != program.inputs.len() {
         return Err("Tensor-JIT input count does not match the serialized graph".into());
@@ -306,6 +344,14 @@ fn specialize_program(
             view,
         });
     }
+    bindings.extend(
+        materialized
+            .iter()
+            .map(|input| StorageSpecializationBinding {
+                node: input.node,
+                view: input.view.clone(),
+            }),
+    );
     let target = match program.target {
         TensorJitTarget::Nvidia => GpuTarget::Nvidia,
         TensorJitTarget::Cpu | TensorJitTarget::Amd => GpuTarget::Amd,
@@ -329,6 +375,181 @@ fn specialize_program(
             .join("; ");
         format!("{error}; graph [{nodes}]")
     })
+}
+
+fn promote_from_elements_boundaries(
+    program: &mut TensorJitProgram,
+) -> Result<Vec<FromElementsBoundary>, String> {
+    let program_inputs = program.inputs.clone();
+    let mut boundaries = Vec::new();
+    for node in &mut program.nodes {
+        if node.kind != NodeKind::StorageView || node.operation != "from_elements" {
+            continue;
+        }
+        let values = node
+            .inputs
+            .first()
+            .copied()
+            .ok_or_else(|| format!("from_elements node {} has no values operand", node.id.0))?;
+        let shape = node
+            .inputs
+            .get(1)
+            .copied()
+            .ok_or_else(|| format!("from_elements node {} has no shape operand", node.id.0))?;
+        let values_input = program_inputs
+            .iter()
+            .position(|input| *input == values)
+            .ok_or_else(|| {
+                format!(
+                    "from_elements node {} values are not an external host input",
+                    node.id.0
+                )
+            })?;
+        let shape_input = program_inputs
+            .iter()
+            .position(|input| *input == shape)
+            .ok_or_else(|| {
+                format!(
+                    "from_elements node {} shape is not an external host input",
+                    node.id.0
+                )
+            })?;
+        boundaries.push(FromElementsBoundary {
+            node: node.id,
+            values_input,
+            shape_input,
+            element_kind: node.shape.element_kind,
+            element_bits: node.shape.element_bits,
+        });
+
+        // `from_elements` is a host storage boundary, not a GPU operation.
+        // Present its materialized result to fusion as an ordinary runtime
+        // tensor parameter. The opaque language lists remain program inputs,
+        // but never become Triton pointer arguments.
+        node.kind = NodeKind::Parameter;
+        node.operation = "parameter".into();
+        node.inputs.clear();
+        node.operand_roles.clear();
+        node.runtime_operands.clear();
+        node.layout = severian_fusion::StorageLayout::Runtime;
+    }
+    Ok(boundaries)
+}
+
+unsafe fn materialize_from_elements(
+    boundaries: &[FromElementsBoundary],
+    inputs: &[ValueAbi],
+) -> Result<Vec<MaterializedHostInput>, String> {
+    boundaries
+        .iter()
+        .map(|boundary| unsafe { materialize_from_elements_input(boundary, inputs) })
+        .collect()
+}
+
+unsafe fn materialize_from_elements_input(
+    boundary: &FromElementsBoundary,
+    inputs: &[ValueAbi],
+) -> Result<MaterializedHostInput, String> {
+    let values = inputs.get(boundary.values_input).ok_or_else(|| {
+        format!(
+            "from_elements node {} values input is missing",
+            boundary.node.0
+        )
+    })?;
+    let shape = inputs.get(boundary.shape_input).ok_or_else(|| {
+        format!(
+            "from_elements node {} shape input is missing",
+            boundary.node.0
+        )
+    })?;
+    if values.kind != VALUE_POINTER || shape.kind != VALUE_LIST_I64 {
+        return Err(format!(
+            "from_elements node {} requires a host values list and an integer shape list",
+            boundary.node.0
+        ));
+    }
+    let values = unsafe { runtime_list(values, "from_elements values") }?;
+    let shape = unsafe { runtime_list(shape, "from_elements shape") }?;
+    let dimensions = unsafe { slice::from_raw_parts(shape.values, shape.length) }
+        .iter()
+        .map(|dimension| {
+            u64::try_from(*dimension).map_err(|_| {
+                format!(
+                    "from_elements node {} has a negative dimension",
+                    boundary.node.0
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let elements = dimensions
+        .iter()
+        .try_fold(1u64, |count, dimension| count.checked_mul(*dimension))
+        .ok_or_else(|| format!("from_elements node {} shape overflows", boundary.node.0))?;
+    if elements != values.length as u64 {
+        return Err(format!(
+            "from_elements node {} shape contains {elements} elements but the values list contains {}",
+            boundary.node.0, values.length
+        ));
+    }
+    if boundary.element_bits != 64 {
+        return Err(format!(
+            "from_elements node {} currently requires 64-bit list storage, found {} bits",
+            boundary.node.0, boundary.element_bits
+        ));
+    }
+    let bytes = unsafe {
+        slice::from_raw_parts(
+            values.values.cast::<u8>(),
+            values
+                .length
+                .checked_mul(mem::size_of::<usize>())
+                .ok_or_else(|| {
+                    format!("from_elements node {} byte size overflows", boundary.node.0)
+                })?,
+        )
+    }
+    .to_vec();
+    let mut stride = 1i64;
+    let mut strides = vec![0; dimensions.len()];
+    for axis in (0..dimensions.len()).rev() {
+        strides[axis] = stride;
+        stride = stride
+            .checked_mul(i64::try_from(dimensions[axis]).map_err(|_| {
+                format!(
+                    "from_elements node {} dimension exceeds i64",
+                    boundary.node.0
+                )
+            })?)
+            .ok_or_else(|| format!("from_elements node {} stride overflows", boundary.node.0))?;
+    }
+    let element = storage_element_representation(boundary.element_kind, boundary.element_bits)?;
+    let view = StorageView::new(
+        bytes.as_ptr() as usize as u64,
+        bytes.len() as u64,
+        element,
+        dimensions,
+        strides,
+        0,
+        StorageOwnership::Borrowed,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(MaterializedHostInput {
+        node: boundary.node,
+        view,
+        bytes,
+    })
+}
+
+unsafe fn runtime_list<'a>(value: &ValueAbi, label: &str) -> Result<&'a RuntimeList, String> {
+    let raw = unsafe { value.value.pointer.cast::<RuntimeList>() };
+    if raw.is_null() {
+        return Err(format!("{label} is null"));
+    }
+    let list = unsafe { &*raw };
+    if list.length > list.capacity || (list.length != 0 && list.values.is_null()) {
+        return Err(format!("{label} is invalid"));
+    }
+    Ok(list)
 }
 
 fn logical_tensor_input(node: &severian_fusion::FusionNode) -> bool {
@@ -404,8 +625,13 @@ fn compile_gpu(
     program: &TensorJitProgram,
     graph: &FusionGraph,
     _specialization: &KernelSpecialization,
+    from_elements: Vec<FromElementsBoundary>,
 ) -> Result<CompiledInstance, String> {
-    let plan = severian_fusion::plan(graph, severian_fusion::DeviceModel::conservative_gpu());
+    let plan = severian_fusion::plan_with_outputs(
+        graph,
+        severian_fusion::DeviceModel::conservative_gpu(),
+        program.outputs.iter().copied(),
+    );
     if plan.regions.is_empty() {
         return Err("Triton Tensor-JIT graph produced no fusion regions".into());
     }
@@ -443,6 +669,7 @@ fn compile_gpu(
         graph: graph.clone(),
         plan,
         options,
+        from_elements,
     })))
 }
 
@@ -538,6 +765,21 @@ unsafe fn launch_gpu(
         }
         views.push((node, view));
     }
+    let materialized = unsafe { materialize_from_elements(&instance.from_elements, inputs) }?;
+    let scalar_inputs = instance
+        .program
+        .inputs
+        .iter()
+        .copied()
+        .enumerate()
+        .filter_map(|(index, node)| {
+            let descriptor = instance.graph.node(node);
+            (descriptor.shape.element_kind != ElementKind::Opaque
+                && matches!(&descriptor.shape.rank, severian_fusion::Rank::Ranked(axes) if axes.is_empty()))
+            .then_some((index, node, descriptor))
+        })
+        .map(|(index, node, descriptor)| scalar_host_input(node, descriptor, &inputs[index]))
+        .collect::<Result<Vec<_>, _>>()?;
     let host_inputs = views
         .iter()
         .map(|(node, view)| {
@@ -554,6 +796,13 @@ unsafe fn launch_gpu(
                 bytes,
             })
         })
+        .chain(materialized.iter().map(|input| {
+            Ok(HostStorageInput {
+                node: input.node,
+                view: input.view.clone(),
+                bytes: input.bytes.as_slice(),
+            })
+        }))
         .collect::<Result<Vec<_>, String>>()?;
     let execution = instance
         .runtime
@@ -562,9 +811,40 @@ unsafe fn launch_gpu(
             &instance.graph,
             &instance.plan,
             &host_inputs,
+            &scalar_inputs,
             &instance.options,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            let region_contracts = instance
+                .plan
+                .regions
+                .iter()
+                .map(|region| format!("{:?}->{:?}", region.inputs, region.outputs))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let graph_contracts = instance
+                .graph
+                .nodes()
+                .iter()
+                .map(|node| {
+                    format!(
+                        "{}:{:?}.{} rank={:?} element={:?}/{}",
+                        node.id.0,
+                        node.kind,
+                        node.operation,
+                        node.shape.rank,
+                        node.shape.element_kind,
+                        node.shape.element_bits,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{error}; program inputs {:?}; uploaded inputs {:?}; fusion regions [{region_contracts}]; graph [{graph_contracts}]",
+                instance.program.inputs,
+                host_inputs.iter().map(|input| input.node).collect::<Vec<_>>(),
+            )
+        })?;
     instance
         .runtime
         .synchronize(&execution.execution)
@@ -600,7 +880,15 @@ unsafe fn launch_gpu(
             .buffers
             .get(&node)
             .copied()
-            .ok_or_else(|| format!("GPU output {} has no device buffer", node.0))?;
+            .ok_or_else(|| {
+                format!(
+                    "GPU output {} ({:?}.{}) has no device buffer; available buffers {:?}",
+                    node.0,
+                    descriptor.kind,
+                    descriptor.operation,
+                    execution.buffers.keys().collect::<Vec<_>>()
+                )
+            })?;
         instance
             .runtime
             .download(buffer, 0, &mut host)
@@ -617,6 +905,44 @@ unsafe fn launch_gpu(
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn scalar_host_input(
+    node: NodeId,
+    descriptor: &severian_fusion::FusionNode,
+    value: &ValueAbi,
+) -> Result<HostScalarInput, String> {
+    let bits = descriptor.shape.element_bits;
+    let bytes = match descriptor.shape.element_kind {
+        ElementKind::IeeeFloat if bits == 32 => {
+            let value = unsafe { value.value.floating } as f32;
+            value.to_ne_bytes().to_vec()
+        }
+        ElementKind::IeeeFloat if bits == 64 => unsafe { value.value.floating }
+            .to_ne_bytes()
+            .to_vec(),
+        ElementKind::SignedInteger if bits <= 64 => {
+            let bytes = unsafe { value.value.signed_integer }.to_ne_bytes();
+            bytes[..usize::from(bits.div_ceil(8))].to_vec()
+        }
+        ElementKind::UnsignedInteger | ElementKind::Boolean if bits <= 64 => {
+            let bytes = unsafe { value.value.unsigned_integer }.to_ne_bytes();
+            bytes[..usize::from(bits.div_ceil(8))].to_vec()
+        }
+        kind => {
+            return Err(format!(
+                "GPU scalar node {} has unsupported representation {kind:?}/{bits}",
+                node.0
+            ))
+        }
+    };
+    let alignment = u8::try_from(bytes.len().next_power_of_two().min(8))
+        .map_err(|_| format!("GPU scalar node {} alignment exceeds the ABI", node.0))?;
+    Ok(HostScalarInput {
+        node,
+        bytes,
+        alignment,
+    })
 }
 
 unsafe fn value_storage(value: &ValueAbi) -> Result<*const StorageViewAbi, String> {

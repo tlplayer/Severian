@@ -324,6 +324,7 @@ fn emit_elementwise(
     };
     if let Some(operation) = binary {
         let rhs = operands.get(1).copied().unwrap_or(first);
+        let rhs = coerce_value(emitter, rhs, &first.scalar, width)?;
         emitter.line(format!(
             "{result} = {operation} {}, {} : {tensor}",
             first.name, rhs.name
@@ -361,6 +362,40 @@ fn emit_elementwise(
     Ok(Value {
         name: result,
         scalar: first.scalar.clone(),
+    })
+}
+
+fn coerce_value(
+    emitter: &mut Emitter,
+    value: &Value,
+    target_scalar: &str,
+    width: u64,
+) -> Result<Value, String> {
+    if value.scalar == target_scalar {
+        return Ok(value.clone());
+    }
+    let source_float = value.scalar.strip_prefix('f').and_then(|bits| bits.parse::<u16>().ok());
+    let target_float = target_scalar
+        .strip_prefix('f')
+        .and_then(|bits| bits.parse::<u16>().ok());
+    let operation = match (source_float, target_float) {
+        (Some(source), Some(target)) if source > target => "arith.truncf",
+        (Some(source), Some(target)) if source < target => "arith.extf",
+        _ => {
+            return Err(format!(
+                "cannot coerce elementwise operand from {} to {target_scalar}",
+                value.scalar
+            ))
+        }
+    };
+    let result = emitter.value();
+    emitter.line(format!(
+        "{result} = {operation} {} : tensor<{width}x{}> to tensor<{width}x{target_scalar}>",
+        value.name, value.scalar
+    ));
+    Ok(Value {
+        name: result,
+        scalar: target_scalar.into(),
     })
 }
 
@@ -1034,10 +1069,13 @@ fn arguments(graph: &FusionGraph, region: &FusionRegion) -> Result<KernelArgumen
     let mut outputs = Vec::new();
     for id in &region.inputs {
         let index = declarations.len();
-        declarations.push(format!(
-            "%arg{index}: !tt.ptr<{}>",
-            scalar_type(graph.node(*id))?
-        ));
+        let node = graph.node(*id);
+        let scalar = scalar_type(node)?;
+        declarations.push(if matches!(&node.shape.rank, Rank::Ranked(axes) if axes.is_empty()) {
+            format!("%arg{index}: {scalar}")
+        } else {
+            format!("%arg{index}: !tt.ptr<{scalar}>")
+        });
         inputs.push((*id, index));
     }
     for id in &region.outputs {
@@ -1319,6 +1357,16 @@ fn load(
     width: u64,
 ) -> Value {
     let scalar = scalar_type(node).expect("validated scalar type");
+    if matches!(&node.shape.rank, Rank::Ranked(axes) if axes.is_empty()) {
+        let value = emitter.value();
+        emitter.line(format!(
+            "{value} = tt.splat %arg{argument} : {scalar} -> tensor<{width}x{scalar}>"
+        ));
+        return Value {
+            name: value,
+            scalar,
+        };
+    }
     let pointers = emitter.value();
     emitter.line(format!("{pointers} = tt.splat %arg{argument} : !tt.ptr<{scalar}> -> tensor<{width}x!tt.ptr<{scalar}>>"));
     let addresses = emitter.value();

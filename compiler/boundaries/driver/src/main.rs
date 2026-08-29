@@ -1081,6 +1081,10 @@ fn compiler(
 ) -> Result<Compiler, String> {
     let target = if config.target == "host" {
         TargetSpec::host()
+    } else if config.target == "gpu" {
+        let mut target = TargetSpec::host();
+        target.capabilities.insert("execution.default.gpu");
+        target
     } else {
         TargetSpec::new(config.target.clone())
     };

@@ -148,6 +148,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
     output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
     output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
+    if !runtime_signatures.contains_key("__sev_tensor_local_release") {
+        output.push_str("  func.func private @__sev_tensor_local_release(!llvm.ptr)\n");
+    }
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");
@@ -427,6 +430,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     output.push_str("  func.func private @__sev_tensor_box_unranked(i64, !llvm.ptr) -> !llvm.ptr\n");
     output.push_str("  func.func private @__sev_tensor_box_rank(!llvm.ptr) -> i64\n");
     output.push_str("  func.func private @__sev_tensor_box_descriptor(!llvm.ptr) -> !llvm.ptr\n");
+    if !runtime_signatures.contains_key("__sev_tensor_local_release") {
+        output.push_str("  func.func private @__sev_tensor_local_release(!llvm.ptr)\n");
+    }
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");

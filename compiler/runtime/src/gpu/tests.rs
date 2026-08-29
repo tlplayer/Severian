@@ -752,7 +752,7 @@ fn storage_view_to_specialization_cache_launcher_and_execution_is_one_path() {
     ];
 
     let first = runtime
-        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &options)
+        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &[], &options)
         .unwrap();
     assert_eq!(first.execution.cache_misses, 1);
     assert_eq!(first.execution.cache_hits, 0);
@@ -760,7 +760,7 @@ fn storage_view_to_specialization_cache_launcher_and_execution_is_one_path() {
     assert!(first.buffers.contains_key(&NodeId(2)));
 
     let second = runtime
-        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &options)
+        .execute_storage_graph(DeviceId(0), &graph, &fusion, &inputs, &[], &options)
         .unwrap();
     assert_eq!(second.execution.cache_misses, 0);
     assert_eq!(second.execution.cache_hits, 1);

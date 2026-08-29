@@ -1041,6 +1041,38 @@ mod tests {
     }
 
     #[test]
+    fn rank_zero_inputs_use_scalar_kernel_arguments() {
+        let tensor = Shape::typed(
+            [severian_fusion::Dimension::Known(64)],
+            ElementKind::IeeeFloat,
+            32,
+        );
+        let scalar = Shape::typed([], ElementKind::IeeeFloat, 64);
+        let mut scale = FusionNode::structural(
+            2,
+            NodeKind::Elementwise,
+            [NodeId(0), NodeId(1)],
+            tensor.clone(),
+        );
+        scale.operation = "scale".into();
+        let graph = FusionGraph::new(vec![
+            FusionNode::structural(0, NodeKind::Parameter, [], tensor),
+            FusionNode::structural(1, NodeKind::Parameter, [], scalar),
+            scale,
+        ])
+        .unwrap();
+        let plan = plan(&graph, DeviceModel::conservative_gpu());
+        let module = lower_to_ttir(&graph, &plan.regions[0], &specialization()).unwrap();
+        assert!(module.text.contains("%arg0: !tt.ptr<f32>"));
+        assert!(module.text.contains("%arg1: f64"));
+        assert!(module
+            .text
+            .contains("tt.splat %arg1 : f64 -> tensor<256xf64>"));
+        assert!(!module.text.contains("!tt.ptr<f64>"));
+        parse_with_pinned_triton(&module);
+    }
+
+    #[test]
     fn unary_relu_emits_the_mlir_comparison_predicate_separator() {
         let shape = Shape::typed(
             [severian_fusion::Dimension::Known(64)],

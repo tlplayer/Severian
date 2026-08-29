@@ -55,6 +55,16 @@ pub struct HostStorageInput<'a> {
     pub bytes: &'a [u8],
 }
 
+/// One rank-zero value passed directly through the kernel ABI. Scalars are
+/// ordinary graph data, but unlike tensors they do not own or address a GPU
+/// buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostScalarInput {
+    pub node: NodeId,
+    pub bytes: Vec<u8>,
+    pub alignment: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
     pub specialization: KernelSpecialization,
@@ -1484,6 +1494,7 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
         graph: &FusionGraph,
         plan: &FusionPlan,
         inputs: &[HostStorageInput<'_>],
+        scalars: &[HostScalarInput],
         options: &CompilerOptions,
     ) -> Result<GraphExecution, RuntimeError> {
         let target = self.device(device)?.target;
@@ -1518,6 +1529,10 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
             .shapes
             .iter()
             .map(|shape| (shape.node, shape.dimensions.as_slice()))
+            .collect::<BTreeMap<_, _>>();
+        let scalar_by_node = scalars
+            .iter()
+            .map(|scalar| (scalar.node, scalar))
             .collect::<BTreeMap<_, _>>();
         for scheduled in &schedule {
             let region = &plan.regions[scheduled.region.0 as usize];
@@ -1566,14 +1581,22 @@ impl<D: GpuDriver, C: GpuCompiler> GpuRuntime<D, C> {
                     .iter()
                     .chain(&region.outputs)
                     .map(|node| {
-                        buffers
-                            .get(node)
-                            .copied()
-                            .map(|buffer| KernelArgument::Buffer {
+                        if let Some(buffer) = buffers.get(node).copied() {
+                            Ok(KernelArgument::Buffer {
                                 buffer,
                                 byte_offset: 0,
                             })
-                            .ok_or(RuntimeError::MissingNodeBuffer(*node))
+                        } else if region.inputs.contains(node) {
+                            scalar_by_node
+                                .get(node)
+                                .map(|scalar| KernelArgument::Scalar {
+                                    bytes: scalar.bytes.clone(),
+                                    alignment: scalar.alignment,
+                                })
+                                .ok_or(RuntimeError::MissingNodeBuffer(*node))
+                        } else {
+                            Err(RuntimeError::MissingNodeBuffer(*node))
+                        }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let dependencies = scheduled

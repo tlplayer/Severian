@@ -858,6 +858,17 @@ struct WorkingRegion {
 }
 
 pub fn plan(graph: &FusionGraph, device: DeviceModel) -> FusionPlan {
+    plan_with_outputs(graph, device, [])
+}
+
+/// Plans fusion while preserving values that are observable through the
+/// compiled-region ABI, even when those values also feed another fused node.
+pub fn plan_with_outputs(
+    graph: &FusionGraph,
+    device: DeviceModel,
+    required_outputs: impl IntoIterator<Item = NodeId>,
+) -> FusionPlan {
+    let required_outputs = required_outputs.into_iter().collect::<BTreeSet<_>>();
     let mut regions = graph
         .nodes()
         .iter()
@@ -885,7 +896,7 @@ pub fn plan(graph: &FusionGraph, device: DeviceModel) -> FusionPlan {
                     continue;
                 }
                 let FusionDecision::Allow { benefit_seconds } =
-                    decide(graph, producer, consumer, device)
+                    decide(graph, producer, consumer, device, &required_outputs)
                 else {
                     continue;
                 };
@@ -920,7 +931,13 @@ pub fn plan(graph: &FusionGraph, device: DeviceModel) -> FusionPlan {
         for node in &region.nodes {
             node_regions[node.0 as usize] = Some(id);
         }
-        final_regions.push(materialize_region(graph, &region, id, device));
+        final_regions.push(materialize_region(
+            graph,
+            &region,
+            id,
+            device,
+            &required_outputs,
+        ));
     }
     FusionPlan {
         regions: final_regions,
@@ -933,6 +950,7 @@ fn decide(
     producer: &WorkingRegion,
     consumer: &WorkingRegion,
     device: DeviceModel,
+    required_outputs: &BTreeSet<NodeId>,
 ) -> FusionDecision {
     let connected = producer.nodes.iter().any(|node| {
         graph
@@ -979,7 +997,8 @@ fn decide(
         });
     }
     let parameters =
-        external_inputs(graph, &combined).len() + external_outputs(graph, &combined).len();
+        external_inputs(graph, &combined).len()
+            + external_outputs(graph, &combined, required_outputs).len();
     if parameters > device.max_kernel_parameters {
         return FusionDecision::Forbid(FusionRejection::ParameterLimit {
             required: parameters,
@@ -1080,12 +1099,17 @@ fn external_inputs(graph: &FusionGraph, region: &WorkingRegion) -> Vec<NodeId> {
         .collect()
 }
 
-fn external_outputs(graph: &FusionGraph, region: &WorkingRegion) -> Vec<NodeId> {
+fn external_outputs(
+    graph: &FusionGraph,
+    region: &WorkingRegion,
+    required_outputs: &BTreeSet<NodeId>,
+) -> Vec<NodeId> {
     region
         .nodes
         .iter()
         .filter(|node| {
-            graph.users(**node).is_empty()
+            required_outputs.contains(node)
+                || graph.users(**node).is_empty()
                 || graph
                     .users(**node)
                     .iter()
@@ -1100,12 +1124,13 @@ fn materialize_region(
     region: &WorkingRegion,
     id: RegionId,
     device: DeviceModel,
+    required_outputs: &BTreeSet<NodeId>,
 ) -> FusionRegion {
     FusionRegion {
         id,
         nodes: region.nodes.iter().copied().collect(),
         inputs: external_inputs(graph, region),
-        outputs: external_outputs(graph, region),
+        outputs: external_outputs(graph, region, required_outputs),
         estimate: estimate(graph, region, device),
     }
 }
@@ -1146,6 +1171,23 @@ mod tests {
         );
         assert_eq!(plan.regions[0].inputs, [NodeId(0), NodeId(1)]);
         assert_eq!(plan.regions[0].outputs, [NodeId(7)]);
+    }
+
+    #[test]
+    fn compiled_region_outputs_remain_kernel_outputs_when_they_are_fused() {
+        let graph = FusionGraph::new(vec![
+            node(0, NodeKind::Parameter, &[]),
+            node(1, NodeKind::Elementwise, &[0]),
+            node(2, NodeKind::Elementwise, &[1]),
+        ])
+        .unwrap();
+        let plan = plan_with_outputs(
+            &graph,
+            DeviceModel::conservative_gpu(),
+            [NodeId(1), NodeId(2)],
+        );
+        assert_eq!(plan.regions.len(), 1);
+        assert_eq!(plan.regions[0].outputs, [NodeId(1), NodeId(2)]);
     }
 
     #[test]

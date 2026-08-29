@@ -36,6 +36,26 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TensorCompiler;
 
+fn gpu_execution_requested(
+    region: &CompileRegion,
+    context: &CompileContext<'_>,
+) -> bool {
+    if region.placement == Some(ExecutionPlacement::Gpu) {
+        return true;
+    }
+    region.placement.is_none()
+        && context
+            .target
+            .capabilities
+            .contains("execution.default.gpu")
+        && region.compile_operations.iter().any(|operation| {
+            !matches!(
+                tensor::TensorOp::decode(operation.id, &operation.attributes),
+                Some(tensor::TensorOp::StorageView(_))
+            )
+        })
+}
+
 impl CompileHandler for TensorCompiler {
     fn compile(
         &self,
@@ -48,7 +68,7 @@ impl CompileHandler for TensorCompiler {
                 .compile_tensor_jit(region, context)
                 .map(CompiledRegionArtifact::TensorJit);
         }
-        if region.placement == Some(ExecutionPlacement::Gpu) {
+        if gpu_execution_requested(region, context) {
             return self
                 .compile_gpu(region, context)
                 .map(CompiledRegionArtifact::GpuKernel);
@@ -63,7 +83,7 @@ impl CompileHandler for TensorCompiler {
         context: &CompileContext<'_>,
         specialization: &CompileRegionSpecialization,
     ) -> Result<CompiledRegionArtifact, CompileError> {
-        if region.placement == Some(ExecutionPlacement::Gpu) {
+        if gpu_execution_requested(region, context) {
             let (region, types) = region
                 .specialize_for_emission(context.types, specialization)
                 .map_err(|error| {
@@ -133,7 +153,8 @@ impl TensorCompiler {
             .iter()
             .map(|value| lower_type(value.type_id, context))
             .collect::<Result<Vec<_>, _>>()?;
-        let architecture = if region.placement == Some(ExecutionPlacement::Gpu) {
+        let gpu = gpu_execution_requested(region, context);
+        let architecture = if gpu {
             context
                 .target
                 .triton_gpu()
@@ -153,7 +174,11 @@ impl TensorCompiler {
             output_nodes,
             inputs,
             outputs,
-            placement: region.placement,
+            placement: if gpu {
+                Some(ExecutionPlacement::Gpu)
+            } else {
+                region.placement
+            },
             architecture,
         })
     }

@@ -999,39 +999,21 @@ impl Compiler {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
+        let catalog = crate::config::Catalog::load().map_err(CompileError::Component)?;
         let mut standard_ids = BTreeMap::new();
         for (name, root) in standard {
-            let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-            if let Some(existing) = packages.packages.values().find(|package| {
-                std::fs::canonicalize(&package.root).unwrap_or_else(|_| package.root.clone())
-                    == canonical_root
-            }) {
-                standard_ids.insert(name.to_owned(), existing.id);
-                continue;
-            }
-            let library = root.join("src/lib.sev");
-            if !library.is_file() {
-                return Err(CompileError::Diagnostic(Diagnostic::new(
-                    "C001001",
-                    format!(
-                        "compiler standard package `{name}` is missing {}",
-                        library.display()
-                    ),
-                    None,
-                )));
-            }
-            let id = severian_modules::PackageId(next);
-            next = next.saturating_add(1);
+            let manifest_path = root.join("package.toml");
+            let manifest =
+                crate::config::Manifest::load(&manifest_path, &catalog).map_err(|error| {
+                    CompileError::Diagnostic(Diagnostic::new(
+                        "C001001",
+                        format!("compiler standard package `{name}` could not resolve: {error}"),
+                        None,
+                    ))
+                })?;
+            let declared = manifest.module_graph(false);
+            let id = merge_package_graph(&mut packages, declared, &mut next);
             standard_ids.insert(name.to_owned(), id);
-            packages.packages.insert(
-                id,
-                severian_modules::ResolvedPackage {
-                    id,
-                    root,
-                    library,
-                    dependencies: BTreeMap::new(),
-                },
-            );
         }
         for package in packages.packages.values_mut() {
             for (name, id) in &standard_ids {
@@ -2236,6 +2218,57 @@ fn module_name(path: &Path) -> String {
         .collect()
 }
 
+fn merge_package_graph(
+    destination: &mut severian_modules::PackageGraph,
+    source: severian_modules::PackageGraph,
+    next_id: &mut u32,
+) -> severian_modules::PackageId {
+    let mut translated = BTreeMap::new();
+    for (source_id, source_package) in &source.packages {
+        let canonical_root = std::fs::canonicalize(&source_package.root)
+            .unwrap_or_else(|_| source_package.root.clone());
+        let destination_id = destination
+            .packages
+            .values()
+            .find(|package| {
+                std::fs::canonicalize(&package.root).unwrap_or_else(|_| package.root.clone())
+                    == canonical_root
+            })
+            .map(|package| package.id)
+            .unwrap_or_else(|| {
+                let id = severian_modules::PackageId(*next_id);
+                *next_id = next_id.saturating_add(1);
+                destination.packages.insert(
+                    id,
+                    severian_modules::ResolvedPackage {
+                        id,
+                        root: source_package.root.clone(),
+                        library: source_package.library.clone(),
+                        dependencies: BTreeMap::new(),
+                    },
+                );
+                id
+            });
+        translated.insert(*source_id, destination_id);
+    }
+
+    for (source_id, source_package) in source.packages {
+        let destination_id = translated[&source_id];
+        let dependencies = source_package
+            .dependencies
+            .into_iter()
+            .map(|(name, dependency)| (name, translated[&dependency]));
+        destination
+            .packages
+            .get_mut(&destination_id)
+            .expect("translated package is present in the destination graph")
+            .dependencies
+            .extend(dependencies);
+    }
+
+    translated[&source.root]
+}
+
 fn select_test(module: &MirModule, selected: severian_mir::FunctionId) -> MirModule {
     let mut module = module.clone();
     module.entry = Some(selected);
@@ -2818,6 +2851,11 @@ mod tests {
                 "missing standard package {package}"
             );
         }
+        let model = dependencies["model"];
+        assert!(graph.packages[&model]
+            .dependencies
+            .contains_key("higgs_audio_v2"));
+        assert!(!dependencies.contains_key("higgs_audio_v2"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
