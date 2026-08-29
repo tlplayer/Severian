@@ -124,18 +124,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         .collect::<BTreeSet<_>>();
 
     let mut output = String::new();
-    for declaration in &module.classes {
-        let fields = declaration
-            .fields
-            .iter()
-            .map(|field| aggregate_field_type(&field.ty))
-            .collect::<Result<Vec<_>, _>>()?
-            .join(", ");
-        output.push_str(&format!(
-            "!sev_class_{} = !llvm.struct<({fields})>\n",
-            declaration.id
-        ));
-    }
+    render_class_aliases(&mut output, module)?;
     if let Some(architecture) = &module.gpu_architecture {
         output.push_str(&format!(
             "module attributes {{severian.gpu.architecture = \"{}\"}} {{\n",
@@ -407,18 +396,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     }
 
     let mut output = String::new();
-    for declaration in &module.classes {
-        let fields = declaration
-            .fields
-            .iter()
-            .map(|field| aggregate_field_type(&field.ty))
-            .collect::<Result<Vec<_>, _>>()?
-            .join(", ");
-        output.push_str(&format!(
-            "!sev_class_{} = !llvm.struct<({fields})>\n",
-            declaration.id
-        ));
-    }
+    render_class_aliases(&mut output, module)?;
     if let Some(architecture) = &module.gpu_architecture {
         output.push_str(&format!(
             "module attributes {{severian.gpu.architecture = \"{}\"}} {{\n",
@@ -3635,6 +3613,37 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_aliases_are_emitted_after_their_field_dependencies() {
+        let module = Module {
+            classes: vec![
+                severian_lir::ClassDeclaration {
+                    id: 3,
+                    name: "Outer".into(),
+                    fields: vec![severian_lir::ClassFieldDeclaration {
+                        name: "inner".into(),
+                        ty: LoweredType::Aggregate(22),
+                    }],
+                },
+                severian_lir::ClassDeclaration {
+                    id: 22,
+                    name: "Inner".into(),
+                    fields: vec![severian_lir::ClassFieldDeclaration {
+                        name: "value".into(),
+                        ty: LoweredType::Integer {
+                            bits: 64,
+                            signed: true,
+                        },
+                    }],
+                },
+            ],
+            ..Module::default()
+        };
+        let mut output = String::new();
+        render_class_aliases(&mut output, &module).unwrap();
+        assert!(output.find("!sev_class_22 =").unwrap() < output.find("!sev_class_3 =").unwrap());
+    }
+
+    #[test]
     fn gpu_cfg_placement_becomes_a_gpu_launch_region() {
         let integer = LoweredType::Integer {
             bits: 64,
@@ -4220,4 +4229,51 @@ mod tests {
             Err(MlirError::DialectNotAllowed { .. })
         ));
     }
+}
+fn render_class_aliases(output: &mut String, module: &Module) -> Result<(), MlirError> {
+    let declared = module
+        .classes
+        .iter()
+        .map(|declaration| declaration.id)
+        .collect::<BTreeSet<_>>();
+    let mut emitted = BTreeSet::new();
+    while emitted.len() != module.classes.len() {
+        let before = emitted.len();
+        for declaration in &module.classes {
+            if emitted.contains(&declaration.id) {
+                continue;
+            }
+            let ready = declaration.fields.iter().all(|field| match field.ty {
+                LoweredType::Aggregate(dependency) => {
+                    !declared.contains(&dependency) || emitted.contains(&dependency)
+                }
+                _ => true,
+            });
+            if !ready {
+                continue;
+            }
+            let fields = declaration
+                .fields
+                .iter()
+                .map(|field| aggregate_field_type(&field.ty))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            output.push_str(&format!(
+                "!sev_class_{} = !llvm.struct<({fields})>\n",
+                declaration.id
+            ));
+            emitted.insert(declaration.id);
+        }
+        if emitted.len() == before {
+            let cyclic = declared
+                .difference(&emitted)
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(MlirError::UnsupportedOperation(format!(
+                "aggregate layout contains an inline cycle among class IDs {cyclic}"
+            )));
+        }
+    }
+    Ok(())
 }

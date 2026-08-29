@@ -16,4 +16,4 @@ class Constructor:
 
 
 trait Conversion:
-    property constructors: set[Constructor]
+    property constructors: list[Constructor]

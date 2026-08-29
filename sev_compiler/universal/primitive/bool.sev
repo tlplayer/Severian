@@ -1,9 +1,10 @@
 import "primitive.sev"
 import "../operator/trait/logical.sev"
-import "../operator/trait/equitable.sev"
+import "../operator/trait/equatable.sev"
 import "../operator/trait/bitwise.sev"
 
 trait Boolean: Primitive + Logical + Equatable + Bitwise
+    pass
 
 
 # The compiler-side model selected when a source value has type `bool`.
@@ -15,9 +16,9 @@ class Bool: Boolean
     category: PrimitiveCategory = PrimitiveCategory.Boolean
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
     default_literal: bool = true
-    constructors: set[Constructor] = {
+    constructors: list[Constructor] = [
         Constructor(TypeRef("bool"), ConversionKind.Identity),
-    }
+    ]
 
     operator and(right: bool) -> bool:
         return right if self else false

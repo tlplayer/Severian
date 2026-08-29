@@ -8,6 +8,9 @@ enum SymbolKind:
     ThreadLocal
 
 
+import "../id/compiler.sev"
+
+
 class Symbol:
     name: SymbolName
     kind: SymbolKind

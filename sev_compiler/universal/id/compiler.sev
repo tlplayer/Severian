@@ -26,6 +26,49 @@ class ValueId: IndexedId
     index: u32
 
 
+class TypeId: IndexedId
+    index: u32
+
+
+class GenericParamId: IndexedId
+    index: u32
+
+
+class DeclarationId: StableId
+    value: u128
+
+
+class CompilerId: StableId
+    value: u128
+
+
+class DefId:
+    package: u128
+    module: u128
+    declaration: DeclarationId
+
+
+class Substitution:
+    arguments: list[tuple[GenericParamId, TypeId]] = []
+
+
+class OpId:
+    dialect: u128
+    operation: u128
+
+
+class AttributeId: StableId
+    value: u128
+
+
+enum AttrValue:
+    Integer(value: i128)
+    Boolean(value: bool)
+    String(value: string)
+    Type(value: TypeId)
+    Types(value: list[TypeId])
+
+
 class BlockId: IndexedId
     index: u32
 

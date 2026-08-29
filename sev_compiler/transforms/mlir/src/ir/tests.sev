@@ -1,0 +1,39 @@
+import "lib.sev"
+
+
+test "open operation identities do not require compiler enum cases":
+    builder = MlirOpBuilder(0)
+    argument = builder_value(builder, 0, integer_type(32))
+    function = builder_create_function(builder, "open_op", public_visibility(), [argument], [integer_type(32)])
+    builder_set_insertion_point(builder, function.entry)
+    result = builder_new_value(builder, integer_type(32))
+    builder_create_operation(builder, operation_name("severian", "future_op"), [argument], [result])
+    builder_return(builder, [result])
+    validate(builder.program)
+    text = print_program_unchecked(builder.program)
+    emitted = builder.program.regions[0].blocks[0].operations[0]
+    assert(operation_name_text(emitted.name) == "severian.future_op", "unknown operations remain open builder data")
+    assert(text != "", "validated object programs remain printable for inspection")
+
+
+test "ranked dynamic tensor types remain typed builder data":
+    element = bf16_scalar_type()
+    dimensions: list[int] = []
+    dimensions.append(known_dimension(1))
+    dimensions.append(dynamic_dimension())
+    dimensions.append(known_dimension(128))
+    contract = tensor_type(element, dimensions)
+    assert(contract.dimensions[0] == 1, "first known dimension must be preserved")
+    assert(contract.dimensions[1] < 0, "dynamic dimension must remain distinct")
+    assert(contract.dimensions[2] == 128, "last known dimension must be preserved")
+
+
+test "verification rejects undefined SSA operands before text materialization":
+    builder = MlirOpBuilder(0)
+    function = builder_create_function(builder, "invalid", public_visibility(), [], [integer_type(32)])
+    builder_set_insertion_point(builder, function.entry)
+    missing = MlirValue(41, integer_type(32))
+    result = builder_new_value(builder, integer_type(32))
+    builder_binary(builder, result, operation_name("arith", "addi"), missing, missing)
+    builder_return(builder, [result])
+    assert(not program_is_valid(builder.program), "undefined SSA operands must fail structural validation")

@@ -1,3 +1,10 @@
+import "../id/compiler.sev"
+import "../literal/lowered.sev"
+import "../operator/lowered.sev"
+import "../source/assertion.sev"
+import "../statement/statement.sev"
+
+
 enum LoweredOperation:
     LoweredCoverage(key: string)
     ConstantValue(value: Constant, result: ValueId)

@@ -1346,6 +1346,26 @@ fn resolution_definitions(resolution: &Resolution) -> Vec<DefId> {
     }
 }
 
+/// The driver temporarily injects bootstrap prelude declarations into every
+/// module's local AST. They belong in that module's lexical scope, but they are
+/// not declarations owned by the module and therefore must never be re-exported
+/// through an unqualified source import.
+fn is_injected_prelude_item(item: &Item) -> bool {
+    let source = match item {
+        Item::Trait(declaration) => declaration.span.source,
+        Item::Class(declaration) => declaration.span.source,
+        Item::Enum(declaration) => declaration.span.source,
+        Item::Binding(binding) => binding.span.source,
+        Item::Expression(expression) => expression.span.source,
+        Item::Function(function) => function.span.source,
+        Item::Type(declaration) => declaration.span.source,
+        Item::Test(declaration) => declaration.span.source,
+        Item::Import(import) => import.span.source,
+        Item::Extension(extension) => extension.span.source,
+    };
+    source.0 >= u32::MAX - 3
+}
+
 fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnostic> {
     let mut index = ProgramIndex::default();
     for module in &module_graph.modules {
@@ -1359,6 +1379,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
         let mut items = Vec::new();
         let mut module_bindings = BTreeSet::new();
         for item in &module.ast.items {
+            let injected_prelude = is_injected_prelude_item(item);
             if let Item::Class(class) = item {
                 for field in &class.fields {
                     index
@@ -1537,7 +1558,9 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                 Resolution::Def(id),
                 &index.definitions,
             );
-            insert_binding(&mut exports, name, Resolution::Def(id), &index.definitions);
+            if !injected_prelude {
+                insert_binding(&mut exports, name, Resolution::Def(id), &index.definitions);
+            }
         }
         index.modules.insert(
             module.id,

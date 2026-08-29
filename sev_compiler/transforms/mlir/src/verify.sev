@@ -31,13 +31,13 @@ def verify_artifact(id: universal.ArtifactId, generated: MlirArtifact, target_sp
 def compose(normal: string, artifacts: list[VerifiedMlirArtifact], target_spec: target.TargetSpec) -> string | MlirError:
     verify_text(normal, "ordinary module")
     additions = ""
-    seen: set[universal.ArtifactId] = set()
+    seen: list[universal.ArtifactId] = []
     for generated in artifacts:
         if generated.target_triple != target_spec.triple:
             return error(TargetMismatch(generated.target_triple, target_spec.triple))
         if generated.id in seen:
             return error(DuplicateSymbol("__sev_artifact_" + string(generated.id.index)))
-        seen.add(generated.id)
+        seen.append(generated.id)
         body = generated.module.trim()
         body = body[body.index("{") + 1:body.rindex("}")]
         additions += body + "\n"

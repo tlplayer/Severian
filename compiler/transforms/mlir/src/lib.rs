@@ -3,6 +3,7 @@
 mod emit;
 mod ffi;
 mod library;
+pub mod native;
 pub mod structured;
 mod verify;
 

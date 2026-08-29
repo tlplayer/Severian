@@ -1,0 +1,137 @@
+import "model.sev"
+
+
+class MlirBlockHandle:
+    region: int
+    block: int
+
+
+class MlirFunctionHandle:
+    function: int
+    entry: MlirBlockHandle
+    arguments: list[MlirValue]
+    declaration: bool
+
+
+enum MlirBuilderError:
+    MissingRegion(region: int)
+    MissingBlock(block: int)
+    MissingInsertionPoint
+    ValueIdCollision(value: int)
+
+
+class MlirOpBuilder:
+    program: MlirProgram
+    insertion: list[MlirBlockHandle]
+    counters: list[int]
+
+    def MlirOpBuilder(first_generated_value: int = 0):
+        program := empty_program(first_generated_value)
+        insertion := []
+        counters := [first_generated_value, 0, 0]
+
+
+# These source functions are the stable builder API. They keep state in the
+# MlirOpBuilder object while ordinary function lowering matures enough to stop
+# inlining class methods at call sites.
+def builder_new_value(builder: MlirOpBuilder, type_id: MlirType) -> MlirValue:
+    value = MlirValue(builder.counters[0], type_id)
+    builder.counters[0] += 1
+    return value
+
+
+def builder_value(builder: MlirOpBuilder, id: int, type_id: MlirType) -> MlirValue:
+    if id >= builder.counters[0]:
+        builder.counters[0] = id + 1
+    return MlirValue(id, type_id)
+
+
+def builder_create_region(builder: MlirOpBuilder) -> int:
+    id = builder.counters[1]
+    builder.counters[1] += 1
+    builder.program.regions.append(MlirRegion(id, []))
+    return id
+
+
+def builder_create_block(builder: MlirOpBuilder, region: int, arguments: list[MlirValue] = []) -> MlirBlockHandle | MlirBuilderError:
+    program := builder.program
+    for selected in program.regions:
+        if selected.id == region:
+            id = builder.counters[2]
+            builder.counters[2] += 1
+            selected.blocks.append(MlirBlock(id, arguments, []))
+            builder.program = program
+            return MlirBlockHandle(region, id)
+    return error(MissingRegion(region))
+
+
+def builder_set_insertion_point(builder: MlirOpBuilder, block: MlirBlockHandle):
+    if len(builder.insertion) == 0:
+        builder.insertion.append(block)
+    else:
+        builder.insertion[0] = block
+
+
+def builder_create_operation(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue] = [], results: list[MlirValue] = [], attributes: list[MlirNamedAttribute] = [], regions: list[int] = [], terminator: bool = false) -> MlirOperation | MlirBuilderError:
+    if len(builder.insertion) == 0:
+        return error(MissingInsertionPoint)
+    insertion = builder.insertion[0]
+    operation = MlirOperation(name, operands, results, attributes, regions, terminator)
+    program := builder.program
+    for selected_region in program.regions:
+        if selected_region.id == insertion.region:
+            for selected_block in selected_region.blocks:
+                if selected_block.id == insertion.block:
+                    selected_block.operations.append(operation)
+                    builder.program = program
+                    return operation
+            return error(MissingBlock(insertion.block))
+    return error(MissingRegion(insertion.region))
+
+
+def builder_create_function(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool = false) -> MlirFunctionHandle:
+    program := builder.program
+    if declaration:
+        program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true))
+        builder.program = program
+        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirBlockHandle(-1, -1), arguments, true)
+    region = builder_create_region(builder)
+    program = builder.program
+    block_id = builder.counters[2]
+    builder.counters[2] += 1
+    program.regions[int(len(program.regions)) - 1].blocks.append(MlirBlock(block_id, arguments, []))
+    entry = MlirBlockHandle(region, block_id)
+    program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false))
+    builder.program = program
+    return MlirFunctionHandle(int(len(program.functions)) - 1, entry, arguments, false)
+
+
+def builder_constant(builder: MlirOpBuilder, result: MlirValue, value: MlirAttributeValue) -> MlirOperation | MlirBuilderError:
+    attribute = MlirNamedAttribute("value", value)
+    return builder_create_operation(builder, operation_name("arith", "constant"), [], [result], [attribute])
+
+
+def builder_binary(builder: MlirOpBuilder, result: MlirValue, name: MlirOperationName, left: MlirValue, right: MlirValue, attributes: list[MlirNamedAttribute] = []) -> MlirOperation | MlirBuilderError:
+    return builder_create_operation(builder, name, [left, right], [result], attributes)
+
+
+def builder_call(builder: MlirOpBuilder, callee: string, arguments: list[MlirValue], results: list[MlirValue]) -> MlirOperation | MlirBuilderError:
+    attribute = MlirNamedAttribute("callee", string_attribute_value(callee))
+    return builder_create_operation(builder, operation_name("func", "call"), arguments, results, [attribute])
+
+
+def builder_return(builder: MlirOpBuilder, values: list[MlirValue]) -> MlirOperation | MlirBuilderError:
+    return builder_create_operation(builder, operation_name("func", "return"), values, [], [], [], true)
+
+
+def builder_yield(builder: MlirOpBuilder, values: list[MlirValue] = []) -> MlirOperation | MlirBuilderError:
+    return builder_create_operation(builder, operation_name("scf", "yield"), values, [], [], [], true)
+
+
+def builder_assert(builder: MlirOpBuilder, condition: MlirValue, message: string) -> MlirOperation | MlirBuilderError:
+    attribute = MlirNamedAttribute("msg", string_attribute_value(message))
+    return builder_create_operation(builder, operation_name("cf", "assert"), [condition], [], [attribute])
+
+
+def builder_if(builder: MlirOpBuilder, condition: MlirValue, then_region: int, else_region: int) -> MlirOperation | MlirBuilderError:
+    return builder_create_operation(builder, operation_name("scf", "if"), [condition], [], [], [then_region, else_region])

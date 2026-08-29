@@ -1,3 +1,10 @@
+import "../id/compiler.sev"
+import "../literal/value.sev"
+import "../operator/kind.sev"
+import "../source/assertion_origin.sev"
+import "../statement/statement.sev"
+
+
 enum Operation:
     Coverage(point: CoveragePoint)
     Constant(value: LiteralValue, result: ValueId)

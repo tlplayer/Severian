@@ -25,11 +25,39 @@ handle!(MlirContext, *mut c_void);
 handle!(MlirDialectRegistry, *mut c_void);
 handle!(MlirDialectHandle, *const c_void);
 handle!(MlirIdentifier, *const c_void);
+handle!(MlirLocation, *const c_void);
 handle!(MlirModule, *const c_void);
 handle!(MlirOperation, *mut c_void);
+handle!(MlirOpPassManager, *mut c_void);
+handle!(MlirPassManager, *mut c_void);
 handle!(MlirRegion, *mut c_void);
 handle!(MlirSymbolTable, *mut c_void);
 handle!(MlirType, *const c_void);
+handle!(MlirValue, *const c_void);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MlirNamedAttribute {
+    pub name: MlirIdentifier,
+    pub attribute: MlirAttribute,
+}
+
+#[repr(C)]
+pub struct MlirOperationState {
+    pub name: MlirStringRef,
+    pub location: MlirLocation,
+    pub n_results: isize,
+    pub results: *mut MlirType,
+    pub n_operands: isize,
+    pub operands: *mut MlirValue,
+    pub n_regions: isize,
+    pub regions: *mut MlirRegion,
+    pub n_successors: isize,
+    pub successors: *mut MlirBlock,
+    pub n_attributes: isize,
+    pub attributes: *mut MlirNamedAttribute,
+    pub enable_result_type_inference: bool,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -40,10 +68,12 @@ pub struct MlirStringRef {
 
 pub type MlirStringCallback = unsafe extern "C" fn(MlirStringRef, *mut c_void);
 
-#[cfg_attr(
-    target_os = "linux",
-    link(name = "severian_mlir_capi", kind = "static")
-)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MlirLogicalResult {
+    pub value: i8,
+}
+
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIIR", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIArith", kind = "static"))]
 #[cfg_attr(
@@ -65,6 +95,7 @@ unsafe extern "C" {
     pub fn mlirContextDestroy(context: MlirContext);
     pub fn mlirContextSetAllowUnregisteredDialects(context: MlirContext, allow: bool);
     pub fn mlirContextAppendDialectRegistry(context: MlirContext, registry: MlirDialectRegistry);
+    pub fn mlirContextLoadAllAvailableDialects(context: MlirContext);
     pub fn mlirDialectRegistryCreate() -> MlirDialectRegistry;
     pub fn mlirDialectRegistryDestroy(registry: MlirDialectRegistry);
     pub fn mlirGetDialectHandle__arith__() -> MlirDialectHandle;
@@ -82,12 +113,24 @@ unsafe extern "C" {
     pub fn mlirGetDialectHandle__vector__() -> MlirDialectHandle;
     pub fn mlirDialectHandleInsertDialect(handle: MlirDialectHandle, registry: MlirDialectRegistry);
 
+    pub fn mlirLocationUnknownGet(context: MlirContext) -> MlirLocation;
+    pub fn mlirModuleCreateEmpty(location: MlirLocation) -> MlirModule;
     pub fn mlirModuleCreateParse(context: MlirContext, source: MlirStringRef) -> MlirModule;
     pub fn mlirModuleDestroy(module: MlirModule);
     pub fn mlirModuleGetBody(module: MlirModule) -> MlirBlock;
     pub fn mlirModuleGetOperation(module: MlirModule) -> MlirOperation;
 
     pub fn mlirBlockGetFirstOperation(block: MlirBlock) -> MlirOperation;
+    pub fn mlirBlockCreate(
+        arguments: isize,
+        types: *const MlirType,
+        locations: *const MlirLocation,
+    ) -> MlirBlock;
+    pub fn mlirBlockAddArgument(
+        block: MlirBlock,
+        ty: MlirType,
+        location: MlirLocation,
+    ) -> MlirValue;
     pub fn mlirBlockAppendOwnedOperation(block: MlirBlock, operation: MlirOperation);
     pub fn mlirOperationGetNextInBlock(operation: MlirOperation) -> MlirOperation;
     pub fn mlirOperationGetFirstRegion(operation: MlirOperation) -> MlirRegion;
@@ -96,6 +139,30 @@ unsafe extern "C" {
     pub fn mlirBlockGetNextInRegion(block: MlirBlock) -> MlirBlock;
     pub fn mlirOperationGetName(operation: MlirOperation) -> MlirIdentifier;
     pub fn mlirOperationClone(operation: MlirOperation) -> MlirOperation;
+    pub fn mlirOperationStateGet(name: MlirStringRef, location: MlirLocation)
+        -> MlirOperationState;
+    pub fn mlirOperationStateAddResults(
+        state: *mut MlirOperationState,
+        count: isize,
+        results: *const MlirType,
+    );
+    pub fn mlirOperationStateAddOperands(
+        state: *mut MlirOperationState,
+        count: isize,
+        operands: *const MlirValue,
+    );
+    pub fn mlirOperationStateAddOwnedRegions(
+        state: *mut MlirOperationState,
+        count: isize,
+        regions: *const MlirRegion,
+    );
+    pub fn mlirOperationStateAddAttributes(
+        state: *mut MlirOperationState,
+        count: isize,
+        attributes: *const MlirNamedAttribute,
+    );
+    pub fn mlirOperationCreate(state: *mut MlirOperationState) -> MlirOperation;
+    pub fn mlirOperationGetResult(operation: MlirOperation, position: isize) -> MlirValue;
     pub fn mlirOperationVerify(operation: MlirOperation) -> bool;
     pub fn mlirOperationGetAttributeByName(
         operation: MlirOperation,
@@ -113,7 +180,14 @@ unsafe extern "C" {
     );
 
     pub fn mlirIdentifierStr(identifier: MlirIdentifier) -> MlirStringRef;
+    pub fn mlirIdentifierGet(context: MlirContext, value: MlirStringRef) -> MlirIdentifier;
+    pub fn mlirNamedAttributeGet(
+        name: MlirIdentifier,
+        attribute: MlirAttribute,
+    ) -> MlirNamedAttribute;
     pub fn mlirStringAttrGet(context: MlirContext, value: MlirStringRef) -> MlirAttribute;
+    pub fn mlirIntegerAttrGet(ty: MlirType, value: i64) -> MlirAttribute;
+    pub fn mlirTypeAttrGet(ty: MlirType) -> MlirAttribute;
     pub fn mlirStringAttrGetValue(attribute: MlirAttribute) -> MlirStringRef;
     pub fn mlirIntegerAttrGetValueInt(attribute: MlirAttribute) -> i64;
     pub fn mlirAttributeIsAType(attribute: MlirAttribute) -> bool;
@@ -127,10 +201,27 @@ unsafe extern "C" {
     pub fn mlirTypeEqual(left: MlirType, right: MlirType) -> bool;
     pub fn mlirTypeParseGet(context: MlirContext, source: MlirStringRef) -> MlirType;
     pub fn mlirIntegerTypeGet(context: MlirContext, bits: u32) -> MlirType;
+    pub fn mlirIndexTypeGet(context: MlirContext) -> MlirType;
+    pub fn mlirFunctionTypeGet(
+        context: MlirContext,
+        input_count: isize,
+        inputs: *const MlirType,
+        result_count: isize,
+        results: *const MlirType,
+    ) -> MlirType;
     pub fn mlirBF16TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF16TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF32TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF64TypeGet(context: MlirContext) -> MlirType;
+    pub fn mlirRankedTensorTypeGet(
+        rank: isize,
+        shape: *const i64,
+        element_type: MlirType,
+        encoding: MlirAttribute,
+    ) -> MlirType;
+
+    pub fn mlirRegionCreate() -> MlirRegion;
+    pub fn mlirRegionAppendOwnedBlock(region: MlirRegion, block: MlirBlock);
 
     pub fn mlirSymbolTableCreate(operation: MlirOperation) -> MlirSymbolTable;
     pub fn mlirSymbolTableDestroy(symbol_table: MlirSymbolTable);
@@ -139,6 +230,22 @@ unsafe extern "C" {
         name: MlirStringRef,
     ) -> MlirOperation;
     pub fn mlirSymbolTableErase(symbol_table: MlirSymbolTable, operation: MlirOperation);
+
+    pub fn mlirRegisterAllPasses();
+    pub fn mlirPassManagerCreate(context: MlirContext) -> MlirPassManager;
+    pub fn mlirPassManagerDestroy(manager: MlirPassManager);
+    pub fn mlirPassManagerEnableVerifier(manager: MlirPassManager, enable: bool);
+    pub fn mlirPassManagerGetAsOpPassManager(manager: MlirPassManager) -> MlirOpPassManager;
+    pub fn mlirParsePassPipeline(
+        manager: MlirOpPassManager,
+        pipeline: MlirStringRef,
+        callback: MlirStringCallback,
+        user_data: *mut c_void,
+    ) -> MlirLogicalResult;
+    pub fn mlirPassManagerRunOnOp(
+        manager: MlirPassManager,
+        operation: MlirOperation,
+    ) -> MlirLogicalResult;
 }
 
 pub fn string_ref(value: &str) -> MlirStringRef {

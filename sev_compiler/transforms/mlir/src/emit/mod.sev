@@ -1,41 +1,22 @@
 import artifact
+import target
 import universal
-
-class MlirArtifact:
-    module: string
-    inputs: list[universal.LoweredType]
-    outputs: list[universal.LoweredType]
+import "../ir/lib.sev"
 
 
-enum MlirError:
-    DialectNotAllowed(dialect: string, target: string)
-    DuplicateSymbol(symbol: string)
-    ArtifactSignatureConflict(artifact_id: universal.ArtifactId)
-    EntryFunctionCount(count: int)
-    EntryFunctionIsDeclaration
-    InvalidValue(value: universal.ValueId)
-    MlirApi(message: string)
-    ParseFailed(description: string)
-    SignatureMismatch
-    TargetMismatch(artifact_target: string, composition_target: string)
-    UnsupportedType(type_id: universal.LoweredType)
-    UnsupportedOperation(message: string)
-    VerificationFailed(description: string)
-
-
-def mlir_type(type_id: universal.LoweredType) -> string | MlirError:
+def lowered_type(type_id: universal.LoweredType) -> MlirType | MlirError:
     match type_id:
-        case Integer: return "i" + string(bits)
+        case Integer: return integer_type(bits, signed)
         case Float:
             match format:
-                case Ieee: return "f" + string(bits)
-                case BrainFloat16: return "bf16"
-        case Boolean: return "i1"
-        case String: return "!llvm.ptr"
-        case Bytes: return "!llvm.ptr"
-        case NoneValue: return "i1"
-        case Unit: return "none"
-        case Arguments: return "!llvm.ptr"
+                case Ieee: return float_type(bits)
+                case BrainFloat16: return bf16_type()
+        case Boolean: return integer_type(1, false)
+        case String: return pointer_type()
+        case Bytes: return pointer_type()
+        case NoneValue: return integer_type(1, false)
+        case Unit: return error(UnsupportedType(type_id))
+        case Arguments: return pointer_type()
 
 
 def value_type(module: universal.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
@@ -44,123 +25,228 @@ def value_type(module: universal.Module, value: universal.ValueId) -> universal.
     return module.values[value.index].lowered_type
 
 
+def mlir_value(builder: MlirOpBuilder, module: universal.Module, value: universal.ValueId) -> MlirValue | MlirError:
+    return builder_value(builder, value.index, lowered_type(value_type(module, value)))
+
+
 def function_symbol(function: universal.FunctionDeclaration) -> string:
     match function.linkage:
         case External: return symbol
-    return "__sev_fn_" + string(function.id.value)
+        case Internal: return "__sev_fn_" + string(function.id.value)
 
 
-def render_constant(value: universal.Constant, type_id: universal.LoweredType) -> string | MlirError:
+def function_results(result: universal.LoweredType) -> list[MlirType] | MlirError:
+    match result:
+        case Unit: return []
+        case _: return [lowered_type(result)]
+
+
+def constant_attribute(value: universal.Constant, type_id: universal.LoweredType, lowered: MlirType) -> MlirAttributeValue | MlirError:
     match value:
-        case IntegerValue: return spelling
-        case FloatValue: return spelling
-        case BooleanValue: return "true" if value else "false"
-        case NoneValue: return "false"
-        case Unit: return ""
-        else: return error(UnsupportedOperation("aggregate constants require the LLVM global route"))
+        case Integer: return integer_attribute(int(value), lowered)
+        case Float: return float_attribute(value, lowered)
+        case Boolean: return boolean_attribute(value)
+        case NoneValue: return boolean_attribute(false)
+        case Unit: return error(UnsupportedType(type_id))
+        case _: return error(UnsupportedOperation("aggregate constants require typed global operations"))
 
 
-def render_block(module: universal.Module, block: universal.Block, indentation: string) -> string | MlirError:
-    output = ""
+def function_index(program: MlirProgram, name: string) -> int | None:
+    index := 0
+    for function in program.functions:
+        if function.name == name:
+            return index
+        index += 1
+    return None
+
+
+def ensure_declaration(builder: MlirOpBuilder, name: string, arguments: list[MlirValue], results: list[MlirValue]) -> unit | MlirBuilderError:
+    known = function_index(builder.program, name)
+    if known != None:
+        return unit
+    result_types: list[MlirType] = []
+    for result in results:
+        result_types.append(result.type_id)
+    builder_create_function(builder, name, private_visibility(), arguments, result_types, true)
+    return unit
+
+
+def comparison_predicate(operator: universal.BinaryOperation, signed: bool, floating: bool = false) -> string | MlirError:
+    match operator:
+        case Equal: return "oeq" if floating else "eq"
+        case NotEqual: return "une" if floating else "ne"
+        case Less: return "olt" if floating else ("slt" if signed else "ult")
+        case LessEqual: return "ole" if floating else ("sle" if signed else "ule")
+        case Greater: return "ogt" if floating else ("sgt" if signed else "ugt")
+        case GreaterEqual: return "oge" if floating else ("sge" if signed else "uge")
+        case _: return error(UnsupportedOperation("operator is not a comparison"))
+
+
+def binary_operation_name(operator: universal.BinaryOperation, type_id: MlirType) -> MlirOperationName | MlirError:
+    floating = is_float(type_id)
+    signed = type_id.scalar.signed
+    match operator:
+        case Add: return operation_name("arith", "addf" if floating else "addi")
+        case Subtract: return operation_name("arith", "subf" if floating else "subi")
+        case Multiply: return operation_name("arith", "mulf" if floating else "muli")
+        case Divide:
+            if floating:
+                return operation_name("arith", "divf")
+            return operation_name("arith", "divsi" if signed else "divui")
+        case Remainder: return operation_name("arith", "remsi" if signed else "remui")
+        case And: return operation_name("arith", "andi")
+        case Or: return operation_name("arith", "ori")
+        case Equal: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case NotEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Less: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case LessEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Greater: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case GreaterEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Power: return error(UnsupportedOperation("power requires math.pow lowering"))
+        case Contains: return error(UnsupportedOperation("containment requires a collection operation"))
+
+
+def binary_attributes(operator: universal.BinaryOperation, type_id: MlirType) -> list[MlirNamedAttribute] | MlirError:
+    name = operation_name_text(binary_operation_name(operator, type_id))
+    if name == "arith.cmpi" or name == "arith.cmpf":
+        predicate = comparison_predicate(operator, type_id.scalar.signed, is_float(type_id))
+        return [MlirNamedAttribute("predicate", string_attribute_value(predicate))]
+    return []
+
+
+def lower_unary(builder: MlirOpBuilder, module: universal.Module, operator: universal.UnaryOperation, operand_id: universal.ValueId, result_id: universal.ValueId) -> unit | MlirError | MlirBuilderError:
+    operand = mlir_value(builder, module, operand_id)
+    result = mlir_value(builder, module, result_id)
+    if operator == universal.Not:
+        one = builder_new_value(builder, integer_type(1, false))
+        builder_constant(builder, one, boolean_attribute(true))
+        builder_binary(builder, result, operation_name("arith", "xori"), operand, one)
+        return unit
+    zero = builder_new_value(builder, operand.type_id)
+    if is_float(operand.type_id):
+        builder_constant(builder, zero, float_attribute("0.0", operand.type_id))
+    else:
+        builder_constant(builder, zero, integer_attribute(0, operand.type_id))
+    if operator == universal.Positive:
+        builder_binary(builder, result, operation_name("arith", "addf" if is_float(operand.type_id) else "addi"), operand, zero)
+    else:
+        builder_binary(builder, result, operation_name("arith", "subf" if is_float(operand.type_id) else "subi"), zero, operand)
+    return unit
+
+
+def lower_block(builder: MlirOpBuilder, module: universal.Module, block: universal.Block) -> unit | MlirError | MlirBuilderError:
     for operation in block.lowered_operations:
         match operation:
             case LoweredCoverage:
-                output += indentation + "func.call @__sev_coverage_hit() : () -> ()\n"
+                ensure_declaration(builder, "__sev_coverage_hit", [], [])
+                builder_call(builder, "__sev_coverage_hit", [], [])
             case ConstantValue:
-                type_id = value_type(module, result)
-                output += indentation + "%v" + string(result.index) + " = arith.constant " + render_constant(value, type_id) + " : " + mlir_type(type_id) + "\n"
+                result_value = mlir_value(builder, module, result)
+                builder_constant(builder, result_value, constant_attribute(value, value_type(module, result), result_value.type_id))
             case LoweredUnary:
-                type_id = value_type(module, result)
-                if operator == universal.Positive:
-                    output += indentation + "%v" + string(result.index) + " = arith.addi %v" + string(operand.index) + ", %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
-                elif operator == universal.Negative:
-                    output += indentation + "%v" + string(result.index) + " = arith.negi %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
-                else:
-                    output += indentation + "%v" + string(result.index) + " = arith.xori %v" + string(operand.index) + ", true : i1\n"
+                lower_unary(builder, module, operator, operand, result)
             case LoweredBinary:
-                type_id = value_type(module, result)
-                mnemonic = binary_mnemonic(operator, type_id)
-                output += indentation + "%v" + string(result.index) + " = " + mnemonic + " %v" + string(left.index) + ", %v" + string(right.index) + " : " + mlir_type(value_type(module, left)) + "\n"
+                left_value = mlir_value(builder, module, left)
+                right_value = mlir_value(builder, module, right)
+                result_value = mlir_value(builder, module, result)
+                builder_binary(builder, result_value, binary_operation_name(operator, left_value.type_id), left_value, right_value, binary_attributes(operator, left_value.type_id))
             case LoweredCall:
-                arguments_text: list[string] = []
-                argument_types: list[string] = []
+                arguments_values: list[MlirValue] = []
                 for argument in arguments:
-                    arguments_text.append("%v" + string(argument.index))
-                    argument_types.append(mlir_type(value_type(module, argument)))
-                result_type = mlir_type(value_type(module, result))
-                output += indentation + "%v" + string(result.index) + " = func.call @__sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ") : (" + argument_types.join(", ") + ") -> " + result_type + "\n"
+                    arguments_values.append(mlir_value(builder, module, argument))
+                result_values: list[MlirValue] = []
+                match value_type(module, result):
+                    case Unit:
+                        pass
+                    case _:
+                        result_values.append(mlir_value(builder, module, result))
+                target_name := ""
+                for function_declaration in module.functions:
+                    if function_declaration.id == function:
+                        target_name = function_symbol(function_declaration)
+                if target_name == "":
+                    return error(UnsupportedOperation("call references an unknown function"))
+                builder_call(builder, target_name, arguments_values, result_values)
             case RuntimeCall:
-                arguments_text: list[string] = []
-                argument_types: list[string] = []
+                arguments_values: list[MlirValue] = []
                 for argument in arguments:
-                    arguments_text.append("%v" + string(argument.index))
-                    argument_types.append(mlir_type(value_type(module, argument)))
-                prefix = ""
-                result_text = ""
+                    arguments_values.append(mlir_value(builder, module, argument))
+                result_values: list[MlirValue] = []
                 if result != None:
-                    prefix = "%v" + string(result.index) + " = "
-                    result_text = mlir_type(value_type(module, result))
-                output += indentation + prefix + "func.call @" + symbol + "(" + arguments_text.join(", ") + ") : (" + argument_types.join(", ") + ") -> " + result_text + "\n"
+                    result_values.append(mlir_value(builder, module, result))
+                ensure_declaration(builder, symbol, arguments_values, result_values)
+                builder_call(builder, symbol, arguments_values, result_values)
             case LoweredReturn:
-                if value == None:
-                    output += indentation + "return\n"
-                else:
-                    output += indentation + "return %v" + string(value.index) + " : " + mlir_type(value_type(module, value)) + "\n"
+                values: list[MlirValue] = []
+                if value != None:
+                    values.append(mlir_value(builder, module, value))
+                builder_return(builder, values)
             case LoweredAssert:
-                output += indentation + "cf.assert %v" + string(condition.index) + ", \"assertion failed\"\n"
+                builder_assert(builder, mlir_value(builder, module, condition), "assertion failed")
             case LoweredIf:
-                output += indentation + "scf.if %v" + string(condition.index) + " {\n"
-                output += render_block(module, then_block, indentation + "  ")
-                output += indentation + "} else {\n"
-                output += render_block(module, else_block, indentation + "  ")
-                output += indentation + "}\n"
+                saved = builder.insertion[0]
+                then_region = builder_create_region(builder)
+                then_entry = builder_create_block(builder, then_region)
+                builder_set_insertion_point(builder, then_entry)
+                lower_block(builder, module, then_block)
+                builder_yield(builder)
+                else_region = builder_create_region(builder)
+                else_entry = builder_create_block(builder, else_region)
+                builder_set_insertion_point(builder, else_entry)
+                lower_block(builder, module, else_block)
+                builder_yield(builder)
+                builder_set_insertion_point(builder, saved)
+                builder_if(builder, mlir_value(builder, module, condition), then_region, else_region)
             case ArtifactCall:
-                output += indentation + "func.call @__sev_artifact_" + string(artifact_id.index) + "() : () -> ()\n"
-    return output
+                arguments_values: list[MlirValue] = []
+                for input in inputs:
+                    arguments_values.append(mlir_value(builder, module, input))
+                result_values: list[MlirValue] = []
+                for output in outputs:
+                    result_values.append(mlir_value(builder, module, output))
+                name = "__sev_artifact_" + string(artifact_id.index)
+                ensure_declaration(builder, name, arguments_values, result_values)
+                builder_call(builder, name, arguments_values, result_values)
+    return unit
 
 
-def binary_mnemonic(operator: universal.BinaryOperation, type_id: universal.LoweredType) -> string:
-    floating = false
-    match type_id:
-        case Float: floating = true
-    if operator == universal.Add: return "arith.addf" if floating else "arith.addi"
-    if operator == universal.Subtract: return "arith.subf" if floating else "arith.subi"
-    if operator == universal.Multiply: return "arith.mulf" if floating else "arith.muli"
-    if operator == universal.Divide: return "arith.divf" if floating else "arith.divsi"
-    if operator == universal.Remainder: return "arith.remsi"
-    if operator == universal.And: return "arith.andi"
-    if operator == universal.Or: return "arith.ori"
-    return "arith.cmpi"
-
-
-def render_function(module: universal.Module, function: universal.FunctionDeclaration) -> string | MlirError:
-    parameters: list[string] = []
+def create_function(builder: MlirOpBuilder, module: universal.Module, function: universal.FunctionDeclaration) -> MlirFunctionHandle | MlirError | MlirBuilderError:
+    arguments: list[MlirValue] = []
     for parameter in function.values:
-        parameters.append("%v" + string(parameter.index) + ": " + mlir_type(value_type(module, parameter)))
-    result = ""
-    if function.lowered_result != universal.Unit:
-        result = " -> " + mlir_type(function.lowered_result)
-    symbol = function_symbol(function)
-    if function.body == None:
-        return "  func.func private @" + symbol + "(" + parameters.join(", ") + ")" + result + "\n"
-    output = "  func.func private @" + symbol + "(" + parameters.join(", ") + ")" + result + " {\n"
-    output += render_block(module, function.body, "    ")
-    output += "  }\n"
-    return output
+        arguments.append(mlir_value(builder, module, parameter))
+    declaration = function.body == None
+    return builder_create_function(builder, function_symbol(function), private_visibility(), arguments, function_results(function.lowered_result), declaration)
 
 
-def render(module: universal.Module) -> string | MlirError:
-    functions = ""
+def lower(module: universal.Module) -> MlirProgram | MlirError | MlirBuilderError | MlirVerificationError:
+    builder = MlirOpBuilder(int(len(module.values)))
+    handles: list[MlirFunctionHandle] = []
     for function in module.functions:
-        functions += render_function(module, function)
-    initializer = render_block(module, module.initializer, "    ")
-    entry_call = ""
+        handles.append(create_function(builder, module, function))
+    index := 0
+    for function in module.functions:
+        if function.body != None:
+            builder_set_insertion_point(builder, handles[index].entry)
+            lower_block(builder, module, function.body)
+        index += 1
+
+    main = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)], false)
+    builder_set_insertion_point(builder, main.entry)
+    lower_block(builder, module, module.initializer)
     if module.entry != None:
-        entry_call = "    func.call @__sev_fn_" + string(module.entry.value) + "() : () -> ()\n"
-    return f"""module {{
-{functions}  func.func @main() -> i32 {{
-{initializer}{entry_call}    %sev_exit = arith.constant 0 : i32
-    return %sev_exit : i32
-  }}
-}}
-"""
+        entry_name := ""
+        for function in module.functions:
+            if function.id == module.entry:
+                entry_name = function_symbol(function)
+        if entry_name == "":
+            return error(UnsupportedOperation("entry references an unknown function"))
+        builder_call(builder, entry_name, [], [])
+    exit_value = builder_new_value(builder, integer_type(32))
+    builder_constant(builder, exit_value, integer_attribute(0, exit_value.type_id))
+    builder_return(builder, [exit_value])
+    validate(builder.program)
+    return builder.program
+
+
+def render(module: universal.Module) -> string | MlirError | MlirBuilderError | MlirVerificationError:
+    return print_program(lower(module))

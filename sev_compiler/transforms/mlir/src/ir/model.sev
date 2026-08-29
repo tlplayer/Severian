@@ -1,0 +1,268 @@
+enum MlirScalarKind:
+    IntegerScalar
+    IeeeFloatScalar
+    BrainFloatScalar
+    IndexScalar
+    PointerScalar
+
+
+class MlirScalarType:
+    kind: MlirScalarKind
+    bits: u16
+    signed: bool
+    address_space: int
+
+
+def known_dimension(value: int) -> int:
+    assert(value >= 0, "known MLIR dimensions cannot be negative")
+    return value
+
+
+def dynamic_dimension() -> int:
+    return -1
+
+
+enum MlirTypeKind:
+    ScalarType
+    TensorType
+    MemRefType
+
+
+class MlirType:
+    kind: MlirTypeKind
+    scalar: MlirScalarType
+    dimensions: list[int]
+
+
+def integer_type(bits: u16, signed: bool = true) -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(IntegerScalar, bits, signed, 0), [])
+
+
+def float_type(bits: u16) -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(IeeeFloatScalar, bits, true, 0), [])
+
+
+def bf16_type() -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(BrainFloatScalar, 16, true, 0), [])
+
+
+def bf16_scalar_type() -> MlirScalarType:
+    return MlirScalarType(BrainFloatScalar, 16, true, 0)
+
+
+def index_type() -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(IndexScalar, 0, false, 0), [])
+
+
+def pointer_type(address_space: int = 0) -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(PointerScalar, 0, false, address_space), [])
+
+
+def tensor_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
+    return MlirType(TensorType, element, dimensions)
+
+
+def memref_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
+    return MlirType(MemRefType, element, dimensions)
+
+
+class MlirValue:
+    id: int
+    type_id: MlirType
+
+
+# MLIR operation identity is intentionally open. Adding a dialect operation is
+# data supplied to the builder, never a new compiler enum variant.
+class MlirOperationName:
+    dialect: string
+    mnemonic: string
+
+    def text() -> string:
+        return dialect + "." + mnemonic
+
+
+def operation_name(dialect: string, mnemonic: string) -> MlirOperationName:
+    return MlirOperationName(dialect, mnemonic)
+
+
+def operation_name_text(name: MlirOperationName) -> string:
+    return name.dialect + "." + name.mnemonic
+
+
+enum MlirAttributeKind:
+    IntegerAttributeKind
+    FloatAttributeKind
+    StringAttributeKind
+    BooleanAttributeKind
+    TypeAttributeKind
+    StringArrayAttributeKind
+
+
+class MlirAttributeValue:
+    kind: MlirAttributeKind
+    text: string
+    integer: int
+    enabled: bool
+    type_id: MlirType
+    strings: list[string]
+
+
+def integer_attribute(value: int, type_id: MlirType) -> MlirAttributeValue:
+    return MlirAttributeValue(IntegerAttributeKind, "", value, false, type_id, [])
+
+
+def float_attribute(spelling: string, type_id: MlirType) -> MlirAttributeValue:
+    return MlirAttributeValue(FloatAttributeKind, spelling, 0, false, type_id, [])
+
+
+def string_attribute_value(value: string) -> MlirAttributeValue:
+    return MlirAttributeValue(StringAttributeKind, value, 0, false, index_type(), [])
+
+
+def boolean_attribute(value: bool) -> MlirAttributeValue:
+    return MlirAttributeValue(BooleanAttributeKind, "", 0, value, index_type(), [])
+
+
+def type_attribute(type_id: MlirType) -> MlirAttributeValue:
+    return MlirAttributeValue(TypeAttributeKind, "", 0, false, type_id, [])
+
+
+def string_array_attribute(values: list[string]) -> MlirAttributeValue:
+    return MlirAttributeValue(StringArrayAttributeKind, "", 0, false, index_type(), values)
+
+
+def attribute_kind_name(kind: MlirAttributeKind) -> string:
+    match kind:
+        case IntegerAttributeKind: return "integer"
+        case FloatAttributeKind: return "float"
+        case StringAttributeKind: return "string"
+        case BooleanAttributeKind: return "boolean"
+        case TypeAttributeKind: return "type"
+        case StringArrayAttributeKind: return "string_array"
+
+
+class MlirNamedAttribute:
+    name: string
+    value: MlirAttributeValue
+
+
+class MlirOperation:
+    name: MlirOperationName
+    operands: list[MlirValue]
+    results: list[MlirValue]
+    attributes: list[MlirNamedAttribute]
+    regions: list[int]
+    terminator: bool
+
+
+class MlirBlock:
+    id: int
+    arguments: list[MlirValue]
+    operations: list[MlirOperation]
+
+
+class MlirRegion:
+    id: int
+    blocks: list[MlirBlock]
+
+
+enum MlirVisibility:
+    PublicVisibility
+    PrivateVisibility
+
+
+def public_visibility() -> MlirVisibility:
+    return PublicVisibility
+
+
+def private_visibility() -> MlirVisibility:
+    return PrivateVisibility
+
+
+class MlirFunctionOp:
+    name: string
+    visibility: MlirVisibility
+    arguments: list[MlirValue]
+    result_types: list[MlirType]
+    body_region: int
+    declaration: bool
+
+
+class MlirProgram:
+    functions: list[MlirFunctionOp]
+    regions: list[MlirRegion]
+    next_value: int
+    next_region: int
+    next_block: int
+
+
+def empty_program(first_generated_value: int = 0) -> MlirProgram:
+    return MlirProgram([], [], first_generated_value, 0, 0)
+
+
+def scalar_kind_name(kind: MlirScalarKind) -> string:
+    match kind:
+        case IntegerScalar: return "integer"
+        case IeeeFloatScalar: return "ieee_float"
+        case BrainFloatScalar: return "brain_float"
+        case IndexScalar: return "index"
+        case PointerScalar: return "pointer"
+
+
+def type_kind_name(kind: MlirTypeKind) -> string:
+    match kind:
+        case ScalarType: return "scalar"
+        case TensorType: return "tensor"
+        case MemRefType: return "memref"
+
+
+def dimension_text(dimension: int) -> string:
+    if dimension < 0:
+        return "?"
+    return string(dimension)
+
+
+def visibility_name(visibility: MlirVisibility) -> string:
+    match visibility:
+        case PublicVisibility: return "public"
+        case PrivateVisibility: return "private"
+
+
+def same_scalar_type(left: MlirScalarType, right: MlirScalarType) -> bool:
+    return scalar_kind_name(left.kind) == scalar_kind_name(right.kind) and left.bits == right.bits and left.signed == right.signed and left.address_space == right.address_space
+
+
+def dimension_identity(dimension: int) -> string:
+    if dimension < 0:
+        return "dynamic"
+    return "known:" + string(dimension)
+
+
+def same_type(left: MlirType, right: MlirType) -> bool:
+    if type_kind_name(left.kind) != type_kind_name(right.kind):
+        return false
+    if not same_scalar_type(left.scalar, right.scalar):
+        return false
+    if len(left.dimensions) != len(right.dimensions):
+        return false
+    index := 0
+    while index < int(len(left.dimensions)):
+        if dimension_identity(left.dimensions[index]) != dimension_identity(right.dimensions[index]):
+            return false
+        index += 1
+    return true
+
+
+def is_integer(type_id: MlirType) -> bool:
+    return type_kind_name(type_id.kind) == "scalar" and scalar_kind_name(type_id.scalar.kind) == "integer"
+
+
+def is_float(type_id: MlirType) -> bool:
+    if type_kind_name(type_id.kind) != "scalar":
+        return false
+    kind = scalar_kind_name(type_id.scalar.kind)
+    return kind == "ieee_float" or kind == "brain_float"
+
+
+def is_boolean(type_id: MlirType) -> bool:
+    return is_integer(type_id) and type_id.scalar.bits == 1

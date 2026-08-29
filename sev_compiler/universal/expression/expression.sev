@@ -1,4 +1,8 @@
 import source
+import "../id/compiler.sev"
+import "../literal/value.sev"
+import "../operator/kind.sev"
+import "../type/expression_conversion.sev"
 
 
 class Expression:

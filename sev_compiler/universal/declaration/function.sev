@@ -1,4 +1,21 @@
 import source
+import "../id/compiler.sev"
+import "../type/annotation.sev"
+import "../type/lowered.sev"
+import "../expression/expression.sev"
+import "../operator/kind.sev"
+import "../statement/statement.sev"
+import "../cfg/cfg.sev"
+import "language.sev"
+
+
+class CompilerCapability:
+    name: string
+
+
+enum CompileRoute:
+    Standard
+    Compiler(compiler: CompilerId)
 
 
 class BoundaryModifier:
@@ -52,8 +69,8 @@ class FunctionDeclaration:
     values: list[ValueId] = []
     lowered_result: LoweredType = Unit
     linkage: FunctionLinkage = Internal
-    binary_requirements: map[GenericParamId, set[BinaryOperator]] = {}
-    capability_requirements: map[GenericParamId, set[CompilerCapability]] = {}
+    binary_requirements: map[GenericParamId, list[BinaryOperator]] = {}
+    capability_requirements: map[GenericParamId, list[CompilerCapability]] = {}
     constrained: bool = false
     constraints_supported: bool = true
     lookup: string | None = None
@@ -64,8 +81,8 @@ def resolved_function(
     generic_parameters: list[GenericParamId],
     constrained: bool,
     constraints_supported: bool,
-    binary_requirements: map[GenericParamId, set[BinaryOperator]],
-    capability_requirements: map[GenericParamId, set[CompilerCapability]],
+    binary_requirements: map[GenericParamId, list[BinaryOperator]],
+    capability_requirements: map[GenericParamId, list[CompilerCapability]],
     parameter_types: list[TypeId],
     result_type: TypeId,
 ) -> FunctionDeclaration:

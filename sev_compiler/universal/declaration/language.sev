@@ -1,4 +1,9 @@
 import source
+import "../id/compiler.sev"
+import "../type/annotation.sev"
+import "../expression/expression.sev"
+import "../operator/syntax.sev"
+import "../statement/statement.sev"
 
 
 enum ImportSubject:

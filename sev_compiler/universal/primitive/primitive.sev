@@ -1,4 +1,23 @@
 import "../type/type.sev"
 
+enum PrimitiveCategory:
+    Boolean
+    Integer
+    Float
+    Text
+    Bytes
+    Absence
+
+
+enum PrimitiveRepresentation:
+    BooleanBit
+    IntegerBits(bits: u16, signed: bool)
+    IeeeFloatBits(bits: u16)
+    BrainFloatBits(bits: u16)
+    PointerBits(bits: u16)
+
+
 trait Primitive: Type
+    property category: PrimitiveCategory
+    property representation: PrimitiveRepresentation
     property default_literal: bool = false

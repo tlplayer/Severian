@@ -1,0 +1,194 @@
+import "validate.sev"
+import "model.sev"
+
+
+# Text is a terminal inspection/bootstrap format. Lowering and optimization
+# consume MlirProgram objects and never parse or edit this output.
+def scalar_type_text(type_id: MlirScalarType) -> string:
+    kind = scalar_kind_name(type_id.kind)
+    if kind == "integer":
+        return "i" + string(i64(type_id.bits))
+    if kind == "ieee_float":
+        return "f" + string(i64(type_id.bits))
+    if kind == "brain_float":
+        return "bf16"
+    if kind == "index":
+        return "index"
+    if type_id.address_space == 0:
+        return "!llvm.ptr"
+    return "!llvm.ptr<" + string(type_id.address_space) + ">"
+
+
+def type_text(type_id: MlirType) -> string:
+    if type_kind_name(type_id.kind) == "scalar":
+        return scalar_type_text(type_id.scalar)
+    dimensions: list[string] = []
+    for dimension in type_id.dimensions:
+        dimensions.append(dimension_text(dimension))
+    prefix = "tensor<" if type_kind_name(type_id.kind) == "tensor" else "memref<"
+    return prefix + dimensions.join("x") + "x" + scalar_type_text(type_id.scalar) + ">"
+
+
+def value_text(value: MlirValue) -> string:
+    return "%v" + string(value.id)
+
+
+def values_text(values: list[MlirValue]) -> string:
+    rendered: list[string] = []
+    for value in values:
+        rendered.append(value_text(value))
+    return rendered.join(", ")
+
+
+def types_text(values: list[MlirValue]) -> string:
+    rendered: list[string] = []
+    for value in values:
+        rendered.append(type_text(value.type_id))
+    return rendered.join(", ")
+
+
+def result_types_text(types: list[MlirType]) -> string:
+    rendered: list[string] = []
+    for type_id in types:
+        rendered.append(type_text(type_id))
+    if len(rendered) == 0:
+        return "()"
+    if len(rendered) == 1:
+        return rendered[0]
+    return "(" + rendered.join(", ") + ")"
+
+
+def result_types_from_values(values: list[MlirValue]) -> string:
+    types: list[MlirType] = []
+    for value in values:
+        types.append(value.type_id)
+    return result_types_text(types)
+
+
+def result_prefix(results: list[MlirValue]) -> string:
+    if len(results) == 0:
+        return ""
+    return values_text(results) + " = "
+
+
+def escaped(value: string) -> string:
+    return value.replace("\\", "\\\\").replace("\"", "\\\"")
+
+
+def attribute_value_text(value: MlirAttributeValue) -> string:
+    kind = attribute_kind_name(value.kind)
+    if kind == "integer":
+        return string(value.integer) + " : " + type_text(value.type_id)
+    if kind == "float":
+        return value.text + " : " + type_text(value.type_id)
+    if kind == "string":
+        return "\"" + escaped(value.text) + "\""
+    if kind == "boolean":
+        return "true" if value.enabled else "false"
+    if kind == "type":
+        return type_text(value.type_id)
+    rendered: list[string] = []
+    for item in value.strings:
+        rendered.append("\"" + escaped(item) + "\"")
+    return "[" + rendered.join(", ") + "]"
+
+
+def attributes_text(attributes: list[MlirNamedAttribute]) -> string:
+    if len(attributes) == 0:
+        return ""
+    rendered: list[string] = []
+    for attribute in attributes:
+        rendered.append(attribute.name + " = " + attribute_value_text(attribute.value))
+    return " {" + rendered.join(", ") + "}"
+
+
+def required_attribute(operation: MlirOperation, name: string) -> MlirAttributeValue:
+    selected := operation.attributes[0].value
+    found := false
+    for attribute in operation.attributes:
+        if attribute.name == name:
+            selected = attribute.value
+            found = true
+    assert(found, "validated MLIR operation is missing an attribute")
+    return selected
+
+
+def region_by_number(program: MlirProgram, id: int) -> MlirRegion:
+    selected := program.regions[0]
+    found := false
+    for region in program.regions:
+        if region.id == id:
+            selected = region
+            found = true
+    assert(found, "validated MLIR region is missing")
+    return selected
+
+
+def print_region(program: MlirProgram, region_id: int, indentation: string) -> string:
+    region = region_by_number(program, region_id)
+    output := "{\n"
+    for block in region.blocks:
+        if len(block.arguments) != 0:
+            arguments: list[string] = []
+            for argument in block.arguments:
+                arguments.append(value_text(argument) + ": " + type_text(argument.type_id))
+            output += indentation + "^bb" + string(block.id) + "(" + arguments.join(", ") + "):\n"
+        for operation in block.operations:
+            output += print_operation(program, operation, indentation + "  ")
+    output += indentation[:int(len(indentation)) - 2] + "}"
+    return output
+
+
+def print_generic_operation(program: MlirProgram, operation: MlirOperation, indentation: string) -> string:
+    regions: list[string] = []
+    for region in operation.regions:
+        regions.append(print_region(program, region, indentation + "  "))
+    owned_regions = " (" + regions.join(", ") + ")" if len(regions) != 0 else ""
+    return indentation + result_prefix(operation.results) + "\"" + operation_name_text(operation.name) + "\"(" + values_text(operation.operands) + ")" + owned_regions + attributes_text(operation.attributes) + " : (" + types_text(operation.operands) + ") -> " + result_types_from_values(operation.results) + "\n"
+
+
+def print_operation(program: MlirProgram, operation: MlirOperation, indentation: string) -> string:
+    name = operation_name_text(operation.name)
+    if name == "arith.constant":
+        return indentation + result_prefix(operation.results) + "arith.constant " + attribute_value_text(required_attribute(operation, "value")) + "\n"
+    if name == "arith.cmpi" or name == "arith.cmpf":
+        return indentation + result_prefix(operation.results) + name + " " + required_string_attribute(operation, "predicate") + ", " + values_text(operation.operands) + " : " + type_text(operation.operands[0].type_id) + "\n"
+    if name.starts_with("arith.") and len(operation.operands) == 2 and len(operation.results) == 1:
+        return indentation + result_prefix(operation.results) + name + " " + values_text(operation.operands) + " : " + type_text(operation.operands[0].type_id) + "\n"
+    if name == "func.call":
+        return indentation + result_prefix(operation.results) + "func.call @" + required_string_attribute(operation, "callee") + "(" + values_text(operation.operands) + ") : (" + types_text(operation.operands) + ") -> " + result_types_from_values(operation.results) + "\n"
+    if name == "func.return":
+        if len(operation.operands) == 0:
+            return indentation + "return\n"
+        return indentation + "return " + values_text(operation.operands) + " : " + types_text(operation.operands) + "\n"
+    if name == "cf.assert":
+        return indentation + "cf.assert " + value_text(operation.operands[0]) + ", \"" + escaped(required_string_attribute(operation, "msg")) + "\"\n"
+    return print_generic_operation(program, operation, indentation)
+
+
+def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
+    parameters: list[string] = []
+    for argument in function.arguments:
+        parameters.append(value_text(argument) + ": " + type_text(argument.type_id))
+    result := ""
+    if len(function.result_types) != 0:
+        result = " -> " + result_types_text(function.result_types)
+    visibility = " private" if visibility_name(function.visibility) == "private" else ""
+    output := "  func.func" + visibility + " @" + function.name + "(" + parameters.join(", ") + ")" + result
+    if function.declaration:
+        return output + "\n"
+    output += " " + print_region(program, function.body_region, "    ") + "\n"
+    return output
+
+
+def print_program_unchecked(program: MlirProgram) -> string:
+    output := "module {\n"
+    for function in program.functions:
+        output += print_function(program, function)
+    output += "}\n"
+    return output
+
+
+def print_program(program: MlirProgram) -> string | MlirVerificationError:
+    validate(program)
+    return print_program_unchecked(program)

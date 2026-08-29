@@ -1,7 +1,3 @@
 trait Equatable:
     operator ==(right: Self) -> bool
-
-
-extend Equatable:
-    operator !=(right: Self) -> bool:
-        return not (self == right)
+    operator !=(right: Self) -> bool

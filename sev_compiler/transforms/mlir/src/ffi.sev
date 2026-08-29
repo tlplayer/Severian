@@ -1,39 +1,38 @@
 @c(repr = "pointer")
-type MlirContext
+type NativeMlirContext
 
 @c(repr = "pointer")
-type MlirModule
+type NativeMlirModule
 
 @c(repr = "pointer")
-type MlirOperation
+type NativeMlirOperation
 
 @c(repr = "pointer")
-type MlirBlock
+type NativeMlirBlock
 
 @c(repr = "pointer")
-type MlirRegion
+type NativeMlirRegion
 
 @c(repr = "pointer")
-type MlirType
+type NativeMlirType
 
 @c(repr = "pointer")
-type MlirAttribute
+type NativeMlirAttribute
 
 @c(symbol = "mlirContextCreate")
-def context_create() -> MlirContext
+def native_context_create() -> NativeMlirContext
 
 @c(symbol = "mlirContextDestroy")
-def context_destroy(context: MlirContext)
+def native_context_destroy(context: NativeMlirContext)
 
 @c(symbol = "mlirModuleCreateParse")
-def module_parse(context: MlirContext, text: borrowed[string]) -> MlirModule
+def native_module_parse(context: NativeMlirContext, text: borrowed[string]) -> NativeMlirModule
 
 @c(symbol = "mlirModuleDestroy")
-def module_destroy(module: MlirModule)
+def native_module_destroy(module: NativeMlirModule)
 
 @c(symbol = "mlirModuleGetOperation")
-def module_operation(module: MlirModule) -> MlirOperation
+def native_module_operation(module: NativeMlirModule) -> NativeMlirOperation
 
 @c(symbol = "mlirOperationVerify")
-def operation_verify(operation: MlirOperation) -> bool
-
+def native_operation_verify(operation: NativeMlirOperation) -> bool

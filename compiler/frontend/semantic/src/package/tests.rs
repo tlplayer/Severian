@@ -47,6 +47,31 @@ fn temporary() -> PathBuf {
 }
 
 #[test]
+fn injected_prelude_declarations_are_local_and_not_reexported() {
+    let mut source = severian_source::SourceFile::virtual_source(
+        "bootstrap-prelude.sev",
+        "def print(value: string) -> i32\n",
+    );
+    source.id = severian_source::SourceId(u32::MAX);
+    let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+    let module = severian_modules::ModuleId(1);
+    let graph = severian_modules::ModuleGraph {
+        modules: vec![severian_modules::ResolvedModule {
+            id: module,
+            path: PathBuf::from("bootstrap-prelude.sev"),
+            source,
+            package: severian_modules::PackageId(0),
+            ast,
+            imports: Vec::new(),
+        }],
+    };
+
+    let index = collect_declarations(&graph).unwrap();
+    assert!(index.modules[&module].scope.bindings.contains_key("print"));
+    assert!(!index.exports[&module].contains_key("print"));
+}
+
+#[test]
 fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
     let root = temporary();
     std::fs::write(

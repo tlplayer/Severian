@@ -7,7 +7,5 @@ trait BitOr:
 trait BitXor:
     operator ^(right: Self) -> Self
 
-trait Bitwise:
-    trait BitAnd
-    trait BitOr
-    trait BitXor
+trait Bitwise: BitAnd + BitOr + BitXor
+    pass

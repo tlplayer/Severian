@@ -1,4 +1,11 @@
 import source
+import "../id/compiler.sev"
+import "../declaration/language.sev"
+import "../declaration/function.sev"
+import "../expression/expression.sev"
+import "../statement/statement.sev"
+import "../cfg/cfg.sev"
+import "../value/lowered.sev"
 
 
 enum Item:

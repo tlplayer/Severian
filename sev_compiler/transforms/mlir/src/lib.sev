@@ -1,3 +1,4 @@
+import "ir/lib.sev"
 import "emit/mod.sev"
 import "ffi.sev"
 import "verify.sev"

@@ -2524,6 +2524,10 @@ fn with_core_prelude(
         }
         severian_ast::Item::Function(function) => {
             function.name == "print"
+                && !ast.items.iter().any(|item| {
+                    matches!(item, severian_ast::Item::Function(existing)
+                        if existing.name == function.name && existing.decorators.is_empty())
+                })
                 && types.resolve_name("usize").is_some()
                 && types.resolve_name("bool").is_some()
                 && (!function.type_parameters.is_empty()
