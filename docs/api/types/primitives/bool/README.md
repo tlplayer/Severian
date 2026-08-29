@@ -21,19 +21,3 @@ def enabled(ready: bool, permitted: bool) -> bool:
     return ready and permitted
 ```
 
-## ABI and lowering
-
-Function parameters/results retain boolean identity through ABI selection.
-Tensor fusion can represent boolean elements, but arithmetic tensor operations
-must reject them unless their operation contract explicitly accepts boolean.
-
-## Tensor
-
-`bool` is representable as an element field in fusion/ABI data. Bit width is
-one; storage packing is a separate layout decision and must not be inferred
-from scalar register width.
-
-## Current weakness
-
-The API lacks exhaustive effectful short-circuit symmetry tests and packed
-boolean tensor layout tests.
