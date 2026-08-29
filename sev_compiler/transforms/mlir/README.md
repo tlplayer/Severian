@@ -53,7 +53,25 @@ The bootstrap provider in `compiler/transforms/mlir/src/native.rs` constructs a
 real `mlir::ModuleOp` through MLIR operation-state APIs. It does not accept a
 module string. It owns the MLIR context and module lifetime, loads registered
 dialects, accepts open operation names, attaches typed operands/results,
-attributes and owned regions, and invokes MLIR's native verifier.
+attributes and owned regions, and invokes MLIR's native verifier. Native handles
+carry their originating context, so a type, attribute, value, block, region, or
+operation from another builder is rejected before an MLIR call is made.
+
+The native materialization vocabulary currently covers:
+
+- signless, signed, and unsigned integers; index, BF16, F16, F32, F64, and
+  address-space-qualified LLVM pointers;
+- ranked and unranked tensors and memrefs, with rank zero distinct from unknown
+  rank and `-1` reserved for a dynamic dimension;
+- function signatures, typed block arguments, SSA operands/results, nested
+  regions, declarations, definitions, and file/line/column locations;
+- integer, floating, boolean, string, type, recursive array, flat-symbol, and
+  structurally built affine-map attributes.
+
+The only crate-visible module parser entry is instrumented. Native-construction
+tests snapshot its call count around materialization and verification; a changed
+count fails the test. Text parsing remains isolated to the legacy artifact
+verifier while its callers are migrated.
 
 This Rust layer is the narrow `Severian -> upstream MLIR` implementation
 boundary, not a second compiler IR. The builder semantics and graph live in
@@ -67,6 +85,7 @@ native interfaces mature, this provider can move upward without changing the
 - A `MlirRegion` is transferred exactly once into its parent operation.
 - A native operation is transferred exactly once into a block.
 - A native function operation is transferred exactly once into the module.
+- Builder handles cannot cross MLIR contexts.
 - The native module owns all transferred operations, blocks, regions, types,
   attributes, and values until it is destroyed.
 - Text owns nothing and cannot be fed back into production lowering.
@@ -80,6 +99,9 @@ Implemented and tested:
 - structural validation before printing/materialization;
 - Universal scalar lowering routed through the typed builder API;
 - direct native `ModuleOp` construction and native MLIR verification;
+- native source locations and provider-owned verifier diagnostics;
+- structural affine maps and the complete attribute families listed above;
+- checked context ownership and parser-call instrumentation;
 - shared-MLIR linking, avoiding the former whole-archive memory spike.
 
 Still required for the production executable path:

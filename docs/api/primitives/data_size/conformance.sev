@@ -1,5 +1,0 @@
-def blocks(total: data_size, block: data_size) -> float:
-    return total / block
-
-test "binary data-size literals normalize to bytes":
-    assert(1KiB == 1024B)

@@ -538,7 +538,7 @@ impl<'context> Module<'context> {
         source: &str,
         description: &str,
     ) -> Result<Self, MlirError> {
-        let raw = unsafe { ffi::mlirModuleCreateParse(context.raw, ffi::string_ref(source)) };
+        let raw = unsafe { ffi::module_create_parse(context.raw, ffi::string_ref(source)) };
         if raw.is_null() {
             return Err(MlirError::ParseFailed(description.to_owned()));
         }

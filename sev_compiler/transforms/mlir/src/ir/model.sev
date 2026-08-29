@@ -25,7 +25,9 @@ def dynamic_dimension() -> int:
 enum MlirTypeKind:
     ScalarType
     TensorType
+    UnrankedTensorType
     MemRefType
+    UnrankedMemRefType
 
 
 class MlirType:
@@ -62,8 +64,28 @@ def tensor_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
     return MlirType(TensorType, element, dimensions)
 
 
+def unranked_tensor_type(element: MlirScalarType) -> MlirType:
+    return MlirType(UnrankedTensorType, element, [])
+
+
 def memref_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
     return MlirType(MemRefType, element, dimensions)
+
+
+def unranked_memref_type(element: MlirScalarType) -> MlirType:
+    return MlirType(UnrankedMemRefType, element, [])
+
+
+class MlirLocation:
+    file: string
+    line: u32
+    column: u32
+
+
+def file_line_column(file: string, line: u32, column: u32) -> MlirLocation:
+    assert(file != "", "an MLIR source location requires a file")
+    assert(line > 0 and column > 0, "MLIR source locations are one-based")
+    return MlirLocation(file, line, column)
 
 
 class MlirValue:
@@ -96,6 +118,81 @@ enum MlirAttributeKind:
     BooleanAttributeKind
     TypeAttributeKind
     StringArrayAttributeKind
+    ArrayAttributeKind
+    SymbolAttributeKind
+    AffineMapAttributeKind
+
+
+enum MlirAffineExpressionKind:
+    AffineDimension
+    AffineSymbol
+    AffineConstant
+    AffineAdd
+    AffineMultiply
+    AffineModulo
+    AffineFloorDivide
+    AffineCeilDivide
+
+
+def affine_expression_kind_name(kind: MlirAffineExpressionKind) -> string:
+    match kind:
+        case AffineDimension: return "dimension"
+        case AffineSymbol: return "symbol"
+        case AffineConstant: return "constant"
+        case AffineAdd: return "add"
+        case AffineMultiply: return "multiply"
+        case AffineModulo: return "modulo"
+        case AffineFloorDivide: return "floor_divide"
+        case AffineCeilDivide: return "ceil_divide"
+
+
+class MlirAffineExpression:
+    kind: MlirAffineExpressionKind
+    position: int = 0
+    constant: int = 0
+    operands: list[MlirAffineExpression] = []
+
+
+def affine_dimension(position: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineDimension, position, 0, [])
+
+
+def affine_symbol(position: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineSymbol, position, 0, [])
+
+
+def affine_constant(value: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineConstant, 0, value, [])
+
+
+def affine_binary(kind: MlirAffineExpressionKind, left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return MlirAffineExpression(kind, 0, 0, [left, right])
+
+
+def affine_add(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineAdd, left, right)
+
+
+def affine_multiply(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineMultiply, left, right)
+
+
+def affine_modulo(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineModulo, left, right)
+
+
+def affine_floor_divide(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineFloorDivide, left, right)
+
+
+def affine_ceil_divide(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineCeilDivide, left, right)
+
+
+class MlirAffineMap:
+    dimensions: int
+    symbols: int
+    results: list[MlirAffineExpression]
 
 
 class MlirAttributeValue:
@@ -105,30 +202,47 @@ class MlirAttributeValue:
     enabled: bool
     type_id: MlirType
     strings: list[string]
+    elements: list[MlirAttributeValue] = []
+    symbol: string = ""
+    affine_maps: list[MlirAffineMap] = []
+    floating: f64 = 0.0
 
 
 def integer_attribute(value: int, type_id: MlirType) -> MlirAttributeValue:
-    return MlirAttributeValue(IntegerAttributeKind, "", value, false, type_id, [])
+    return MlirAttributeValue(IntegerAttributeKind, "", value, false, type_id, [], [], "", [], 0.0)
 
 
-def float_attribute(spelling: string, type_id: MlirType) -> MlirAttributeValue:
-    return MlirAttributeValue(FloatAttributeKind, spelling, 0, false, type_id, [])
+def float_attribute(value: f64, type_id: MlirType) -> MlirAttributeValue:
+    return MlirAttributeValue(FloatAttributeKind, "", 0, false, type_id, [], [], "", [], value)
 
 
 def string_attribute_value(value: string) -> MlirAttributeValue:
-    return MlirAttributeValue(StringAttributeKind, value, 0, false, index_type(), [])
+    return MlirAttributeValue(StringAttributeKind, value, 0, false, index_type(), [], [], "", [], 0.0)
 
 
 def boolean_attribute(value: bool) -> MlirAttributeValue:
-    return MlirAttributeValue(BooleanAttributeKind, "", 0, value, index_type(), [])
+    return MlirAttributeValue(BooleanAttributeKind, "", 0, value, index_type(), [], [], "", [], 0.0)
 
 
 def type_attribute(type_id: MlirType) -> MlirAttributeValue:
-    return MlirAttributeValue(TypeAttributeKind, "", 0, false, type_id, [])
+    return MlirAttributeValue(TypeAttributeKind, "", 0, false, type_id, [], [], "", [], 0.0)
 
 
 def string_array_attribute(values: list[string]) -> MlirAttributeValue:
-    return MlirAttributeValue(StringArrayAttributeKind, "", 0, false, index_type(), values)
+    return MlirAttributeValue(StringArrayAttributeKind, "", 0, false, index_type(), values, [], "", [], 0.0)
+
+
+def array_attribute(values: list[MlirAttributeValue]) -> MlirAttributeValue:
+    return MlirAttributeValue(ArrayAttributeKind, "", 0, false, index_type(), [], values, "", [], 0.0)
+
+
+def symbol_attribute(value: string) -> MlirAttributeValue:
+    assert(value != "", "an MLIR symbol reference cannot be empty")
+    return MlirAttributeValue(SymbolAttributeKind, "", 0, false, index_type(), [], [], value, [], 0.0)
+
+
+def affine_map_attribute(value: MlirAffineMap) -> MlirAttributeValue:
+    return MlirAttributeValue(AffineMapAttributeKind, "", 0, false, index_type(), [], [], "", [value], 0.0)
 
 
 def attribute_kind_name(kind: MlirAttributeKind) -> string:
@@ -139,6 +253,9 @@ def attribute_kind_name(kind: MlirAttributeKind) -> string:
         case BooleanAttributeKind: return "boolean"
         case TypeAttributeKind: return "type"
         case StringArrayAttributeKind: return "string_array"
+        case ArrayAttributeKind: return "array"
+        case SymbolAttributeKind: return "symbol"
+        case AffineMapAttributeKind: return "affine_map"
 
 
 class MlirNamedAttribute:
@@ -153,6 +270,7 @@ class MlirOperation:
     attributes: list[MlirNamedAttribute]
     regions: list[int]
     terminator: bool
+    location: MlirLocation | None = None
 
 
 class MlirBlock:
@@ -186,6 +304,7 @@ class MlirFunctionOp:
     result_types: list[MlirType]
     body_region: int
     declaration: bool
+    location: MlirLocation | None = None
 
 
 class MlirProgram:
@@ -213,7 +332,9 @@ def type_kind_name(kind: MlirTypeKind) -> string:
     match kind:
         case ScalarType: return "scalar"
         case TensorType: return "tensor"
+        case UnrankedTensorType: return "unranked_tensor"
         case MemRefType: return "memref"
+        case UnrankedMemRefType: return "unranked_memref"
 
 
 def dimension_text(dimension: int) -> string:

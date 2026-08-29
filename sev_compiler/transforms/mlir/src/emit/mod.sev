@@ -44,7 +44,7 @@ def function_results(result: universal.LoweredType) -> list[MlirType] | MlirErro
 def constant_attribute(value: universal.Constant, type_id: universal.LoweredType, lowered: MlirType) -> MlirAttributeValue | MlirError:
     match value:
         case Integer: return integer_attribute(int(value), lowered)
-        case Float: return float_attribute(value, lowered)
+        case Float: return float_attribute(f64(value), lowered)
         case Boolean: return boolean_attribute(value)
         case NoneValue: return boolean_attribute(false)
         case Unit: return error(UnsupportedType(type_id))
@@ -124,7 +124,7 @@ def lower_unary(builder: MlirOpBuilder, module: universal.Module, operator: univ
         return unit
     zero = builder_new_value(builder, operand.type_id)
     if is_float(operand.type_id):
-        builder_constant(builder, zero, float_attribute("0.0", operand.type_id))
+        builder_constant(builder, zero, float_attribute(0.0, operand.type_id))
     else:
         builder_constant(builder, zero, integer_attribute(0, operand.type_id))
     if operator == universal.Positive:

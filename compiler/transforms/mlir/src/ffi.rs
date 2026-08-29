@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 
+use core::cell::Cell;
 use core::ffi::{c_char, c_void};
 
 macro_rules! handle {
@@ -20,10 +21,13 @@ macro_rules! handle {
 }
 
 handle!(MlirAttribute, *const c_void);
+handle!(MlirAffineExpr, *const c_void);
+handle!(MlirAffineMap, *const c_void);
 handle!(MlirBlock, *mut c_void);
 handle!(MlirContext, *mut c_void);
 handle!(MlirDialectRegistry, *mut c_void);
 handle!(MlirDialectHandle, *const c_void);
+handle!(MlirDiagnostic, *mut c_void);
 handle!(MlirIdentifier, *const c_void);
 handle!(MlirLocation, *const c_void);
 handle!(MlirModule, *const c_void);
@@ -67,6 +71,8 @@ pub struct MlirStringRef {
 }
 
 pub type MlirStringCallback = unsafe extern "C" fn(MlirStringRef, *mut c_void);
+pub type MlirDiagnosticHandler =
+    unsafe extern "C" fn(MlirDiagnostic, *mut c_void) -> MlirLogicalResult;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -114,8 +120,15 @@ unsafe extern "C" {
     pub fn mlirDialectHandleInsertDialect(handle: MlirDialectHandle, registry: MlirDialectRegistry);
 
     pub fn mlirLocationUnknownGet(context: MlirContext) -> MlirLocation;
+    pub fn mlirLocationFileLineColGet(
+        context: MlirContext,
+        filename: MlirStringRef,
+        line: u32,
+        column: u32,
+    ) -> MlirLocation;
     pub fn mlirModuleCreateEmpty(location: MlirLocation) -> MlirModule;
-    pub fn mlirModuleCreateParse(context: MlirContext, source: MlirStringRef) -> MlirModule;
+    #[link_name = "mlirModuleCreateParse"]
+    fn mlir_module_create_parse_raw(context: MlirContext, source: MlirStringRef) -> MlirModule;
     pub fn mlirModuleDestroy(module: MlirModule);
     pub fn mlirModuleGetBody(module: MlirModule) -> MlirBlock;
     pub fn mlirModuleGetOperation(module: MlirModule) -> MlirOperation;
@@ -186,7 +199,17 @@ unsafe extern "C" {
         attribute: MlirAttribute,
     ) -> MlirNamedAttribute;
     pub fn mlirStringAttrGet(context: MlirContext, value: MlirStringRef) -> MlirAttribute;
+    pub fn mlirAttributeGetNull() -> MlirAttribute;
     pub fn mlirIntegerAttrGet(ty: MlirType, value: i64) -> MlirAttribute;
+    pub fn mlirFloatAttrDoubleGet(context: MlirContext, ty: MlirType, value: f64) -> MlirAttribute;
+    pub fn mlirBoolAttrGet(context: MlirContext, value: i32) -> MlirAttribute;
+    pub fn mlirArrayAttrGet(
+        context: MlirContext,
+        count: isize,
+        elements: *const MlirAttribute,
+    ) -> MlirAttribute;
+    pub fn mlirFlatSymbolRefAttrGet(context: MlirContext, symbol: MlirStringRef) -> MlirAttribute;
+    pub fn mlirAffineMapAttrGet(map: MlirAffineMap) -> MlirAttribute;
     pub fn mlirTypeAttrGet(ty: MlirType) -> MlirAttribute;
     pub fn mlirStringAttrGetValue(attribute: MlirAttribute) -> MlirStringRef;
     pub fn mlirIntegerAttrGetValueInt(attribute: MlirAttribute) -> i64;
@@ -201,6 +224,8 @@ unsafe extern "C" {
     pub fn mlirTypeEqual(left: MlirType, right: MlirType) -> bool;
     pub fn mlirTypeParseGet(context: MlirContext, source: MlirStringRef) -> MlirType;
     pub fn mlirIntegerTypeGet(context: MlirContext, bits: u32) -> MlirType;
+    pub fn mlirIntegerTypeSignedGet(context: MlirContext, bits: u32) -> MlirType;
+    pub fn mlirIntegerTypeUnsignedGet(context: MlirContext, bits: u32) -> MlirType;
     pub fn mlirIndexTypeGet(context: MlirContext) -> MlirType;
     pub fn mlirFunctionTypeGet(
         context: MlirContext,
@@ -213,12 +238,41 @@ unsafe extern "C" {
     pub fn mlirF16TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF32TypeGet(context: MlirContext) -> MlirType;
     pub fn mlirF64TypeGet(context: MlirContext) -> MlirType;
+    pub fn mlirLLVMPointerTypeGet(context: MlirContext, address_space: u32) -> MlirType;
     pub fn mlirRankedTensorTypeGet(
         rank: isize,
         shape: *const i64,
         element_type: MlirType,
         encoding: MlirAttribute,
     ) -> MlirType;
+    pub fn mlirUnrankedTensorTypeGet(element_type: MlirType) -> MlirType;
+    pub fn mlirMemRefTypeContiguousGet(
+        element_type: MlirType,
+        rank: isize,
+        shape: *const i64,
+        memory_space: MlirAttribute,
+    ) -> MlirType;
+    pub fn mlirUnrankedMemRefTypeGet(
+        element_type: MlirType,
+        memory_space: MlirAttribute,
+    ) -> MlirType;
+
+    pub fn mlirAffineDimExprGet(context: MlirContext, position: isize) -> MlirAffineExpr;
+    pub fn mlirAffineSymbolExprGet(context: MlirContext, position: isize) -> MlirAffineExpr;
+    pub fn mlirAffineConstantExprGet(context: MlirContext, value: i64) -> MlirAffineExpr;
+    pub fn mlirAffineAddExprGet(left: MlirAffineExpr, right: MlirAffineExpr) -> MlirAffineExpr;
+    pub fn mlirAffineMulExprGet(left: MlirAffineExpr, right: MlirAffineExpr) -> MlirAffineExpr;
+    pub fn mlirAffineModExprGet(left: MlirAffineExpr, right: MlirAffineExpr) -> MlirAffineExpr;
+    pub fn mlirAffineFloorDivExprGet(left: MlirAffineExpr, right: MlirAffineExpr)
+        -> MlirAffineExpr;
+    pub fn mlirAffineCeilDivExprGet(left: MlirAffineExpr, right: MlirAffineExpr) -> MlirAffineExpr;
+    pub fn mlirAffineMapGet(
+        context: MlirContext,
+        dimensions: isize,
+        symbols: isize,
+        result_count: isize,
+        results: *mut MlirAffineExpr,
+    ) -> MlirAffineMap;
 
     pub fn mlirRegionCreate() -> MlirRegion;
     pub fn mlirRegionAppendOwnedBlock(region: MlirRegion, block: MlirBlock);
@@ -246,6 +300,33 @@ unsafe extern "C" {
         manager: MlirPassManager,
         operation: MlirOperation,
     ) -> MlirLogicalResult;
+
+    pub fn mlirDiagnosticPrint(
+        diagnostic: MlirDiagnostic,
+        callback: MlirStringCallback,
+        user_data: *mut c_void,
+    );
+    pub fn mlirContextAttachDiagnosticHandler(
+        context: MlirContext,
+        handler: MlirDiagnosticHandler,
+        user_data: *mut c_void,
+        delete_user_data: Option<unsafe extern "C" fn(*mut c_void)>,
+    ) -> u64;
+    pub fn mlirContextDetachDiagnosticHandler(context: MlirContext, id: u64);
+}
+
+thread_local! {
+    static MODULE_PARSE_CALLS: Cell<usize> = const { Cell::new(0) };
+}
+
+pub unsafe fn module_create_parse(context: MlirContext, source: MlirStringRef) -> MlirModule {
+    MODULE_PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    unsafe { mlir_module_create_parse_raw(context, source) }
+}
+
+#[cfg(test)]
+pub fn module_parse_calls() -> usize {
+    MODULE_PARSE_CALLS.with(Cell::get)
 }
 
 pub fn string_ref(value: &str) -> MlirStringRef {

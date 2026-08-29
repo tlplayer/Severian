@@ -5,6 +5,9 @@ import "model.sev"
 enum MlirVerificationError:
     DuplicateFunction(name: string)
     DuplicateValue(value: int)
+    DuplicateBlock(block: int)
+    DuplicateRegionOwnership(region: int)
+    UnownedRegion(region: int)
     MissingRegion(region: int)
     MissingBlock(region: int)
     UndefinedValue(value: int)
@@ -19,6 +22,69 @@ enum MlirVerificationError:
     OperationAfterTerminator(block: int)
     MissingTerminator(region: int)
     WrongTerminator(region: int, expected: string, actual: string)
+    InvalidType(description: string)
+    InvalidAttribute(description: string)
+    InvalidLocation(file: string, line: u32, column: u32)
+
+
+def validate_location(location: MlirLocation) -> bool | MlirVerificationError:
+    if location.file == "" or location.line == 0 or location.column == 0:
+        return error(InvalidLocation(location.file, location.line, location.column))
+    return true
+
+
+def validate_type(type_id: MlirType) -> bool | MlirVerificationError:
+    kind = type_kind_name(type_id.kind)
+    scalar = scalar_kind_name(type_id.scalar.kind)
+    if kind == "scalar" and scalar == "integer" and type_id.scalar.bits == 0:
+        return error(InvalidType("integer width must be non-zero"))
+    if kind == "scalar" and scalar == "ieee_float" and type_id.scalar.bits != 16 and type_id.scalar.bits != 32 and type_id.scalar.bits != 64:
+        return error(InvalidType("native IEEE floating width must be 16, 32, or 64"))
+    if (kind == "unranked_tensor" or kind == "unranked_memref") and len(type_id.dimensions) != 0:
+        return error(InvalidType("unranked types cannot carry ranked dimensions"))
+    for dimension in type_id.dimensions:
+        if dimension < -1:
+            return error(InvalidType("dynamic dimensions use exactly -1"))
+    return true
+
+
+def validate_affine_expression(expression: MlirAffineExpression, dimensions: int, symbols: int) -> bool | MlirVerificationError:
+    kind = affine_expression_kind_name(expression.kind)
+    if kind == "dimension":
+        if expression.position < 0 or expression.position >= dimensions:
+            return error(InvalidAttribute("affine dimension is out of range"))
+        return true
+    if kind == "symbol":
+        if expression.position < 0 or expression.position >= symbols:
+            return error(InvalidAttribute("affine symbol is out of range"))
+        return true
+    if kind == "constant":
+        return true
+    if len(expression.operands) != 2:
+        return error(InvalidAttribute("binary affine expressions require two operands"))
+    validate_affine_expression(expression.operands[0], dimensions, symbols)
+    validate_affine_expression(expression.operands[1], dimensions, symbols)
+    return true
+
+
+def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationError:
+    kind = attribute_kind_name(value.kind)
+    if kind == "integer" or kind == "float" or kind == "type":
+        validate_type(value.type_id)
+    if kind == "symbol" and value.symbol == "":
+        return error(InvalidAttribute("symbol references cannot be empty"))
+    if kind == "array":
+        for element in value.elements:
+            validate_attribute(element)
+    if kind == "affine_map":
+        if len(value.affine_maps) != 1:
+            return error(InvalidAttribute("affine-map attributes require exactly one map"))
+        map = value.affine_maps[0]
+        if map.dimensions < 0 or map.symbols < 0:
+            return error(InvalidAttribute("affine-map arity cannot be negative"))
+        for result in map.results:
+            validate_affine_expression(result, map.dimensions, map.symbols)
+    return true
 
 
 def has_string_attribute(operation: MlirOperation, name: string) -> bool:
@@ -74,6 +140,14 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
     mnemonic = operation.name.mnemonic
     if dialect == "" or mnemonic == "":
         return error(InvalidOperationName(name))
+    if operation.location != None:
+        validate_location(operation.location)
+    for operand in operation.operands:
+        validate_type(operand.type_id)
+    for result in operation.results:
+        validate_type(result.type_id)
+    for attribute in operation.attributes:
+        validate_attribute(attribute.value)
     if name == "arith.constant":
         if len(operation.operands) != 0 or len(operation.results) != 1:
             return error(InvalidArity(name))
@@ -127,18 +201,21 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
     return true
 
 
-def validate_operation(program: MlirProgram, operation: MlirOperation, defined: list[int]) -> bool | MlirVerificationError:
+def validate_operation(program: MlirProgram, operation: MlirOperation, defined: list[int], owned_regions: list[int]) -> bool | MlirVerificationError:
     for operand in operation.operands:
         if operand.id not in defined:
             return error(UndefinedValue(operand.id))
     validate_operation_signature(program, operation)
     expected = "scf.yield" if operation_name_text(operation.name) == "scf.if" else ""
     for region in operation.regions:
-        validate_region(program, region, copy_values(defined), expected)
+        if region in owned_regions:
+            return error(DuplicateRegionOwnership(region))
+        owned_regions.append(region)
+        validate_region(program, region, copy_values(defined), expected, owned_regions)
     return true
 
 
-def validate_region(program: MlirProgram, region_id: int, inherited: list[int], expected_terminator: string) -> bool | MlirVerificationError:
+def validate_region(program: MlirProgram, region_id: int, inherited: list[int], expected_terminator: string, owned_regions: list[int]) -> bool | MlirVerificationError:
     index = region_index(program, region_id)
     if index < 0:
         return error(MissingRegion(region_id))
@@ -156,7 +233,7 @@ def validate_region(program: MlirProgram, region_id: int, inherited: list[int], 
         for operation in block.operations:
             if terminated:
                 return error(OperationAfterTerminator(block.id))
-            validate_operation(program, operation, defined)
+            validate_operation(program, operation, defined, owned_regions)
             if operation.terminator:
                 terminated = true
                 actual_terminator = operation_name_text(operation.name)
@@ -174,13 +251,29 @@ def validate_region(program: MlirProgram, region_id: int, inherited: list[int], 
 
 def validate(program: MlirProgram) -> bool | MlirVerificationError:
     names: list[string] = []
+    blocks: list[int] = []
+    for region in program.regions:
+        for block in region.blocks:
+            if block.id in blocks:
+                return error(DuplicateBlock(block.id))
+            blocks.append(block.id)
     for function in program.functions:
         if function.name in names:
             return error(DuplicateFunction(function.name))
         names.append(function.name)
+    owned_regions: list[int] = []
     for function in program.functions:
+        if function.location != None:
+            validate_location(function.location)
+        for argument in function.arguments:
+            validate_type(argument.type_id)
+        for result in function.result_types:
+            validate_type(result)
         if not function.declaration:
-            validate_region(program, function.body_region, [], "func.return")
+            if function.body_region in owned_regions:
+                return error(DuplicateRegionOwnership(function.body_region))
+            owned_regions.append(function.body_region)
+            validate_region(program, function.body_region, [], "func.return", owned_regions)
             region = program.regions[region_index(program, function.body_region)]
             entry = region.blocks[0]
             if len(entry.arguments) != len(function.arguments):
@@ -193,6 +286,9 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
                 if not same_type(final_operation.operands[index].type_id, function.result_types[index]):
                     return error(ReturnSignatureMismatch(function.name))
                 index += 1
+    for region in program.regions:
+        if region.id not in owned_regions:
+            return error(UnownedRegion(region.id))
     return true
 
 

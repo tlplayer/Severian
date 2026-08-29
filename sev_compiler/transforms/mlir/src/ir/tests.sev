@@ -4,15 +4,17 @@ import "lib.sev"
 test "open operation identities do not require compiler enum cases":
     builder = MlirOpBuilder(0)
     argument = builder_value(builder, 0, integer_type(32))
-    function = builder_create_function(builder, "open_op", public_visibility(), [argument], [integer_type(32)])
+    location = file_line_column("open_op.sev", 2, 3)
+    function = builder_create_function_at(builder, "open_op", public_visibility(), [argument], [integer_type(32)], false, location)
     builder_set_insertion_point(builder, function.entry)
     result = builder_new_value(builder, integer_type(32))
-    builder_create_operation(builder, operation_name("severian", "future_op"), [argument], [result])
+    builder_create_operation_at(builder, operation_name("severian", "future_op"), [argument], [result], [], [], false, location)
     builder_return(builder, [result])
     validate(builder.program)
     text = print_program_unchecked(builder.program)
     emitted = builder.program.regions[0].blocks[0].operations[0]
     assert(operation_name_text(emitted.name) == "severian.future_op", "unknown operations remain open builder data")
+    assert(emitted.location.line == 2, "operation locations remain structured data")
     assert(text != "", "validated object programs remain printable for inspection")
 
 
@@ -28,6 +30,35 @@ test "ranked dynamic tensor types remain typed builder data":
     assert(contract.dimensions[2] == 128, "last known dimension must be preserved")
 
 
+test "rank zero and unranked tensor contracts are distinct":
+    scalar = bf16_scalar_type()
+    rank_zero = tensor_type(scalar, [])
+    unranked = unranked_tensor_type(scalar)
+    assert(type_kind_name(rank_zero.kind) == "tensor", "empty dimensions represent rank zero")
+    assert(type_kind_name(unranked.kind) == "unranked_tensor", "unranked is a distinct type kind")
+    assert(not same_type(rank_zero, unranked), "rank zero must never collapse into unranked")
+
+
+test "typed attributes and locations remain structural data":
+    map = MlirAffineMap(2, 1, [
+        affine_dimension(0),
+        affine_add(affine_dimension(1), affine_symbol(0)),
+    ])
+    attributes = array_attribute([
+        integer_attribute(7, integer_type(32)),
+        float_attribute(1.25, float_type(64)),
+        boolean_attribute(true),
+        symbol_attribute("callee"),
+        affine_map_attribute(map),
+    ])
+    location = file_line_column("builder.sev", 9, 4)
+    assert(len(attributes.elements) == 5, "array attributes preserve typed elements")
+    assert(attributes.elements[1].floating == 1.25, "floating values are typed data, not MLIR fragments")
+    assert(attributes.elements[3].symbol == "callee", "symbols are not encoded as ordinary strings")
+    assert(attributes.elements[4].affine_maps[0].dimensions == 2, "affine arity remains data")
+    assert(location.line == 9 and location.column == 4, "source location remains structured")
+
+
 test "verification rejects undefined SSA operands before text materialization":
     builder = MlirOpBuilder(0)
     function = builder_create_function(builder, "invalid", public_visibility(), [], [integer_type(32)])
@@ -37,3 +68,13 @@ test "verification rejects undefined SSA operands before text materialization":
     builder_binary(builder, result, operation_name("arith", "addi"), missing, missing)
     builder_return(builder, [result])
     assert(not program_is_valid(builder.program), "undefined SSA operands must fail structural validation")
+
+
+test "verification rejects a region with multiple owners":
+    builder = MlirOpBuilder(0)
+    function = builder_create_function(builder, "owner", public_visibility(), [], [])
+    builder_set_insertion_point(builder, function.entry)
+    builder_return(builder, [])
+    shared_region = builder.program.functions[function.function].body_region
+    builder.program.functions.append(MlirFunctionOp("duplicate_owner", public_visibility(), [], [], shared_region, false, None))
+    assert(not program_is_valid(builder.program), "native regions must have exactly one owner")

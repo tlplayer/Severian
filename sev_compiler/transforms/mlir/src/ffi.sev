@@ -1,8 +1,7 @@
+# Opaque bootstrap handles. The native provider owns every allocation and MLIR
+# object. No MlirProgram, list, map, or serialized module crosses this ABI.
 @c(repr = "pointer")
-type NativeMlirContext
-
-@c(repr = "pointer")
-type NativeMlirModule
+type NativeMlirSession
 
 @c(repr = "pointer")
 type NativeMlirOperation
@@ -11,28 +10,167 @@ type NativeMlirOperation
 type NativeMlirBlock
 
 @c(repr = "pointer")
+type NativeMlirDetachedBlock
+
+@c(repr = "pointer")
 type NativeMlirRegion
 
 @c(repr = "pointer")
 type NativeMlirType
 
 @c(repr = "pointer")
+type NativeMlirValue
+
+@c(repr = "pointer")
 type NativeMlirAttribute
 
-@c(symbol = "mlirContextCreate")
-def native_context_create() -> NativeMlirContext
+@c(repr = "pointer")
+type NativeMlirLocation
 
-@c(symbol = "mlirContextDestroy")
-def native_context_destroy(context: NativeMlirContext)
+@c(repr = "pointer")
+type NativeMlirTypeDraft
 
-@c(symbol = "mlirModuleCreateParse")
-def native_module_parse(context: NativeMlirContext, text: borrowed[string]) -> NativeMlirModule
+@c(repr = "pointer")
+type NativeMlirArrayDraft
 
-@c(symbol = "mlirModuleDestroy")
-def native_module_destroy(module: NativeMlirModule)
+@c(repr = "pointer")
+type NativeMlirAffineExpression
 
-@c(symbol = "mlirModuleGetOperation")
-def native_module_operation(module: NativeMlirModule) -> NativeMlirOperation
+@c(repr = "pointer")
+type NativeMlirAffineMapDraft
 
-@c(symbol = "mlirOperationVerify")
-def native_operation_verify(operation: NativeMlirOperation) -> bool
+@c(repr = "pointer")
+type NativeMlirOperationDraft
+
+
+@c(symbol = "__sev_mlir_session_create_v1")
+def native_session_create() -> NativeMlirSession
+
+@c(symbol = "__sev_mlir_session_destroy_v1")
+def native_session_destroy(session: NativeMlirSession)
+
+@c(symbol = "__sev_mlir_session_ok_v1")
+def native_session_ok(session: NativeMlirSession) -> bool
+
+@c(symbol = "__sev_mlir_session_verify_v1")
+def native_session_verify(session: NativeMlirSession) -> bool
+
+@c(symbol = "__sev_mlir_type_integer_v1")
+def native_type_integer(session: NativeMlirSession, bits: u32, signedness: i32) -> NativeMlirType
+
+@c(symbol = "__sev_mlir_type_float_v1")
+def native_type_float(session: NativeMlirSession, bits: u32, brain: bool) -> NativeMlirType
+
+@c(symbol = "__sev_mlir_type_index_v1")
+def native_type_index(session: NativeMlirSession) -> NativeMlirType
+
+@c(symbol = "__sev_mlir_type_pointer_v1")
+def native_type_pointer(session: NativeMlirSession, address_space: u32) -> NativeMlirType
+
+@c(symbol = "__sev_mlir_type_draft_v1")
+def native_type_draft(session: NativeMlirSession, kind: i32, element: NativeMlirType) -> NativeMlirTypeDraft
+
+@c(symbol = "__sev_mlir_type_draft_dimension_v1")
+def native_type_draft_dimension(draft: NativeMlirTypeDraft, dimension: i64)
+
+@c(symbol = "__sev_mlir_type_draft_input_v1")
+def native_type_draft_input(draft: NativeMlirTypeDraft, type_id: NativeMlirType)
+
+@c(symbol = "__sev_mlir_type_draft_result_v1")
+def native_type_draft_result(draft: NativeMlirTypeDraft, type_id: NativeMlirType)
+
+@c(symbol = "__sev_mlir_type_draft_finish_v1")
+def native_type_draft_finish(session: NativeMlirSession, draft: NativeMlirTypeDraft) -> NativeMlirType
+
+@c(symbol = "__sev_mlir_location_v1")
+def native_location(session: NativeMlirSession, file: string, line: u32, column: u32) -> NativeMlirLocation
+
+@c(symbol = "__sev_mlir_location_unknown_v1")
+def native_location_unknown(session: NativeMlirSession) -> NativeMlirLocation
+
+@c(symbol = "__sev_mlir_region_v1")
+def native_region(session: NativeMlirSession) -> NativeMlirRegion
+
+@c(symbol = "__sev_mlir_block_v1")
+def native_block(session: NativeMlirSession) -> NativeMlirDetachedBlock
+
+@c(symbol = "__sev_mlir_block_argument_v1")
+def native_block_argument(session: NativeMlirSession, block: NativeMlirDetachedBlock, type_id: NativeMlirType, location: NativeMlirLocation) -> NativeMlirValue
+
+@c(symbol = "__sev_mlir_region_append_block_v1")
+def native_region_append_block(session: NativeMlirSession, region: NativeMlirRegion, block: NativeMlirDetachedBlock) -> NativeMlirBlock
+
+@c(symbol = "__sev_mlir_attribute_string_v1")
+def native_attribute_string(session: NativeMlirSession, value: string) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_attribute_symbol_v1")
+def native_attribute_symbol(session: NativeMlirSession, value: string) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_attribute_integer_v1")
+def native_attribute_integer(session: NativeMlirSession, type_id: NativeMlirType, value: i64) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_attribute_float_v1")
+def native_attribute_float(session: NativeMlirSession, type_id: NativeMlirType, value: f64) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_attribute_boolean_v1")
+def native_attribute_boolean(session: NativeMlirSession, value: bool) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_attribute_type_v1")
+def native_attribute_type(session: NativeMlirSession, type_id: NativeMlirType) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_array_draft_v1")
+def native_array_draft(session: NativeMlirSession) -> NativeMlirArrayDraft
+
+@c(symbol = "__sev_mlir_array_draft_push_v1")
+def native_array_draft_push(draft: NativeMlirArrayDraft, value: NativeMlirAttribute)
+
+@c(symbol = "__sev_mlir_array_draft_finish_v1")
+def native_array_draft_finish(session: NativeMlirSession, draft: NativeMlirArrayDraft) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_affine_dimension_v1")
+def native_affine_dimension(session: NativeMlirSession, position: usize) -> NativeMlirAffineExpression
+
+@c(symbol = "__sev_mlir_affine_symbol_v1")
+def native_affine_symbol(session: NativeMlirSession, position: usize) -> NativeMlirAffineExpression
+
+@c(symbol = "__sev_mlir_affine_constant_v1")
+def native_affine_constant(session: NativeMlirSession, value: i64) -> NativeMlirAffineExpression
+
+@c(symbol = "__sev_mlir_affine_binary_v1")
+def native_affine_binary(session: NativeMlirSession, kind: i32, left: NativeMlirAffineExpression, right: NativeMlirAffineExpression) -> NativeMlirAffineExpression
+
+@c(symbol = "__sev_mlir_affine_map_draft_v1")
+def native_affine_map_draft(session: NativeMlirSession, dimensions: usize, symbols: usize) -> NativeMlirAffineMapDraft
+
+@c(symbol = "__sev_mlir_affine_map_draft_push_v1")
+def native_affine_map_draft_push(draft: NativeMlirAffineMapDraft, expression: NativeMlirAffineExpression)
+
+@c(symbol = "__sev_mlir_affine_map_draft_finish_v1")
+def native_affine_map_draft_finish(session: NativeMlirSession, draft: NativeMlirAffineMapDraft) -> NativeMlirAttribute
+
+@c(symbol = "__sev_mlir_operation_draft_v1")
+def native_operation_draft(session: NativeMlirSession, dialect: string, mnemonic: string, location: NativeMlirLocation) -> NativeMlirOperationDraft
+
+@c(symbol = "__sev_mlir_operation_draft_result_v1")
+def native_operation_draft_result(draft: NativeMlirOperationDraft, type_id: NativeMlirType)
+
+@c(symbol = "__sev_mlir_operation_draft_operand_v1")
+def native_operation_draft_operand(draft: NativeMlirOperationDraft, value: NativeMlirValue)
+
+@c(symbol = "__sev_mlir_operation_draft_region_v1")
+def native_operation_draft_region(draft: NativeMlirOperationDraft, region: NativeMlirRegion)
+
+@c(symbol = "__sev_mlir_operation_draft_attribute_v1")
+def native_operation_draft_attribute(draft: NativeMlirOperationDraft, name: string, value: NativeMlirAttribute)
+
+@c(symbol = "__sev_mlir_operation_draft_finish_v1")
+def native_operation_draft_finish(session: NativeMlirSession, draft: NativeMlirOperationDraft) -> NativeMlirOperation
+
+@c(symbol = "__sev_mlir_operation_result_v1")
+def native_operation_result(session: NativeMlirSession, operation: NativeMlirOperation, index: usize) -> NativeMlirValue
+
+@c(symbol = "__sev_mlir_block_append_operation_v1")
+def native_block_append_operation(session: NativeMlirSession, block: NativeMlirBlock, operation: NativeMlirOperation)
+
+@c(symbol = "__sev_mlir_module_append_operation_v1")
+def native_module_append_operation(session: NativeMlirSession, operation: NativeMlirOperation)

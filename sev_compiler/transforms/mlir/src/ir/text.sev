@@ -22,6 +22,10 @@ def scalar_type_text(type_id: MlirScalarType) -> string:
 def type_text(type_id: MlirType) -> string:
     if type_kind_name(type_id.kind) == "scalar":
         return scalar_type_text(type_id.scalar)
+    if type_kind_name(type_id.kind) == "unranked_tensor":
+        return "tensor<*x" + scalar_type_text(type_id.scalar) + ">"
+    if type_kind_name(type_id.kind) == "unranked_memref":
+        return "memref<*x" + scalar_type_text(type_id.scalar) + ">"
     dimensions: list[string] = []
     for dimension in type_id.dimensions:
         dimensions.append(dimension_text(dimension))
@@ -80,17 +84,64 @@ def attribute_value_text(value: MlirAttributeValue) -> string:
     if kind == "integer":
         return string(value.integer) + " : " + type_text(value.type_id)
     if kind == "float":
-        return value.text + " : " + type_text(value.type_id)
+        return string(value.floating) + " : " + type_text(value.type_id)
     if kind == "string":
         return "\"" + escaped(value.text) + "\""
     if kind == "boolean":
         return "true" if value.enabled else "false"
     if kind == "type":
         return type_text(value.type_id)
+    if kind == "array":
+        elements: list[string] = []
+        for element in value.elements:
+            elements.append(attribute_value_text(element))
+        return "[" + elements.join(", ") + "]"
+    if kind == "symbol":
+        return "@" + value.symbol
+    if kind == "affine_map":
+        return affine_map_text(value.affine_maps[0])
     rendered: list[string] = []
     for item in value.strings:
         rendered.append("\"" + escaped(item) + "\"")
     return "[" + rendered.join(", ") + "]"
+
+
+def affine_expression_text(expression: MlirAffineExpression) -> string:
+    kind = affine_expression_kind_name(expression.kind)
+    if kind == "dimension":
+        return "d" + string(expression.position)
+    if kind == "symbol":
+        return "s" + string(expression.position)
+    if kind == "constant":
+        return string(expression.constant)
+    symbol := " + "
+    if kind == "multiply":
+        symbol = " * "
+    if kind == "modulo":
+        symbol = " mod "
+    if kind == "floor_divide":
+        symbol = " floordiv "
+    if kind == "ceil_divide":
+        symbol = " ceildiv "
+    return "(" + affine_expression_text(expression.operands[0]) + symbol + affine_expression_text(expression.operands[1]) + ")"
+
+
+def affine_map_text(map: MlirAffineMap) -> string:
+    dimensions: list[string] = []
+    symbols: list[string] = []
+    results: list[string] = []
+    index := 0
+    while index < map.dimensions:
+        dimensions.append("d" + string(index))
+        index += 1
+    index = 0
+    while index < map.symbols:
+        symbols.append("s" + string(index))
+        index += 1
+    for result in map.results:
+        results.append(affine_expression_text(result))
+    symbol_text = "[" + symbols.join(", ") + "]" if len(symbols) != 0 else ""
+    return "affine_map<(" + dimensions.join(", ") + ")" + symbol_text + " -> (" + results.join(", ") + ")>"
 
 
 def attributes_text(attributes: list[MlirNamedAttribute]) -> string:

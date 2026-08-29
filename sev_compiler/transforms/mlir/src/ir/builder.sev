@@ -72,11 +72,10 @@ def builder_set_insertion_point(builder: MlirOpBuilder, block: MlirBlockHandle):
         builder.insertion[0] = block
 
 
-def builder_create_operation(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue] = [], results: list[MlirValue] = [], attributes: list[MlirNamedAttribute] = [], regions: list[int] = [], terminator: bool = false) -> MlirOperation | MlirBuilderError:
+def builder_append_operation(builder: MlirOpBuilder, operation: MlirOperation) -> MlirOperation | MlirBuilderError:
     if len(builder.insertion) == 0:
         return error(MissingInsertionPoint)
     insertion = builder.insertion[0]
-    operation = MlirOperation(name, operands, results, attributes, regions, terminator)
     program := builder.program
     for selected_region in program.regions:
         if selected_region.id == insertion.region:
@@ -89,10 +88,18 @@ def builder_create_operation(builder: MlirOpBuilder, name: MlirOperationName, op
     return error(MissingRegion(insertion.region))
 
 
-def builder_create_function(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool = false) -> MlirFunctionHandle:
+def builder_create_operation(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue] = [], results: list[MlirValue] = [], attributes: list[MlirNamedAttribute] = [], regions: list[int] = [], terminator: bool = false) -> MlirOperation | MlirBuilderError:
+    return builder_append_operation(builder, MlirOperation(name, operands, results, attributes, regions, terminator, None))
+
+
+def builder_create_operation_at(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue], results: list[MlirValue], attributes: list[MlirNamedAttribute], regions: list[int], terminator: bool, location: MlirLocation) -> MlirOperation | MlirBuilderError:
+    return builder_append_operation(builder, MlirOperation(name, operands, results, attributes, regions, terminator, location))
+
+
+def builder_create_function_at(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool, location: MlirLocation | None) -> MlirFunctionHandle:
     program := builder.program
     if declaration:
-        program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true))
+        program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true, location))
         builder.program = program
         return MlirFunctionHandle(int(len(program.functions)) - 1, MlirBlockHandle(-1, -1), arguments, true)
     region = builder_create_region(builder)
@@ -101,7 +108,24 @@ def builder_create_function(builder: MlirOpBuilder, name: string, visibility: Ml
     builder.counters[2] += 1
     program.regions[int(len(program.regions)) - 1].blocks.append(MlirBlock(block_id, arguments, []))
     entry = MlirBlockHandle(region, block_id)
-    program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false))
+    program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false, location))
+    builder.program = program
+    return MlirFunctionHandle(int(len(program.functions)) - 1, entry, arguments, false)
+
+
+def builder_create_function(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool = false) -> MlirFunctionHandle:
+    program := builder.program
+    if declaration:
+        program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true, None))
+        builder.program = program
+        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirBlockHandle(-1, -1), arguments, true)
+    region = builder_create_region(builder)
+    program = builder.program
+    block_id = builder.counters[2]
+    builder.counters[2] += 1
+    program.regions[int(len(program.regions)) - 1].blocks.append(MlirBlock(block_id, arguments, []))
+    entry = MlirBlockHandle(region, block_id)
+    program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false, None))
     builder.program = program
     return MlirFunctionHandle(int(len(program.functions)) - 1, entry, arguments, false)
 
