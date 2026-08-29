@@ -284,8 +284,44 @@ fn global_constant_survives_mutable_string_addition_in_main() {
     assert!(mlir.contains("@__sev_global_0"), "{mlir}");
     assert!(mlir.contains("llvm.store"), "{mlir}");
     assert!(mlir.contains("llvm.load"), "{mlir}");
+    assert!(mlir.contains("func.func @__sev_string_concat("), "{mlir}");
+    assert!(mlir.contains("call @malloc"), "{mlir}");
+    assert!(
+        !mlir.contains("func.func private @__sev_string_concat"),
+        "{mlir}"
+    );
     assert!(!mlir.contains("_assigned"), "{mlir}");
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn string_library_executes_from_sev_through_composed_mlir() {
+    let source = repository_root().join("library/core/text/examples/mlir-runtime.sev");
+
+    let output = sev().arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"Hello, MLIR!\n");
+
+    let emitted = sev()
+        .arg(&source)
+        .args(["--emit", "mlir"])
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let mlir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(mlir.contains("func.func @__sev_string_concat("), "{mlir}");
+    assert!(mlir.contains("func.func @__sev_string_compare("), "{mlir}");
+    assert!(!mlir.contains("func.func private @__sev_string_concat"));
+    assert!(!mlir.contains("func.func private @__sev_string_compare"));
 }
 
 #[test]

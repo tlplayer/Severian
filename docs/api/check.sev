@@ -45,7 +45,7 @@ def check_markdown(path: string) -> int:
         if not (file.write(temporary, snippet) == 0):
             print("api check: could not materialize snippet " + string(index) + " from " + path)
             failures += 1
-        else not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 target/debug/sev check " + temporary) == 0):
+        else not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 ../target/debug/sev check " + temporary) == 0):
             print("api check: Severian rejected snippet " + string(index) + " from " + path)
             failures += 1
     return failures
@@ -60,7 +60,7 @@ def check_primitive_contract(name: string) -> int:
     for heading in ["## Representation", "## Source semantics", "## ABI and lowering", "## Tensor", "## Current weakness"]:
         failures += require_marker(page, source, heading, "required primitive section")
     failures += require_marker(page, source, "universal.primitive." + name, "the exact Universal path")
-    if not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 target/debug/sev check " + conformance) == 0):
+    if not (process.run("ulimit -v 524288; timeout 15s taskset -c 0 ../target/debug/sev check " + conformance) == 0):
         print("api check: primitive conformance failed for " + name)
         failures += 1
     return failures
@@ -68,9 +68,9 @@ def check_primitive_contract(name: string) -> int:
 
 def check_editor_vocabulary() -> int:
     index = file.raw("api/index.toml")
-    grammar = file.raw("editors/vscode/syntaxes/severian.tmLanguage.json")
+    grammar = file.raw("../editors/vscode/syntaxes/severian.tmLanguage.json")
     failures := 0
-    for line in file.raw("compiler/universal/src/primitive/mod.rs").split("\n"):
+    for line in file.raw("../compiler/universal/src/primitive/mod.rs").split("\n"):
         if "name: \"" not in line:
             continue
         name = line.split("\"")[1]
@@ -90,7 +90,7 @@ def check_editor_vocabulary() -> int:
 
 def check_structural_tensor_ids() -> int:
     records = file.raw("api/compiler/tensor/operations.toml")
-    universal = file.raw("compiler/universal/src/tensor.rs")
+    universal = file.raw("../compiler/universal/src/tensor.rs")
     failures := 0
     for operation in ["elementwise", "reduce", "matmul", "reshape_view", "permute", "slice", "broadcast", "gather", "scatter", "concatenate", "convert", "storage_view"]:
         identity = "tensor." + operation
@@ -104,7 +104,7 @@ def check_structural_tensor_ids() -> int:
 
 
 def check_native_catalogue() -> int:
-    if process.run("ulimit -v 524288; timeout 20s taskset -c 0 target/debug/sev api check --root api") == 0:
+    if process.run("ulimit -v 524288; timeout 20s taskset -c 0 ../target/debug/sev api check --root api") == 0:
         return 0
     print("api check: native `sev api check` rejected the canonical catalogue")
     return 1

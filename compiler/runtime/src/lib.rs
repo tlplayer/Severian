@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub mod gpu;
 pub mod storage_view;
+pub mod string;
 pub mod tensor_jit;
 
 pub use storage_view::{
@@ -11,6 +12,7 @@ pub use storage_view::{
     StorageView, StorageViewAbi, StorageViewError, STORAGE_VIEW_ABI_MAGIC,
     STORAGE_VIEW_ABI_VERSION, STORAGE_VIEW_CONTIGUOUS, STORAGE_VIEW_READ_ONLY,
 };
+pub use string::{StringAbiV1, StringStatusV1, StringViewAbiV1, STRING_ABI_VERSION};
 
 /// Native runtime translation units linked by artifact backends.
 ///

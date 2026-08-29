@@ -27,7 +27,7 @@ def check_symmetry() -> int:
     failures := 0
     if not run_case(
         "scalar operators against Python",
-        "target/debug/sev run api/symmetry/operators.sev",
+        "../target/debug/sev run api/symmetry/operators.sev",
         "python3 api/symmetry/operators.py",
         "/tmp/severian-api-operators.out",
         "/tmp/severian-api-operators-python.out",
@@ -39,7 +39,7 @@ def check_symmetry() -> int:
         failures += 1
     else not run_case(
         "ordinary generics against Rust",
-        "target/debug/sev run api/symmetry/generics.sev",
+        "../target/debug/sev run api/symmetry/generics.sev",
         "/tmp/severian-api-generics-rust",
         "/tmp/severian-api-generics.out",
         "/tmp/severian-api-generics-rust.out",

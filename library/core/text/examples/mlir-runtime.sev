@@ -1,0 +1,5 @@
+def main():
+    greeting := "Hello"
+    greeting += ", MLIR!"
+    assert(greeting == "Hello, MLIR!")
+    print(greeting)

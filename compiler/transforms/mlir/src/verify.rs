@@ -1,5 +1,6 @@
 use crate::emit::{artifact_symbol, MlirArtifact, MlirError};
 use crate::ffi;
+use crate::library::registered_libraries;
 use severian_artifact::ArtifactId;
 use severian_lir::{LoweredFloatFormat, LoweredType};
 use severian_target::TargetSpec;
@@ -149,6 +150,8 @@ pub fn compose(
         }
     }
 
+    compose_registered_libraries(&context, &module, target)?;
+
     if module.verify("composed module").is_err() {
         let printed = module.print();
         let excerpt = mismatched_call_signatures(&printed).join("\n");
@@ -158,6 +161,99 @@ pub fn compose(
     }
     module.verify_allowed_dialects(target)?;
     Ok(module.print())
+}
+
+fn compose_registered_libraries(
+    context: &Context,
+    module: &Module<'_>,
+    target: &TargetSpec,
+) -> Result<(), MlirError> {
+    for library in registered_libraries() {
+        let symbols = SymbolTable::new(module)?;
+        let required = library
+            .exports
+            .iter()
+            .filter(|symbol| symbols.lookup(symbol).is_some())
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if required.is_empty() {
+            continue;
+        }
+        if library
+            .pointer_bits
+            .is_some_and(|bits| bits != target.pointer_bits())
+        {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "MLIR library {} v{} requires a {}-bit pointer ABI, target {} uses {} bits",
+                library.id,
+                library.abi_version,
+                library.pointer_bits.expect("checked as present"),
+                target.triple,
+                target.pointer_bits()
+            )));
+        }
+        for symbol in &required {
+            let declaration = symbols
+                .lookup(symbol)
+                .expect("required library symbol was discovered in this table");
+            if operation_name(declaration) != "func.func" || module.operation_has_body(declaration)
+            {
+                return Err(MlirError::DuplicateSymbol((*symbol).to_owned()));
+            }
+        }
+        let source = Module::parse(
+            context,
+            library.module,
+            &format!("MLIR library {} v{}", library.id, library.abi_version),
+        )?;
+        source.verify(&format!("MLIR library {}", library.id))?;
+        source.verify_allowed_dialects(target)?;
+        let declared_id = operation_string_attribute(source.operation(), "severian.library_id");
+        let declared_version =
+            operation_integer_attribute(source.operation(), "severian.abi_version");
+        if declared_id.as_deref() != Some(library.id)
+            || declared_version != Some(i64::from(library.abi_version))
+        {
+            return Err(MlirError::VerificationFailed(format!(
+                "MLIR library registry expects {} v{}, module declares {:?} v{:?}",
+                library.id, library.abi_version, declared_id, declared_version
+            )));
+        }
+        let source_symbols = SymbolTable::new(&source)?;
+        for symbol in &required {
+            if source_symbols
+                .lookup(symbol)
+                .is_none_or(|definition| !source.operation_has_body(definition))
+            {
+                return Err(MlirError::VerificationFailed(format!(
+                    "MLIR library {} does not define required export `{symbol}`",
+                    library.id
+                )));
+            }
+        }
+        let mut operation = unsafe { ffi::mlirBlockGetFirstOperation(source.body()) };
+        while !operation.is_null() {
+            let next = unsafe { ffi::mlirOperationGetNextInBlock(operation) };
+            if let Some(name) = operation_symbol_name(operation) {
+                let import = required.contains(name.as_str())
+                    || library.dependencies.contains(&name.as_str());
+                if import {
+                    if let Some(existing) = symbols.lookup(&name) {
+                        if required.contains(name.as_str()) {
+                            unsafe { ffi::mlirSymbolTableErase(symbols.raw, existing) };
+                        }
+                    }
+                    if symbols.lookup(&name).is_none() {
+                        let cloned = unsafe { ffi::mlirOperationClone(operation) };
+                        unsafe { ffi::mlirBlockAppendOwnedOperation(module.body(), cloned) };
+                    }
+                }
+            }
+            operation = next;
+        }
+        module.verify(&format!("module composed with MLIR library {}", library.id))?;
+    }
+    Ok(())
 }
 
 fn mismatched_call_signatures(module: &str) -> Vec<String> {
@@ -196,6 +292,75 @@ fn mismatched_call_signatures(module: &str) -> Vec<String> {
         })
         .take(40)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registered_string_library_replaces_requested_declarations() {
+        let ordinary = r#"
+module {
+  func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr
+  func.func private @__sev_string_compare(!llvm.ptr, !llvm.ptr) -> i32
+  func.func private @__sev_string_release(!llvm.ptr)
+  func.func @entry(%left: !llvm.ptr, %right: !llvm.ptr) -> i32 {
+    %joined = func.call @__sev_string_concat(%left, %right) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr
+    %comparison = func.call @__sev_string_compare(%joined, %right) : (!llvm.ptr, !llvm.ptr) -> i32
+    func.call @__sev_string_release(%joined) : (!llvm.ptr) -> ()
+    return %comparison : i32
+  }
+}
+"#;
+
+        let composed = compose(ordinary, &[], &TargetSpec::host()).unwrap();
+
+        assert!(composed.contains("func.func @__sev_string_concat("));
+        assert!(composed.contains("func.func @__sev_string_compare("));
+        assert!(composed.contains("func.func @__sev_string_release("));
+        assert!(!composed.contains("func.func private @__sev_string_concat"));
+        assert!(composed.contains("func.func private @malloc"));
+        assert!(composed.contains("func.func private @free"));
+    }
+
+    #[test]
+    fn unused_registered_library_is_not_imported() {
+        let ordinary = "module { func.func @entry() { return } }";
+        let composed = compose(ordinary, &[], &TargetSpec::host()).unwrap();
+
+        assert!(!composed.contains("__sev_string_concat"));
+        assert!(!composed.contains("severian.library_id"));
+    }
+
+    #[test]
+    fn a_string_export_definition_cannot_be_silently_replaced() {
+        let ordinary = r#"
+module {
+  func.func @__sev_string_compare(%left: !llvm.ptr, %right: !llvm.ptr) -> i32 {
+    %zero = arith.constant 0 : i32
+    return %zero : i32
+  }
+}
+"#;
+
+        assert!(matches!(
+            compose(ordinary, &[], &TargetSpec::host()),
+            Err(MlirError::DuplicateSymbol(symbol)) if symbol == "__sev_string_compare"
+        ));
+    }
+
+    #[test]
+    fn legacy_string_layout_rejects_a_32_bit_target_before_import() {
+        let ordinary =
+            "module { func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr }";
+
+        assert!(matches!(
+            compose(ordinary, &[], &TargetSpec::new("x86-unknown-linux")),
+            Err(MlirError::UnsupportedOperation(message))
+                if message.contains("requires a 64-bit pointer ABI")
+        ));
+    }
 }
 
 /// Replaces compiled-region declarations with host functions that call the
@@ -501,6 +666,12 @@ fn operation_string_attribute(operation: ffi::MlirOperation, name: &str) -> Opti
     }
     let bytes = unsafe { std::slice::from_raw_parts(value.data.cast::<u8>(), value.length) };
     Some(String::from_utf8_lossy(bytes).into_owned())
+}
+
+fn operation_integer_attribute(operation: ffi::MlirOperation, name: &str) -> Option<i64> {
+    let attribute =
+        unsafe { ffi::mlirOperationGetAttributeByName(operation, ffi::string_ref(name)) };
+    (!attribute.is_null()).then(|| unsafe { ffi::mlirIntegerAttrGetValueInt(attribute) })
 }
 
 impl Drop for Module<'_> {

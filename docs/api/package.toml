@@ -14,8 +14,8 @@ name = "api-symmetry"
 path = "symmetry.sev"
 
 [dependencies]
-file = { path = "../library/system/file", version = "0.1.0" }
-process = { path = "../library/system/process", version = "0.1.0" }
+file = { path = "../../library/system/file", version = "0.1.0" }
+process = { path = "../../library/system/process", version = "0.1.0" }
 
 [test]
 coverage-min = 0

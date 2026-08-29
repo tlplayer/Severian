@@ -199,6 +199,18 @@ id = "library.compute.parallel"
 source = "library/compute/tensor/package.toml"
 id = "library.tensor"
 [[coverage.library_package]]
+source = "library/compute/tensor/examples/severian-gpu-mlir/package.toml"
+id = "library.tensor"
+[[coverage.library_package]]
+source = "library/compute/tensor/examples/severian-kernel-transform/package.toml"
+id = "library.tensor"
+[[coverage.library_package]]
+source = "library/compute/tensor/examples/triton-dispatch/package.toml"
+id = "library.tensor"
+[[coverage.library_package]]
+source = "library/package.toml"
+id = "library.package_catalog"
+[[coverage.library_package]]
 source = "library/core/package.toml"
 id = "library.core"
 [[coverage.library_package]]
@@ -260,6 +272,12 @@ source = "library/core/collections/stack/package.toml"
 id = "library.collections"
 [[coverage.library_package]]
 source = "library/core/collections/traits/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/internal/contiguous_storage/package.toml"
+id = "library.collections"
+[[coverage.library_package]]
+source = "library/core/collections/internal/hash_table/package.toml"
 id = "library.collections"
 [[coverage.library_package]]
 source = "library/data/package.toml"

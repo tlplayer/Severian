@@ -115,6 +115,7 @@ unsafe extern "C" {
     pub fn mlirIdentifierStr(identifier: MlirIdentifier) -> MlirStringRef;
     pub fn mlirStringAttrGet(context: MlirContext, value: MlirStringRef) -> MlirAttribute;
     pub fn mlirStringAttrGetValue(attribute: MlirAttribute) -> MlirStringRef;
+    pub fn mlirIntegerAttrGetValueInt(attribute: MlirAttribute) -> i64;
     pub fn mlirAttributeIsAType(attribute: MlirAttribute) -> bool;
     pub fn mlirTypeAttrGetValue(attribute: MlirAttribute) -> MlirType;
 

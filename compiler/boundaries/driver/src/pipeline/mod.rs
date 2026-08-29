@@ -325,14 +325,7 @@ impl Compiler {
                 let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
                     .map_err(CompileError::Lowering)?;
                 let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
-                let text = if artifacts.is_empty() {
-                    // Emission is also a debugging boundary: return the
-                    // generated form even when downstream MLIR verification
-                    // is the behavior under investigation.
-                    ordinary
-                } else {
-                    compose_region_artifacts(&ordinary, artifacts, &self.target)?.host_mlir
-                };
+                let text = compose_region_artifacts(&ordinary, artifacts, &self.target)?.host_mlir;
                 Ok(format!("{}\n", text.trim_end()))
             }
         }

@@ -472,23 +472,3 @@ const char *__sev_string_slice_ex(
     result[output] = '\0';
     return result;
 }
-
-const char *__sev_string_concat(const char *left, const char *right) {
-    size_t left_length = strlen(left);
-    size_t right_length = strlen(right);
-    if (right_length > SIZE_MAX - left_length - 1) abort();
-    if (left_length + right_length + 1 > SIZE_MAX - sizeof(sev_owned_string)) abort();
-    char *result = sev_string_allocation(left_length + right_length);
-    memcpy(result, left, left_length);
-    memcpy(result + left_length, right, right_length + 1);
-    return result;
-}
-
-int32_t __sev_string_compare(const char *left, const char *right) {
-    return strcmp(left, right);
-}
-
-void __sev_string_release(const char *value) {
-    if (value == NULL) return;
-    free(((sev_owned_string *)value) - 1);
-}

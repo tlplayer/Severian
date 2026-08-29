@@ -13,7 +13,7 @@ requires evidence and an API status update, not merely deleting the prose.
 | `W-GPU-002` | Driver integration | The ordinary driver does not yet produce `.sev` `LogicalKernel` objects from every `FusionRegion`. | The tensor example constructs the initial kernel contract through a fixture. | Driver executes `FusionRegion → LogicalKernel → ScheduledKernel → verified MLIR`. |
 | `W-IDE-001` | Editor semantics | VS Code support is TextMate/CLI based; it has no compiler-backed semantic tokens, completion, or navigation. | `editors/vscode` contains no language-server client. | LSP uses compiler symbol/type/ownership data and API IDs. |
 | `W-TENSOR-001` | Tensor surface | Structural operation identities exist, but backend coverage is not exhaustive across every element kind, rank, layout, and effect. | `TensorOp::ALL` exceeds current direct GPU lowering coverage. | Generated conformance matrix passes all legal combinations and rejects illegal ones at legalization. |
-| `W-TEST-001` | Behavioral symmetry | Python/Rust symmetry currently covers scalar operators and ordinary generics, not all 430 queryable records. | `api/SYMMETRY.md` lists two passing cases and the missing groups. | Every implemented API group has a behavioral or compile-outcome oracle; partial groups expose failing cases at their precise boundary. |
+| `W-TEST-001` | Behavioral symmetry | Python/Rust symmetry currently covers scalar operators and ordinary generics, not all 498 queryable records. | `api/SYMMETRY.md` lists two passing cases and the missing groups. | Every implemented API group has a behavioral or compile-outcome oracle; partial groups expose failing cases at their precise boundary. |
 
 ## How records expose weakness
 

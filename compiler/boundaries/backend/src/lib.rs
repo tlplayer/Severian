@@ -490,7 +490,17 @@ fn c_return_type(ty: LoweredType) -> Result<&'static str, BackendError> {
 }
 
 pub fn supports_direct_lir(module: &LoweredModule) -> bool {
-    module.initializer_cfg.is_none() && render_c(module).is_ok()
+    let requires_mlir_library = all_operations(module).into_iter().any(|operation| {
+        matches!(
+            operation,
+            Operation::RuntimeCall { symbol, .. }
+                if matches!(
+                    symbol.as_str(),
+                    "__sev_string_concat" | "__sev_string_compare" | "__sev_string_release"
+                )
+        )
+    });
+    module.initializer_cfg.is_none() && !requires_mlir_library && render_c(module).is_ok()
 }
 
 fn value_type(module: &LoweredModule, id: ValueId) -> Result<LoweredType, BackendError> {
@@ -1055,6 +1065,32 @@ mod tests {
         let rendered = render_c(&module).unwrap();
         assert!(rendered.contains("__sev_string_concat(v0, v1)"));
         assert!(rendered.contains("const char * __sev_string_concat(const char *, const char *);"));
+    }
+
+    #[test]
+    fn mlir_owned_string_operations_bypass_the_direct_c_backend() {
+        for symbol in [
+            "__sev_string_concat",
+            "__sev_string_compare",
+            "__sev_string_release",
+        ] {
+            let module = LoweredModule {
+                values: vec![Value {
+                    id: ValueId(0),
+                    ty: LoweredType::String,
+                }],
+                initializer: Block {
+                    operations: vec![Operation::RuntimeCall {
+                        symbol: symbol.into(),
+                        arguments: Vec::new(),
+                        result: None,
+                    }],
+                },
+                ..LoweredModule::default()
+            };
+
+            assert!(!supports_direct_lir(&module), "{symbol}");
+        }
     }
 
     #[test]

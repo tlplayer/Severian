@@ -34,7 +34,7 @@ surface:
 - [Weakness ledger](WEAKNESSES.md)
 - [Completeness and relationship audit](AUDIT.md)
 
-The catalogue currently materializes 430 queryable feature records. Exact
+The catalogue currently materializes 498 queryable feature records. Exact
 members are inherited from documented families so `primitive.i32` and
 `operator.add` have complete logical records without copying family contracts.
 The weakness ledger records implementation gaps without pretending they are
