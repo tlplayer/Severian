@@ -1,0 +1,6 @@
+
+
+```sev
+trait Hash:
+    
+```
