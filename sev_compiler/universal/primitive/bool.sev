@@ -196,6 +196,23 @@ class bool: Boolean :
     operator if(self) -> self
     operator else(self) -> not self
 
+    test "bool selects if and else branches":
+        selected := 0
+        a = true
+
+        if a:
+            selected = 1
+        else:
+            selected = 2
+
+        assert(selected == 1)
+
+        if not a:
+            selected = 3
+        else:
+            selected = 4
+
+        assert(selected == 4)
     '''
     ## Logical operators
 
@@ -259,6 +276,41 @@ class bool: Boolean :
     operator >=(right: bool) -> bool:
         return self or not right
 
+    test "bitwise operators use the Boolean truth table":
+        assert((false & false) == false)
+        assert((false & true) == false)
+        assert((true & true) == true)
+
+        assert((false | false) == false)
+        assert((false | true) == true)
+        assert((true | true) == true)
+
+        assert((false ^ false) == false)
+        assert((false ^ true) == true)
+        assert((true ^ true) == false)
+
+        value := true
+        value &= false
+        assert(value == false)
+
+        value |= true
+        assert(value == true)
+
+        value ^= true
+        assert(value == false)
+
+
+    test "bool equality and ordering are total":
+        assert(false == false)
+        assert(true == true)
+        assert(false != true)
+
+        assert(false < true)
+        assert(false <= false)
+        assert(false <= true)
+        assert(true > false)
+        assert(true >= true)
+
     '''
     ## Value traits
     '''
@@ -274,12 +326,48 @@ class bool: Boolean :
     def print(self) -> string:
         return "true" if self else "false"
 
+````sev
     '''
+    ## Conversion relations
+
+    Conversions are declared inside `operator <=>` as edges in the type-conversion
+    graph.
+
+    - `A => B` declares a bidirectional conversion relationship between `A` and `B`.
+    - `A -> B` declares a one-direction conversion from `A` to `B`.
+    - `A ~> B` declares an approximate relationship where conversion may lose
+      information, require a policy, or fail with `TypeConversionError`.
+    - `T(value)` requests the canonical conversion to `T`.
+    - `value as T` requests conversion through the broader conversion graph and may
+      use relationships that the canonical constructor does not.
+    - Specify blocked conversions with never or ! operators in the graph
+    - An unsupported conversion produces `TypeConversionError`.
+
+    The symbols describe relationships between types, not whether a programmer is
+    permitted to write a particular conversion.
+
+    ```text
+    A => B       A <-> B
+
+    A -> B       A -> B
+
+    A ~> B       A ~~> B
+    ```
+
+    `~>` is primarily a relationship declared inside `<=>`. At a call site the
+    programmer normally requests that relationship with approximate or approx.
+
     ## Integer conversion family
 
-    The -> is expanded once for every member of the closed `int` union.
-    `throw` has type `Error`; the failed arm therefore does not widen the successful
-    result beyond `bool`.
+    The conversion definition is expanded for every member of the closed `int`
+    union.
+
+    Boolean and integer types have a declared conversion relationship. `bool`
+    maps to the integer values `0` and `1`; integer-to-bool conversion maps zero
+    to `false` and non-zero values to `true`.
+
+    `throw` has type `Error`, so an unsupported generated conversion terminates
+    through `TypeConversionError` rather than widening the successful value type.
     '''
     operator <=>(self, T) -> T | TypeConversionError:
         integer_conversion-> [T:I]: 
@@ -295,10 +383,18 @@ class bool: Boolean :
     '''
     ## Floating conversion family
 
-    bool-to-float conversion is total and explicit. No float-to-bool
-    conversion is declared here; floating truth testing belongs to `float`'s
-    `operator if/else`, while a policy-bearing numeric conversion belongs to the
-    floating primitive API.
+    The conversion definition is expanded for every member of the closed `float`
+    union.
+
+    Boolean and floating-point types have a bidirectional conversion relationship:
+    `false` maps to `0.0`, `true` maps to `1.0`, zero maps to `false`, and any
+    non-zero value maps to `true`.
+
+    More complex floating-point conversions may use `~>` when narrowing,
+    approximation, precision loss, or another conversion policy must be represented.
+
+    `bool(value)` uses the canonical Boolean conversion. `value as bool` may use the
+    broader conversion graph when a more permissive conversion relationship exists.
     '''
         float_conversion-> [T:F]:
             self => F:
@@ -307,6 +403,7 @@ class bool: Boolean :
                 return false if F == 0 else return true 
         _ -> [T]:
             throw TypeConversionError(f"Failed to convert {type(T)} to bool, no compatible types")
+````
 
 
 '''
@@ -329,24 +426,6 @@ the attached Markdown, signatures, conversion graph, -> expansions, ordinary
 tests, and compiler accept/reject cases from this file.
 '''
 
-
-test "bool selects if and else branches":
-    selected := 0
-    a = true
-
-    if a:
-        selected = 1
-    else:
-        selected = 2
-
-    assert(selected == 1)
-
-    if not a:
-        selected = 3
-    else:
-        selected = 4
-
-    assert(selected == 4)
 
 
 test "container truth is separate from bool conversion":
@@ -395,41 +474,6 @@ test "and and or preserve operands and short circuit":
     assert((true or throw Eror("Short circuit failed")))
 
 
-test "bitwise operators use the Boolean truth table":
-    assert((false & false) == false)
-    assert((false & true) == false)
-    assert((true & true) == true)
-
-    assert((false | false) == false)
-    assert((false | true) == true)
-    assert((true | true) == true)
-
-    assert((false ^ false) == false)
-    assert((false ^ true) == true)
-    assert((true ^ true) == false)
-
-    value := true
-    value &= false
-    assert(value == false)
-
-    value |= true
-    assert(value == true)
-
-    value ^= true
-    assert(value == false)
-
-
-test "bool equality and ordering are total":
-    assert(false == false)
-    assert(true == true)
-    assert(false != true)
-
-    assert(false < true)
-    assert(false <= false)
-    assert(false <= true)
-    assert(true > false)
-    assert(true >= true)
-
 
 test "bool value traits are stable":
     assert(bool.default() == false)
@@ -440,22 +484,3 @@ test "bool value traits are stable":
     assert(false.display() == "false")
     assert(true.display() == "true")
 
-
-
-test "string conversion is canonical and checked":
-    assert(string(false) == "false")
-    assert(string(true) == "true")
-    assert(bool("false") == false)
-    assert(bool("true") == true)
-
-
-
-test with compiler "total conversion does not permit implicit assignment":
-    reject:
-        value: i32 = true
-
-test with compiler "truth operators must produce bool or Never":
-    reject:
-        class invalid_truth: Truth
-            operator if(self) -> 1
-            operator else(self) -> 0

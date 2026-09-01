@@ -1,0 +1,18 @@
+
+
+
+
+
+
+test with compiler "package level no loss of data for conversion":
+    import package
+    #Set package for compiler to reject data loss for conversion
+    package.config.set("lossless.conversion",true)
+    reject:
+        big_number: i64 = 10**10
+        small_representation: f8 = big_number
+
+    package.config.set("lossless.conversion",false)
+    accept:
+        big_number: i64 = 10**10
+        small_representation: f8 = big_number

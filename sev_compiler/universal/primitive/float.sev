@@ -1,0 +1,755 @@
+import "primitive.sev"
+
+import "../operator/trait/arithmetic.sev"
+import "../operator/trait/equatable.sev"
+import "../operator/trait/ordered.sev"
+
+
+'''
+# `float`
+
+`float` is Severian's closed family of binary floating-point primitives.
+
+```sev
+union float:
+    f8e4m3fn
+    f8e5m2
+    bf16
+    f16
+    f32
+    f64
+    f128
+```
+
+The family uses concrete formats rather than an ambiguous `f8`. The two common
+8-bit AI formats remain distinct types and distinct conversion nodes.
+
+Unsuffixed floating literals belong to the `float` family. The expected type
+selects the concrete representation; without an expected type the compiler uses
+`f64`.
+
+## Storage
+
+Floating primitives lower directly to MLIR floating-point types:
+
+```text
+Severian      MLIR
+f8e4m3fn      f8E4M3FN
+f8e5m2        f8E5M2
+bf16          bf16
+f16           f16
+f32           f32
+f64           f64
+f128          f128
+```
+
+The primitive metadata retains precision, exponent width, NaN support, and
+infinity support so the conversion graph can distinguish widening from
+approximation.
+
+## Truth
+
+Floating values participate in the `Truth` contract:
+
+```text
++0.0     -> false
+-0.0     -> false
+nonzero  -> true
+NaN      -> true
++inf     -> true
+-inf     -> true
+```
+
+Truth testing does not change the floating type.
+'''
+
+
+trait FloatArithmetic:
+    operator +(right: Self) -> Self
+    operator -(right: Self) -> Self
+    operator *(right: Self) -> Self
+    operator /(right: Self) -> Self
+    operator //(right: Self) -> Self
+    operator %(right: Self) -> Self
+    operator **(right: Self) -> Self
+
+    operator +=(right: Self)
+    operator -=(right: Self)
+    operator *=(right: Self)
+    operator /=(right: Self)
+    operator //=(right: Self)
+    operator %=(right: Self)
+
+
+trait Floating:
+    Primitive
+    Truth
+    FloatArithmetic
+    Equatable
+    Ordered
+    Copy
+    Clone
+    Default
+    Print
+
+    property bits: u16
+    property exponent_bits: u16
+    property precision_bits: u16
+    property supports_infinity: bool
+    property supports_nan: bool
+
+
+'''
+# Float family
+
+The family is closed. A numeric class may convert to or from a floating primitive,
+but implementing `Floating` does not make it a member of `float`.
+'''
+union f8:
+    f8e4m3fn
+    f8e5m2
+
+
+union float:
+    f8
+    bf16
+    f16
+    f32
+    f64
+    f128
+
+
+'''
+# Primitive declarations
+
+`precision_bits` includes the implicit leading significand bit when the format
+has one. The compiler uses this metadata when classifying float-to-float
+conversion edges.
+'''
+class f8e4m3fn: Floating :
+    name: string = "f8e4m3fn"
+    size: byte = 1B
+    alignment: byte = 1B
+    bits: u16 = 8
+    exponent_bits: u16 = 4
+    precision_bits: u16 = 4
+    supports_infinity: bool = false
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        8, 4, 3, false
+    )
+    default_literal: bool = true
+
+
+class f8e5m2: Floating :
+    name: string = "f8e5m2"
+    size: byte = 1B
+    alignment: byte = 1B
+    bits: u16 = 8
+    exponent_bits: u16 = 5
+    precision_bits: u16 = 3
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        8, 5, 2, true
+    )
+    default_literal: bool = true
+
+
+class bf16: Floating :
+    name: string = "bf16"
+    size: byte = 2B
+    alignment: byte = 2B
+    bits: u16 = 16
+    exponent_bits: u16 = 8
+    precision_bits: u16 = 8
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        16, 8, 7, true
+    )
+    default_literal: bool = true
+
+
+class f16: Floating :
+    name: string = "f16"
+    size: byte = 2B
+    alignment: byte = 2B
+    bits: u16 = 16
+    exponent_bits: u16 = 5
+    precision_bits: u16 = 11
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        16, 5, 10, true
+    )
+    default_literal: bool = true
+
+
+class f32: Floating :
+    name: string = "f32"
+    size: byte = 4B
+    alignment: byte = 4B
+    bits: u16 = 32
+    exponent_bits: u16 = 8
+    precision_bits: u16 = 24
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        32, 8, 23, true
+    )
+    default_literal: bool = true
+
+
+class f64: Floating :
+    name: string = "f64"
+    size: byte = 8B
+    alignment: byte = 8B
+    bits: u16 = 64
+    exponent_bits: u16 = 11
+    precision_bits: u16 = 53
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        64, 11, 52, true
+    )
+    default_literal: bool = true
+
+
+class f128: Floating :
+    name: string = "f128"
+    size: byte = 16B
+    alignment: byte = 16B
+    bits: u16 = 128
+    exponent_bits: u16 = 15
+    precision_bits: u16 = 113
+    supports_infinity: bool = true
+    supports_nan: bool = true
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
+        128, 15, 112, true
+    )
+    default_literal: bool = true
+
+
+'''
+# Shared floating behavior
+
+Every member of `float` inherits the same source-level behavior. The concrete
+format determines the MLIR result type.
+
+## Direct MLIR lowering
+
+Primitive floating operations bind directly to MLIR with `mlir(...)`:
+
+```sev
+return mlir(arith.addf, self, right)
+return mlir(arith.cmpf, "olt", self, right)
+return mlir(math.sqrt, self)
+```
+
+`mlir(...)` constructs typed MLIR directly. There is no hidden
+`intrinsic.float_*` layer.
+
+A raw MLIR block remains available for multi-operation lowering:
+
+```sev
+mlir:
+    %quotient = arith.divf %self, %right : !F
+    %floor = math.floor %quotient : !F
+    return %floor
+```
+
+Formatting and parsing remain ordinary library behavior because they are not
+single MLIR primitive operations.
+'''
+extend [F: float] F:
+
+    operator if(self) -> bool:
+        return mlir(arith.cmpf, "une", self, F(0.0))
+
+    operator else(self) -> bool:
+        return mlir(arith.cmpf, "oeq", self, F(0.0))
+
+    operator +(right: F) -> F:
+        return mlir(arith.addf, self, right)
+
+    operator -(right: F) -> F:
+        return mlir(arith.subf, self, right)
+
+    operator *(right: F) -> F:
+        return mlir(arith.mulf, self, right)
+
+    operator /(right: F) -> F:
+        return mlir(arith.divf, self, right)
+
+    operator //(right: F) -> F:
+        quotient := mlir(arith.divf, self, right)
+        return mlir(math.floor, quotient)
+
+    operator %(right: F) -> F:
+        quotient := mlir(arith.divf, self, right)
+        floor_quotient := mlir(math.floor, quotient)
+        product := mlir(arith.mulf, floor_quotient, right)
+        return mlir(arith.subf, self, product)
+
+    operator **(right: F) -> F:
+        return mlir(math.powf, self, right)
+
+    operator +(self) -> F:
+        return self
+
+    operator -(self) -> F:
+        return mlir(arith.negf, self)
+
+    operator ==(right: F) -> bool:
+        return mlir(arith.cmpf, "oeq", self, right)
+
+    operator !=(right: F) -> bool:
+        return mlir(arith.cmpf, "une", self, right)
+
+    operator <(right: F) -> bool:
+        return mlir(arith.cmpf, "olt", self, right)
+
+    operator <=(right: F) -> bool:
+        return mlir(arith.cmpf, "ole", self, right)
+
+    operator >(right: F) -> bool:
+        return mlir(arith.cmpf, "ogt", self, right)
+
+    operator >=(right: F) -> bool:
+        return mlir(arith.cmpf, "oge", self, right)
+
+    operator +=(right: F):
+        self = self + right
+
+    operator -=(right: F):
+        self = self - right
+
+    operator *=(right: F):
+        self = self * right
+
+    operator /=(right: F):
+        self = self / right
+
+    operator //=(right: F):
+        self = self // right
+
+    operator %=(right: F):
+        self = self % right
+
+    def copy(self) -> F:
+        return self
+
+    def default() -> F:
+        return F(0.0)
+
+    def print(self) -> string:
+        return string.from_float(self)
+
+    def abs(self) -> F:
+        return mlir(math.absf, self)
+
+    def floor(self) -> F:
+        return mlir(math.floor, self)
+
+    def ceil(self) -> F:
+        return mlir(math.ceil, self)
+
+    def trunc(self) -> F:
+        return mlir(math.trunc, self)
+
+    def round(self) -> F:
+        return mlir(math.roundeven, self)
+
+    def round_away(self) -> F:
+        return mlir(math.round, self)
+
+    def fract(self) -> F:
+        return self - self.trunc()
+
+    def sqrt(self) -> F:
+        return mlir(math.sqrt, self)
+
+    def rsqrt(self) -> F:
+        return mlir(math.rsqrt, self)
+
+    def cbrt(self) -> F:
+        return mlir(math.cbrt, self)
+
+    def exp(self) -> F:
+        return mlir(math.exp, self)
+
+    def exp2(self) -> F:
+        return mlir(math.exp2, self)
+
+    def expm1(self) -> F:
+        return mlir(math.expm1, self)
+
+    def log(self) -> F:
+        return mlir(math.log, self)
+
+    def log2(self) -> F:
+        return mlir(math.log2, self)
+
+    def log10(self) -> F:
+        return mlir(math.log10, self)
+
+    def log1p(self) -> F:
+        return mlir(math.log1p, self)
+
+    def sin(self) -> F:
+        return mlir(math.sin, self)
+
+    def cos(self) -> F:
+        return mlir(math.cos, self)
+
+    def tan(self) -> F:
+        return mlir(math.tan, self)
+
+    def asin(self) -> F:
+        return mlir(math.asin, self)
+
+    def acos(self) -> F:
+        return mlir(math.acos, self)
+
+    def atan(self) -> F:
+        return mlir(math.atan, self)
+
+    def atan2(self, right: F) -> F:
+        return mlir(math.atan2, self, right)
+
+    def sinh(self) -> F:
+        return mlir(math.sinh, self)
+
+    def cosh(self) -> F:
+        return mlir(math.cosh, self)
+
+    def tanh(self) -> F:
+        return mlir(math.tanh, self)
+
+    def fma(self, multiplier: F, addend: F) -> F:
+        return mlir(math.fma, self, multiplier, addend)
+
+    def copysign(self, sign: F) -> F:
+        return mlir(math.copysign, self, sign)
+
+    def is_nan(self) -> bool:
+        return mlir(math.isnan, self)
+
+    def is_infinite(self) -> bool:
+        return mlir(math.isinf, self)
+
+    def is_finite(self) -> bool:
+        return mlir(math.isfinite, self)
+
+    def is_normal(self) -> bool:
+        return mlir(math.isnormal, self)
+
+    def signum(self) -> F:
+        if self.is_nan():
+            return self
+        if self < F(0.0):
+            return F(-1.0)
+        return F(1.0)
+
+
+'''
+## Conversion relations
+
+Conversions are declared inside `operator <=>` as edges in the type-conversion
+graph.
+
+- `A => B` declares a bidirectional conversion relationship between `A` and `B`.
+- `A -> B` declares a one-direction conversion from `A` to `B`.
+- `A ~> B` declares an approximate relationship where conversion may round,
+  overflow, underflow, lose precision, require policy, or throw.
+- `T(value)` requests the target's canonical conversion.
+- `value as T` may traverse the broader conversion graph, including approximate
+  relationships.
+- An unsupported conversion produces `TypeConversionError`.
+
+The symbols describe only the graph:
+
+```text
+A => B       A <-> B
+A -> B       A  -> B
+A ~> B       A ~~> B
+```
+
+## Float-to-float conversion
+
+Every float format receives an edge to every other format.
+
+A conversion is `->` when the target has at least the source precision and
+exponent width and does not lose an infinity representation. Otherwise the
+relationship is `~>`.
+
+Examples:
+
+```text
+f16  -> f32
+bf16 -> f32
+f32  -> f64
+f64  -> f128
+
+f32      ~> f16
+f32      ~> bf16
+f16      ~> bf16
+bf16     ~> f16
+f8e4m3fn ~> f8e5m2
+```
+
+`~>` does not prescribe a failure policy. IEEE conversion may round, underflow,
+or overflow according to the selected target and package policy.
+'''
+extend [F: float] F:
+
+    operator <=>(self, T) -> T | TypeConversionError:
+
+        float_conversion-> [T:G] with G in float:
+
+            self -> G with (
+                F.precision_bits <= G.precision_bits
+                and F.exponent_bits <= G.exponent_bits
+                and (not F.supports_infinity or G.supports_infinity)
+            ):
+                if F is G:
+                    return self
+
+                if F.bits < G.bits:
+                    return mlir(arith.extf, self, to=G)
+
+                if F.bits > G.bits:
+                    return mlir(arith.truncf, self, to=G)
+
+                widened := mlir(arith.extf, self, to=f32)
+                return mlir(arith.truncf, widened, to=G)
+
+            self ~> G with (
+                F.precision_bits > G.precision_bits
+                or F.exponent_bits > G.exponent_bits
+                or (F.supports_infinity and not G.supports_infinity)
+            ):
+                if F is G:
+                    return self
+
+                if F.bits < G.bits:
+                    return mlir(arith.extf, self, to=G)
+
+                if F.bits > G.bits:
+                    return mlir(arith.truncf, self, to=G)
+
+                widened := mlir(arith.extf, self, to=f32)
+                return mlir(arith.truncf, widened, to=G)
+
+        float_conversion -> float
+
+        '''
+        ## Integer conversion family
+
+        Integer/floating conversion is approximate in general. An integer may
+        exceed a float's exact significand precision; a float may contain a
+        fraction, NaN, infinity, or a value outside the destination integer range.
+        '''
+        integer_conversion-> [T:I] with I in int:
+
+            self ~> I:
+                if not self.is_finite():
+                    throw TypeConversionError(
+                        "non-finite float cannot convert to integer"
+                    )
+
+                if self < F(I.min) or self > F(I.max):
+                    throw TypeConversionError(
+                        f"{self} is outside {I}[{I.min}, {I.max}]"
+                    )
+
+                if I.signed:
+                    return mlir(arith.fptosi, self, to=I)
+                return mlir(arith.fptoui, self, to=I)
+
+            I ~> self:
+                if I.signed:
+                    return mlir(arith.sitofp, I, to=F)
+                return mlir(arith.uitofp, I, to=F)
+
+        integer_conversion -> int
+
+        '''
+        ## String conversion
+
+        Formatting is a one-direction conversion. Parsing is approximate because
+        the source may be malformed or outside the selected floating format.
+        '''
+        self -> string:
+            return self.print()
+
+        string ~> self:
+            parsed ?= string.parse_float[F](string)
+            if parsed is Error:
+                throw TypeConversionError(
+                    f"cannot convert '{string}' to {F}"
+                )
+            return parsed
+
+        _ -> [T]:
+            throw TypeConversionError(
+                f"Failed to convert {F} to {type(T)}, no compatible conversion"
+            )
+
+
+'''
+# Executable specification
+'''
+
+
+test "float is a closed family of concrete formats":
+    assert(f8e4m3fn is float)
+    assert(f8e5m2 is float)
+    assert(bf16 is float)
+    assert(f16 is float)
+    assert(f32 is float)
+    assert(f64 is float)
+    assert(f128 is float)
+
+
+test "float truth is zero versus nonzero":
+    if f32(0.0):
+        throw Error("positive zero must be false")
+
+    if f32(-0.0):
+        throw Error("negative zero must be false")
+
+    if f32(0.5):
+        pass
+    else:
+        throw Error("nonzero float must be true")
+
+    nan := f32("nan")
+    if nan:
+        pass
+    else:
+        throw Error("NaN must be truthy")
+
+
+test "floating arithmetic stays in the concrete format":
+    a: f32 = 7.5
+    b: f32 = 2.0
+
+    assert(a + b == f32(9.5))
+    assert(a - b == f32(5.5))
+    assert(a * b == f32(15.0))
+    assert(a / b == f32(3.75))
+    assert(f32(2.0) ** f32(3.0) == f32(8.0))
+
+
+test "floor division and modulo use floor semantics":
+    assert(f32(7.0) // f32(2.0) == f32(3.0))
+    assert(f32(7.0) % f32(2.0) == f32(1.0))
+    assert(f32(-7.0) // f32(2.0) == f32(-4.0))
+    assert(f32(-7.0) % f32(2.0) == f32(1.0))
+
+
+test "float equality and ordering follow IEEE NaN behavior":
+    nan := f32("nan")
+
+    assert(not (nan == nan))
+    assert(nan != nan)
+    assert(not (nan < f32(0.0)))
+    assert(not (nan <= f32(0.0)))
+    assert(not (nan > f32(0.0)))
+    assert(not (nan >= f32(0.0)))
+
+
+test "float metadata describes representation":
+    assert(f16.bits == 16)
+    assert(f16.exponent_bits == 5)
+    assert(f16.precision_bits == 11)
+
+    assert(bf16.bits == 16)
+    assert(bf16.exponent_bits == 8)
+    assert(bf16.precision_bits == 8)
+
+    assert(f32.bits == 32)
+    assert(f32.precision_bits == 24)
+    assert(f64.bits == 64)
+    assert(f64.precision_bits == 53)
+
+
+test "float classification uses MLIR math operations":
+    assert(f32("nan").is_nan())
+    assert(f32("inf").is_infinite())
+    assert(f32("-inf").is_infinite())
+    assert(f32(1.0).is_finite())
+    assert(f32(1.0).is_normal())
+
+
+test "float math functions preserve the concrete type":
+    value: f64 = 4.0
+
+    assert(value.sqrt() == f64(2.0))
+    assert(value.abs() == f64(4.0))
+    assert(f64(-1.25).floor() == f64(-2.0))
+    assert(f64(-1.25).ceil() == f64(-1.0))
+    assert(f64(1.75).trunc() == f64(1.0))
+
+
+-> assert_float_widen[A, B](value: A):
+    converted: B = B(value)
+    assert(converted == value as B)
+
+
+test "wider float formats generate one-direction edges":
+    assert_float_widen[f16, f32](f16(1.5))
+    assert_float_widen[bf16, f32](bf16(1.5))
+    assert_float_widen[f32, f64](f32(1.5))
+    assert_float_widen[f64, f128](f64(1.5))
+
+
+test "narrower float formats generate approximate edges":
+    assert((f64(1.5) as f32) == f32(1.5))
+    assert((f32(1.5) as f16) == f16(1.5))
+    assert((f32(1.5) as bf16) == bf16(1.5))
+
+
+test "f16 and bf16 are not interchangeable representations":
+    source: f16 = 1.1
+    converted := source as bf16
+    assert(converted is bf16)
+
+
+test "float and integer conversion uses approximate edges":
+    assert((f32(7.0) as i32) == i32(7))
+    assert((i32(7) as f32) == f32(7.0))
+
+    throws(f32("inf") as i32)
+    throws(f32("nan") as i32)
+
+
+test "float string formatting and parsing use conversion graph":
+    parsed := f64("3.5")
+    assert(parsed == f64(3.5))
+    assert(string(f64(3.5)) == "3.5")
+    throws(f32("not-a-float"))
+
+
+test "fused multiply add is available":
+    result := f32(2.0).fma(f32(3.0), f32(4.0))
+    assert(result == f32(10.0))
+
+
+test with compiler "float does not define bitwise operators":
+    reject:
+        value := f32(1.0) & f32(2.0)
+
+
+test with compiler "unsupported float conversion has no graph edge":
+    reject:
+        value := f32([1, 2, 3])
