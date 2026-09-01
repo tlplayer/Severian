@@ -1,33 +1,461 @@
 import "primitive.sev"
+
 import "../operator/trait/logical.sev"
 import "../operator/trait/equatable.sev"
 import "../operator/trait/bitwise.sev"
+import "../operator/trait/ordered.sev"
 
-trait Boolean: Primitive + Logical + Equatable + Bitwise
+
+trait Truth:
+    operator if(self) -> bool
+    operator else(self) -> bool
+
+'''
+# `bool`
+
+`bool` is Severian's compiler-owned Boolean primitive.
+
+The `: ... :` class header marks a primitive declaration. Names inside the
+markers are ordinary trait contracts. The compiler recognizes the storage and
+lowering metadata, but the behavior remains specified by Severian source and
+executable tests.
+
+A Boolean has two values: `false` and `true`. In MLIR expressions it lowers to
+`i1`. Addressable storage occupies one byte unless a packed container chooses a
+bit representation.
+
+## Truth and conversion are separate
+
+Truth testing is control-flow behavior:
+
+```sev
+if value:
+    ...
+else:
+    ...
+```
+
+The compiler dispatches `operator if(value)` for the taken branch and
+`operator else(value)` for the rejected branch. These special operators are
+expression-bodied; their result must be `bool` or `Error`. An exception therefore
+propagates instead of assigning an arbitrary truth value.
+
+The compiler supplies `operator if(self) -> true` and
+`operator else(self) -> false` for an ordinary object unless its class replaces
+the truth contract. A type may override both operators:
+
+```sev
+class map: Container + Truth
+    items: list[(Any, Any)]
+
+    operator if(self) -> bool | never: len(self.items) != 0
+    operator else(self) -> bool | never: len(self.items) == 0
+```
+
+A type whose truth value is undefined may throw. The thrown expression has type
+`Error`, so the condition produces no value on that path. This is useful for types
+such as a multi-element tensor whose truth value would be ambiguous.
+
+Explicit construction is different. `bool(value)` resolves a conversion edge
+from `operator <=>`; it does not use truth testing. Consequently, an integer may
+be truthy in a condition while `bool(2)` still throws a `TypeConversionError`.
+
+## Conversion relations
+
+- `A = B` is total not explicit.
+- `A => B` is total but explicit.
+- `A ~> B` is checked and may throw.
+- `operator <=>(self, T)` owns all declared directional edges between the two
+  types. It does not imply that both directions exist or have the same quality.
+
+The integer relation is therefore asymmetric:
+
+```text
+bool => int
+int  ~> bool
+```
+
+Conversions:
+0 < -> true
+0 -> false
+0.0 < f -> true
+0.0 -> false
+[] -> false
+[1,..] -> true
+{} -> false
+{1,..} -> true
+"" -> false
+"..." -> true
+None -> false
+not None -> true
+
+## Typed -> expansion
+
+A declaration -> is applied with `-> -> Type`. When the right side is
+a closed union, the compiler expands the -> once for every member and checks
+each generated declaration independently. The -> emits typed AST rather than
+text.
+
+For example, `integer_conversion -> int` emits one `<=>` relation for every
+signed and unsigned integer member of the `int` union. This replaces a Rust-like
+list of concrete conversion implementations while retaining concrete conversion
+edges for coherence, diagnostics, monomorphization, and documentation.
+
+'''
+
+
+'''
+# Truth-value contract
+
+`operator if` and `operator else` are compiler-dispatched condition operators.
+Their expression result must be `bool` or `!`. Types overriding one must override
+both so the positive and negative branch behavior remains explicit in the API.
+'''
+trait Truth:
+    operator if(self) -> bool
+    operator else(self) -> bool
+
+trait View:
+    pass
+
+trait Copy:
     pass
 
 
-# The compiler-side model selected when a source value has type `bool`.
-# Target lowering is responsible for representing Bool as MLIR `i1`.
-class Bool: Boolean
+trait Borrow:
+    def borrow(self) -> Self
+
+
+trait Default:
+    def default() -> Self
+
+
+trait Hash:
+    def hash(self) -> u64
+
+
+trait Print:
+    def Print(self) -> string
+
+
+trait ConstParam:
+    pass
+
+
+trait Structural:
+    pass
+
+
+trait BitwiseAssign:
+    operator &=(right: Self)
+    operator |=(right: Self)
+    operator ^=(right: Self)
+
+
+trait Boolean:
+    Primitive
+    Truth
+    Logical
+    Equatable
+    Ordered
+    Bitwise
+    BitwiseAssign
+    Copy
+    Clone
+    Default
+    Hash
+    Print
+    ConstParam
+    Structural
+
+
+'''
+# Primitive declaration
+
+`constructors = :conversions` is compiler notation. It derives constructor
+metadata from identity and `<=>` edges, preventing a second conversion table from
+drifting away from the executable relation declarations below.
+'''
+class bool: Boolean :
     name: string = "bool"
-    size: Size = Size.Fixed(1)
-    alignment: Size = Size.Fixed(1)
+    size: byte = 1B
+    alignment: byte = 1B
     category: PrimitiveCategory = PrimitiveCategory.Boolean
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
+    # Capability flag: `true`/`false` are native literals. `Default` still
+    # produces the value `false`.
     default_literal: bool = true
-    constructors: list[Constructor] = [
-        Constructor(TypeRef("bool"), ConversionKind.Identity),
-    ]
+    constructors: list[Constructor] = :conversions
 
-    operator and(right: bool) -> bool:
-        return right if self else false
+    '''
+    ## Truth-value operators
 
-    operator or(right: bool) -> bool:
-        return true if self else right
+    For `bool`, the positive branch is the value itself and the negative branch
+    is its complement.
+    '''
+    operator if(self) -> self
+    operator else(self) -> not self
+
+    '''
+    ## Logical operators
+
+    `and` and `or` are compiler-short-circuiting operators. Their right operand
+    is evaluated only when selected, and the result is one of the original
+    operands rather than a forced `bool`. The result type is therefore `bool | T`;
+    for two Boolean operands union normalization reduces it to `bool`.
+    '''
+    operator and[T](right: T) -> bool | T:
+        return right if self else self
+
+    operator or[T](right: T) -> bool | T:
+        return self if self else right
 
     operator not() -> bool:
         return false if self else true
 
+    '''md
+    ## Bitwise operators
+
+    Unlike `and` and `or`, `&`, `|`, and `^` evaluate both operands.
+    '''
+    operator &(right: bool) -> bool:
+        return right if self else false
+
+    operator |(right: bool) -> bool:
+        return true if self else right
+
+    operator ^(right: bool) -> bool:
+        return (self and not right) or (not self and right)
+
+    operator &=(right: bool):
+        self = self & right
+
+    operator |=(right: bool):
+        self = self | right
+
+    operator ^=(right: bool):
+        self = self ^ right
+
+    '''
+    ## Equality and order
+
+    Boolean ordering is total: `false < true`.
+    '''
     operator ==(right: bool) -> bool:
-        return right if self else (false if right else true)
+        return not (self ^ right)
+
+    operator !=(right: bool) -> bool:
+        return self ^ right
+
+    operator <(right: bool) -> bool:
+        return not self and right
+
+    operator <=(right: bool) -> bool:
+        return not self or right
+
+    operator >(right: bool) -> bool:
+        return self and not right
+
+    operator >=(right: bool) -> bool:
+        return self or not right
+
+    '''
+    ## Value traits
+    '''
+    def copy(self) -> bool:
+        return bool(self)
+
+    def default() -> bool:
+        return false
+
+    def hash(self) -> u64:
+        return 1 if self else 0
+
+    def print(self) -> string:
+        return "true" if self else "false"
+
+    '''
+    ## Integer conversion family
+
+    The -> is expanded once for every member of the closed `int` union.
+    `throw` has type `Error`; the failed arm therefore does not widen the successful
+    result beyond `bool`.
+    '''
+    operator <=>(self, T) -> T | TypeConversionError:
+        integer_conversion-> [T:I]: 
+            self => I:
+                return 1 if self else 0
+
+            I -> self:
+                match value:
+                    case 0:
+                        return false
+                    case _:
+                        return true
+    '''
+    ## Floating conversion family
+
+    bool-to-float conversion is total and explicit. No float-to-bool
+    conversion is declared here; floating truth testing belongs to `float`'s
+    `operator if/else`, while a policy-bearing numeric conversion belongs to the
+    floating primitive API.
+    '''
+        float_conversion-> [T:F]:
+            self => F:
+                return 1.0 if self else 0.0
+            F => self:
+                return false if F == 0 else return true 
+        _ -> [T]:
+            throw TypeConversionError(f"Failed to convert {type(T)} to bool, no compatible types")
+
+
+'''
+# Truth-value fixture
+
+This local class verifies that normal classes and containers can define Python-
+style emptiness without introducing a permissive conversion to `bool`.
+'''
+class truth_box: Truth
+    items: list[int]
+
+    operator if(self) -> len(self.items) != 0
+    operator else(self) -> len(self.items) == 0
+
+'''
+# Executable specification
+
+These tests are the primary API contract. Documentation generation should render
+the attached Markdown, signatures, conversion graph, -> expansions, ordinary
+tests, and compiler accept/reject cases from this file.
+'''
+
+
+test "bool selects if and else branches":
+    selected := 0
+    a = true
+
+    if a:
+        selected = 1
+    else:
+        selected = 2
+
+    assert(selected == 1)
+
+    if not a:
+        selected = 3
+    else:
+        selected = 4
+
+    assert(selected == 4)
+
+
+test "container truth is separate from bool conversion":
+    empty := truth_box([])
+    populated := truth_box([1])
+
+    empty_branch := false
+    populated_branch := false
+
+    if empty:
+        empty_branch = true
+    else:
+        empty_branch = false
+
+    if populated:
+        populated_branch = true
+    else:
+        populated_branch = false
+
+    assert(empty_branch == false)
+    assert(populated_branch == true)
+
+
+test "logical operators use the Boolean truth table":
+    assert((false and false) == false)
+    assert((false and true) == false)
+    assert((true and false) == false)
+    assert((true and true) == true)
+
+    assert((false or false) == false)
+    assert((false or true) == true)
+    assert((true or false) == true)
+    assert((true or true) == true)
+
+    assert(not false == true)
+    assert(not true == false)
+
+
+test "and and or preserve operands and short circuit":
+    assert((false and "right") == false)
+    assert((true and "right") == "right")
+    assert((false or "right") == "right")
+    assert((true or "right") == true)
+
+    assert((false and throw Eror("Short circuit failed")) == false)
+    assert((true or throw Eror("Short circuit failed")))
+
+
+test "bitwise operators use the Boolean truth table":
+    assert((false & false) == false)
+    assert((false & true) == false)
+    assert((true & true) == true)
+
+    assert((false | false) == false)
+    assert((false | true) == true)
+    assert((true | true) == true)
+
+    assert((false ^ false) == false)
+    assert((false ^ true) == true)
+    assert((true ^ true) == false)
+
+    value := true
+    value &= false
+    assert(value == false)
+
+    value |= true
+    assert(value == true)
+
+    value ^= true
+    assert(value == false)
+
+
+test "bool equality and ordering are total":
+    assert(false == false)
+    assert(true == true)
+    assert(false != true)
+
+    assert(false < true)
+    assert(false <= false)
+    assert(false <= true)
+    assert(true > false)
+    assert(true >= true)
+
+
+test "bool value traits are stable":
+    assert(bool.default() == false)
+    assert(true.clone() == true)
+    assert(false.clone() == false)
+    assert(false.hash() == 0)
+    assert(true.hash() == 1)
+    assert(false.display() == "false")
+    assert(true.display() == "true")
+
+
+
+test "string conversion is canonical and checked":
+    assert(string(false) == "false")
+    assert(string(true) == "true")
+    assert(bool("false") == false)
+    assert(bool("true") == true)
+
+
+
+test with compiler "total conversion does not permit implicit assignment":
+    reject:
+        value: i32 = true
+
+test with compiler "truth operators must produce bool or Never":
+    reject:
+        class invalid_truth: Truth
+            operator if(self) -> 1
+            operator else(self) -> 0
