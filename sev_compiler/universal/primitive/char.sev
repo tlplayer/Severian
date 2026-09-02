@@ -1,0 +1,238 @@
+import "primitive.sev"
+
+import "../operator/trait/equatable.sev"
+import "../operator/trait/ordered.sev"
+
+
+'''
+# `char[T: u8 | u32 = u32]`
+
+`char` is Severian's unsigned character primitive family.
+
+```sev
+c := 't'
+print(type(c))           # u32
+
+byte_char := char[u8]('t')
+print(type(byte_char))   # u8
+```
+
+The default representation is `u32` so ordinary character literals can
+represent Unicode scalar values directly.
+
+`char[u8]` is available for low-level byte-oriented work.
+
+`char` is transparent over its storage primitive. The compiler validates
+character semantics and lowers the value as the selected unsigned integer
+representation rather than allocating a wrapper object.
+
+```text
+char[u32] -> u32 storage
+char[u8]  -> u8 storage
+```
+
+## Valid values
+
+`char[u32]` accepts Unicode scalar values:
+
+```text
+U+0000..U+D7FF
+U+E000..U+10FFFF
+```
+
+Surrogates and values above `U+10FFFF` are rejected.
+
+`char[u8]` accepts `0..255`. It is a low-level byte character/code-unit
+representation and is not by itself a guarantee of valid UTF-8.
+
+Strings decode and iterate using the default `char[u32]`.
+'''
+
+
+union char_storage:
+    u8
+    u32
+
+
+trait Character:
+    Copy
+    Clone
+    Equatable
+    Ordered
+    Hash
+    Print
+
+    property storage: Type
+
+    def codepoint(self) -> u32
+    def ascii(self) -> bool
+    def digit(self) -> bool
+    def whitespace(self) -> bool
+    def utf8_len(self) -> usize
+
+
+class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
+
+    storage: Type = T
+
+    def char(value: T) -> char[char_storage]:
+        if T is u32:
+            if value > 0x10ffff:
+                throw TypeConversionError(
+                    f"U+{value:x} exceeds U+10FFFF"
+                )
+
+            if value >= 0xd800 and value <= 0xdfff:
+                throw TypeConversionError(
+                    f"U+{value:x} is a Unicode surrogate"
+                )
+
+        return value
+
+    def char(value: char[u32]) with T is u8:
+        codepoint := value.codepoint()
+
+        if codepoint > 0xff:
+            throw TypeConversionError(
+                f"U+{codepoint:x} does not fit in char[u8]"
+            )
+
+        return codepoint as u8
+
+    def char(value: char[u8]) with T is u32:
+        return u32(value)
+
+    def codepoint(self) -> u32:
+        return u32(self)
+
+    def copy(self) -> char[T]:
+        return self
+
+    def clone(self) -> char[T]:
+        return self
+
+    def hash(self) -> u64:
+        return u64(self)
+
+    def ascii(self) -> (u8,bool):
+        return self.codepoint(),self.codepoint() <= 0x7f
+
+    def digit(self) -> (u8,bool):
+        value := self.codepoint()
+        return value >= u32('0') and value <= u32('9')
+
+    def whitespace(self) -> bool:
+        value := self.codepoint()
+
+        return (
+            value == 0x09
+            or value == 0x0a
+            or value == 0x0b
+            or value == 0x0c
+            or value == 0x0d
+            or value == 0x20
+        )
+
+    def utf8_len(self) -> usize:
+        value := self.codepoint()
+
+        if value <= 0x7f:
+            return 1
+
+        if value <= 0x7ff:
+            return 2
+
+        if value <= 0xffff:
+            return 3
+
+        return 4
+
+
+'''
+## Conversion relations
+
+```text
+char[u8]  -> char[u32]
+char[u32] ~> char[u8]
+```
+
+Widening is always valid. Narrowing may fail when the scalar exceeds `255`.
+'''
+extend [T: char_storage] char[T]:
+
+    operator <=>(self, U) -> U | TypeConversionError:
+
+        self -> char[u32] with T is u8:
+            return char[u32](u32(self))
+
+        self ~> char[u8] with T is u32:
+            if self.codepoint() > 0xff:
+                throw TypeConversionError(
+                    f"U+{self.codepoint():x} does not fit in char[u8]"
+                )
+
+            return char[u8](u8(self.codepoint()))
+
+        _ -> [U]:
+            throw TypeConversionError(
+                f"no character conversion from char[{T}] to {U}"
+            )
+
+
+'''
+# Executable specification
+'''
+
+test "character literal defaults to u32 storage":
+    value := 't'
+
+    assert(type(value) == u32)
+    assert(value == u32(0x74))
+
+test "explicit u8 character uses u8 storage":
+    value := char[u8]('t')
+
+    assert(type(value) == u8)
+    assert(value == u8(0x74))
+
+test "default char accepts Unicode scalar":
+    value := 'λ'
+
+    assert(type(value) == u32)
+    assert(value == u32(0x03bb))
+
+test "u8 character supports low level byte range":
+    value := char[u8](0xff)
+
+    assert(type(value) == u8)
+    assert(value == 0xff)
+
+test "Unicode scalar rejects surrogate values":
+    throws(char[u32](0xd800))
+    throws(char[u32](0xdfff))
+
+test "Unicode scalar rejects values above maximum":
+    throws(char[u32](0x110000))
+
+test "u8 character widens to Unicode character":
+    byte_char := char[u8](0x74)
+    unicode_char := byte_char as char[u32]
+
+    assert(unicode_char.codepoint() == 0x74)
+
+test "Unicode character narrows when it fits":
+    unicode_char := char[u32](0x74)
+    byte_char := unicode_char as char[u8]
+
+    assert(byte_char == u8(0x74))
+
+test "Unicode character narrowing rejects large scalar":
+    value := 'λ'
+
+    throws(value as char[u8])
+
+test "utf8 length follows Unicode scalar":
+    assert(char[u32](0x24).utf8_len() == 1)
+    assert(char[u32](0x03bb).utf8_len() == 2)
+    assert(char[u32](0x20ac).utf8_len() == 3)
+    assert(char[u32](0x10348).utf8_len() == 4)

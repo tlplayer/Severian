@@ -1,0 +1,1169 @@
+import "primitive.sev"
+import "slice.sev"
+
+import "../operator/trait/equatable.sev"
+import "../operator/trait/ordered.sev"
+
+
+'''
+# `string`
+
+`string` is Severian's immutable owned UTF-8 text type.
+
+```sev
+message := "hello"
+```
+
+A string owns one contiguous allocation of UTF-8 bytes.
+
+```text
+string
+  |
+  +-----------------------------------+
+  | UTF-8 byte | UTF-8 byte | ...    |
+  +-----------------------------------+
+```
+
+The string stores both byte length and Unicode scalar length:
+
+```text
+byte_length    number of UTF-8 bytes
+length         number of Unicode scalar values
+```
+
+These are intentionally different:
+
+```sev
+ascii := "hello"
+assert(ascii.len() == 5)
+assert(ascii.bytes_len() == 5)
+
+unicode := "λ"
+assert(unicode.len() == 1)
+assert(unicode.bytes_len() == 2)
+```
+
+## Ownership
+
+`string` owns its UTF-8 allocation.
+
+Strings are immutable. Operations such as concatenation and slicing construct
+new strings rather than mutating existing storage.
+
+```text
+allocate[u8](N)
+      |
+      v
+   string
+      |
+      +--> slice[u8]     borrowed bytes
+```
+
+`clone()` creates independent backing storage. `mirror` may share a string
+without copying because the value cannot be mutated.
+
+Dropping the final owner releases the allocation.
+
+## UTF-8
+
+All `string` values contain valid UTF-8.
+
+Construction from raw bytes validates continuation-byte structure, overlong
+sequences, surrogate code points, and code points above `U+10FFFF`.
+
+Invalid byte input throws `UnicodeError`.
+
+## Indexing
+
+String indexing is by Unicode scalar index, not byte index:
+
+```sev
+text := "aλz"
+
+assert(text[0] == 'a')
+assert(text[1] == 'λ')
+assert(text[2] == 'z')
+```
+
+`byte(index)` provides explicit raw-byte access.
+
+String slicing also uses scalar indices and returns an owned `string`.
+
+## Truth
+
+```text
+""      -> false
+"text"  -> true
+```
+
+Truth testing does not convert the string into another value.
+'''
+
+
+trait String:
+    Truth
+    Equatable
+    Ordered
+    Clone
+    Hash
+    Print
+
+    property length: usize
+    property byte_length: usize
+
+    operator [](index: usize) -> char
+    operator [](range: Range[usize]) -> string
+    operator +(right: string) -> string
+    operator *(count: usize) -> string
+
+    def len(self) -> usize
+    def bytes_len(self) -> usize
+    def is_empty(self) -> bool
+    def byte(self, index: usize) -> u8
+    def bytes(self) -> slice[u8]
+    def starts_with(self, prefix: string) -> bool
+    def ends_with(self, suffix: string) -> bool
+    def contains(self, needle: string) -> bool
+
+
+'''
+# UTF-8 helpers
+
+These helpers operate on raw bytes but remain inside the string implementation.
+They are not a second public string API.
+'''
+def __utf8_is_continuation(value: u8) -> bool:
+    return (value & 0b11000000) == 0b10000000
+
+
+def __utf8_width(first: u8) -> usize | UnicodeError:
+    if first <= 0x7f:
+        return 1
+
+    if first >= 0xc2 and first <= 0xdf:
+        return 2
+
+    if first >= 0xe0 and first <= 0xef:
+        return 3
+
+    if first >= 0xf0 and first <= 0xf4:
+        return 4
+
+    throw UnicodeError(
+        f"invalid UTF-8 leading byte 0x{first:02x}"
+    )
+
+
+def __utf8_decode(
+    memory: borrow Memory[u8],
+    offset: usize,
+    end: usize,
+) -> (char, usize) | UnicodeError:
+
+    if offset >= end:
+        throw UnicodeError("unexpected end of UTF-8 input")
+
+    unsafe:
+        first := memory[offset]
+
+    width ?= __utf8_width(first)
+
+    if offset + width > end:
+        throw UnicodeError("truncated UTF-8 sequence")
+
+    if width == 1:
+        return (char(u32(first)), 1)
+
+    unsafe:
+        second := memory[offset + 1]
+
+    if not __utf8_is_continuation(second):
+        throw UnicodeError("invalid UTF-8 continuation byte")
+
+    if width == 2:
+        codepoint :=
+            (u32(first & 0x1f) << 6)
+            | u32(second & 0x3f)
+
+        return (char(codepoint), 2)
+
+    unsafe:
+        third := memory[offset + 2]
+
+    if not __utf8_is_continuation(third):
+        throw UnicodeError("invalid UTF-8 continuation byte")
+
+    if first == 0xe0 and second < 0xa0:
+        throw UnicodeError("overlong UTF-8 sequence")
+
+    if first == 0xed and second >= 0xa0:
+        throw UnicodeError("UTF-8 surrogate code point")
+
+    if width == 3:
+        codepoint :=
+            (u32(first & 0x0f) << 12)
+            | (u32(second & 0x3f) << 6)
+            | u32(third & 0x3f)
+
+        return (char(codepoint), 3)
+
+    unsafe:
+        fourth := memory[offset + 3]
+
+    if not __utf8_is_continuation(fourth):
+        throw UnicodeError("invalid UTF-8 continuation byte")
+
+    if first == 0xf0 and second < 0x90:
+        throw UnicodeError("overlong UTF-8 sequence")
+
+    if first == 0xf4 and second > 0x8f:
+        throw UnicodeError("UTF-8 code point exceeds U+10FFFF")
+
+    codepoint :=
+        (u32(first & 0x07) << 18)
+        | (u32(second & 0x3f) << 12)
+        | (u32(third & 0x3f) << 6)
+        | u32(fourth & 0x3f)
+
+    return (char(codepoint), 4)
+
+
+def __utf8_validate(
+    memory: borrow Memory[u8],
+    byte_length: usize,
+) -> usize | UnicodeError:
+
+    offset := 0
+    characters := 0
+
+    while offset < byte_length:
+        (_, width) ?= __utf8_decode(
+            memory,
+            offset,
+            byte_length,
+        )
+
+        offset += width
+        characters += 1
+
+    return characters
+
+
+def __utf8_byte_offset(
+    memory: borrow Memory[u8],
+    byte_length: usize,
+    character_index: usize,
+) -> usize | IndexError | UnicodeError:
+
+    offset := 0
+    current := 0
+
+    while current < character_index:
+        if offset >= byte_length:
+            throw IndexError(
+                f"string index {character_index} outside character length {current}"
+            )
+
+        (_, width) ?= __utf8_decode(
+            memory,
+            offset,
+            byte_length,
+        )
+
+        offset += width
+        current += 1
+
+    return offset
+
+
+'''
+# `string`
+
+The raw memory handle is hidden. Public operations preserve UTF-8 validity and
+immutability.
+'''
+class string: String:
+
+    __memory: Memory[u8]
+    byte_length: usize
+    length: usize
+
+
+    def string():
+        unsafe:
+            __memory = allocate[u8](0)
+
+        byte_length = 0
+        length = 0
+
+
+    '''
+    ## UTF-8 byte construction
+
+    Input bytes are validated and copied into owned storage.
+    '''
+    def string(value: slice[u8]):
+        characters ?= __utf8_validate(
+            value.__memory,
+            value.len(),
+        )
+
+        unsafe:
+            __memory = allocate[u8](value.len())
+
+            for index in range(value.len()):
+                __memory[index] = value[index]
+
+        byte_length = value.len()
+        length = characters
+
+
+    '''
+    ## Compiler literal construction
+
+    Literal bytes are UTF-8 validated by the compiler before normal string
+    ownership is created.
+    '''
+    def __from_literal[N: usize](value: u8[N]) -> string:
+        unsafe:
+            memory := allocate[u8](N)
+
+            for index in range(N):
+                memory[index] = value[index]
+
+        characters ?= __utf8_validate(
+            borrow memory,
+            N,
+        )
+
+        return string.__from_valid_utf8(
+            move memory,
+            N,
+            characters,
+        )
+
+
+    '''
+    ## Adopt validated storage
+
+    Internal operations use this after creating bytes on known UTF-8 boundaries.
+    '''
+    def __from_valid_utf8(
+        memory: move Memory[u8],
+        byte_length: usize,
+        length: usize,
+    ) -> string:
+        result := string()
+
+        unsafe:
+            free(result.__memory)
+
+        result.__memory = move memory
+        result.byte_length = byte_length
+        result.length = length
+
+        return result
+
+
+    operator if(self) -> self.length != 0
+    operator else(self) -> self.length == 0
+
+
+    '''
+    ## Unicode indexing
+    '''
+    operator [](index: usize) -> char:
+        if index >= self.length:
+            throw IndexError(
+                f"string index {index} outside [0, {self.length})"
+            )
+
+        offset ?= __utf8_byte_offset(
+            borrow __memory,
+            byte_length,
+            index,
+        )
+
+        (value, _) ?= __utf8_decode(
+            borrow __memory,
+            offset,
+            byte_length,
+        )
+
+        return value
+
+
+    '''
+    ## Unicode slicing
+    '''
+    operator [](range: Range[usize]) -> string:
+        start := range.start
+        end := range.end
+
+        if start > end:
+            throw IndexError(
+                f"string slice start {start} exceeds end {end}"
+            )
+
+        if end > self.length:
+            throw IndexError(
+                f"string slice end {end} exceeds length {self.length}"
+            )
+
+        start_byte ?= __utf8_byte_offset(
+            borrow __memory,
+            byte_length,
+            start,
+        )
+
+        end_byte ?= __utf8_byte_offset(
+            borrow __memory,
+            byte_length,
+            end,
+        )
+
+        result_bytes := end_byte - start_byte
+
+        unsafe:
+            memory := allocate[u8](result_bytes)
+
+            for index in range(result_bytes):
+                memory[index] = __memory[start_byte + index]
+
+        return string.__from_valid_utf8(
+            move memory,
+            result_bytes,
+            end - start,
+        )
+
+
+    '''
+    ## Raw byte access
+    '''
+    def byte(self, index: usize) -> u8:
+        if index >= byte_length:
+            throw IndexError(
+                f"string byte index {index} outside [0, {byte_length})"
+            )
+
+        unsafe:
+            return __memory[index]
+
+
+    def bytes(self) -> slice[u8]:
+        return slice[u8](
+            borrow __memory,
+            0,
+            byte_length,
+        )
+
+
+    def len(self) -> usize:
+        return length
+
+
+    def bytes_len(self) -> usize:
+        return byte_length
+
+
+    def is_empty(self) -> bool:
+        return length == 0
+
+
+    '''
+    ## Concatenation
+    '''
+    operator +(right: string) -> string:
+        result_bytes := byte_length + right.byte_length
+        result_chars := length + right.length
+
+        unsafe:
+            memory := allocate[u8](result_bytes)
+
+            for index in range(byte_length):
+                memory[index] = __memory[index]
+
+            for index in range(right.byte_length):
+                memory[byte_length + index] = right.__memory[index]
+
+        return string.__from_valid_utf8(
+            move memory,
+            result_bytes,
+            result_chars,
+        )
+
+
+    '''
+    ## Repetition
+    '''
+    operator *(count: usize) -> string:
+        if count == 0 or byte_length == 0:
+            return string()
+
+        result_bytes := byte_length * count
+        result_chars := length * count
+
+        unsafe:
+            memory := allocate[u8](result_bytes)
+
+            for repetition in range(count):
+                destination := repetition * byte_length
+
+                for index in range(byte_length):
+                    memory[destination + index] = __memory[index]
+
+        return string.__from_valid_utf8(
+            move memory,
+            result_bytes,
+            result_chars,
+        )
+
+
+    '''
+    ## Equality and ordering
+
+    Valid UTF-8 can be compared directly by stored bytes for equality and
+    lexicographic Unicode scalar order.
+    '''
+    operator ==(right: string) -> bool:
+        if byte_length != right.byte_length:
+            return false
+
+        for index in range(byte_length):
+            if self.byte(index) != right.byte(index):
+                return false
+
+        return true
+
+
+    operator !=(right: string) -> bool:
+        return not (self == right)
+
+
+    operator <(right: string) -> bool:
+        common := min(byte_length, right.byte_length)
+
+        for index in range(common):
+            left_byte := self.byte(index)
+            right_byte := right.byte(index)
+
+            if left_byte < right_byte:
+                return true
+
+            if left_byte > right_byte:
+                return false
+
+        return byte_length < right.byte_length
+
+
+    operator <=(right: string) -> bool:
+        return self < right or self == right
+
+
+    operator >(right: string) -> bool:
+        return right < self
+
+
+    operator >=(right: string) -> bool:
+        return right <= self
+
+
+    '''
+    ## Search helpers
+    '''
+    def starts_with(self, prefix: string) -> bool:
+        if prefix.byte_length > byte_length:
+            return false
+
+        for index in range(prefix.byte_length):
+            if self.byte(index) != prefix.byte(index):
+                return false
+
+        return true
+
+
+    def ends_with(self, suffix: string) -> bool:
+        if suffix.byte_length > byte_length:
+            return false
+
+        offset := byte_length - suffix.byte_length
+
+        for index in range(suffix.byte_length):
+            if self.byte(offset + index) != suffix.byte(index):
+                return false
+
+        return true
+
+
+    def contains(self, needle: string) -> bool:
+        if needle.byte_length == 0:
+            return true
+
+        if needle.byte_length > byte_length:
+            return false
+
+        last_start := byte_length - needle.byte_length
+
+        for start in range(last_start + 1):
+            matches := true
+
+            for index in range(needle.byte_length):
+                if self.byte(start + index) != needle.byte(index):
+                    matches = false
+                    break
+
+            if matches:
+                return true
+
+        return false
+
+
+    '''
+    ## Iteration
+    '''
+    def iter(self) -> Iterator[char]:
+        offset := 0
+
+        while offset < byte_length:
+            (value, width) ?= __utf8_decode(
+                borrow __memory,
+                offset,
+                byte_length,
+            )
+
+            yield value
+            offset += width
+
+
+    '''
+    ## Clone and hash
+    '''
+    def clone(self) -> string:
+        unsafe:
+            memory := allocate[u8](byte_length)
+
+            for index in range(byte_length):
+                memory[index] = __memory[index]
+
+        return string.__from_valid_utf8(
+            move memory,
+            byte_length,
+            length,
+        )
+
+
+    def hash(self) -> u64:
+        value: u64 = 14695981039346656037
+
+        for index in range(byte_length):
+            value ^= u64(self.byte(index))
+            value *= 1099511628211
+
+        return value
+
+
+    def print(self) -> string:
+        return self
+
+
+    '''
+    ## Integer formatting
+
+    This is the implementation used by integer `print()` and the `int -> string`
+    conversion relation.
+    '''
+    def from_integer[I: int](value: I, base: u8 = 10) -> string:
+        if base < 2 or base > 36:
+            throw ValueError(
+                f"integer base {base} outside [2, 36]"
+            )
+
+        if value == 0:
+            return "0"
+
+        negative := I.signed and value < 0
+
+        magnitude: u128
+        if negative:
+            magnitude = u128(-(value + 1))
+            magnitude += 1
+        else:
+            magnitude = value as u128
+
+        digits := array[u8, 128]()
+        count := 0
+
+        while magnitude != 0:
+            digit := u8(magnitude % u128(base))
+
+            if digit < 10:
+                digits[count] = u8('0') + digit
+            else:
+                digits[count] = u8('a') + (digit - 10)
+
+            magnitude //= u128(base)
+            count += 1
+
+        total := count + (1 if negative else 0)
+
+        unsafe:
+            memory := allocate[u8](total)
+
+            output := 0
+
+            if negative:
+                memory[0] = u8('-')
+                output = 1
+
+            for index in range(count):
+                memory[output + index] = digits[count - index - 1]
+
+        return string.__from_valid_utf8(
+            move memory,
+            total,
+            total,
+        )
+
+
+    '''
+    ## Integer parsing
+    '''
+    def parse_integer[I: int](
+        self,
+        base: u8 = 10,
+    ) -> I | TypeConversionError:
+
+        if base < 2 or base > 36:
+            throw TypeConversionError(
+                f"integer base {base} outside [2, 36]"
+            )
+
+        if length == 0:
+            throw TypeConversionError("empty string is not an integer")
+
+        index := 0
+        negative := false
+
+        if self[0] == '-':
+            if not I.signed:
+                throw TypeConversionError(
+                    f"negative value cannot convert to {I}"
+                )
+
+            negative = true
+            index = 1
+
+        else if self[0] == '+':
+            index = 1
+
+        if index == length:
+            throw TypeConversionError("sign without integer digits")
+
+        value: u128 = 0
+
+        while index < length:
+            current := self[index]
+            digit: u8
+
+            if current >= '0' and current <= '9':
+                digit = u8(current) - u8('0')
+
+            else if current >= 'a' and current <= 'z':
+                digit = u8(current) - u8('a') + 10
+
+            else if current >= 'A' and current <= 'Z':
+                digit = u8(current) - u8('A') + 10
+
+            else:
+                throw TypeConversionError(
+                    f"invalid integer character '{current}'"
+                )
+
+            if digit >= base:
+                throw TypeConversionError(
+                    f"digit '{current}' is invalid for base {base}"
+                )
+
+            value = value * u128(base) + u128(digit)
+            index += 1
+
+        if negative:
+            signed_value := -(i128(value))
+
+            if signed_value < i128(I.min) or signed_value > i128(I.max):
+                throw TypeConversionError(
+                    f"'{self}' is outside {I}[{I.min}, {I.max}]"
+                )
+
+            return signed_value as I
+
+        if value > u128(I.max):
+            throw TypeConversionError(
+                f"'{self}' is outside {I}[{I.min}, {I.max}]"
+            )
+
+        return value as I
+
+
+    '''
+    ## Floating formatting
+
+    Shortest-round-trip decimal formatting is a library algorithm rather than an
+    MLIR primitive operation.
+    '''
+    def from_float[F: float](value: F) -> string:
+        return decimal.format_float[F](value)
+
+
+    '''
+    ## Floating parsing
+
+    Parsing handles signs, fractions, decimal exponents, NaN, and infinity.
+    '''
+    def parse_float[F: float](self) -> F | TypeConversionError:
+        if self == "nan":
+            return mlir(arith.constant, "nan", to=F)
+
+        if self == "inf" or self == "+inf":
+            if not F.supports_infinity:
+                throw TypeConversionError(
+                    f"{F} does not represent infinity"
+                )
+
+            return mlir(arith.constant, "inf", to=F)
+
+        if self == "-inf":
+            if not F.supports_infinity:
+                throw TypeConversionError(
+                    f"{F} does not represent infinity"
+                )
+
+            return mlir(arith.constant, "-inf", to=F)
+
+        if length == 0:
+            throw TypeConversionError("empty string is not a float")
+
+        index := 0
+        negative := false
+
+        if self[0] == '-':
+            negative = true
+            index = 1
+
+        else if self[0] == '+':
+            index = 1
+
+        if index == length:
+            throw TypeConversionError("sign without float digits")
+
+        value := F(0.0)
+        saw_digit := false
+
+        while index < length and self[index] >= '0' and self[index] <= '9':
+            value *= F(10.0)
+            value += F(u8(self[index]) - u8('0'))
+            index += 1
+            saw_digit = true
+
+        if index < length and self[index] == '.':
+            index += 1
+            place := F(0.1)
+
+            while index < length and self[index] >= '0' and self[index] <= '9':
+                value += F(u8(self[index]) - u8('0')) * place
+                place *= F(0.1)
+                index += 1
+                saw_digit = true
+
+        if not saw_digit:
+            throw TypeConversionError(
+                f"'{self}' contains no floating digits"
+            )
+
+        exponent: i32 = 0
+
+        if index < length and (self[index] == 'e' or self[index] == 'E'):
+            index += 1
+
+            exponent_negative := false
+
+            if index < length and self[index] == '-':
+                exponent_negative = true
+                index += 1
+
+            else if index < length and self[index] == '+':
+                index += 1
+
+            if index == length:
+                throw TypeConversionError("float exponent has no digits")
+
+            while index < length and self[index] >= '0' and self[index] <= '9':
+                exponent = exponent * 10 + i32(u8(self[index]) - u8('0'))
+                index += 1
+
+            if exponent_negative:
+                exponent = -exponent
+
+        if index != length:
+            throw TypeConversionError(
+                f"invalid float character '{self[index]}'"
+            )
+
+        if exponent > 0:
+            for _ in range(usize(exponent)):
+                value *= F(10.0)
+
+        else if exponent < 0:
+            for _ in range(usize(-exponent)):
+                value /= F(10.0)
+
+        if negative:
+            value = -value
+
+        return value
+
+
+    def drop():
+        unsafe:
+            free(__memory)
+
+
+'''
+## Conversion relations
+
+`string` participates in the same graph used by numeric primitives.
+
+The numeric primitive files own the generated numeric/string edges:
+
+```text
+int    -> string
+string ~> int
+
+float  -> string
+string ~> float
+```
+
+This file provides the formatting and parsing operations used by those
+relations.
+
+Raw bytes have an asymmetric relationship with string:
+
+```text
+string -> bytes
+bytes  ~> string
+```
+
+A string can always expose or copy its UTF-8 bytes. Arbitrary bytes may fail
+UTF-8 validation when converted to string.
+'''
+extend string:
+
+    operator <=>(self, T) -> T | TypeConversionError:
+
+        self -> bytes:
+            result := bytes(byte_length)
+
+            for index in range(byte_length):
+                result[index] = self.byte(index)
+
+            return result
+
+        bytes ~> self:
+            return string(bytes.slice())
+
+        _ -> [T]:
+            throw TypeConversionError(
+                f"Failed to convert string to {type(T)}, no compatible conversion"
+            )
+
+
+'''
+# Executable specification
+'''
+
+
+test "empty string has zero lengths and false truth":
+    value := ""
+
+    assert(value.len() == 0)
+    assert(value.bytes_len() == 0)
+
+    if value:
+        throw Error("empty string must be false")
+
+
+test "non-empty string is true":
+    value := "hello"
+
+    if value:
+        pass
+    else:
+        throw Error("non-empty string must be true")
+
+
+test "ASCII length equals byte length":
+    value := "hello"
+
+    assert(value.len() == 5)
+    assert(value.bytes_len() == 5)
+
+
+test "Unicode scalar length differs from byte length":
+    value := "aλz"
+
+    assert(value.len() == 3)
+    assert(value.bytes_len() == 4)
+
+
+test "string indexing uses Unicode scalar indices":
+    value := "aλz"
+
+    assert(value[0] == 'a')
+    assert(value[1] == 'λ')
+    assert(value[2] == 'z')
+
+    throws(value[3])
+
+
+test "byte access exposes UTF-8 representation":
+    value := "λ"
+
+    assert(value.bytes_len() == 2)
+    assert(value.byte(0) == 0xce)
+    assert(value.byte(1) == 0xbb)
+
+
+test "string slicing uses Unicode scalar boundaries":
+    value := "aλbc"
+
+    assert(value[0:2] == "aλ")
+    assert(value[1:3] == "λb")
+    assert(value[2:4] == "bc")
+
+
+test "string concatenation creates a new value":
+    left := "hello"
+    right := " λ"
+
+    combined := left + right
+
+    assert(left == "hello")
+    assert(right == " λ")
+    assert(combined == "hello λ")
+
+
+test "string repetition preserves UTF-8":
+    assert("ab" * 3 == "ababab")
+    assert("λ" * 3 == "λλλ")
+    assert("x" * 0 == "")
+
+
+test "string equality and ordering are lexical":
+    assert("abc" == "abc")
+    assert("abc" != "abd")
+    assert("abc" < "abd")
+    assert("abc" < "abcd")
+    assert("λ" < "μ")
+
+
+test "prefix suffix and contains inspect content":
+    value := "severian"
+
+    assert(value.starts_with("sev"))
+    assert(value.ends_with("ian"))
+    assert(value.contains("ver"))
+    assert(not value.contains("xyz"))
+    assert(value.contains(""))
+
+
+test "string iteration yields Unicode scalar values":
+    value := "aλz"
+
+    result := array[char, 3]()
+    index := 0
+
+    for character in value:
+        result[index] = character
+        index += 1
+
+    assert(result[0] == 'a')
+    assert(result[1] == 'λ')
+    assert(result[2] == 'z')
+
+
+test "string clone owns independent storage":
+    original := "hello"
+    cloned := original.clone()
+
+    drop original
+
+    assert(cloned == "hello")
+
+
+test "string bytes borrow does not own allocation":
+    value := "hello"
+    raw := value.bytes()
+
+    assert(raw.len() == 5)
+    assert(raw[0] == u8('h'))
+
+    drop raw
+
+    assert(value == "hello")
+
+
+test "integer formatting handles sign and bases":
+    assert(string.from_integer[i32](0) == "0")
+    assert(string.from_integer[i32](42) == "42")
+    assert(string.from_integer[i32](-42) == "-42")
+    assert(string.from_integer[u32](255, base=16) == "ff")
+
+
+test "integer parsing validates target range":
+    assert("42".parse_integer[i32]() == 42)
+    assert("-42".parse_integer[i32]() == -42)
+    assert("ff".parse_integer[u8](base=16) == 255)
+
+    throws("256".parse_integer[u8]())
+    throws("-1".parse_integer[u8]())
+    throws("12x".parse_integer[i32]())
+
+
+test "float parsing handles decimal and exponent":
+    assert("3.5".parse_float[f64]() == f64(3.5))
+    assert("-2.25".parse_float[f64]() == f64(-2.25))
+    assert("1e3".parse_float[f64]() == f64(1000.0))
+    assert("1e-2".parse_float[f64]() == f64(0.01))
+
+
+test "float parsing handles IEEE special values":
+    assert("nan".parse_float[f32]().is_nan())
+    assert("inf".parse_float[f32]().is_infinite())
+    assert("-inf".parse_float[f32]().is_infinite())
+
+
+test "invalid UTF-8 bytes reject string construction":
+    invalid := array[u8, 2]([0xc0, 0x80])
+
+    throws(string(invalid[0:2]))
+
+
+test "string converts to bytes and validates bytes on return":
+    value := "λ"
+    raw := value as bytes
+    restored := raw as string
+
+    assert(restored == value)
+
+
+test with compiler "string is immutable":
+    reject:
+        value = "hello"
+        value[0] = 'H'
+
+
+test with compiler "borrowed string bytes cannot outlive string":
+    reject:
+        def invalid() -> slice[u8]:
+            value := "hello"
+            return value.bytes()

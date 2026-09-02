@@ -1,0 +1,377 @@
+import "array.sev"
+
+
+'''
+# `slice[T]`
+
+`slice` is a non-owning contiguous view over storage owned by another value.
+
+```text
+owner
+  |
+  +-------------------------+
+  | T | T | T | T | T | T |
+  +-------------------------+
+        ^-----------^
+             slice
+```
+
+A slice stores a borrowed memory region, an offset, and a runtime length.
+
+It does not allocate and it does not free storage. The compiler ties the slice
+lifetime to the owner that produced it.
+
+## Ownership
+
+There is one slice type:
+
+```text
+array[T, N]     owns memory
+slice[T]        borrows a region
+```
+
+Mutability is not represented by a second `mut_slice` type.
+
+The ownership checker infers the required borrow from use:
+
+```sev
+view := values[1:4]
+x := view[0]          # shared read borrow
+
+view[0] = 99          # the same slice now requires an exclusive write borrow
+```
+
+A slice that is only read may coexist with other shared slices.
+
+A slice that is written requires exclusive access to its borrowed region for its
+live range. Overlapping reads/writes or writes/writes are rejected. Statically
+disjoint regions may coexist.
+
+Dropping a slice ends the borrow only. It never releases the backing allocation.
+
+A slice cannot outlive its owner.
+
+A slice cannot be mirrored because it is not an owner.
+
+## Sub-slicing
+
+Sub-slicing does not create a borrow chain.
+
+```text
+owner[2:8][1:3]
+
+normalizes to
+
+owner[3:5]
+```
+
+The compiler tracks the original owner plus the normalized region.
+'''
+
+
+trait Slice[T]:
+    Truth
+
+    property length: usize
+
+    operator [](index: usize) -> T
+    operator []=(index: usize, value: T)
+
+    def len(self) -> usize
+    def is_empty(self) -> bool
+    def first(self) -> T
+    def last(self) -> T
+    def fill(self, value: T)
+    def subslice(self, start: usize, end: usize) -> slice[T]
+
+
+'''
+# `slice[T]`
+
+`__memory` is a compiler-tracked borrowed memory handle.
+
+The handle carries its owner and normalized region in ownership metadata. The
+source-level type remains `slice[T]`; read/write effects determine whether the
+borrow is shared or exclusive.
+'''
+class slice[T]: Slice[T]:
+
+    __memory: borrow Memory[T]
+    __offset: usize
+    length: usize
+
+    def slice(
+        memory: borrow Memory[T],
+        offset: usize,
+        length: usize,
+    ):
+        if offset + length > memory.len():
+            throw IndexError(
+                f"slice [{offset}, {offset + length}) exceeds memory length {memory.len()}"
+            )
+
+        __memory = memory
+        __offset = offset
+        self.length = length
+
+    operator if(self) -> self.length != 0
+    operator else(self) -> self.length == 0
+
+    operator [](index: usize) -> T:
+        if index >= self.length:
+            throw IndexError(
+                f"slice index {index} outside [0, {self.length})"
+            )
+
+        unsafe:
+            return __memory[__offset + index]
+
+    operator []=(index: usize, value: T):
+        if index >= self.length:
+            throw IndexError(
+                f"slice index {index} outside [0, {self.length})"
+            )
+
+        unsafe:
+            __memory[__offset + index] = value
+
+    def len(self) -> usize:
+        return self.length
+
+    def is_empty(self) -> bool:
+        return self.length == 0
+
+    def first(self) -> T:
+        if self.length == 0:
+            throw IndexError("first() on empty slice")
+
+        return self[0]
+
+    def last(self) -> T:
+        if self.length == 0:
+            throw IndexError("last() on empty slice")
+
+        return self[self.length - 1]
+
+    def fill(self, value: T):
+        for index in range(self.length):
+            self[index] = value
+
+    def subslice(self, start: usize, end: usize) -> slice[T]:
+        if start > end:
+            throw IndexError(
+                f"slice start {start} exceeds end {end}"
+            )
+
+        if end > self.length:
+            throw IndexError(
+                f"slice end {end} exceeds length {self.length}"
+            )
+
+        return slice[T](
+            __memory,
+            __offset + start,
+            end - start,
+        )
+
+    def iter(self) -> Iterator[T]:
+        for index in range(self.length):
+            yield self[index]
+
+    def drop():
+        pass
+
+
+'''
+# Array slicing
+
+Slicing an owner creates a borrowed region without transferring ownership.
+'''
+extend [T: Copy + Default, N: usize] array[T, N]:
+
+    operator [](range: Range[usize]) -> slice[T]:
+        start := range.start
+        end := range.end
+
+        if start > end:
+            throw IndexError(
+                f"slice start {start} exceeds end {end}"
+            )
+
+        if end > N:
+            throw IndexError(
+                f"slice end {end} exceeds array length {N}"
+            )
+
+        return slice[T](
+            borrow __memory,
+            start,
+            end - start,
+        )
+
+
+'''
+# Executable specification
+'''
+
+test "slice borrows a contiguous array region":
+    values := array[i32, 6]([10, 20, 30, 40, 50, 60])
+    middle := values[1:4]
+
+    assert(middle.len() == 3)
+    assert(middle[0] == 20)
+    assert(middle[1] == 30)
+    assert(middle[2] == 40)
+
+test "shared slices may overlap":
+    values := array[i32, 5]([1, 2, 3, 4, 5])
+
+    left := values[0:3]
+    right := values[2:5]
+
+    assert(left[2] == 3)
+    assert(right[0] == 3)
+
+test "writing through slice writes owner region":
+    values := array[i32, 4]([10, 20, 30, 40])
+    middle := values[1:3]
+
+    middle[0] = 99
+    middle[1] = 88
+
+    assert(values[0] == 10)
+    assert(values[1] == 99)
+    assert(values[2] == 88)
+    assert(values[3] == 40)
+
+test "fill writes selected owner region":
+    values := array[i32, 5]([1, 2, 3, 4, 5])
+    middle := values[1:4]
+
+    middle.fill(9)
+
+    assert(values == array[i32, 5]([1, 9, 9, 9, 5]))
+
+test "slice does not own backing storage":
+    values := array[i32, 4]([10, 20, 30, 40])
+    view := values[1:3]
+
+    drop view
+
+    assert(values[0] == 10)
+    assert(values[1] == 20)
+    assert(values[2] == 30)
+    assert(values[3] == 40)
+
+test "dropping slice ends borrow":
+    values := array[i32, 4]([1, 2, 3, 4])
+    view := values[1:3]
+
+    assert(view[0] == 2)
+
+    drop view
+
+    values[1] = 99
+    assert(values[1] == 99)
+
+test "slice truth follows runtime length":
+    values := array[i32, 4]([10, 20, 30, 40])
+
+    empty := values[2:2]
+    populated := values[1:3]
+
+    if empty:
+        throw Error("empty slice must be false")
+
+    if populated:
+        pass
+    else:
+        throw Error("non-empty slice must be true")
+
+test "slice bounds are relative to view":
+    values := array[i32, 6]([10, 20, 30, 40, 50, 60])
+    middle := values[2:4]
+
+    assert(middle[0] == 30)
+    assert(middle[1] == 40)
+
+    throws(middle[2])
+
+test "subslice normalizes to original owner":
+    values := array[i32, 8]([0, 1, 2, 3, 4, 5, 6, 7])
+
+    outer := values[2:7]
+    inner := outer.subslice(1, 3)
+
+    assert(inner.len() == 2)
+    assert(inner[0] == 3)
+    assert(inner[1] == 4)
+
+test "slice first and last use slice endpoints":
+    values := array[i32, 6]([10, 20, 30, 40, 50, 60])
+    middle := values[2:5]
+
+    assert(middle.first() == 30)
+    assert(middle.last() == 50)
+
+test "empty slice rejects first and last":
+    values := array[i32, 2]([10, 20])
+    empty := values[1:1]
+
+    throws(empty.first())
+    throws(empty.last())
+
+test "slice iteration preserves order":
+    values := array[i32, 5]([10, 20, 30, 40, 50])
+    middle := values[1:4]
+
+    total := 0
+
+    for value in middle:
+        total += value
+
+    assert(total == 90)
+
+test with compiler "slice cannot outlive owner":
+    reject:
+        def invalid() -> slice[i32]:
+            values := array[i32, 4]([1, 2, 3, 4])
+            return values[1:3]
+
+test with compiler "overlapping slices reject when either is written":
+    reject:
+        values := array[i32, 5]([1, 2, 3, 4, 5])
+
+        left := values[0:3]
+        right := values[2:5]
+
+        left[0] = 10
+        right[0] = 20
+
+test with compiler "owner cannot write borrowed region while write slice lives":
+    reject:
+        values := array[i32, 4]([1, 2, 3, 4])
+        middle := values[1:3]
+
+        middle[0] = 20
+        values[1] = 99
+
+test with compiler "disjoint write slices may coexist":
+    accept:
+        values := array[i32, 6]([1, 2, 3, 4, 5, 6])
+
+        left := values[0:2]
+        right := values[4:6]
+
+        left[0] = 10
+        right[0] = 50
+
+        assert(values[0] == 10)
+        assert(values[4] == 50)
+
+test with compiler "slice cannot be mirrored":
+    reject:
+        values := array[i32, 4]([1, 2, 3, 4])
+        view := values[1:3]
+
+        copy := mirror view
