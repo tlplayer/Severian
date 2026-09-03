@@ -1,0 +1,623 @@
+import "primitive.sev"
+import "slice.sev"
+
+
+'''
+# `list[T]`
+
+`list` is Severian's runtime-sized contiguous owned container.
+
+```text
+list[T]
+
+length = 3
+capacity = 4
+
+__memory
+   |
+   +-------------------+
+   | T | T | T | _ |
+   +-------------------+
+     0   1   2
+```
+
+A list owns one typed allocation and tracks:
+
+```text
+length      initialized elements
+capacity    allocated element slots
+```
+
+The first implementation requires `T: Copy + Default` because the current memory
+layer exposes typed allocation/free but does not yet expose general placement
+construction and per-element destruction for arbitrary owned classes.
+
+## Ownership
+
+`list[T]` is an owner.
+
+```text
+list[T]        owns memory
+slice[T]       borrows a region
+mirror list    shares storage until mutation
+```
+
+A list may have any number of mirrors.
+
+The first mutation through either the owner or a mirror triggers the compiler's
+mirror detach rule before this implementation mutates storage. The writer becomes
+an independent owner; other mirrors retain the previous value.
+
+Active slices constrain mutation through normal ownership rules. Operations that
+may write or reallocate the list require exclusive access to the affected owner.
+
+## Growth
+
+Capacity grows geometrically:
+
+```text
+0 -> 4 -> 8 -> 16 -> 32 -> ...
+```
+
+Growth allocates a new typed region, copies initialized elements, then frees the
+old allocation.
+
+No `realloc` primitive is required.
+
+## Truth
+
+```text
+[]       -> false
+[x, ...] -> true
+```
+
+Truth testing uses `operator if/else`; there is no separate `is_empty()` API.
+
+## Failure-return rule
+
+Operations where absence is ordinary return the useful value plus a Boolean:
+
+```sev
+value, ok := values.pop()
+index, found := values.find(needle)
+removed, ok := values.remove(needle)
+```
+
+The caller decides what failure means.
+'''
+
+
+trait List[T]:
+    Truth
+
+    property length: usize
+    property capacity: usize
+
+    operator [](index: usize) -> T
+    operator []=(index: usize, value: T)
+    operator [](range: Range[usize]) -> slice[T]
+
+    def len(self) -> usize
+    def cap(self) -> usize
+
+    def append(self, value: T)
+    def extend(self, values: slice[T])
+    def reserve(self, additional: usize)
+    def clear(self)
+
+    def pop(self) -> (T, bool)
+    def find(self, value: T) -> (usize, bool)
+    def remove(self, value: T) -> (T, bool)
+
+
+class list[T: Copy + Default]: List[T]:
+
+    __memory: Memory[T]
+    length: usize
+    capacity: usize
+
+
+    def list():
+        unsafe:
+            __memory = allocate[T](0)
+
+        length = 0
+        capacity = 0
+
+
+    def list[N: usize](values: array[T, N]):
+        requested := max(usize(4), N)
+
+        unsafe:
+            __memory = allocate[T](requested)
+
+            for index in range(N):
+                __memory[index] = values[index]
+
+            for index in range(N, requested):
+                __memory[index] = T.default()
+
+        length = N
+        capacity = requested
+
+
+    def list(values: slice[T]):
+        requested := max(usize(4), values.len())
+
+        unsafe:
+            __memory = allocate[T](requested)
+
+            for index in range(values.len()):
+                __memory[index] = values[index]
+
+            for index in range(values.len(), requested):
+                __memory[index] = T.default()
+
+        length = values.len()
+        capacity = requested
+
+
+    operator if(self) -> self.length != 0
+    operator else(self) -> self.length == 0
+
+
+    operator [](index: usize) -> T:
+        if index >= length:
+            throw IndexError(
+                f"list index {index} outside [0, {length})"
+            )
+
+        unsafe:
+            return __memory[index]
+
+
+    operator []=(index: usize, value: T):
+        if index >= length:
+            throw IndexError(
+                f"list index {index} outside [0, {length})"
+            )
+
+        unsafe:
+            __memory[index] = value
+
+
+    operator [](range: Range[usize]) -> slice[T]:
+        start := range.start
+        end := range.end
+
+        if start > end:
+            throw IndexError(
+                f"slice start {start} exceeds end {end}"
+            )
+
+        if end > length:
+            throw IndexError(
+                f"slice end {end} exceeds list length {length}"
+            )
+
+        return slice[T](
+            borrow __memory,
+            start,
+            end - start,
+        )
+
+
+    def len(self) -> usize:
+        return length
+
+
+    def cap(self) -> usize:
+        return capacity
+
+
+    def reserve(self, additional: usize):
+        required := length + additional
+
+        if required <= capacity:
+            return
+
+        new_capacity := max(usize(4), capacity)
+
+        while new_capacity < required:
+            new_capacity *= 2
+
+        __grow(new_capacity)
+
+
+    def __grow(self, new_capacity: usize):
+        if new_capacity <= capacity:
+            return
+
+        unsafe:
+            replacement := allocate[T](new_capacity)
+
+            for index in range(length):
+                replacement[index] = __memory[index]
+
+            for index in range(length, new_capacity):
+                replacement[index] = T.default()
+
+            free(__memory)
+
+        __memory = move replacement
+        capacity = new_capacity
+
+
+    def append(self, value: T):
+        reserve(1)
+
+        unsafe:
+            __memory[length] = value
+
+        length += 1
+
+
+    def extend(self, values: slice[T]):
+        incoming := values.len()
+
+        if incoming == 0:
+            return
+
+        reserve(incoming)
+
+        for index in range(incoming):
+            unsafe:
+                __memory[length + index] = values[index]
+
+        length += incoming
+
+
+    def insert(self, index: usize, value: T):
+        if index > length:
+            throw IndexError(
+                f"list insert index {index} outside [0, {length}]"
+            )
+
+        reserve(1)
+
+        cursor := length
+
+        while cursor > index:
+            unsafe:
+                __memory[cursor] = __memory[cursor - 1]
+
+            cursor -= 1
+
+        unsafe:
+            __memory[index] = value
+
+        length += 1
+
+
+    def pop(self) -> (T, bool):
+        if length == 0:
+            return (T.default(), false)
+
+        index := length - 1
+
+        unsafe:
+            value := __memory[index]
+            __memory[index] = T.default()
+
+        length = index
+
+        return (value, true)
+
+
+    def pop(self, index: usize) -> (T, bool):
+        if index >= length:
+            return (T.default(), false)
+
+        unsafe:
+            value := __memory[index]
+
+        cursor := index
+
+        while cursor + 1 < length:
+            unsafe:
+                __memory[cursor] = __memory[cursor + 1]
+
+            cursor += 1
+
+        length -= 1
+
+        unsafe:
+            __memory[length] = T.default()
+
+        return (value, true)
+
+
+    def find(self, value: T) -> (usize, bool):
+        for index in range(length):
+            if self[index] == value:
+                return (index, true)
+
+        return (0, false)
+
+
+    def remove(self, value: T) -> (T, bool):
+        index, found := find(value)
+
+        if not found:
+            return (T.default(), false)
+
+        return pop(index)
+
+
+    def clear(self):
+        for index in range(length):
+            unsafe:
+                __memory[index] = T.default()
+
+        length = 0
+
+
+    def copy(self) -> list[T]:
+        result := list[T]()
+        result.reserve(length)
+
+        for index in range(length):
+            result.append(self[index])
+
+        return result
+
+
+    def iter(self) -> Iterator[T]:
+        for index in range(length):
+            yield self[index]
+
+
+    def drop():
+        unsafe:
+            free(__memory)
+
+
+'''
+# Executable specification
+'''
+
+
+test "list starts empty":
+    values := list[i32]()
+
+    assert(values.len() == 0)
+    assert(values.cap() == 0)
+
+    if values:
+        throw Error("empty list must be false")
+
+
+test "append grows list":
+    values := list[i32]()
+
+    values.append(10)
+    values.append(20)
+    values.append(30)
+
+    assert(values.len() == 3)
+    assert(values[0] == 10)
+    assert(values[1] == 20)
+    assert(values[2] == 30)
+
+
+test "first append creates minimum capacity":
+    values := list[i32]()
+
+    values.append(1)
+
+    assert(values.cap() >= 4)
+
+
+test "capacity grows geometrically":
+    values := list[i32]()
+
+    for value in range(9):
+        values.append(i32(value))
+
+    assert(values.len() == 9)
+    assert(values.cap() >= 9)
+
+
+test "list construction from array copies values":
+    source := array[i32, 4]([10, 20, 30, 40])
+    values := list[i32](source)
+
+    source[0] = 99
+
+    assert(values.len() == 4)
+    assert(values[0] == 10)
+
+
+test "list indexes mutate initialized storage":
+    values := list[i32](array[i32, 3]([1, 2, 3]))
+
+    values[1] = 20
+
+    assert(values[0] == 1)
+    assert(values[1] == 20)
+    assert(values[2] == 3)
+
+
+test "list bounds use runtime length not capacity":
+    values := list[i32]()
+    values.reserve(8)
+
+    assert(values.cap() >= 8)
+    assert(values.len() == 0)
+
+    throws(values[0])
+
+
+test "list slices borrow initialized region":
+    values := list[i32](array[i32, 5]([10, 20, 30, 40, 50]))
+    middle := values[1:4]
+
+    assert(middle.len() == 3)
+    assert(middle[0] == 20)
+    assert(middle[1] == 30)
+    assert(middle[2] == 40)
+
+
+test "write through list slice updates list":
+    values := list[i32](array[i32, 4]([10, 20, 30, 40]))
+    middle := values[1:3]
+
+    middle[0] = 99
+
+    assert(values[1] == 99)
+
+
+test "insert shifts elements":
+    values := list[i32](array[i32, 3]([10, 30, 40]))
+
+    values.insert(1, 20)
+
+    assert(values.len() == 4)
+    assert(values[0] == 10)
+    assert(values[1] == 20)
+    assert(values[2] == 30)
+    assert(values[3] == 40)
+
+
+test "pop returns value and success":
+    values := list[i32](array[i32, 3]([10, 20, 30]))
+
+    value, ok := values.pop()
+
+    assert(ok)
+    assert(value == 30)
+    assert(values.len() == 2)
+
+
+test "pop on empty list returns false":
+    values := list[i32]()
+
+    value, ok := values.pop()
+
+    assert(not ok)
+    assert(value == i32.default())
+
+
+test "indexed pop shifts tail":
+    values := list[i32](array[i32, 4]([10, 20, 30, 40]))
+
+    value, ok := values.pop(1)
+
+    assert(ok)
+    assert(value == 20)
+    assert(values.len() == 3)
+    assert(values[0] == 10)
+    assert(values[1] == 30)
+    assert(values[2] == 40)
+
+
+test "find returns index and boolean":
+    values := list[i32](array[i32, 4]([10, 20, 30, 40]))
+
+    index, found := values.find(30)
+    assert(found)
+    assert(index == 2)
+
+    _, found := values.find(99)
+    assert(not found)
+
+
+test "remove returns removed value and boolean":
+    values := list[i32](array[i32, 4]([10, 20, 30, 40]))
+
+    value, ok := values.remove(20)
+
+    assert(ok)
+    assert(value == 20)
+    assert(values.len() == 3)
+    assert(values[0] == 10)
+    assert(values[1] == 30)
+    assert(values[2] == 40)
+
+    _, ok := values.remove(99)
+    assert(not ok)
+
+
+test "clear preserves capacity":
+    values := list[i32](array[i32, 4]([1, 2, 3, 4]))
+    before := values.cap()
+
+    values.clear()
+
+    assert(values.len() == 0)
+    assert(values.cap() == before)
+
+
+test "copy creates independent storage":
+    left := list[i32](array[i32, 3]([1, 2, 3]))
+    right := left.copy()
+
+    right[0] = 99
+
+    assert(left[0] == 1)
+    assert(right[0] == 99)
+
+
+test "mirror shares until list mutation":
+    owner := list[i32](array[i32, 3]([1, 2, 3]))
+    snapshot := mirror owner
+
+    assert(snapshot[0] == 1)
+
+    owner[0] = 99
+
+    assert(owner[0] == 99)
+    assert(snapshot[0] == 1)
+
+
+test "mirror mutation detaches writer":
+    owner := list[i32](array[i32, 3]([1, 2, 3]))
+    branch := mirror owner
+
+    branch.append(4)
+
+    assert(owner.len() == 3)
+    assert(branch.len() == 4)
+    assert(branch[3] == 4)
+
+
+test "list iteration follows logical length":
+    values := list[i32](array[i32, 4]([10, 20, 30, 40]))
+
+    total := 0
+
+    for value in values:
+        total += value
+
+    assert(total == 100)
+
+
+test with compiler "list cannot reallocate through live slice":
+    reject:
+        values := list[i32](array[i32, 4]([1, 2, 3, 4]))
+        borrowed := values[1:3]
+
+        values.reserve(100)
+
+        assert(borrowed[0] == 2)
+
+
+test with compiler "list append conflicts with live borrowed region":
+    reject:
+        values := list[i32](array[i32, 4]([1, 2, 3, 4]))
+        borrowed := values[0:2]
+
+        values.append(5)
+
+        assert(borrowed[0] == 1)
+
+
+test with compiler "list requires copy default element contract":
+    reject:
+        class Resource:
+            handle
+
+            def drop():
+                release(handle)
+
+        values := list[Resource]()

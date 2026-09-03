@@ -71,3 +71,30 @@ Effect
     borrow/move
     IO
     async
+
+
+Symbols
+T  Type
+V  Value
+
+E  Error
+Ex Expression
+M  Macro
+S  Statement
+D  Declaration
+P  Pattern
+L  Literal
+
+O  Operation
+I  Instruction
+B  Block
+
+A  Argument
+R  Result
+F  Callable
+
+C  Constraint
+K  Kind
+Y  Symbol
+N  Node
+X  Any compiler term ex: X: E | S | D | P | T...
