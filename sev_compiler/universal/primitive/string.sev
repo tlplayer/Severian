@@ -36,11 +36,11 @@ These are intentionally different:
 ```sev
 ascii := "hello"
 assert(ascii.len() == 5)
-assert(ascii.bytes_len() == 5)
+assert(ascii.bytes() == 5B)
 
 unicode := "λ"
 assert(unicode.len() == 1)
-assert(unicode.bytes_len() == 2)
+assert(unicode.bytes() == 2B)
 ```
 
 ## Ownership
@@ -119,8 +119,7 @@ trait String:
     def len(self) -> usize
     def bytes(self) -> usize
     def empty(self) -> bool
-    def byte(self, index: usize) -> u8
-    def raw(self) -> slice[u8]
+    def raw(self) -> slice[char]
     #starts/ends with the index is where is starts searching from
     def with(prefix: string,(start: string = "start",direction: string "forward")) -> bool
     def contains(self, needle: string) -> bool
@@ -129,7 +128,7 @@ trait String:
     def split(self) -> list[string]
     def join(self,conjunction: string) -> string
     def find(self,substring: string) -> int
-    #Regex match "foo".match(".*") -> ("foo",true)
+    #Regex match "foo".match(".*") -> ("foo" | ["foo",""foo2"],true)
     def match(self, expression: string) -> tuple(string,bool)
 
 
@@ -654,7 +653,7 @@ class string: String:
     This is the implementation used by integer `print()` and the `int -> string`
     conversion relation.
     '''
-    def from_integer[I: int](value: I, base: u8 = 10) -> string:
+    def from_integer[integer: int](value: Integer, base: u8 = 10) -> string:
         if base < 2 or base > 36:
             throw ValueError(
                 f"integer base {base} outside [2, 36]"
@@ -968,7 +967,7 @@ test "empty string has zero lengths and false truth":
     value := ""
 
     assert(value.len() == 0)
-    assert(value.bytes_len() == 0)
+    assert(value.bytes() == 0B)
 
     if value:
         throw Error("empty string must be false")
@@ -987,14 +986,14 @@ test "ASCII length equals byte length":
     value := "hello"
 
     assert(value.len() == 5)
-    assert(value.bytes_len() == 5)
+    assert(value.bytes() == 5)
 
 
 test "Unicode scalar length differs from byte length":
     value := "aλz"
 
     assert(value.len() == 3)
-    assert(value.bytes_len() == 4)
+    assert(value.bytes() == 4)
 
 
 test "string indexing uses Unicode scalar indices":
@@ -1010,7 +1009,7 @@ test "string indexing uses Unicode scalar indices":
 test "byte access exposes UTF-8 representation":
     value := "λ"
 
-    assert(value.bytes_len() == 2)
+    assert(value.bytes() == 2)
     assert(value.byte(0) == 0xce)
     assert(value.byte(1) == 0xbb)
 

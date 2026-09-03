@@ -372,6 +372,6 @@ test with compiler "disjoint write slices may coexist":
 test with compiler "slice cannot be mirrored":
     reject:
         values := array[i32, 4]([1, 2, 3, 4])
-        view := values[1:3]
+        values_view := values[1:3]
 
-        copy := mirror view
+        values_copy := mirror view

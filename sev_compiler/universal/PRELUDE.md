@@ -39,6 +39,7 @@ API ID: `prelude.function.assert`
 | `compile()`    | Compile source         |
 | `eval()`       | Evaluate an expression |
 | `exe()`       | Execute code           |
+| `parse()`       | Parse code to ast/IR           |
 
 ### Conversion and Representation
 

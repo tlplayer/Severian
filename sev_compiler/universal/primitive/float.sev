@@ -440,20 +440,20 @@ extend [F: float] F:
     def copysign(self, sign: F) -> F:
         return mlir(math.copysign, self, sign)
 
-    def is_nan(self) -> bool:
+    def nan(self) -> bool:
         return mlir(math.isnan, self)
 
-    def is_infinite(self) -> bool:
+    def infinite(self) -> bool:
         return mlir(math.isinf, self)
 
-    def is_finite(self) -> bool:
+    def finite(self) -> bool:
         return mlir(math.isfinite, self)
 
-    def is_normal(self) -> bool:
+    def normal(self) -> bool:
         return mlir(math.isnormal, self)
 
     def signum(self) -> F:
-        if self.is_nan():
+        if self.nan():
             return self
         if self < F(0.0):
             return F(-1.0)
@@ -561,7 +561,7 @@ extend [F: float] F:
         integer_conversion-> [T:I] with I in int:
 
             self ~> I:
-                if not self.is_finite():
+                if not self.finite():
                     throw TypeConversionError(
                         "non-finite float cannot convert to integer"
                     )
@@ -684,11 +684,11 @@ test "float metadata describes representation":
 
 
 test "float classification uses MLIR math operations":
-    assert(f32("nan").is_nan())
-    assert(f32("inf").is_infinite())
-    assert(f32("-inf").is_infinite())
-    assert(f32(1.0).is_finite())
-    assert(f32(1.0).is_normal())
+    assert(f32("nan").nan())
+    assert(f32("inf").infinite())
+    assert(f32("-inf").infinite())
+    assert(f32(1.0).finite())
+    assert(f32(1.0).normal())
 
 
 test "float math functions preserve the concrete type":

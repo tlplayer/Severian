@@ -68,7 +68,7 @@ trait Character:
     def ascii(self) -> bool
     def digit(self) -> bool
     def whitespace(self) -> bool
-    def utf8_len(self) -> usize
+    def len(self) -> usize
 
 
 class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:

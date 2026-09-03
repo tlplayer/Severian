@@ -86,9 +86,14 @@ enum AddressSpace:
     local
 
 
+#Pointers are rife with exceptions/errors so they are unsafe by default
+@unsafe
 class pointer[T](Primitive):
     _address: usize
     _address_space: AddressSpace = AddressSpace.generic
+
+    #Self alias *[T] is an alternative invocation/reference
+    self as *[T]
 
     def type(self) -> Type:
         return T
