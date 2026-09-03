@@ -1,0 +1,33 @@
+union foobar:
+    foo
+    bar
+
+
+class foo:
+    def return_foobar() -> foobar:
+        return self
+
+    def foo_value() -> None:
+        return 1
+
+class bar:
+    def return_bar() -> foobar:
+        return self
+
+    def bar_value() -> None:
+        return 2
+
+
+test "Fixed point type collapse":
+    #When we zip a union we get a fixed point colpase if there is no conflict in implementation
+    foobar = zip(foo,bar)
+
+    #We instantiate the new class which has both functions/values
+    fb = foobar()
+
+    assert(fb.bar_value() == 2)
+    assert(fb.foo_value() == 1)
+    assert(type(fb) == foobar)
+
+
+
