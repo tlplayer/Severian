@@ -269,13 +269,14 @@ mlir:
 Formatting and parsing remain ordinary library behavior because they are not
 single MLIR primitive operations.
 '''
-extend [F: float] F:
+
+class float_type: Float
 
     operator if(self) -> bool:
-        return mlir(arith.cmpf, "une", self, F(0.0))
+        return mlir(arith.cmpf, "une", self, self(0.0))
 
     operator else(self) -> bool:
-        return mlir(arith.cmpf, "oeq", self, F(0.0))
+        return mlir(arith.cmpf, "oeq", self, self(0.0))
 
     operator +(right: F) -> F:
         return mlir(arith.addf, self, right)
@@ -509,7 +510,6 @@ f8e4m3fn ~> f8e5m2
 `~>` does not prescribe a failure policy. IEEE conversion may round, underflow,
 or overflow according to the selected target and package policy.
 '''
-extend [F: float] F:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
@@ -608,6 +608,8 @@ extend [F: float] F:
 '''
 # Executable specification
 '''
+
+float = zip(float_type)
 
 
 test "float is a closed family of concrete formats":

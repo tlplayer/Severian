@@ -6420,6 +6420,42 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let AstExpressionKind::Name(name) = &callee.kind {
+                    let generic_expected = (name.len() == 1
+                        && name.as_bytes()[0].is_ascii_uppercase())
+                        .then_some(expected)
+                        .flatten();
+                    if let Some(ty) = self
+                        .active_type_aliases
+                        .get(name)
+                        .copied()
+                        .or(generic_expected)
+                    {
+                        let [argument] = arguments.as_slice() else {
+                            return Err(Diagnostic::new(
+                                "E000206",
+                                format!("type parameter `{name}` expects one constructor value"),
+                                Some(ast.span),
+                            ));
+                        };
+                        if argument.name.is_some() || argument.spread {
+                            return Err(Diagnostic::new(
+                                "E000206",
+                                "a type-parameter constructor requires one positional value",
+                                Some(argument.span),
+                            ));
+                        }
+                        let value = self.expression(&argument.value, Some(ty))?;
+                        let value = self.coerce(value, ty, false)?;
+                        if expected.is_some_and(|expected| !self.types.assignable(ty, expected)) {
+                            return Err(semantic_error(
+                                format!("constructed `{name}` does not satisfy the expected type"),
+                                ast.span,
+                            ));
+                        }
+                        return Ok(value);
+                    }
+                }
                 if matches!(&callee.kind, AstExpressionKind::Name(name) if name == "mlir") {
                     let Some((operation_argument, remaining)) = arguments.split_first() else {
                         return Err(Diagnostic::new(
@@ -6453,7 +6489,8 @@ impl Analyzer<'_> {
                                 continue;
                             }
                         }
-                        operands.push(self.expression(&argument.value, None)?);
+                        let operand_expected = operands.first().map(|operand: &Expression| operand.type_id);
+                        operands.push(self.expression(&argument.value, operand_expected)?);
                     }
                     let result = expected
                         .or_else(|| operands.first().map(|operand| operand.type_id))
@@ -8973,22 +9010,28 @@ impl Analyzer<'_> {
             }
             if requested.is_none()
                 && self.types.resolve_name("string") == Some(expression.type_id)
-                && matches!(
-                    self.types
-                        .definition(expected)
-                        .map(|definition| definition.name.as_str()),
-                    Some("float" | "f64")
-                )
+                && self.types.primitive(expected).is_some_and(|primitive| {
+                    primitive.category == severian_universal::PrimitiveCategory::Float
+                })
             {
                 let string = expression.type_id;
                 let span = expression.span;
-                return Ok(self.runtime_call(
+                let runtime_float = self
+                    .types
+                    .resolve_name("f64")
+                    .expect("bootstrap defines f64");
+                let parsed = self.runtime_call(
                     "__sev_float_from_string",
                     &[string],
-                    expected,
+                    runtime_float,
                     vec![expression],
                     span,
-                ));
+                );
+                return if expected == runtime_float {
+                    Ok(parsed)
+                } else {
+                    self.coerce(parsed, expected, true)
+                };
             }
             if requested.is_none()
                 && self.types.resolve_name("string") == Some(expression.type_id)
