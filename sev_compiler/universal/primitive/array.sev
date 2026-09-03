@@ -1,0 +1,384 @@
+import "../primitive/primitive.sev"
+import "../../memory/memory.sev"
+
+
+'''
+# `array[T, N]`
+
+`array` is Severian's fixed-length contiguous owned container.
+
+```sev
+values := array[i32, 4]
+```
+
+An array owns one allocation containing exactly `N` elements of `T`.
+
+```text
+array[T, N]
+
+__memory
+   |
+   +-- T[0]
+   +-- T[1]
+   +-- ...
+   +-- T[N - 1]
+```
+
+`array` is intentionally the small fixed-storage primitive beneath higher-level
+containers.
+
+```text
+allocate[T, N]
+      |
+      v
+array[T, N]
+      |
+      +--> slice[T]
+      |
+      +--> list[T]
+```
+
+The initial implementation requires `T: Copy + Default`. The current systems
+memory API exposes typed allocation, indexed access, layout queries, and `free`,
+but does not yet expose general placement construction and per-element
+destruction for arbitrary owned classes.
+
+## Memory contract
+
+The implementation uses the same primitives as
+`docs/examples/04-systems/02-memory`:
+
+```sev
+allocate[T](count)
+free(memory)
+bytes[T]()
+alignment[T]()
+drop value
+```
+
+Raw allocation and raw indexed memory access stay inside `unsafe`. Array users
+operate through the checked container interface.
+
+## Truth
+
+Arrays follow the `Truth` contract:
+
+```text
+array[T, 0] -> false
+array[T, N] -> true when N > 0
+```
+
+Truth testing does not convert the array to `bool`; it only selects control flow.
+
+## Ownership
+
+An array owns its allocation.
+
+- construction allocates once;
+- `copy()` creates a new allocation;
+- `drop` frees the owned allocation exactly once;
+- indexing never transfers ownership of the array itself.
+'''
+
+
+trait FixedContainer[T, N]:
+    property length: usize
+
+    def len(self) -> usize
+    def size(self) -> byte
+    def alignment(self) -> byte
+
+
+trait Array[T, N]:
+    FixedContainer[T, N]
+    Truth
+    Copy
+
+    operator [](index: usize) -> T
+    operator []=(index: usize, value: T)
+
+
+'''
+# `array[T, N]`
+
+`N` is a compile-time length.
+
+The storage pointer is hidden because direct access would bypass bounds,
+ownership, and lifetime checks.
+'''
+class array[T: Copy + Default, N: usize]: Array[T, N]:
+
+    __memory
+    length: usize = N
+
+
+    '''
+    ## Default construction
+
+    Allocate exactly `N` elements and initialize each element with `T.default()`.
+    '''
+    def array():
+        unsafe:
+            __memory = allocate[T](N)
+
+            for index in range(N):
+                __memory[index] = T.default()
+
+
+    '''
+    ## Value construction
+
+    Construct an array from exactly `N` values.
+
+    The input shape must match the compile-time array length.
+    '''
+    def array(values: T[N]):
+        unsafe:
+            __memory = allocate[T](N)
+
+            for index in range(N):
+                __memory[index] = values[index]
+
+
+    '''
+    ## Truth
+
+    Fixed-length emptiness is known at compile time.
+    '''
+    operator if(self) -> N != 0
+    operator else(self) -> N == 0
+
+
+    '''
+    ## Indexing
+
+    Bounds are checked before entering the raw memory operation.
+    '''
+    operator [](index: usize) -> T:
+        if index >= N:
+            throw IndexError(
+                f"array index {index} outside [0, {N})"
+            )
+
+        unsafe:
+            return __memory[index]
+
+
+    operator []=(index: usize, value: T):
+        if index >= N:
+            throw IndexError(
+                f"array index {index} outside [0, {N})"
+            )
+
+        unsafe:
+            __memory[index] = value
+
+
+    '''
+    ## Length and layout
+    '''
+    def len(self) -> usize:
+        return N
+
+
+    def size(self) -> usize:
+        return N
+
+    def bytes(self) -> bytes:
+        return N *bytes(T)
+
+    def alignment(self) -> byte:
+        return alignment[T]()
+
+
+    def empty(self) -> bool:
+        return N == 0
+
+    '''
+    ## Fill
+
+    Replace every element with a copied value.
+    '''
+    def fill(self, value: T):
+        for index in range(N):
+            self[index] = value
+
+
+    '''
+    ## Copy
+
+    Arrays use value-copy semantics. Copying creates independent backing storage.
+    '''
+    def copy(self) -> array[T, N]:
+        result := array[T, N]()
+
+        for index in range(N):
+            result[index] = self[index]
+
+        return result
+
+
+    '''
+    ## Iteration
+
+    Iteration is index-based over the fixed range.
+    '''
+    def iterate(self) -> Iterator[T]:
+        for index in range(N):
+            yield self[index]
+
+
+    '''
+    ## Lifetime
+
+    `drop` owns the final transition from live allocation to released allocation.
+
+    The current `Copy + Default` constraint means no per-element destructor is
+    required before releasing the backing allocation.
+    '''
+    def drop():
+        unsafe:
+            free(__memory)
+
+
+'''
+# Executable specification
+
+These tests define array behavior across layout, indexing, ownership, truth,
+copying, initialization, and lifetime.
+'''
+
+
+test "array constructs fixed contiguous storage":
+    values := array[i32, 4]()
+
+    assert(values.len() == 4)
+    assert(values[0] == 0)
+    assert(values[1] == 0)
+    assert(values[2] == 0)
+    assert(values[3] == 0)
+
+
+test "array supports indexed mutation":
+    values := array[i32, 4]()
+
+    values[0] = 10
+    values[1] = 20
+    values[2] = 30
+    values[3] = 40
+
+    assert(values[0] == 10)
+    assert(values[1] == 20)
+    assert(values[2] == 30)
+    assert(values[3] == 40)
+
+
+test "array value constructor preserves values":
+    values := array[i32, 4]([10, 20, 30, 40])
+
+    assert(values[0] == 10)
+    assert(values[1] == 20)
+    assert(values[2] == 30)
+    assert(values[3] == 40)
+
+
+test "array layout derives from element type":
+    values := array[u32, 4]()
+
+    assert(values.size() == 16B)
+    assert(values.alignment() == alignment[u32]())
+
+
+test "array truth depends on fixed length":
+    empty := array[u8, 0]()
+    populated := array[u8, 4]()
+
+    if empty:
+        throw Error("empty array must be false")
+
+    if populated:
+        pass
+    else:
+        throw Error("non-empty array must be true")
+
+
+test "array is_empty follows fixed length":
+    assert(array[u8, 0]().is_empty())
+    assert(not array[u8, 1]().is_empty())
+
+
+test "array bounds are checked":
+    values := array[i32, 4]()
+
+    throws(values[4])
+    throws(values[4] = 10)
+
+
+test "empty array rejects first and last":
+    values := array[i32, 0]()
+
+    throws(values[0])
+    throws(values[-1])
+
+
+test "array fill replaces every element":
+    values := array[i32, 4]()
+
+    values.fill(7)
+
+    assert(values[0] == 7)
+    assert(values[1] == 7)
+    assert(values[2] == 7)
+    assert(values[3] == 7)
+
+
+test "array copy owns separate storage":
+    left := array[i32, 2]([10, 20])
+    right := left.copy()
+
+    right[0] = 99
+
+    assert(left[0] == 10)
+    assert(right[0] == 99)
+    assert(left[1] == right[1])
+
+
+test "array iteration follows index order":
+    values := array[i32, 4]([10, 20, 30, 40])
+    total := 0
+
+    for value in values:
+        total += value
+
+    assert(total == 100)
+
+
+test "array lifetime releases owned allocation":
+    values := array[i32, 4]()
+
+    drop values
+
+    reject:
+        value := values[0]
+
+
+test with compiler "array length is part of the type":
+    reject:
+        source := array[i32, 4]()
+        target: array[i32, 8] = source
+
+
+test with compiler "array initializer length must match type":
+    reject:
+        values := array[i32, 4]([1, 2, 3])
+
+
+test with compiler "array requires copy default element contract":
+    reject:
+        class OwnedResource:
+            handle
+
+            def drop():
+                release(handle)
+
+        values := array[OwnedResource, 4]()
