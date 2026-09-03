@@ -724,6 +724,12 @@ fn install_primitive_class_operators(
             }
             let result =
                 resolve_package_type(types, &implementation.result, class.module, classes, &[])?;
+            // Compound-assignment declarations use the base operator syntax
+            // in the current AST but return `unit`; they describe mutation,
+            // not an additional value-producing binary overload.
+            if result == types.resolve_name("unit").expect("bootstrap defines unit") {
+                continue;
+            }
             match implementation.parameters.as_slice() {
                 [] => {
                     if let Some(operator) = crate::universal_unary_syntax(implementation.operator) {

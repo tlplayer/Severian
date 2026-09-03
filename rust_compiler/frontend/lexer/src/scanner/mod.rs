@@ -210,6 +210,14 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::StarEqual
             }
             b'*' => one(&mut cursor, TokenKind::Star),
+            b'/' if bytes.get(cursor..cursor + 3) == Some(b"//=") => {
+                cursor += 3;
+                TokenKind::FloorDivideEqual
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
+                cursor += 2;
+                TokenKind::FloorDivide
+            }
             b'/' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 TokenKind::SlashEqual
@@ -224,6 +232,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::MinusEqual
             }
             b'-' => one(&mut cursor, TokenKind::Minus),
+            b'~' if bytes.get(cursor + 1) == Some(&b'>') => {
+                cursor += 2;
+                TokenKind::ApproxArrow
+            }
             b'=' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 TokenKind::EqualEqual
@@ -234,11 +246,31 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::NotEqual
             }
             b'!' => one(&mut cursor, TokenKind::Bang),
+            b'<' if bytes.get(cursor..cursor + 3) == Some(b"<=>") => {
+                cursor += 3;
+                TokenKind::Conversion
+            }
+            b'<' if bytes.get(cursor..cursor + 3) == Some(b"<<=") => {
+                cursor += 3;
+                TokenKind::ShiftLeftEqual
+            }
+            b'<' if bytes.get(cursor + 1) == Some(&b'<') => {
+                cursor += 2;
+                TokenKind::ShiftLeft
+            }
             b'<' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 TokenKind::LessEqual
             }
             b'<' => one(&mut cursor, TokenKind::Less),
+            b'>' if bytes.get(cursor..cursor + 3) == Some(b">>=") => {
+                cursor += 3;
+                TokenKind::ShiftRightEqual
+            }
+            b'>' if bytes.get(cursor + 1) == Some(&b'>') => {
+                cursor += 2;
+                TokenKind::ShiftRight
+            }
             b'>' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 TokenKind::GreaterEqual
@@ -413,6 +445,29 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                     Diagnostic::new(
                         "E000101",
                         "hexadecimal literal is too large",
+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+                    )
+                })?;
+                TokenKind::Integer(value.to_string())
+            }
+            b'0' if matches!(bytes.get(cursor + 1), Some(b'b' | b'B')) => {
+                cursor += 2;
+                let digits_start = cursor;
+                while cursor < bytes.len() && matches!(bytes[cursor], b'0' | b'1' | b'_') {
+                    cursor += 1;
+                }
+                let digits = source.text[digits_start..cursor].replace('_', "");
+                if digits.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "binary literals require at least one digit",
+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+                    ));
+                }
+                let value = u128::from_str_radix(&digits, 2).map_err(|_| {
+                    Diagnostic::new(
+                        "E000101",
+                        "binary literal is too large",
                         Some(Span::new(source.id, start as u32, cursor as u32)),
                     )
                 })?;

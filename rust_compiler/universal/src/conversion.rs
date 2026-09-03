@@ -174,9 +174,9 @@ fn classify(
             Some(Checked)
         }
 
-        // Integer-to-float is the language's ordinary arithmetic promotion.
-        // Backends still choose the concrete signed/unsigned instruction.
-        (Integer { .. } | PointerInteger { .. }, Float { .. }) => Some(Promote),
+        // Integer storage can exceed a floating format's precision even when
+        // its range fits, so this relation is approximate in both directions.
+        (Integer { .. } | PointerInteger { .. }, Float { .. }) => Some(Lossy),
         (Float { .. }, Integer { .. } | PointerInteger { .. }) => Some(Lossy),
 
         (

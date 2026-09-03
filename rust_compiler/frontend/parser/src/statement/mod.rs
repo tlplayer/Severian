@@ -142,7 +142,14 @@ impl Parser<'_> {
                 module.items.push(Item::Enum(self.enum_declaration()?));
                 self.separators();
                 continue;
-            } else if self.at_identifier("def") {
+            } else if self.at_identifier("union") {
+                if !decorators.is_empty() {
+                    return Err(self.error("decorators may not precede a union declaration"));
+                }
+                module.items.push(Item::Type(self.union_declaration()?));
+                self.separators();
+                continue;
+            } else if self.at_identifier("def") || self.at(&TokenKind::Arrow) {
                 let declaration = self.function_declaration(decorators)?;
                 let has_body = declaration.body.is_some();
                 module.items.push(Item::Function(declaration));
@@ -301,7 +308,9 @@ impl Parser<'_> {
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<FunctionDeclaration, Diagnostic> {
-        let start = self.next().span;
+        let introducer = self.next();
+        let compile_time = introducer.kind == TokenKind::Arrow;
+        let start = introducer.span;
         let (name, _) = self.identifier("expected a function name")?;
         let (mut type_parameters, mut constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
@@ -431,6 +440,7 @@ impl Parser<'_> {
         };
         Ok(FunctionDeclaration {
             decorators,
+            compile_time,
             name,
             type_parameters,
             constraints,
@@ -787,14 +797,18 @@ impl Parser<'_> {
                     None
                 };
                 self.expect(&TokenKind::Colon, "expected `:` after compiler expectation")?;
-                let (case_items, case_body, end) = self.compiler_case_block()?;
+                let (case_items, mut case_body, end) = self.compiler_case_block()?;
+                let mut scoped_body = body.clone();
+                scoped_body.append(&mut case_body);
                 cases.push(CompilerTestCase {
                     expectation,
                     diagnostic_name,
                     items: case_items,
-                    body: case_body,
+                    body: scoped_body,
                     span: Span::new(token.span.source, token.span.start, end),
                 });
+            } else if self.at_identifier("import") || self.at_identifier("from") {
+                self.import_declaration()?;
             } else {
                 body.push(self.block_statement()?);
                 if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
@@ -807,7 +821,7 @@ impl Parser<'_> {
             .expect(&TokenKind::Dedent, "expected end of compiler test body")?
             .span
             .end;
-        Ok((body, cases, end))
+        Ok((Vec::new(), cases, end))
     }
 
     fn compiler_case_block(&mut self) -> Result<(Vec<Item>, Vec<Statement>, u32), Diagnostic> {
@@ -1556,6 +1570,46 @@ impl Parser<'_> {
         })
     }
 
+    fn union_declaration(&mut self) -> Result<TypeDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, _) = self.identifier("expected a union name")?;
+        self.expect(&TokenKind::Colon, "expected `:` after union name")?;
+        self.expect(&TokenKind::Newline, "expected a newline after union name")?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected an indented union body")?;
+        self.separators();
+        let mut members = Vec::new();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            members.push(self.type_annotation()?);
+            if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                return Err(self.error("expected a newline after union member"));
+            }
+            self.separators();
+        }
+        if members.is_empty() {
+            return Err(Diagnostic::new(
+                "E000112",
+                "a union declaration requires at least one member",
+                Some(start),
+            ));
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of union body")?
+            .span
+            .end;
+        Ok(TypeDeclaration {
+            decorators: Vec::new(),
+            name,
+            type_parameters: Vec::new(),
+            constraints: Vec::new(),
+            definition: Some(TypeAnnotation {
+                kind: TypeAnnotationKind::Union(members),
+                span: Span::new(start.source, start.start, end),
+            }),
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
     fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
         let keyword = self.next();
         let start = keyword.span;
@@ -1653,6 +1707,20 @@ impl Parser<'_> {
             "expected a newline after trait header; base traits do not take a trailing `:`",
         )?;
         while self.take(&TokenKind::Newline).is_some() {}
+        if !self.at(&TokenKind::Indent) {
+            return Ok(TraitDeclaration {
+                decorators,
+                namespaces: Vec::new(),
+                name,
+                type_parameters,
+                constraints,
+                bases,
+                properties: Vec::new(),
+                methods: Vec::new(),
+                operators: Vec::new(),
+                span: Span::new(start.source, start.start, self.peek().span.start),
+            });
+        }
         self.expect(&TokenKind::Indent, "expected an indented trait body")?;
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -1814,6 +1882,8 @@ impl Parser<'_> {
         decorators: Vec<Decorator>,
     ) -> Result<ExtensionDeclaration, Diagnostic> {
         let start = self.next().span;
+        let (type_parameters, mut constraints) = self.type_parameters()?;
+        constraints.extend(self.declaration_constraints()?);
         let target = self.type_annotation()?;
         self.expect(&TokenKind::Colon, "expected `:` after extension target")?;
         self.expect(
@@ -1860,6 +1930,8 @@ impl Parser<'_> {
             .span;
         Ok(ExtensionDeclaration {
             decorators,
+            type_parameters,
+            constraints,
             target,
             methods,
             operators,
@@ -2365,6 +2437,20 @@ impl Parser<'_> {
             });
         }
         self.expect(&TokenKind::Colon, "expected `:` after operator signature")?;
+        if operator == OperatorSyntax::Conversion {
+            let end = self.opaque_indented_block("conversion operator")?;
+            return Ok(OperatorImplementation {
+                decorators,
+                operator,
+                type_parameters,
+                constraints,
+                parameters,
+                contracts,
+                result,
+                body: Vec::new(),
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         let (body, end) = self.indented_block("operator")?;
         Ok(OperatorImplementation {
             decorators,
@@ -2406,13 +2492,21 @@ impl Parser<'_> {
                 )
             })?
         };
-        let (type_parameters, constraints) = self.type_parameters()?;
+        let (mut type_parameters, constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
             loop {
                 let (name, span) = self.identifier("expected an operator parameter")?;
-                if name == "self" && !self.at(&TokenKind::Colon) {
+                if !self.at(&TokenKind::Colon)
+                    && (name == "self" || operator == OperatorSyntax::Conversion)
+                {
+                    if operator == OperatorSyntax::Conversion
+                        && name != "self"
+                        && !type_parameters.contains(&name)
+                    {
+                        type_parameters.push(name);
+                    }
                     if self.take(&TokenKind::Comma).is_some() {
                         continue;
                     }
@@ -2434,6 +2528,33 @@ impl Parser<'_> {
             .expect(&TokenKind::RightParen, "expected `)` after parameters")?
             .span;
         Ok((start, operator, type_parameters, constraints, parameters, close))
+    }
+
+    fn opaque_indented_block(&mut self, owner: &str) -> Result<u32, Diagnostic> {
+        self.expect(
+            &TokenKind::Newline,
+            &format!("expected a newline before {owner} body"),
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(
+            &TokenKind::Indent,
+            &format!("expected an indented {owner} body"),
+        )?;
+        let mut depth = 1usize;
+        let mut end = self.peek().span.start;
+        while depth > 0 && !self.at(&TokenKind::Eof) {
+            let token = self.next();
+            end = token.span.end;
+            match token.kind {
+                TokenKind::Indent => depth += 1,
+                TokenKind::Dedent => depth -= 1,
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return Err(self.error(&format!("expected end of {owner} body")));
+        }
+        Ok(end)
     }
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
@@ -2459,10 +2580,13 @@ impl Parser<'_> {
             TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
             TokenKind::StarEqual => Some(BinaryOperator::Multiply),
             TokenKind::SlashEqual => Some(BinaryOperator::Divide),
+            TokenKind::FloorDivideEqual => Some(BinaryOperator::FloorDivide),
             TokenKind::PercentEqual => Some(BinaryOperator::Remainder),
             TokenKind::AmpersandEqual => Some(BinaryOperator::BitwiseAnd),
             TokenKind::PipeEqual => Some(BinaryOperator::Pipe),
             TokenKind::CaretEqual => Some(BinaryOperator::BitwiseXor),
+            TokenKind::ShiftLeftEqual => Some(BinaryOperator::ShiftLeft),
+            TokenKind::ShiftRightEqual => Some(BinaryOperator::ShiftRight),
             _ => None,
         };
         if let Some(operator) = compound {
@@ -2775,10 +2899,13 @@ impl Parser<'_> {
                             | TokenKind::MinusEqual
                             | TokenKind::StarEqual
                             | TokenKind::SlashEqual
+                            | TokenKind::FloorDivideEqual
                             | TokenKind::PercentEqual
                             | TokenKind::AmpersandEqual
                             | TokenKind::PipeEqual
                             | TokenKind::CaretEqual
+                            | TokenKind::ShiftLeftEqual
+                            | TokenKind::ShiftRightEqual
                     )
                 }))
     }
@@ -2832,6 +2959,39 @@ impl Parser<'_> {
         loop {
             const RANGE_PRECEDENCE: u8 = 4;
             const SYMBOL_PACK_PRECEDENCE: u8 = 8;
+            const CAST_PRECEDENCE: u8 = 9;
+            if self.at_identifier("as") {
+                if CAST_PRECEDENCE < minimum_precedence {
+                    break;
+                }
+                self.next();
+                let target = self.type_annotation()?;
+                let span = Span::new(expression.span.source, expression.span.start, target.span.end);
+                expression = Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(Expression {
+                            kind: ExpressionKind::TypeApplication {
+                                callee: Box::new(Expression {
+                                    kind: ExpressionKind::Name("__as__".into()),
+                                    span,
+                                }),
+                                arguments: vec![target],
+                            },
+                            span,
+                        }),
+                        arguments: vec![CallArgument {
+                            name: None,
+                            spread: false,
+                            value: expression,
+                            expected_error: None,
+                            span,
+                        }],
+                    },
+                    span,
+                };
+                comparison_tail = None;
+                continue;
+            }
             if self.at(&TokenKind::Range) {
                 if RANGE_PRECEDENCE < minimum_precedence {
                     break;
@@ -4019,7 +4179,19 @@ impl Parser<'_> {
                 span: Span::new(star.span.source, star.span.start, name_span.end),
             });
         }
-        self.type_annotation()
+        let mut annotation = self.type_annotation()?;
+        while matches!(self.peek().kind, TokenKind::Slash | TokenKind::Star) {
+            let operator = self.next();
+            let right = self.type_annotation()?;
+            let name = if operator.kind == TokenKind::Slash {
+                "__dimension_divide"
+            } else {
+                "__dimension_multiply"
+            };
+            let span = Span::new(annotation.span.source, annotation.span.start, right.span.end);
+            annotation = TypeAnnotation::named(name, vec![annotation, right], span);
+        }
+        Ok(annotation)
     }
 
     fn separators(&mut self) {
@@ -4253,11 +4425,20 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
         TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
         TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
         TokenKind::Plus => OperatorSyntax::Plus,
+        TokenKind::PlusEqual => OperatorSyntax::Plus,
         TokenKind::Minus => OperatorSyntax::Minus,
+        TokenKind::MinusEqual => OperatorSyntax::Minus,
         TokenKind::Star => OperatorSyntax::Multiply,
+        TokenKind::StarEqual => OperatorSyntax::Multiply,
         TokenKind::Slash => OperatorSyntax::Divide,
+        TokenKind::SlashEqual => OperatorSyntax::Divide,
+        TokenKind::FloorDivide | TokenKind::FloorDivideEqual => OperatorSyntax::FloorDivide,
         TokenKind::Percent => OperatorSyntax::Remainder,
+        TokenKind::PercentEqual => OperatorSyntax::Remainder,
         TokenKind::Power => OperatorSyntax::Power,
+        TokenKind::ShiftLeft | TokenKind::ShiftLeftEqual => OperatorSyntax::ShiftLeft,
+        TokenKind::ShiftRight | TokenKind::ShiftRightEqual => OperatorSyntax::ShiftRight,
+        TokenKind::Conversion => OperatorSyntax::Conversion,
         TokenKind::EqualEqual => OperatorSyntax::Equal,
         TokenKind::NotEqual => OperatorSyntax::NotEqual,
         TokenKind::Less => OperatorSyntax::Less,
@@ -4281,8 +4462,12 @@ fn operator_spelling(operator: OperatorSyntax) -> &'static str {
         OperatorSyntax::Minus => "-",
         OperatorSyntax::Multiply => "*",
         OperatorSyntax::Divide => "/",
+        OperatorSyntax::FloorDivide => "//",
         OperatorSyntax::Remainder => "%",
         OperatorSyntax::Power => "**",
+        OperatorSyntax::ShiftLeft => "<<",
+        OperatorSyntax::ShiftRight => ">>",
+        OperatorSyntax::Conversion => "<=>",
         OperatorSyntax::Equal => "==",
         OperatorSyntax::NotEqual => "!=",
         OperatorSyntax::Less => "<",
@@ -4310,8 +4495,12 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
         OperatorSyntax::Minus => BinaryOperator::Subtract,
         OperatorSyntax::Multiply => BinaryOperator::Multiply,
         OperatorSyntax::Divide => BinaryOperator::Divide,
+        OperatorSyntax::FloorDivide => BinaryOperator::FloorDivide,
         OperatorSyntax::Remainder => BinaryOperator::Remainder,
         OperatorSyntax::Power => BinaryOperator::Power,
+        OperatorSyntax::ShiftLeft => BinaryOperator::ShiftLeft,
+        OperatorSyntax::ShiftRight => BinaryOperator::ShiftRight,
+        OperatorSyntax::Conversion => return None,
         OperatorSyntax::Equal => BinaryOperator::Equal,
         OperatorSyntax::NotEqual => BinaryOperator::NotEqual,
         OperatorSyntax::Less => BinaryOperator::Less,
@@ -4458,8 +4647,12 @@ fn precedence(operator: BinaryOperator) -> u8 {
         BinaryOperator::Pipe => 4,
         BinaryOperator::BitwiseXor => 5,
         BinaryOperator::BitwiseAnd => 6,
+        BinaryOperator::ShiftLeft | BinaryOperator::ShiftRight => 7,
         BinaryOperator::Add | BinaryOperator::Subtract => 7,
-        BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 8,
+        BinaryOperator::Multiply
+        | BinaryOperator::Divide
+        | BinaryOperator::FloorDivide
+        | BinaryOperator::Remainder => 8,
         BinaryOperator::Power => 9,
     }
 }

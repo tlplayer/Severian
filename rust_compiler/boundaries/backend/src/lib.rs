@@ -647,12 +647,15 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
         BinaryOperation::Subtract => "-",
         BinaryOperation::Multiply => "*",
         BinaryOperation::Divide => "/",
+        BinaryOperation::FloorDivide => "/",
         BinaryOperation::Remainder => "%",
         BinaryOperation::Power => {
             return Err(BackendError::UnsupportedOperation(
                 "power requires a lowered runtime or target operation".into(),
             ))
         }
+        BinaryOperation::ShiftLeft => "<<",
+        BinaryOperation::ShiftRight => ">>",
         BinaryOperation::Equal => "==",
         BinaryOperation::NotEqual => "!=",
         BinaryOperation::Less => "<",
@@ -767,6 +770,9 @@ fn emit_mlir_binary(
         "--convert-async-to-llvm".to_owned(),
         "--convert-scf-to-cf".to_owned(),
         "--convert-index-to-llvm".to_owned(),
+        // `math.ipowi` is outlined here; the direct Math-to-LLVM conversion
+        // intentionally leaves integer power in the Math dialect.
+        "--convert-math-to-funcs".to_owned(),
         "--convert-math-to-llvm".to_owned(),
         "--convert-arith-to-llvm".to_owned(),
         "--convert-cf-to-llvm".to_owned(),

@@ -60,6 +60,9 @@ pub struct FunctionParameter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDeclaration {
     pub decorators: Vec<Decorator>,
+    /// `true` for a leading-`->` compile-time specialization declaration.
+    /// Its generic body is checked after the call-site types are substituted.
+    pub compile_time: bool,
     pub name: String,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,
@@ -218,8 +221,12 @@ pub enum OperatorSyntax {
     Minus,
     Multiply,
     Divide,
+    FloorDivide,
     Remainder,
     Power,
+    ShiftLeft,
+    ShiftRight,
+    Conversion,
     Equal,
     NotEqual,
     Less,
@@ -322,6 +329,8 @@ pub struct ClassDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionDeclaration {
     pub decorators: Vec<Decorator>,
+    pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub target: TypeAnnotation,
     pub methods: Vec<FunctionDeclaration>,
     pub operators: Vec<OperatorImplementation>,

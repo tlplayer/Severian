@@ -446,11 +446,19 @@ fn install_primitive_operators(types: &mut TypeContextBuilder) -> Result<(), Typ
         add_comparisons(types, required(types, name)?, boolean, false);
     }
 
+    let integer_exponent = required(types, "u32")?;
     for spec in PRIMITIVES {
         let ty = required(types, spec.name)?;
         match spec.category {
-            PrimitiveCategory::Integer => add_numeric(types, ty, boolean, true),
-            PrimitiveCategory::Float => add_numeric(types, ty, boolean, false),
+            PrimitiveCategory::Integer => {
+                let signed = matches!(
+                    spec.representation,
+                    PrimitiveRepresentation::Integer { signed: true, .. }
+                        | PrimitiveRepresentation::PointerInteger { signed: true }
+                );
+                add_integer(types, ty, integer_exponent, boolean, signed);
+            }
+            PrimitiveCategory::Float => add_numeric(types, ty, boolean),
             PrimitiveCategory::Measured => add_measured(types, ty, boolean),
             _ => {}
         }
@@ -477,7 +485,7 @@ fn install_primitive_operators(types: &mut TypeContextBuilder) -> Result<(), Typ
     Ok(())
 }
 
-fn add_numeric(types: &mut TypeContextBuilder, ty: TypeId, boolean: TypeId, bitwise: bool) {
+fn add_numeric(types: &mut TypeContextBuilder, ty: TypeId, boolean: TypeId) {
     types.add_unary(UnaryOperator::Positive, ty, ty);
     types.add_unary(UnaryOperator::Negative, ty, ty);
     for operator in [
@@ -490,15 +498,39 @@ fn add_numeric(types: &mut TypeContextBuilder, ty: TypeId, boolean: TypeId, bitw
     ] {
         add_binary(types, operator, ty, ty, ty);
     }
-    if bitwise {
-        for operator in [
-            BinaryOperator::BitwiseOr,
-            BinaryOperator::BitwiseAnd,
-            BinaryOperator::BitwiseXor,
-        ] {
-            add_binary(types, operator, ty, ty, ty);
-        }
+    add_comparisons(types, ty, boolean, true);
+}
+
+fn add_integer(
+    types: &mut TypeContextBuilder,
+    ty: TypeId,
+    exponent: TypeId,
+    boolean: TypeId,
+    signed: bool,
+) {
+    types.add_unary(UnaryOperator::Positive, ty, ty);
+    if signed {
+        types.add_unary(UnaryOperator::Negative, ty, ty);
     }
+    for operator in [
+        BinaryOperator::Add,
+        BinaryOperator::Subtract,
+        BinaryOperator::Multiply,
+        BinaryOperator::Divide,
+        BinaryOperator::FloorDivide,
+        BinaryOperator::Remainder,
+        BinaryOperator::BitwiseOr,
+        BinaryOperator::BitwiseAnd,
+        BinaryOperator::BitwiseXor,
+    ] {
+        add_binary(types, operator, ty, ty, ty);
+    }
+    add_binary(types, BinaryOperator::Power, ty, exponent, ty);
+    // The source contract accepts every integer shift count and converts it
+    // to the receiver representation before emitting MLIR, whose shift
+    // operands must have the same signless integer type.
+    add_binary(types, BinaryOperator::ShiftLeft, ty, ty, ty);
+    add_binary(types, BinaryOperator::ShiftRight, ty, ty, ty);
     add_comparisons(types, ty, boolean, true);
 }
 

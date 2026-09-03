@@ -182,7 +182,11 @@ pub(super) fn validate_generic_bodies(
 ) -> Result<(), Diagnostic> {
     for module in &module_graph.modules {
         for function in module.ast.items.iter().filter_map(|item| match item {
-            Item::Function(function) if !function.type_parameters.is_empty() => Some(function),
+            Item::Function(function)
+                if !function.compile_time && !function.type_parameters.is_empty() =>
+            {
+                Some(function)
+            }
             _ => None,
         }) {
             let Some(body) = &function.body else {
@@ -668,8 +672,11 @@ fn ast_binary(operator: severian_ast::BinaryOperator) -> severian_universal::Bin
         Ast::Subtract => Universal::Subtract,
         Ast::Multiply => Universal::Multiply,
         Ast::Divide => Universal::Divide,
+        Ast::FloorDivide => Universal::FloorDivide,
         Ast::Remainder => Universal::Remainder,
         Ast::Power => Universal::Power,
+        Ast::ShiftLeft => Universal::ShiftLeft,
+        Ast::ShiftRight => Universal::ShiftRight,
         Ast::Equal | Ast::Identity => Universal::Equal,
         Ast::NotEqual => Universal::NotEqual,
         Ast::Less => Universal::Less,
@@ -695,8 +702,12 @@ fn ast_binary_syntax(
         Ast::Minus => severian_ast::BinaryOperator::Subtract,
         Ast::Multiply => severian_ast::BinaryOperator::Multiply,
         Ast::Divide => severian_ast::BinaryOperator::Divide,
+        Ast::FloorDivide => severian_ast::BinaryOperator::FloorDivide,
         Ast::Remainder => severian_ast::BinaryOperator::Remainder,
         Ast::Power => severian_ast::BinaryOperator::Power,
+        Ast::ShiftLeft => severian_ast::BinaryOperator::ShiftLeft,
+        Ast::ShiftRight => severian_ast::BinaryOperator::ShiftRight,
+        Ast::Conversion => return None,
         Ast::Equal => severian_ast::BinaryOperator::Equal,
         Ast::NotEqual => severian_ast::BinaryOperator::NotEqual,
         Ast::Less => severian_ast::BinaryOperator::Less,
@@ -1208,8 +1219,12 @@ fn trait_is_structurally_satisfied(
                     Syntax::Minus => Binary::Subtract,
                     Syntax::Multiply => Binary::Multiply,
                     Syntax::Divide => Binary::Divide,
+                    Syntax::FloorDivide => Binary::FloorDivide,
                     Syntax::Remainder => Binary::Remainder,
                     Syntax::Power => Binary::Power,
+                    Syntax::ShiftLeft => Binary::ShiftLeft,
+                    Syntax::ShiftRight => Binary::ShiftRight,
+                    Syntax::Conversion => return false,
                     Syntax::Equal => Binary::Equal,
                     Syntax::NotEqual => Binary::NotEqual,
                     Syntax::Less => Binary::Less,
@@ -2955,7 +2970,12 @@ fn specialize_statement(statement: &mut severian_ast::Statement, substitution: &
 fn specialize_expression(expression: &mut severian_ast::Expression, substitution: &Substitution) {
     use severian_ast::ExpressionKind;
     match &mut expression.kind {
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::Symbol(_) => {}
+        ExpressionKind::Name(name) => {
+            if let Some(replacement) = substitution.get(name) {
+                name.clone_from(replacement);
+            }
+        }
+        ExpressionKind::Literal(_) | ExpressionKind::Symbol(_) => {}
         ExpressionKind::List(values)
         | ExpressionKind::Set(values)
         | ExpressionKind::Tuple(values) => {

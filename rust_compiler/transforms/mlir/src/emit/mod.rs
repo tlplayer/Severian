@@ -2404,12 +2404,26 @@ fn binary_mnemonic(operator: BinaryOperation, ty: &LoweredType) -> Result<String
             "arith.divui"
         }
         .into(),
+        BinaryOperation::FloorDivide => if signed {
+            "arith.floordivsi"
+        } else {
+            "arith.divui"
+        }
+        .into(),
         BinaryOperation::Remainder => if floating {
             "arith.remf"
         } else if signed {
             "arith.remsi"
         } else {
             "arith.remui"
+        }
+        .into(),
+        BinaryOperation::Power => "math.ipowi".into(),
+        BinaryOperation::ShiftLeft => "arith.shli".into(),
+        BinaryOperation::ShiftRight => if signed {
+            "arith.shrsi"
+        } else {
+            "arith.shrui"
         }
         .into(),
         BinaryOperation::Equal => if floating {
@@ -3510,8 +3524,14 @@ fn mlir_binary(operator: BinaryOperation, ty: &LoweredType) -> Result<&'static s
         (BinaryOperation::Multiply, false, true) => "arith.muli",
         (BinaryOperation::Divide, false, true) if signed => "arith.divsi",
         (BinaryOperation::Divide, false, true) => "arith.divui",
+        (BinaryOperation::FloorDivide, false, true) if signed => "arith.floordivsi",
+        (BinaryOperation::FloorDivide, false, true) => "arith.divui",
         (BinaryOperation::Remainder, false, true) if signed => "arith.remsi",
         (BinaryOperation::Remainder, false, true) => "arith.remui",
+        (BinaryOperation::Power, false, true) => "math.ipowi",
+        (BinaryOperation::ShiftLeft, false, true) => "arith.shli",
+        (BinaryOperation::ShiftRight, false, true) if signed => "arith.shrsi",
+        (BinaryOperation::ShiftRight, false, true) => "arith.shrui",
         (BinaryOperation::Equal, false, true) => "arith.cmpi eq,",
         (BinaryOperation::NotEqual, false, true) => "arith.cmpi ne,",
         (BinaryOperation::Less, false, true) if signed => "arith.cmpi slt,",

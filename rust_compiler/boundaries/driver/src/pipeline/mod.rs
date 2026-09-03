@@ -232,38 +232,18 @@ impl Compiler {
         mode: CompileMode,
         module_name: &str,
     ) -> Result<MirModule, CompileError> {
-        let ast = with_core_prelude(ast, &self.context.types)?;
-        let external = severian_xxi::resolve(
-            &ast,
-            &self.context.types,
-            &severian_abi::AbiTarget::derive(&self.target),
-        )
-        .map_err(|error| {
-            CompileError::Diagnostic(Diagnostic::new("E000701", error.to_string(), None))
-        })?;
-        let (mut hir, types) = severian_semantic::analyze_with_context_and_types(
-            &ast,
-            &self.context.types,
-            severian_semantic::AnalysisContext {
-                mode: match mode {
-                    CompileMode::Build => severian_semantic::AnalysisMode::Build,
-                    CompileMode::Test => severian_semantic::AnalysisMode::Test,
-                },
-                module_name,
-            },
-        )
-        .map_err(CompileError::Diagnostic)?;
-        apply_external_calls(&ast, &external, &mut hir)?;
-        severian_ownership::validate(&hir).map_err(CompileError::Diagnostic)?;
-        let mut mir = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
-        mir.types = Some(types);
-        let mut context = self.context.clone();
-        context.types = mir
-            .types
-            .clone()
-            .expect("the in-memory pipeline installed its structural type catalog");
-        severian_mir::run_required_pipeline(&mut mir, &context).map_err(CompileError::MirPass)?;
-        Ok(mir)
+        let source = SourceFile::virtual_source(format!("{module_name}.sev"), "");
+        let graph = severian_modules::ModuleGraph {
+            modules: vec![severian_modules::ResolvedModule {
+                id: severian_modules::ModuleId(1),
+                path: PathBuf::from(format!("{module_name}.sev")),
+                source,
+                package: severian_modules::PackageId(0),
+                ast: ast.clone(),
+                imports: Vec::new(),
+            }],
+        };
+        self.check_graph_to_mir(graph, mode)
     }
 
     pub fn check_source(&self, source: &SourceFile) -> Result<(), CompileError> {
@@ -2601,17 +2581,6 @@ fn boundary_type_is_available(
         && arguments
             .iter()
             .all(|argument| boundary_type_is_available(argument, types))
-}
-
-fn apply_external_calls(
-    ast: &severian_ast::Module,
-    external: &severian_xxi::ResolvedExternalModule,
-    hir: &mut severian_hir::Program,
-) -> Result<(), CompileError> {
-    let Some(module) = hir.modules.first_mut() else {
-        return Ok(());
-    };
-    apply_external_calls_to_module(ast, external, module, None)
 }
 
 fn apply_external_calls_to_module(

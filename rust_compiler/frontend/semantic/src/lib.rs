@@ -137,6 +137,8 @@ pub(crate) fn analyze_with_package_functions(
 ) -> Result<Program, Diagnostic> {
     let normalized_ast = normalize_extensions(ast)?;
     let ast = &normalized_ast;
+    let closed_type_families = closed_type_families(ast);
+    let lossless_conversion = compiler_lossless_conversion(ast);
     let mut local_class_constructors = BTreeMap::new();
     for declaration in ast.items.iter().filter_map(|item| match item {
         severian_ast::Item::Class(declaration) => Some(declaration),
@@ -203,6 +205,8 @@ pub(crate) fn analyze_with_package_functions(
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
         active_type_aliases: BTreeMap::new(),
+        closed_type_families,
+        lossless_conversion,
         functions: BTreeMap::new(),
         source_functions: ast
             .items
@@ -1010,6 +1014,28 @@ pub(crate) fn normalize_extensions(
     ast: &severian_ast::Module,
 ) -> Result<severian_ast::Module, Diagnostic> {
     let mut normalized = ast.clone();
+    let union_members = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Type(declaration) => {
+                let severian_ast::TypeAnnotationKind::Union(members) =
+                    &declaration.definition.as_ref()?.kind
+                else {
+                    return None;
+                };
+                Some((
+                    declaration.name.clone(),
+                    members
+                        .iter()
+                        .filter_map(TypeAnnotation::simple_name)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                ))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
     let extensions = ast
         .items
         .iter()
@@ -1020,6 +1046,87 @@ pub(crate) fn normalize_extensions(
         .collect::<Vec<_>>();
 
     for extension in &extensions {
+        if let ([parameter], Some(target)) = (
+            extension.type_parameters.as_slice(),
+            extension.target.simple_name(),
+        ) {
+            if target == parameter {
+                let bound = extension.constraints.iter().find_map(|constraint| match constraint {
+                    severian_ast::GenericConstraint::Parameter {
+                        parameter: constrained,
+                        bound,
+                        ..
+                    } if constrained == parameter => bound.simple_name(),
+                    _ => None,
+                });
+                let Some(bound) = bound else {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "a generic extension requires a closed type-family bound",
+                        Some(extension.span),
+                    ));
+                };
+                let mut members = Vec::new();
+                collect_closed_union_members(bound, &union_members, &mut members);
+                members.sort();
+                members.dedup();
+                if members.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        format!("generic extension bound `{bound}` is not a closed union"),
+                        Some(extension.span),
+                    ));
+                }
+                for member in members {
+                    let Some(class) = normalized.items.iter_mut().find_map(|item| match item {
+                        severian_ast::Item::Class(class) if class.name == member => Some(class),
+                        _ => None,
+                    }) else {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            format!("closed union member `{member}` has no class declaration"),
+                            Some(extension.span),
+                        ));
+                    };
+                    let replacement = TypeAnnotation::named(
+                        member.clone(),
+                        Vec::new(),
+                        extension.target.span,
+                    );
+                    let substitution = BTreeMap::from([(parameter.clone(), replacement)]);
+                    class.methods.extend(extension.methods.iter().cloned().map(|mut method| {
+                        for argument in &mut method.parameters {
+                            argument.annotation = substitute_type_annotation(
+                                &argument.annotation,
+                                &substitution,
+                            );
+                        }
+                        method.result = substitute_type_annotation(&method.result, &substitution);
+                        method
+                    }));
+                    class.operators.extend(
+                        extension
+                            .operators
+                            .iter()
+                            .cloned()
+                            .map(|mut implementation| {
+                                for argument in &mut implementation.parameters {
+                                    argument.annotation = substitute_type_annotation(
+                                        &argument.annotation,
+                                        &substitution,
+                                    );
+                                }
+                                implementation.result = substitute_type_annotation(
+                                    &implementation.result,
+                                    &substitution,
+                                );
+                                implementation
+                            }),
+                    );
+                }
+                continue;
+            }
+        }
         let Some((target, _)) = extension.target.named_parts() else {
             return Err(Diagnostic::new(
                 "E000204",
@@ -1121,6 +1228,89 @@ pub(crate) fn normalize_extensions(
     Ok(normalized)
 }
 
+fn collect_closed_union_members(
+    name: &str,
+    unions: &BTreeMap<String, Vec<String>>,
+    members: &mut Vec<String>,
+) {
+    let Some(nested) = unions.get(name) else {
+        members.push(name.to_owned());
+        return;
+    };
+    for member in nested {
+        collect_closed_union_members(member, unions, members);
+    }
+}
+
+fn closed_type_families(
+    ast: &severian_ast::Module,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let unions = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Type(declaration) => {
+                let severian_ast::TypeAnnotationKind::Union(members) =
+                    &declaration.definition.as_ref()?.kind
+                else {
+                    return None;
+                };
+                Some((
+                    declaration.name.clone(),
+                    members
+                        .iter()
+                        .filter_map(TypeAnnotation::simple_name)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                ))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    unions
+        .keys()
+        .map(|family| {
+            let mut members = Vec::new();
+            collect_closed_union_members(family, &unions, &mut members);
+            (family.clone(), members.into_iter().collect())
+        })
+        .collect()
+}
+
+fn compiler_lossless_conversion(ast: &severian_ast::Module) -> bool {
+    let mut enabled = false;
+    for statement in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Test(test) => Some(test.body.as_slice()),
+        _ => None,
+    }).flatten() {
+        let severian_ast::Statement::Expression(expression) = statement else {
+            continue;
+        };
+        let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
+            continue;
+        };
+        if callable_path(callee).as_deref() != Some("package.config.set") {
+            continue;
+        }
+        let [key, value] = arguments.as_slice() else {
+            continue;
+        };
+        if matches!(
+            (&key.value.kind, &value.value.kind),
+            (
+                AstExpressionKind::Literal(AstLiteral::String(key)),
+                AstExpressionKind::Literal(AstLiteral::Boolean(_))
+            ) if key == "lossless.conversion"
+        ) {
+            let AstExpressionKind::Literal(AstLiteral::Boolean(value)) = &value.value.kind else {
+                unreachable!()
+            };
+            enabled = *value;
+        }
+    }
+    enabled
+}
+
 struct Analyzer<'a> {
     types: &'a mut TypeContext,
     names: BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
@@ -1130,6 +1320,8 @@ struct Analyzer<'a> {
     /// readable parent bindings, which may be shadowed by this set.
     declarations: BTreeSet<String>,
     active_type_aliases: BTreeMap<String, TypeId>,
+    closed_type_families: BTreeMap<String, BTreeSet<String>>,
+    lossless_conversion: bool,
     next_hir: u32,
     next_binding: u32,
     next_comprehension: u32,
@@ -5106,6 +5298,32 @@ impl Analyzer<'_> {
 
     fn prepare(&mut self, ast: &AstExpression) -> Result<Prepared, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Unary {
+                operator: AstUnaryOperator::Positive,
+                operand,
+            } if matches!(
+                operand.kind,
+                AstExpressionKind::Literal(AstLiteral::Integer(_) | AstLiteral::Float(_))
+            ) => {
+                let AstExpressionKind::Literal(value) = &operand.kind else {
+                    unreachable!()
+                };
+                Ok(Prepared::Literal(universal_literal(value), ast.span))
+            }
+            AstExpressionKind::Unary {
+                operator: AstUnaryOperator::Negative,
+                operand,
+            } => match &operand.kind {
+                AstExpressionKind::Literal(AstLiteral::Integer(value)) => Ok(Prepared::Literal(
+                    LiteralValue::Integer(format!("-{value}")),
+                    ast.span,
+                )),
+                AstExpressionKind::Literal(AstLiteral::Float(value)) => Ok(Prepared::Literal(
+                    LiteralValue::Float(format!("-{value}")),
+                    ast.span,
+                )),
+                _ => self.expression(ast, None).map(Prepared::Resolved),
+            },
             AstExpressionKind::Literal(AstLiteral::Measured { .. }) => {
                 self.expression(ast, None).map(Prepared::Resolved)
             }
@@ -5700,6 +5918,31 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Member { object, name } => {
+                if let AstExpressionKind::Name(type_name) = &object.kind {
+                    if !self.names.contains_key(type_name) {
+                        let metadata = self.classes.get(type_name).and_then(|class| {
+                            class
+                                .primitive
+                                .then_some(class)
+                                .and_then(|class| class.fields.iter().find(|field| field.name == *name))
+                                .and_then(|field| {
+                                    Some((field.annotation.clone(), field.default.clone()?))
+                                })
+                        });
+                        if let Some((annotation, value)) = metadata {
+                            let metadata_type = self.resolve_source_type(&annotation)?;
+                            if expected.is_some_and(|expected| {
+                                !self.types.assignable(metadata_type, expected)
+                            }) {
+                                return Err(semantic_error(
+                                    "primitive metadata does not satisfy the expected type".into(),
+                                    ast.span,
+                                ));
+                            }
+                            return self.expression(&value, Some(metadata_type));
+                        }
+                    }
+                }
                 if let Some(path) = callable_path(ast) {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, &[], expected, ast.span);
@@ -6242,7 +6485,9 @@ impl Analyzer<'_> {
                 if let Some(call) = self.math_call(callee, arguments, expected, ast.span)? {
                     return Ok(call);
                 }
-                if let Some(call) = self.system_surface_call(callee, arguments, ast.span)? {
+                if let Some(call) =
+                    self.system_surface_call(callee, arguments, expected, ast.span)?
+                {
                     return Ok(call);
                 }
                 if let AstExpressionKind::TypeApplication {
@@ -6251,6 +6496,26 @@ impl Analyzer<'_> {
                 } = &callee.kind
                 {
                     if let AstExpressionKind::Name(name) = &application.kind {
+                        if name == "__as__" {
+                            let ([target], [argument]) =
+                                (type_arguments.as_slice(), arguments.as_slice())
+                            else {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    "an `as` conversion expects one target type and one value",
+                                    Some(ast.span),
+                                ));
+                            };
+                            let target = self.resolve_source_type(target)?;
+                            let value = self.expression(&argument.value, None)?;
+                            if expected.is_some_and(|expected| expected != target) {
+                                return Err(semantic_error(
+                                    "conversion does not satisfy the expected type".into(),
+                                    ast.span,
+                                ));
+                            }
+                            return self.coerce(value, target, true);
+                        }
                         if name == "set" && type_arguments.len() == 1 && arguments.is_empty() {
                             let element = self.resolve_source_type(&type_arguments[0])?;
                             return self.empty_set_expression(Some(element), ast.span);
@@ -7492,6 +7757,37 @@ impl Analyzer<'_> {
                 Ok(call)
             }
             AstExpressionKind::Unary { operator, operand } => {
+                let signed_literal = match (operator, &operand.kind) {
+                    (
+                        AstUnaryOperator::Positive,
+                        AstExpressionKind::Literal(AstLiteral::Integer(value)),
+                    ) => Some(LiteralValue::Integer(value.clone())),
+                    (
+                        AstUnaryOperator::Negative,
+                        AstExpressionKind::Literal(AstLiteral::Integer(value)),
+                    ) => Some(LiteralValue::Integer(format!("-{value}"))),
+                    (
+                        AstUnaryOperator::Positive,
+                        AstExpressionKind::Literal(AstLiteral::Float(value)),
+                    ) => Some(LiteralValue::Float(value.clone())),
+                    (
+                        AstUnaryOperator::Negative,
+                        AstExpressionKind::Literal(AstLiteral::Float(value)),
+                    ) => Some(LiteralValue::Float(format!("-{value}"))),
+                    _ => None,
+                };
+                if let Some(value) = signed_literal {
+                    let type_id = self
+                        .types
+                        .resolve_literal(&value, expected)
+                        .map_err(|error| semantic_error(error.to_string(), ast.span))?;
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id,
+                        kind: ExpressionKind::Literal(value),
+                        span: ast.span,
+                    });
+                }
                 if *operator == AstUnaryOperator::AddressOf {
                     if self.unsafe_depth == 0 {
                         return Err(Diagnostic::new(
@@ -7647,6 +7943,38 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
+                if *operator == AstBinaryOperator::Identity {
+                    if let (
+                        AstExpressionKind::Name(member),
+                        AstExpressionKind::Name(family),
+                    ) = (&left.kind, &right.kind)
+                    {
+                        if !self.names.contains_key(member)
+                            && !self.names.contains_key(family)
+                            && self.types.resolve_name(member).is_some()
+                        {
+                            if let Some(members) = self.closed_type_families.get(family) {
+                                let belongs = members.contains(member);
+                                let boolean = self
+                                    .types
+                                    .resolve_name("bool")
+                                    .expect("bootstrap defines bool");
+                                if expected.is_some_and(|expected| expected != boolean) {
+                                    return Err(semantic_error(
+                                        "type-family identity produces a Boolean value".into(),
+                                        ast.span,
+                                    ));
+                                }
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Literal(LiteralValue::Boolean(belongs)),
+                                    span: ast.span,
+                                });
+                            }
+                        }
+                    }
+                }
                 if matches!(
                     operator,
                     AstBinaryOperator::Less
@@ -8025,31 +8353,6 @@ impl Analyzer<'_> {
                         let right = self.expression(right, Some(left.type_id))?;
                         return Ok(self.runtime_call(
                             "__sev_pow_f64_f64",
-                            &[left.type_id, left.type_id],
-                            left.type_id,
-                            vec![left, right],
-                            ast.span,
-                        ));
-                    }
-                    if matches!(name, Some("int" | "i64")) {
-                        if matches!(right.kind, AstExpressionKind::Literal(AstLiteral::Float(_))) {
-                            let float = self
-                                .types
-                                .resolve_name("float")
-                                .expect("bootstrap defines float");
-                            let left = self.coerce(left, float, false)?;
-                            let right = self.expression(right, Some(float))?;
-                            return Ok(self.runtime_call(
-                                "__sev_pow_f64_f64",
-                                &[float, float],
-                                float,
-                                vec![left, right],
-                                ast.span,
-                            ));
-                        }
-                        let right = self.expression(right, Some(left.type_id))?;
-                        return Ok(self.runtime_call(
-                            "__sev_pow_i64_i64",
                             &[left.type_id, left.type_id],
                             left.type_id,
                             vec![left, right],
@@ -8621,22 +8924,37 @@ impl Analyzer<'_> {
             }
             if requested.is_none()
                 && self.types.resolve_name("string") == Some(expression.type_id)
-                && matches!(
-                    self.types
-                        .definition(expected)
-                        .map(|definition| definition.name.as_str()),
-                    Some("int" | "i64")
-                )
+                && self.integer_primitive(expected)
             {
+                if matches!(
+                    &expression.kind,
+                    ExpressionKind::Literal(LiteralValue::String(value))
+                        if value.parse::<i128>().is_err()
+                ) {
+                    return Ok(self.throw_expression(
+                        "invalid integer string conversion",
+                        expected,
+                        expression.span,
+                    ));
+                }
                 let string = expression.type_id;
                 let span = expression.span;
-                return Ok(self.runtime_call(
+                let machine_integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let parsed = self.runtime_call(
                     "__sev_int_from_string",
                     &[string],
-                    expected,
+                    machine_integer,
                     vec![expression],
                     span,
-                ));
+                );
+                return if expected == machine_integer {
+                    Ok(parsed)
+                } else {
+                    self.coerce(parsed, expected, true)
+                };
             }
         }
         let Some(mut conversion) = self.types.numeric_conversion(expression.type_id, expected)
@@ -8676,22 +8994,135 @@ impl Analyzer<'_> {
             };
             conversion = selected;
         }
-        if !explicit && conversion.kind > severian_universal::ConversionKind::Promote {
-            return Err(semantic_error(
-                "expression does not satisfy the expected type".into(),
-                expression.span,
-            ));
+        if !explicit {
+            let rejected = conversion.kind == severian_universal::ConversionKind::Checked
+                || (self.lossless_conversion
+                    && conversion.kind == severian_universal::ConversionKind::Lossy);
+            if rejected {
+                return Err(semantic_error(
+                    "expression does not satisfy the expected type".into(),
+                    expression.span,
+                ));
+            }
         }
         let span = expression.span;
-        Ok(Expression {
+        let converted = Expression {
             id: self.next_id(),
             type_id: expected,
             kind: ExpressionKind::Convert {
-                operand: Box::new(expression),
+                operand: Box::new(expression.clone()),
                 conversion,
             },
             span,
-        })
+        };
+        if explicit && conversion.kind == severian_universal::ConversionKind::Checked {
+            if let Some(condition) =
+                self.checked_integer_conversion_condition(&expression, expected, span)
+            {
+                let failure = self.throw_expression(
+                    "integer conversion is outside the target range",
+                    expected,
+                    span,
+                );
+                return Ok(Expression {
+                    id: self.next_id(),
+                    type_id: expected,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(converted),
+                        fallback: Box::new(failure),
+                    },
+                    span,
+                });
+            }
+        }
+        Ok(converted)
+    }
+
+    fn checked_integer_conversion_condition(
+        &mut self,
+        value: &Expression,
+        target: TypeId,
+        span: severian_source::Span,
+    ) -> Option<Expression> {
+        let shape = |ty| {
+            let representation = self.types.primitive(ty)?.representation;
+            match representation {
+                severian_universal::PrimitiveRepresentation::Integer { bits, signed } => {
+                    let bits = match bits {
+                        severian_universal::IntegerWidth::Fixed(bits) => bits,
+                        severian_universal::IntegerWidth::Machine => 64,
+                    };
+                    Some((bits, signed))
+                }
+                severian_universal::PrimitiveRepresentation::PointerInteger { signed } => {
+                    Some((64, signed))
+                }
+                _ => None,
+            }
+        };
+        let (source_bits, source_signed) = shape(value.type_id)?;
+        let (target_bits, target_signed) = shape(target)?;
+        let boolean = self.types.resolve_name("bool")?;
+        let mut conditions = Vec::new();
+        let mut comparison = |operator, spelling: String| {
+            let bound = Expression {
+                id: self.next_id(),
+                type_id: value.type_id,
+                kind: ExpressionKind::Literal(LiteralValue::Integer(spelling)),
+                span,
+            };
+            conditions.push(Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator,
+                    left: Box::new(value.clone()),
+                    right: Box::new(bound),
+                },
+                span,
+            });
+        };
+        let signed_min = |bits: u16| format!("-{}", 1u128 << (bits - 1));
+        let signed_max = |bits: u16| ((1u128 << (bits - 1)) - 1).to_string();
+        let unsigned_max = |bits: u16| {
+            if bits == 128 {
+                u128::MAX.to_string()
+            } else {
+                ((1u128 << bits) - 1).to_string()
+            }
+        };
+        match (source_signed, target_signed) {
+            (true, true) if target_bits < source_bits => {
+                comparison(BinaryOperator::GreaterEqual, signed_min(target_bits));
+                comparison(BinaryOperator::LessEqual, signed_max(target_bits));
+            }
+            (false, false) if target_bits < source_bits => {
+                comparison(BinaryOperator::LessEqual, unsigned_max(target_bits));
+            }
+            (true, false) => {
+                comparison(BinaryOperator::GreaterEqual, "0".into());
+                if target_bits < source_bits {
+                    comparison(BinaryOperator::LessEqual, unsigned_max(target_bits));
+                }
+            }
+            (false, true) if target_bits <= source_bits => {
+                comparison(BinaryOperator::LessEqual, signed_max(target_bits));
+            }
+            _ => {}
+        }
+        let mut conditions = conditions.into_iter();
+        let first = conditions.next()?;
+        Some(conditions.fold(first, |left, right| Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Binary {
+                operator: BinaryOperator::And,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            span,
+        }))
     }
 
     fn constraint_name(&self, constraint: TypeConstraint) -> String {
@@ -10621,9 +11052,17 @@ impl Analyzer<'_> {
         &mut self,
         callee: &AstExpression,
         arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
         let callable = callable_path(callee);
+        if callable.as_deref() == Some("package.config.set") && arguments.len() == 2 {
+            let unit = self
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit");
+            return self.default_expression(unit, span).map(Some);
+        }
         let builtin_file_read = callable.as_deref() == Some("file.read_bytes")
             && self.functions.contains_key("file.read_bytes")
             && arguments.len() == 2;
@@ -10903,6 +11342,24 @@ impl Analyzer<'_> {
             }));
         }
         if callable.as_deref() == Some("bytes") && arguments.len() == 1 && positional {
+            if let Some(byte) = expected.and_then(|expected| {
+                self.list_elements.get(&expected).copied().filter(|element| {
+                    self.types.resolve_name("u8") == Some(*element)
+                })
+            }) {
+                let AstExpressionKind::List(elements) = &arguments[0].value.kind else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "fixed bytes construction expects a list literal",
+                        Some(arguments[0].value.span),
+                    ));
+                };
+                let values = elements
+                    .iter()
+                    .map(|element| self.expression(element, Some(byte)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return self.resolved_list_expression(byte, values, span).map(Some);
+            }
             let value = self.expression(&arguments[0].value, None)?;
             if self.list_elements.contains_key(&value.type_id) {
                 let storage = self.list_storage_expression(value, span);
@@ -15518,6 +15975,13 @@ impl Analyzer<'_> {
                 Some(callee.span),
             ));
         };
+        if arguments.is_empty() && self.integer_primitive(object.type_id) {
+            if let Some(lowered) =
+                self.primitive_integer_method(method_name, object.clone(), expected, span)?
+            {
+                return Ok(Some(lowered));
+            }
+        }
         let method_substitution = self
             .classes
             .get(&instance.name)
@@ -15743,6 +16207,184 @@ impl Analyzer<'_> {
             },
             span,
         }))
+    }
+
+    fn primitive_integer_method(
+        &mut self,
+        name: &str,
+        object: Expression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let representation = self
+            .types
+            .primitive(object.type_id)
+            .map(|primitive| primitive.representation)
+            .expect("integer primitive was checked");
+        let (bits, signed) = match representation {
+            severian_universal::PrimitiveRepresentation::Integer {
+                bits: severian_universal::IntegerWidth::Fixed(bits),
+                signed,
+            } => (Some(bits), signed),
+            severian_universal::PrimitiveRepresentation::Integer {
+                bits: severian_universal::IntegerWidth::Machine,
+                signed,
+            }
+            | severian_universal::PrimitiveRepresentation::PointerInteger { signed } => {
+                (None, signed)
+            }
+            _ => return Ok(None),
+        };
+        if matches!(name, "abs" | "signum")
+            && expected.is_some_and(|expected| !self.types.assignable(object.type_id, expected))
+        {
+            return Err(semantic_error(
+                "integer method result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        let integer_literal = |id, value: &str| Expression {
+            id,
+            type_id: object.type_id,
+            kind: ExpressionKind::Literal(LiteralValue::Integer(value.into())),
+            span,
+        };
+        match name {
+            "abs" => {
+                if !signed {
+                    return Ok(Some(object));
+                }
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let zero = integer_literal(self.next_id(), "0");
+                let condition = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Less,
+                        left: Box::new(object.clone()),
+                        right: Box::new(zero),
+                    },
+                    span,
+                };
+                let negative = Expression {
+                    id: self.next_id(),
+                    type_id: object.type_id,
+                    kind: ExpressionKind::Unary {
+                        operator: UnaryOperator::Negative,
+                        operand: Box::new(object.clone()),
+                    },
+                    span,
+                };
+                Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: object.type_id,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(negative),
+                        fallback: Box::new(object),
+                    },
+                    span,
+                }))
+            }
+            "signum" if signed => {
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let zero = integer_literal(self.next_id(), "0");
+                let less = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Less,
+                        left: Box::new(object.clone()),
+                        right: Box::new(zero.clone()),
+                    },
+                    span,
+                };
+                let greater = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Greater,
+                        left: Box::new(object.clone()),
+                        right: Box::new(zero.clone()),
+                    },
+                    span,
+                };
+                let positive = Expression {
+                    id: self.next_id(),
+                    type_id: object.type_id,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(greater),
+                        value: Box::new(integer_literal(self.next_id(), "1")),
+                        fallback: Box::new(zero),
+                    },
+                    span,
+                };
+                Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: object.type_id,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(less),
+                        value: Box::new(integer_literal(self.next_id(), "-1")),
+                        fallback: Box::new(positive),
+                    },
+                    span,
+                }))
+            }
+            "little_endian" | "big_endian" => {
+                let Some(bits) = bits else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "target-sized integer endian conversion requires a resolved target width",
+                        Some(span),
+                    ));
+                };
+                let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
+                let list = self.instantiate_list_type(byte);
+                if expected.is_some_and(|expected| !self.types.assignable(list, expected)) {
+                    return Err(semantic_error(
+                        "integer endian result does not satisfy the expected type".into(),
+                        span,
+                    ));
+                }
+                let count = usize::from(bits / 8);
+                let mut values = Vec::with_capacity(count);
+                for output in 0..count {
+                    let byte_index = if name == "big_endian" {
+                        count - output - 1
+                    } else {
+                        output
+                    };
+                    let shift = integer_literal(
+                        self.next_id(),
+                        &(byte_index * 8).to_string(),
+                    );
+                    let shifted = Expression {
+                        id: self.next_id(),
+                        type_id: object.type_id,
+                        kind: ExpressionKind::Binary {
+                            operator: BinaryOperator::ShiftRight,
+                            left: Box::new(object.clone()),
+                            right: Box::new(shift),
+                        },
+                        span,
+                    };
+                    values.push(self.coerce_with_conversion_mode(
+                        shifted,
+                        byte,
+                        true,
+                        Some(severian_universal::ConversionKind::Lossy),
+                    )?);
+                }
+                self.resolved_list_expression(byte, values, span).map(Some)
+            }
+            _ => Ok(None),
+        }
     }
 
     fn class_index_operator(
@@ -17698,8 +18340,11 @@ fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
         AstBinaryOperator::Subtract => "-",
         AstBinaryOperator::Multiply => "*",
         AstBinaryOperator::Divide => "/",
+        AstBinaryOperator::FloorDivide => "//",
         AstBinaryOperator::Remainder => "%",
         AstBinaryOperator::Power => "**",
+        AstBinaryOperator::ShiftLeft => "<<",
+        AstBinaryOperator::ShiftRight => ">>",
         AstBinaryOperator::Equal | AstBinaryOperator::Identity => "==",
         AstBinaryOperator::NotEqual => "!=",
         AstBinaryOperator::Less => "<",
@@ -17726,8 +18371,12 @@ fn universal_binary_syntax(
         Ast::Minus => Universal::Subtract,
         Ast::Multiply => Universal::Multiply,
         Ast::Divide => Universal::Divide,
+        Ast::FloorDivide => Universal::FloorDivide,
         Ast::Remainder => Universal::Remainder,
         Ast::Power => Universal::Power,
+        Ast::ShiftLeft => Universal::ShiftLeft,
+        Ast::ShiftRight => Universal::ShiftRight,
+        Ast::Conversion => return None,
         Ast::Equal => Universal::Equal,
         Ast::NotEqual => Universal::NotEqual,
         Ast::Less => Universal::Less,
@@ -17766,8 +18415,12 @@ fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str
         Operator::Minus => "-",
         Operator::Multiply => "*",
         Operator::Divide => "/",
+        Operator::FloorDivide => "//",
         Operator::Remainder => "%",
         Operator::Power => "**",
+        Operator::ShiftLeft => "<<",
+        Operator::ShiftRight => ">>",
+        Operator::Conversion => "<=>",
         Operator::Equal => "==",
         Operator::NotEqual => "!=",
         Operator::Less => "<",
@@ -18819,8 +19472,11 @@ fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
         AstBinaryOperator::Subtract => BinaryOperator::Subtract,
         AstBinaryOperator::Multiply => BinaryOperator::Multiply,
         AstBinaryOperator::Divide => BinaryOperator::Divide,
+        AstBinaryOperator::FloorDivide => BinaryOperator::FloorDivide,
         AstBinaryOperator::Remainder => BinaryOperator::Remainder,
         AstBinaryOperator::Power => BinaryOperator::Power,
+        AstBinaryOperator::ShiftLeft => BinaryOperator::ShiftLeft,
+        AstBinaryOperator::ShiftRight => BinaryOperator::ShiftRight,
         AstBinaryOperator::Equal => BinaryOperator::Equal,
         AstBinaryOperator::Identity => {
             unreachable!("identity is lowered before universal resolution")

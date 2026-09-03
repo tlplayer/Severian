@@ -810,7 +810,11 @@ impl TypeContext {
             }
         }
         matches.sort_by_key(|item| (item.left, item.right, item.result));
-        matches.dedup();
+        // A source primitive completion may restate a compiler-bootstrap
+        // signature with exact patterns. Once resolved, both declarations are
+        // the same operation; do not manufacture an overload ambiguity from
+        // their different pre-resolution patterns.
+        matches.dedup_by_key(|item| (item.left, item.right, item.result));
         match matches.as_slice() {
             [resolved] => Ok(*resolved),
             [] => Err(TypeError::NoMatchingOperator(operator)),
@@ -877,12 +881,15 @@ impl TypeContext {
         operand: TypeConstraint,
         expected: Option<TypeId>,
     ) -> Result<ResolvedUnary, TypeError> {
-        let matches: Vec<_> = self
+        let mut matches: Vec<_> = self
             .unary
             .iter()
             .filter(|(known, input, result)| {
                 *known == operator
-                    && constraint_matches(self, operand, *input)
+                    && match operand {
+                        TypeConstraint::Known(actual) => actual == *input,
+                        TypeConstraint::Literal(_) => constraint_matches(self, operand, *input),
+                    }
                     && expected.is_none_or(|expected| self.assignable(*result, expected))
             })
             .map(|(_, operand, result)| ResolvedUnary {
@@ -890,6 +897,8 @@ impl TypeContext {
                 result: *result,
             })
             .collect();
+        matches.sort_by_key(|item| (item.operand, item.result));
+        matches.dedup();
         match matches.as_slice() {
             [resolved] => Ok(*resolved),
             [] => Err(TypeError::NoMatchingUnary(operator)),
@@ -902,6 +911,22 @@ impl TypeContext {
                         .collect();
                     if let [resolved] = exact.as_slice() {
                         return Ok(*resolved);
+                    }
+                }
+                let best_cost = matches
+                    .iter()
+                    .filter_map(|item| constraint_conversion_cost(self, operand, item.operand))
+                    .min();
+                if let Some(best_cost) = best_cost {
+                    let best = matches
+                        .iter()
+                        .filter(|item| {
+                            constraint_conversion_cost(self, operand, item.operand)
+                                == Some(best_cost)
+                        })
+                        .collect::<Vec<_>>();
+                    if let [resolved] = best.as_slice() {
+                        return Ok(**resolved);
                     }
                 }
                 if let TypeConstraint::Literal(kind) = operand {
@@ -1058,14 +1083,32 @@ fn literal_fits(literal: &LiteralValue, representation: PrimitiveRepresentation)
 }
 
 fn integer_literal_fits(spelling: &str, bits: IntegerWidth, signed: bool) -> bool {
-    let Ok(value) = spelling.parse::<u128>() else {
-        return matches!(bits, IntegerWidth::Machine);
+    let (negative, magnitude) = spelling
+        .strip_prefix('-')
+        .map_or((false, spelling), |magnitude| (true, magnitude));
+    if negative && !signed {
+        return false;
+    }
+    let normalized = magnitude.replace('_', "");
+    let (digits, radix) = if let Some(digits) = normalized.strip_prefix("0b") {
+        (digits, 2)
+    } else if let Some(digits) = normalized.strip_prefix("0o") {
+        (digits, 8)
+    } else if let Some(digits) = normalized.strip_prefix("0x") {
+        (digits, 16)
+    } else {
+        (normalized.as_str(), 10)
+    };
+    let Ok(value) = u128::from_str_radix(digits, radix) else {
+        return false;
     };
     match bits {
         IntegerWidth::Machine => true,
         IntegerWidth::Fixed(0) => false,
         IntegerWidth::Fixed(128) if !signed => true,
+        IntegerWidth::Fixed(128) if negative => value <= (1u128 << 127),
         IntegerWidth::Fixed(128) => value <= i128::MAX as u128,
+        IntegerWidth::Fixed(bits) if negative => value <= (1u128 << (bits - 1)),
         IntegerWidth::Fixed(bits) if signed => value < (1u128 << (bits - 1)),
         IntegerWidth::Fixed(bits) => value < (1u128 << bits),
     }
