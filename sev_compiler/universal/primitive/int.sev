@@ -651,7 +651,7 @@ extend [I: int] I:
             return self.print()
 
         string ~> self:
-            parsed ?= string.parse_integer[I](string, base=10)
+            parsed ?= string.parse_integer[int](string, base=10)
             if parsed is Error:
                 throw TypeConversionError(f"cannot convert '{string}' to {I}")
             return parsed
