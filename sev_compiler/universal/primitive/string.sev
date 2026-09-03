@@ -117,13 +117,20 @@ trait String:
     operator *(count: usize) -> string
 
     def len(self) -> usize
-    def bytes_len(self) -> usize
-    def is_empty(self) -> bool
+    def bytes(self) -> usize
+    def empty(self) -> bool
     def byte(self, index: usize) -> u8
-    def bytes(self) -> slice[u8]
-    def starts_with(self, prefix: string) -> bool
-    def ends_with(self, suffix: string) -> bool
+    def raw(self) -> slice[u8]
+    #starts/ends with the index is where is starts searching from
+    def with(prefix: string,(start: string = "start",direction: string "forward")) -> bool
     def contains(self, needle: string) -> bool
+    def upper(self) -> string
+    def lower(self) -> string
+    def split(self) -> list[string]
+    def join(self,conjunction: string) -> string
+    def find(self,substring: string) -> int
+    #Regex match "foo".match(".*") -> ("foo",true)
+    def match(self, expression: string) -> tuple(string,bool)
 
 
 '''
@@ -437,36 +444,11 @@ class string: String:
         )
 
 
-    '''
-    ## Raw byte access
-    '''
-    def byte(self, index: usize) -> u8:
-        if index >= byte_length:
-            throw IndexError(
-                f"string byte index {index} outside [0, {byte_length})"
-            )
-
-        unsafe:
-            return __memory[index]
-
-
-    def bytes(self) -> slice[u8]:
-        return slice[u8](
-            borrow __memory,
-            0,
-            byte_length,
-        )
-
-
     def len(self) -> usize:
         return length
 
 
-    def bytes_len(self) -> usize:
-        return byte_length
-
-
-    def is_empty(self) -> bool:
+    def empty(self) -> bool:
         return length == 0
 
 

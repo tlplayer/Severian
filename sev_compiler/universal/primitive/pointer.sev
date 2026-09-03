@@ -1,0 +1,189 @@
+import "primitive.sev"
+
+
+'''
+# `pointer[T]`
+
+`pointer[T]` is a raw, non-owning reference to storage containing `T`.
+Also see 
+A pointer does not own the referenced storage and does not extend its lifetime.
+It exists for low-level memory operations, compiler/runtime internals, device
+memory, allocators, and foreign interfaces.
+
+Normal Severian code should prefer owned values, borrows, slices, arrays, and
+other lifetime-checked types.
+
+```text
+owner
+  |
+  +-------------------------+
+  | T | T | T | T | T | T |
+  +-------------------------+
+        ^
+        |
+    pointer[T]
+```
+
+A pointer is an address plus compiler-known pointee information.
+
+The pointee type is retained by the compiler even when the backend lowers the
+runtime representation to an untyped machine pointer.
+
+## Ownership
+
+```text
+pointer[T]     does not own memory
+```
+
+Dropping a pointer does not release storage.
+
+A pointer may outlive the storage it references. Dereferencing such a pointer
+is invalid. The compiler therefore does not provide the same lifetime guarantee
+for raw pointers that it provides for borrows and slices.
+
+Pointer operations which can violate memory safety require an unsafe context.
+
+## Nullability
+
+Pointers are non-null values.
+
+Use a union when an absent address is valid:
+
+```sev
+pointer[T] | None
+```
+
+## Representation
+
+Pointer width and alignment are target-dependent.
+
+```text
+pointer[T].size()
+pointer[T].alignment()
+```
+
+The pointee type does not change the size of the pointer itself.
+
+## Address spaces
+
+Address-space information belongs to the pointer representation rather than
+the pointee.
+
+Backends may distinguish address spaces such as host, device, global, shared,
+local, or other target-specific memory regions.
+
+The universal pointer type preserves this information so lowering does not
+need to recover it from an integer address.
+'''
+
+
+enum AddressSpace:
+    generic
+    host
+    device
+    global
+    shared
+    local
+
+
+class pointer[T](Primitive):
+    _address: usize
+    _address_space: AddressSpace = AddressSpace.generic
+
+    def type(self) -> Type:
+        return T
+
+    def size(self) -> Size:
+        return Size.pointer
+
+    def alignment(self) -> Size:
+        return Size.pointer
+
+    def address(self) -> usize:
+        return self._address
+
+    def space(self) -> AddressSpace:
+        return self._address_space
+
+
+'''
+# Construction
+
+Raw pointers should normally be produced by compiler-recognized memory,
+allocation, FFI, device, or borrow operations rather than constructed from an
+integer directly.
+
+Explicit integer-to-pointer conversion is unsafe because an integer does not
+carry lifetime or provenance information.
+'''
+
+
+unsafe def pointer_from_address[T](
+    address: usize,
+    address_space: AddressSpace = AddressSpace.generic,
+) -> pointer[T]:
+    return pointer[T](
+        _address=address,
+        _address_space=address_space,
+    )
+
+
+'''
+# Operations
+'''
+
+
+unsafe def load[T](value: pointer[T]) -> T:
+    intrinsic
+
+
+unsafe def store[T](value: pointer[T], item: T):
+    intrinsic
+
+
+unsafe def offset[T](value: pointer[T], elements: isize) -> pointer[T]:
+    intrinsic
+
+
+def address[T](value: pointer[T]) -> usize:
+    return value.address()
+
+
+def address_space[T](value: pointer[T]) -> AddressSpace:
+    return value.space()
+
+
+'''
+# Comparison
+
+Pointer equality compares pointer identity/address within the backend's pointer
+model. Ordering comparisons are intentionally not part of the universal pointer
+API.
+'''
+
+
+def ==[T](lhs: pointer[T], rhs: pointer[T]) -> bool:
+    intrinsic
+
+
+def !=[T](lhs: pointer[T], rhs: pointer[T]) -> bool:
+    return not lhs == rhs
+
+
+'''
+# Example
+
+```sev
+unsafe:
+    p = pointer_from_address[i32](address)
+    value = load(p)
+    next = offset(p, 1)
+    store(next, value)
+```
+
+Nullable pointer:
+
+```sev
+value: pointer[i32] | None
+```
+'''

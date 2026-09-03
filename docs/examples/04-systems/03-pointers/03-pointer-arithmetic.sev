@@ -7,7 +7,9 @@ test:
         values[2] = 30
         values[3] = 40
 
-        pointer: *[int] = values
+        #Both valid spellings/invocations
+        value_pointer: *[int] = values
+        value_pointer: pointer[int] = values
 
         assert(pointer[0] == 10)
         assert((pointer + 1)[0] == 20)
