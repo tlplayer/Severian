@@ -310,32 +310,15 @@ fn universal_unary(operator: OperatorSyntax) -> Option<UnaryOperator> {
 }
 
 fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
-    Some(match operator {
-        OperatorSyntax::Index | OperatorSyntax::If | OperatorSyntax::Else => return None,
-        OperatorSyntax::Pipe => BinaryOperator::BitwiseOr,
-        OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
-        OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,
-        OperatorSyntax::Plus => BinaryOperator::Add,
-        OperatorSyntax::Minus => BinaryOperator::Subtract,
-        OperatorSyntax::Multiply => BinaryOperator::Multiply,
-        OperatorSyntax::Divide => BinaryOperator::Divide,
-        OperatorSyntax::FloorDivide => BinaryOperator::FloorDivide,
-        OperatorSyntax::Remainder => BinaryOperator::Remainder,
-        OperatorSyntax::Power => BinaryOperator::Power,
-        OperatorSyntax::ShiftLeft => BinaryOperator::ShiftLeft,
-        OperatorSyntax::ShiftRight => BinaryOperator::ShiftRight,
-        OperatorSyntax::Conversion => return None,
-        OperatorSyntax::Equal => BinaryOperator::Equal,
-        OperatorSyntax::NotEqual => BinaryOperator::NotEqual,
-        OperatorSyntax::Less => BinaryOperator::Less,
-        OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
-        OperatorSyntax::Greater => BinaryOperator::Greater,
-        OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
-        OperatorSyntax::Contains => BinaryOperator::Contains,
-        OperatorSyntax::And => BinaryOperator::And,
-        OperatorSyntax::Or => BinaryOperator::Or,
-        OperatorSyntax::Not => return None,
-    })
+    (!matches!(
+        operator,
+        OperatorSyntax::Index
+            | OperatorSyntax::If
+            | OperatorSyntax::Else
+            | OperatorSyntax::Conversion
+            | OperatorSyntax::Not
+    ))
+    .then(|| BinaryOperator::from_stable_id(operator.stable_id()))
 }
 
 #[derive(Debug)]

@@ -6420,6 +6420,74 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if matches!(&callee.kind, AstExpressionKind::Name(name) if name == "mlir") {
+                    let Some((operation_argument, remaining)) = arguments.split_first() else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "mlir(...) requires an operation name",
+                            Some(ast.span),
+                        ));
+                    };
+                    let operation_name = callable_path(&operation_argument.value).ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000206",
+                            "the first mlir(...) argument must be a dialect.operation name",
+                            Some(operation_argument.span),
+                        )
+                    })?;
+                    let Some((dialect, operation)) = operation_name.split_once('.') else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "an MLIR operation name must include its dialect",
+                            Some(operation_argument.span),
+                        ));
+                    };
+                    let mut parameters = Vec::new();
+                    let mut operands = Vec::new();
+                    for argument in remaining {
+                        if operands.is_empty() {
+                            if let AstExpressionKind::Literal(AstLiteral::String(value)) =
+                                &argument.value.kind
+                            {
+                                parameters.push(value.clone());
+                                continue;
+                            }
+                        }
+                        operands.push(self.expression(&argument.value, None)?);
+                    }
+                    let result = expected
+                        .or_else(|| operands.first().map(|operand| operand.type_id))
+                        .ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000206",
+                                "mlir(...) needs an expected result type or an operand",
+                                Some(ast.span),
+                            )
+                        })?;
+                    let mut attributes = severian_universal::Attrs::new();
+                    attributes.insert(
+                        severian_universal::MLIR_OPERATION_NAME_ATTRIBUTE,
+                        severian_universal::AttrValue::String(operation_name.clone()),
+                    );
+                    if !parameters.is_empty() {
+                        attributes.insert(
+                            severian_universal::MLIR_OPERATION_PARAMETERS_ATTRIBUTE,
+                            severian_universal::AttrValue::String(parameters.join(", ")),
+                        );
+                    }
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: result,
+                        kind: ExpressionKind::Call {
+                            callee: severian_hir::Callee::Intrinsic {
+                                operation: severian_universal::OpId::named(dialect, operation),
+                                attributes,
+                            },
+                            arguments: operands,
+                        },
+                        span: ast.span,
+                    });
+                }
                 if let Some(symbol) = callable_path(callee)
                     .and_then(|path| path.strip_prefix("__operator__.").map(str::to_owned))
                 {
@@ -7852,7 +7920,7 @@ impl Analyzer<'_> {
                     ));
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstUnaryOperator::Borrow | AstUnaryOperator::BorrowMut
                 ) {
                     let operand = self.expression(operand, expected)?;
@@ -7976,7 +8044,7 @@ impl Analyzer<'_> {
                     }
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Less
                         | AstBinaryOperator::LessEqual
                         | AstBinaryOperator::Greater
@@ -7989,7 +8057,7 @@ impl Analyzer<'_> {
                     } = &left.kind
                     {
                         if matches!(
-                            first_operator,
+                            *first_operator,
                             AstBinaryOperator::Less
                                 | AstBinaryOperator::LessEqual
                                 | AstBinaryOperator::Greater
@@ -8034,7 +8102,7 @@ impl Analyzer<'_> {
                         ast.span,
                     );
                 }
-                if matches!(operator, AstBinaryOperator::And | AstBinaryOperator::Or) {
+                if matches!(*operator, AstBinaryOperator::And | AstBinaryOperator::Or) {
                     let left_value = self.expression(left, None)?;
                     let source_short_circuit = self
                         .class_instances_by_type
@@ -8063,7 +8131,7 @@ impl Analyzer<'_> {
                             ));
                         }
                         if let AstExpressionKind::Literal(AstLiteral::Boolean(value)) = left.kind {
-                            let select_left = match operator {
+                            let select_left = match *operator {
                                 AstBinaryOperator::And => !value,
                                 AstBinaryOperator::Or => value,
                                 _ => unreachable!(),
@@ -8115,7 +8183,7 @@ impl Analyzer<'_> {
                     }
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Add
                         | AstBinaryOperator::Subtract
                         | AstBinaryOperator::Multiply
@@ -8127,7 +8195,7 @@ impl Analyzer<'_> {
                         .is_some()
                     {
                         let right_value = self.expression(right, Some(left_value.type_id))?;
-                        let operation = match operator {
+                        let operation = match *operator {
                             AstBinaryOperator::Add => {
                                 severian_universal::tensor::ElementwiseOp::Add
                             }
@@ -8151,7 +8219,7 @@ impl Analyzer<'_> {
                     }
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
                 ) {
                     if let AstExpressionKind::Name(type_name) = &right.kind {
@@ -8287,7 +8355,7 @@ impl Analyzer<'_> {
                     ));
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Add | AstBinaryOperator::Subtract
                 ) {
                     let resolved_left = self.expression(left, None)?;
@@ -8361,14 +8429,14 @@ impl Analyzer<'_> {
                     }
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Equal
                         | AstBinaryOperator::NotEqual
                         | AstBinaryOperator::Identity
                 ) {
                     let resolved_left = self.expression(left, None)?;
                     if matches!(
-                        operator,
+                        *operator,
                         AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
                     ) {
                         if resolved_left.type_id == any_type_id() {
@@ -8675,7 +8743,7 @@ impl Analyzer<'_> {
                     }
                 }
                 if matches!(
-                    operator,
+                    *operator,
                     AstBinaryOperator::Less
                         | AstBinaryOperator::LessEqual
                         | AstBinaryOperator::Greater
@@ -8689,7 +8757,7 @@ impl Analyzer<'_> {
                             .types
                             .resolve_name("bool")
                             .expect("bootstrap defines bool");
-                        let symbol = match operator {
+                        let symbol = match *operator {
                             AstBinaryOperator::Less => "__sev_any_less",
                             AstBinaryOperator::LessEqual => "__sev_any_less_equal",
                             AstBinaryOperator::Greater => "__sev_any_greater",
@@ -17972,7 +18040,7 @@ fn constant_integer_expression(expression: &AstExpression) -> Option<i64> {
         } => {
             let left = constant_integer_expression(left)?;
             let right = constant_integer_expression(right)?;
-            match operator {
+            match *operator {
                 AstBinaryOperator::Pipe => Some(left | right),
                 AstBinaryOperator::BitwiseAnd => Some(left & right),
                 AstBinaryOperator::BitwiseXor => Some(left ^ right),
@@ -18002,7 +18070,7 @@ fn constant_boolean_expression(expression: &AstExpression) -> Option<bool> {
         } => {
             let left = constant_integer_expression(left)?;
             let right = constant_integer_expression(right)?;
-            Some(match operator {
+            Some(match *operator {
                 AstBinaryOperator::Equal => left == right,
                 AstBinaryOperator::NotEqual => left != right,
                 AstBinaryOperator::Less => left < right,
@@ -18332,61 +18400,23 @@ fn attach_tensor_result_shape(expression: &mut Expression, shape: severian_unive
 }
 
 fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
-    match operator {
-        AstBinaryOperator::Pipe => "|",
-        AstBinaryOperator::BitwiseAnd => "&",
-        AstBinaryOperator::BitwiseXor => "^",
-        AstBinaryOperator::Add => "+",
-        AstBinaryOperator::Subtract => "-",
-        AstBinaryOperator::Multiply => "*",
-        AstBinaryOperator::Divide => "/",
-        AstBinaryOperator::FloorDivide => "//",
-        AstBinaryOperator::Remainder => "%",
-        AstBinaryOperator::Power => "**",
-        AstBinaryOperator::ShiftLeft => "<<",
-        AstBinaryOperator::ShiftRight => ">>",
-        AstBinaryOperator::Equal | AstBinaryOperator::Identity => "==",
-        AstBinaryOperator::NotEqual => "!=",
-        AstBinaryOperator::Less => "<",
-        AstBinaryOperator::LessEqual => "<=",
-        AstBinaryOperator::Greater => ">",
-        AstBinaryOperator::GreaterEqual => ">=",
-        AstBinaryOperator::Contains => "in",
-        AstBinaryOperator::And => "and",
-        AstBinaryOperator::Or => "or",
-    }
+    operator
+        .standard_spelling()
+        .unwrap_or("<source-defined operator>")
 }
 
 fn universal_binary_syntax(
     operator: severian_ast::OperatorSyntax,
 ) -> Option<severian_universal::BinaryOperator> {
-    use severian_ast::OperatorSyntax as Ast;
-    use severian_universal::BinaryOperator as Universal;
-    Some(match operator {
-        Ast::Index | Ast::If | Ast::Else | Ast::Not => return None,
-        Ast::Pipe => Universal::BitwiseOr,
-        Ast::BitwiseAnd => Universal::BitwiseAnd,
-        Ast::BitwiseXor => Universal::BitwiseXor,
-        Ast::Plus => Universal::Add,
-        Ast::Minus => Universal::Subtract,
-        Ast::Multiply => Universal::Multiply,
-        Ast::Divide => Universal::Divide,
-        Ast::FloorDivide => Universal::FloorDivide,
-        Ast::Remainder => Universal::Remainder,
-        Ast::Power => Universal::Power,
-        Ast::ShiftLeft => Universal::ShiftLeft,
-        Ast::ShiftRight => Universal::ShiftRight,
-        Ast::Conversion => return None,
-        Ast::Equal => Universal::Equal,
-        Ast::NotEqual => Universal::NotEqual,
-        Ast::Less => Universal::Less,
-        Ast::LessEqual => Universal::LessEqual,
-        Ast::Greater => Universal::Greater,
-        Ast::GreaterEqual => Universal::GreaterEqual,
-        Ast::Contains => Universal::Contains,
-        Ast::And => Universal::And,
-        Ast::Or => Universal::Or,
-    })
+    (!matches!(
+        operator,
+        severian_ast::OperatorSyntax::Index
+            | severian_ast::OperatorSyntax::If
+            | severian_ast::OperatorSyntax::Else
+            | severian_ast::OperatorSyntax::Conversion
+            | severian_ast::OperatorSyntax::Not
+    ))
+    .then(|| severian_universal::BinaryOperator::from_stable_id(operator.stable_id()))
 }
 
 fn universal_unary_syntax(
@@ -18403,35 +18433,9 @@ fn universal_unary_syntax(
 }
 
 fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str {
-    use severian_ast::OperatorSyntax as Operator;
-    match operator {
-        Operator::Index => "[]",
-        Operator::If => "if",
-        Operator::Else => "else",
-        Operator::Pipe => "|",
-        Operator::BitwiseAnd => "&",
-        Operator::BitwiseXor => "^",
-        Operator::Plus => "+",
-        Operator::Minus => "-",
-        Operator::Multiply => "*",
-        Operator::Divide => "/",
-        Operator::FloorDivide => "//",
-        Operator::Remainder => "%",
-        Operator::Power => "**",
-        Operator::ShiftLeft => "<<",
-        Operator::ShiftRight => ">>",
-        Operator::Conversion => "<=>",
-        Operator::Equal => "==",
-        Operator::NotEqual => "!=",
-        Operator::Less => "<",
-        Operator::LessEqual => "<=",
-        Operator::Greater => ">",
-        Operator::GreaterEqual => ">=",
-        Operator::Contains => "in",
-        Operator::And => "and",
-        Operator::Or => "or",
-        Operator::Not => "not",
-    }
+    operator
+        .standard_spelling()
+        .unwrap_or("<source-defined operator>")
 }
 
 fn class_application(expression: &AstExpression) -> Option<(String, &[TypeAnnotation])> {
@@ -18470,7 +18474,7 @@ fn static_integer_in(
         } => {
             let left = static_integer_in(left, environment)?;
             let right = static_integer_in(right, environment)?;
-            match operator {
+            match *operator {
                 AstBinaryOperator::Pipe => Some(left | right),
                 AstBinaryOperator::BitwiseAnd => Some(left & right),
                 AstBinaryOperator::BitwiseXor => Some(left ^ right),
@@ -18510,7 +18514,7 @@ fn static_boolean(expression: &AstExpression, environment: &BTreeMap<String, i64
         } => {
             let left = static_integer_in(left, environment)?;
             let right = static_integer_in(right, environment)?;
-            Some(match operator {
+            Some(match *operator {
                 AstBinaryOperator::Equal | AstBinaryOperator::Identity => left == right,
                 AstBinaryOperator::NotEqual => left != right,
                 AstBinaryOperator::Less => left < right,
@@ -19231,7 +19235,7 @@ fn integration_expectation(
             }
         }
     }
-    match operator {
+    match *operator {
         AstBinaryOperator::Contains => Some(severian_hir::TestExpectation::Contains {
             stream: test_stream(right)?,
             value: string_literal(left)?.to_owned(),
@@ -19464,32 +19468,12 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
 }
 
 fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
-    match operator {
-        AstBinaryOperator::Pipe => BinaryOperator::BitwiseOr,
-        AstBinaryOperator::BitwiseAnd => BinaryOperator::BitwiseAnd,
-        AstBinaryOperator::BitwiseXor => BinaryOperator::BitwiseXor,
-        AstBinaryOperator::Add => BinaryOperator::Add,
-        AstBinaryOperator::Subtract => BinaryOperator::Subtract,
-        AstBinaryOperator::Multiply => BinaryOperator::Multiply,
-        AstBinaryOperator::Divide => BinaryOperator::Divide,
-        AstBinaryOperator::FloorDivide => BinaryOperator::FloorDivide,
-        AstBinaryOperator::Remainder => BinaryOperator::Remainder,
-        AstBinaryOperator::Power => BinaryOperator::Power,
-        AstBinaryOperator::ShiftLeft => BinaryOperator::ShiftLeft,
-        AstBinaryOperator::ShiftRight => BinaryOperator::ShiftRight,
-        AstBinaryOperator::Equal => BinaryOperator::Equal,
-        AstBinaryOperator::Identity => {
-            unreachable!("identity is lowered before universal resolution")
-        }
-        AstBinaryOperator::NotEqual => BinaryOperator::NotEqual,
-        AstBinaryOperator::Less => BinaryOperator::Less,
-        AstBinaryOperator::LessEqual => BinaryOperator::LessEqual,
-        AstBinaryOperator::Greater => BinaryOperator::Greater,
-        AstBinaryOperator::GreaterEqual => BinaryOperator::GreaterEqual,
-        AstBinaryOperator::Contains => BinaryOperator::Contains,
-        AstBinaryOperator::And => BinaryOperator::And,
-        AstBinaryOperator::Or => BinaryOperator::Or,
-    }
+    assert_ne!(
+        operator,
+        AstBinaryOperator::Identity,
+        "identity is lowered before universal resolution"
+    );
+    BinaryOperator::from_stable_id(operator.stable_id())
 }
 
 fn semantic_error(message: String, span: severian_source::Span) -> Diagnostic {

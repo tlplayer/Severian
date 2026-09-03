@@ -75,10 +75,10 @@ trait IntegerArithmetic:
 
 
 trait IntegerShift:
-    operator <<[I: int](right: I) -> Self
-    operator >>[I: int](right: I) -> Self
-    operator <<=[I: int](right: I)
-    operator >>=[I: int](right: I)
+    operator <<[LeftShift: Y, I: int](right: I) -> Self
+    operator >>[RightShift: Y, I: int](right: I) -> Self
+    operator <<=[LeftShift: Y, I: int](right: I)
+    operator >>=[RightShift: Y, I: int](right: I)
 
 
 trait IntegerBitwiseAssign:
@@ -392,10 +392,10 @@ extend [I: int] I:
     operator ^(right: I) -> I:
         return mlir(arith.xori, self, right)
 
-    operator <<[S: int](right: S) -> I:
+    operator <<[LeftShift: Y, S: int](right: S) -> I:
         return mlir(arith.shli, self, right as I)
 
-    operator >>[S: int](right: S) -> I:
+    operator >>[RightShift: Y, S: int](right: S) -> I:
         if I.signed:
             return mlir(arith.shrsi, self, right as I)
         return mlir(arith.shrui, self, right as I)
@@ -447,10 +447,10 @@ extend [I: int] I:
     operator ^=(right: I):
         self = self ^ right
 
-    operator <<=[S: int](right: S):
+    operator <<=[LeftShift: Y, S: int](right: S):
         self = self << right
 
-    operator >>=[S: int](right: S):
+    operator >>=[RightShift: Y, S: int](right: S):
         self = self >> right
 
     def copy(self) -> I:

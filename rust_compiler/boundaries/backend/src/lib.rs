@@ -407,6 +407,11 @@ fn render_block(
                     "artifact call `{artifact:?}` requires the MLIR composition pipeline"
                 )))
             }
+            Operation::Mlir { mnemonic, .. } => {
+                return Err(BackendError::UnsupportedOperation(format!(
+                    "direct MLIR operation `{mnemonic}` requires the MLIR pipeline"
+                )))
+            }
         }
     }
     Ok(())
@@ -669,6 +674,11 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
         }
         BinaryOperation::And => "&&",
         BinaryOperation::Or => "||",
+        _ => {
+            return Err(BackendError::UnsupportedOperation(format!(
+                "no C lowering is registered for `{operator}`"
+            )))
+        }
     })
 }
 

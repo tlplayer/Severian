@@ -1,4 +1,4 @@
-use crate::{LiteralKind, TypeId};
+use crate::{LiteralKind, OperationId, TypeId};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -19,85 +19,86 @@ impl UnaryOperator {
     }
 }
 
+/// The semantic identity of an operator.
+///
+/// This is intentionally an open stable ID, not an enum. Standard operators
+/// are constants for convenience, while user declarations can construct an ID
+/// from any symbol without changing the compiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BinaryOperator {
-    BitwiseOr,
-    BitwiseAnd,
-    BitwiseXor,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    FloorDivide,
-    Remainder,
-    Power,
-    ShiftLeft,
-    ShiftRight,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Contains,
-    And,
-    Or,
-}
+pub struct OperatorId(pub OperationId);
 
-impl BinaryOperator {
+/// Compatibility name retained for the existing type-resolution API.
+pub type BinaryOperator = OperatorId;
+
+#[allow(non_upper_case_globals)]
+impl OperatorId {
+    pub const BitwiseOr: Self = Self::from_symbol("|");
+    pub const BitwiseAnd: Self = Self::from_symbol("&");
+    pub const BitwiseXor: Self = Self::from_symbol("^");
+    pub const Add: Self = Self::from_symbol("+");
+    pub const Subtract: Self = Self::from_symbol("-");
+    pub const Multiply: Self = Self::from_symbol("*");
+    pub const Divide: Self = Self::from_symbol("/");
+    pub const FloorDivide: Self = Self::from_symbol("//");
+    pub const Remainder: Self = Self::from_symbol("%");
+    pub const Power: Self = Self::from_symbol("**");
+    pub const ShiftLeft: Self = Self::from_symbol("<<");
+    pub const ShiftRight: Self = Self::from_symbol(">>");
+    pub const Equal: Self = Self::from_symbol("==");
+    pub const NotEqual: Self = Self::from_symbol("!=");
+    pub const Less: Self = Self::from_symbol("<");
+    pub const LessEqual: Self = Self::from_symbol("<=");
+    pub const Greater: Self = Self::from_symbol(">");
+    pub const GreaterEqual: Self = Self::from_symbol(">=");
+    pub const Contains: Self = Self::from_symbol("in");
+    pub const And: Self = Self::from_symbol("and");
+    pub const Or: Self = Self::from_symbol("or");
+
+    pub const fn from_symbol(value: &str) -> Self {
+        Self(OperationId::from_name(value))
+    }
+
+    pub const fn from_stable_id(value: u128) -> Self {
+        Self(OperationId(value))
+    }
+
     pub fn from_spelling(value: &str) -> Option<Self> {
-        match value {
-            "|" => Some(Self::BitwiseOr),
-            "&" => Some(Self::BitwiseAnd),
-            "^" => Some(Self::BitwiseXor),
-            "+" => Some(Self::Add),
-            "-" => Some(Self::Subtract),
-            "*" => Some(Self::Multiply),
-            "/" => Some(Self::Divide),
-            "//" => Some(Self::FloorDivide),
-            "%" => Some(Self::Remainder),
-            "**" => Some(Self::Power),
-            "<<" => Some(Self::ShiftLeft),
-            ">>" => Some(Self::ShiftRight),
-            "==" => Some(Self::Equal),
-            "!=" => Some(Self::NotEqual),
-            "<" => Some(Self::Less),
-            "<=" => Some(Self::LessEqual),
-            ">" => Some(Self::Greater),
-            ">=" => Some(Self::GreaterEqual),
-            "in" => Some(Self::Contains),
-            "and" => Some(Self::And),
-            "or" => Some(Self::Or),
-            _ => None,
-        }
+        (!value.is_empty()).then(|| Self::from_symbol(value))
+    }
+
+    pub const fn standard_spelling(self) -> Option<&'static str> {
+        if self.0 .0 == Self::BitwiseOr.0 .0 { Some("|") }
+        else if self.0 .0 == Self::BitwiseAnd.0 .0 { Some("&") }
+        else if self.0 .0 == Self::BitwiseXor.0 .0 { Some("^") }
+        else if self.0 .0 == Self::Add.0 .0 { Some("+") }
+        else if self.0 .0 == Self::Subtract.0 .0 { Some("-") }
+        else if self.0 .0 == Self::Multiply.0 .0 { Some("*") }
+        else if self.0 .0 == Self::Divide.0 .0 { Some("/") }
+        else if self.0 .0 == Self::FloorDivide.0 .0 { Some("//") }
+        else if self.0 .0 == Self::Remainder.0 .0 { Some("%") }
+        else if self.0 .0 == Self::Power.0 .0 { Some("**") }
+        else if self.0 .0 == Self::ShiftLeft.0 .0 { Some("<<") }
+        else if self.0 .0 == Self::ShiftRight.0 .0 { Some(">>") }
+        else if self.0 .0 == Self::Equal.0 .0 { Some("==") }
+        else if self.0 .0 == Self::NotEqual.0 .0 { Some("!=") }
+        else if self.0 .0 == Self::Less.0 .0 { Some("<") }
+        else if self.0 .0 == Self::LessEqual.0 .0 { Some("<=") }
+        else if self.0 .0 == Self::Greater.0 .0 { Some(">") }
+        else if self.0 .0 == Self::GreaterEqual.0 .0 { Some(">=") }
+        else if self.0 .0 == Self::Contains.0 .0 { Some("in") }
+        else if self.0 .0 == Self::And.0 .0 { Some("and") }
+        else if self.0 .0 == Self::Or.0 .0 { Some("or") }
+        else { None }
     }
 }
 
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::BitwiseOr => "|",
-            Self::BitwiseAnd => "&",
-            Self::BitwiseXor => "^",
-            Self::Add => "+",
-            Self::Subtract => "-",
-            Self::Multiply => "*",
-            Self::Divide => "/",
-            Self::FloorDivide => "//",
-            Self::Remainder => "%",
-            Self::Power => "**",
-            Self::ShiftLeft => "<<",
-            Self::ShiftRight => ">>",
-            Self::Equal => "==",
-            Self::NotEqual => "!=",
-            Self::Less => "<",
-            Self::LessEqual => "<=",
-            Self::Greater => ">",
-            Self::GreaterEqual => ">=",
-            Self::Contains => "in",
-            Self::And => "and",
-            Self::Or => "or",
-        })
+        if let Some(spelling) = self.standard_spelling() {
+            formatter.write_str(spelling)
+        } else {
+            write!(formatter, "operator#{:032x}", self.0 .0)
+        }
     }
 }
 

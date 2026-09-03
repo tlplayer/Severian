@@ -209,34 +209,139 @@ impl TypeAnnotation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperatorSyntax {
-    Index,
-    If,
-    Else,
-    Pipe,
-    BitwiseAnd,
-    BitwiseXor,
-    Plus,
-    Minus,
-    Multiply,
-    Divide,
-    FloorDivide,
-    Remainder,
-    Power,
-    ShiftLeft,
-    ShiftRight,
-    Conversion,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Contains,
-    And,
-    Or,
-    Not,
+const fn operator_hash(value: &str) -> u128 {
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    let mut result = OFFSET;
+    while index < bytes.len() {
+        result ^= bytes[index] as u128;
+        result = result.wrapping_mul(PRIME);
+        index += 1;
+    }
+    result
+}
+
+/// Stable, open identity of operator syntax.
+///
+/// Individual operators deliberately are associated constants rather than enum
+/// variants. Parsers may construct an identity for any source spelling with
+/// `from_spelling`; known constants only document the standard prelude.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OperatorSyntax(pub u128);
+
+#[allow(non_upper_case_globals)]
+impl OperatorSyntax {
+    pub const Index: Self = Self(operator_hash("[]"));
+    pub const If: Self = Self(operator_hash("if"));
+    pub const Else: Self = Self(operator_hash("else"));
+    pub const Pipe: Self = Self(operator_hash("|"));
+    pub const BitwiseAnd: Self = Self(operator_hash("&"));
+    pub const BitwiseXor: Self = Self(operator_hash("^"));
+    pub const Plus: Self = Self(operator_hash("+"));
+    pub const Add: Self = Self::Plus;
+    pub const Minus: Self = Self(operator_hash("-"));
+    pub const Subtract: Self = Self::Minus;
+    pub const Multiply: Self = Self(operator_hash("*"));
+    pub const Divide: Self = Self(operator_hash("/"));
+    pub const FloorDivide: Self = Self(operator_hash("//"));
+    pub const Remainder: Self = Self(operator_hash("%"));
+    pub const Power: Self = Self(operator_hash("**"));
+    pub const ShiftLeft: Self = Self(operator_hash("<<"));
+    pub const ShiftRight: Self = Self(operator_hash(">>"));
+    pub const Conversion: Self = Self(operator_hash("<=>"));
+    pub const Equal: Self = Self(operator_hash("=="));
+    // Identity intentionally has a semantic identity distinct from equality,
+    // even though its legacy surface spelling is also `==`.
+    pub const Identity: Self = Self(operator_hash("compiler.identity"));
+    pub const NotEqual: Self = Self(operator_hash("!="));
+    pub const Less: Self = Self(operator_hash("<"));
+    pub const LessEqual: Self = Self(operator_hash("<="));
+    pub const Greater: Self = Self(operator_hash(">"));
+    pub const GreaterEqual: Self = Self(operator_hash(">="));
+    pub const Contains: Self = Self(operator_hash("in"));
+    pub const And: Self = Self(operator_hash("and"));
+    pub const Or: Self = Self(operator_hash("or"));
+    pub const Not: Self = Self(operator_hash("not"));
+
+    pub const fn from_spelling(spelling: &str) -> Self {
+        Self(operator_hash(spelling))
+    }
+
+    pub const fn stable_id(self) -> u128 {
+        self.0
+    }
+
+    pub fn standard_spelling(self) -> Option<&'static str> {
+        if self == Self::Index {
+            Some("[]")
+        } else if self == Self::If {
+            Some("if")
+        } else if self == Self::Else {
+            Some("else")
+        } else if self == Self::Pipe {
+            Some("|")
+        } else if self == Self::BitwiseAnd {
+            Some("&")
+        } else if self == Self::BitwiseXor {
+            Some("^")
+        } else if self == Self::Plus {
+            Some("+")
+        } else if self == Self::Minus {
+            Some("-")
+        } else if self == Self::Multiply {
+            Some("*")
+        } else if self == Self::Divide {
+            Some("/")
+        } else if self == Self::FloorDivide {
+            Some("//")
+        } else if self == Self::Remainder {
+            Some("%")
+        } else if self == Self::Power {
+            Some("**")
+        } else if self == Self::ShiftLeft {
+            Some("<<")
+        } else if self == Self::ShiftRight {
+            Some(">>")
+        } else if self == Self::Conversion {
+            Some("<=>")
+        } else if self == Self::Equal || self == Self::Identity {
+            Some("==")
+        } else if self == Self::NotEqual {
+            Some("!=")
+        } else if self == Self::Less {
+            Some("<")
+        } else if self == Self::LessEqual {
+            Some("<=")
+        } else if self == Self::Greater {
+            Some(">")
+        } else if self == Self::GreaterEqual {
+            Some(">=")
+        } else if self == Self::Contains {
+            Some("in")
+        } else if self == Self::And {
+            Some("and")
+        } else if self == Self::Or {
+            Some("or")
+        } else if self == Self::Not {
+            Some("not")
+        } else {
+            None
+        }
+    }
+}
+
+impl std::fmt::Debug for OperatorSyntax {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.standard_spelling() {
+            Some(spelling) => formatter.debug_tuple("Operator").field(&spelling).finish(),
+            None => formatter
+                .debug_tuple("Operator")
+                .field(&format_args!("{:032x}", self.0))
+                .finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,6 +374,9 @@ pub struct OperatorParameter {
 pub struct OperatorDeclaration {
     pub decorators: Vec<Decorator>,
     pub operator: OperatorSyntax,
+    /// Optional compiler-symbol tag supplied as the first `[Tag: Y]`
+    /// parameter. It names the semantic operation independently of spelling.
+    pub tag: Option<String>,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,
     pub parameters: Vec<OperatorParameter>,
@@ -280,6 +388,9 @@ pub struct OperatorDeclaration {
 pub struct OperatorImplementation {
     pub decorators: Vec<Decorator>,
     pub operator: OperatorSyntax,
+    /// Optional compiler-symbol tag supplied as the first `[Tag: Y]`
+    /// parameter. It names the semantic operation independently of spelling.
+    pub tag: Option<String>,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,
     pub parameters: Vec<OperatorParameter>,

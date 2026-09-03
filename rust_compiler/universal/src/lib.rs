@@ -33,9 +33,12 @@ pub use operation_registry::{
     AttrValue, AttributeId, Attrs, BackendId, CanonicalRewrite, DialectId, EffectSet, IrContext,
     LoweringCapability, OpId, OperationDiagnostic, OperationId, OperationInterface,
     OperationRegistry, ProviderId, RegisteredOperation, RuntimeId, COMPILED_ARTIFACT_ATTRIBUTE,
-    COMPILE_TARGETS_ATTRIBUTE, COMPILE_TYPE_ATTRIBUTE,
+    COMPILE_TARGETS_ATTRIBUTE, COMPILE_TYPE_ATTRIBUTE, MLIR_OPERATION_NAME_ATTRIBUTE,
+    MLIR_OPERATION_PARAMETERS_ATTRIBUTE,
 };
-pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
+pub use operator::{
+    BinaryOperator, OperatorId, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator,
+};
 pub use primitive::{
     install_primitives, FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition,
     PrimitiveRepresentation, PrimitiveSpec, PRIMITIVES,

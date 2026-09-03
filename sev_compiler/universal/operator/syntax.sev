@@ -1,17 +1,10 @@
-enum OperatorSyntax:
-    Plus
-    Minus
-    Multiply
-    Divide
-    Remainder
-    Power
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
-    Contains
-    And
-    Or
-    Not
+enum Fixity:
+    Prefix
+    Infix
+    Postfix
+
+
+enum Associativity:
+    Left
+    Right
+    None

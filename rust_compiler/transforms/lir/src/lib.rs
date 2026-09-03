@@ -195,30 +195,10 @@ pub enum UnaryOperation {
     Not,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOperation {
-    BitwiseOr,
-    BitwiseAnd,
-    BitwiseXor,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    FloorDivide,
-    Remainder,
-    Power,
-    ShiftLeft,
-    ShiftRight,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Contains,
-    And,
-    Or,
-}
+/// Lowered operator applications retain the canonical semantic operator ID.
+/// Backends select a lowering for that ID; LIR does not re-enumerate source
+/// operators.
+pub type BinaryOperation = severian_universal::OperatorId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskOwner {
@@ -250,6 +230,14 @@ pub enum Operation {
         operator: BinaryOperation,
         left: ValueId,
         right: ValueId,
+        result: ValueId,
+    },
+    /// A source-declared direct MLIR builder operation. The mnemonic is data
+    /// carried from semantic resolution, so adding it does not extend LIR.
+    Mlir {
+        mnemonic: String,
+        parameters: Option<String>,
+        operands: Vec<ValueId>,
         result: ValueId,
     },
     Aggregate {

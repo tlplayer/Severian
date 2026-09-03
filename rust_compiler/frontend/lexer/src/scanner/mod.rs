@@ -123,6 +123,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 TokenKind::Newline
             }
+            byte if is_operator_character(byte) && is_custom_operator(bytes, cursor) => {
+                cursor = operator_end(bytes, cursor);
+                TokenKind::Operator(source.text[start..cursor].to_owned())
+            }
             b'@' => one(&mut cursor, TokenKind::At),
             b'&' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
@@ -544,6 +548,31 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
     }
     tokens.push(token(source, TokenKind::Eof, cursor, cursor));
     Ok(tokens)
+}
+
+fn is_operator_character(byte: u8) -> bool {
+    matches!(byte, b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^'
+        | b'<' | b'>' | b'=' | b'!' | b'~' | b'?')
+}
+
+fn operator_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while bytes.get(end).is_some_and(|byte| is_operator_character(*byte)) {
+        end += 1;
+    }
+    end
+}
+
+fn is_custom_operator(bytes: &[u8], start: usize) -> bool {
+    let end = operator_end(bytes, start);
+    !matches!(
+        &bytes[start..end],
+        b"=" | b"&" | b"&=" | b"^" | b"^=" | b"?=" | b"|" | b"|="
+            | b"+" | b"+=" | b"%" | b"%=" | b"*" | b"*=" | b"**"
+            | b"/" | b"/=" | b"//" | b"//=" | b"-" | b"-=" | b"->"
+            | b"~>" | b"==" | b"!=" | b"!" | b"<" | b"<=" | b"<<"
+            | b"<<=" | b"<=>" | b">" | b">=" | b">>" | b">>="
+    )
 }
 
 fn numeric_token(

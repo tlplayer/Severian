@@ -26,31 +26,14 @@ pub enum UnaryOperator {
     Move,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOperator {
-    Pipe,
-    BitwiseAnd,
-    BitwiseXor,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    FloorDivide,
-    Remainder,
-    Power,
-    ShiftLeft,
-    ShiftRight,
-    Equal,
-    Identity,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Contains,
-    And,
-    Or,
-}
+/// An open source-level operator identity.
+///
+/// The identity is derived from the operator symbol instead of from a Rust enum
+/// discriminant. Consequently a source package can declare another operator
+/// without adding an AST variant. `OperatorSyntax` is the same identity used by
+/// operator declarations; the alias remains while downstream crates migrate
+/// from the old binary-specific name.
+pub type BinaryOperator = crate::OperatorSyntax;
 
 /// The lifetime owner selected for a spawned task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

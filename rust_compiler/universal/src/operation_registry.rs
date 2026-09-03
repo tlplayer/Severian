@@ -100,6 +100,11 @@ pub enum AttrValue {
 pub const COMPILE_TYPE_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.type");
 pub const COMPILE_TARGETS_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.targets");
 pub const COMPILED_ARTIFACT_ATTRIBUTE: AttributeId = AttributeId::from_name("compile.artifact");
+/// Textual MLIR operation name attached by the source `mlir(...)` builder.
+pub const MLIR_OPERATION_NAME_ATTRIBUTE: AttributeId = AttributeId::from_name("mlir.operation");
+/// Optional comma-separated literal parameters preceding SSA operands.
+pub const MLIR_OPERATION_PARAMETERS_ATTRIBUTE: AttributeId =
+    AttributeId::from_name("mlir.parameters");
 
 pub type Attrs = BTreeMap<AttributeId, AttrValue>;
 

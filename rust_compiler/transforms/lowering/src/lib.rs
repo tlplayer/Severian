@@ -366,6 +366,37 @@ impl CfgLowering<'_> {
                 attributes,
                 ..
             } => {
+                if let Some(severian_universal::AttrValue::String(mnemonic)) =
+                    attributes.get(&severian_universal::MLIR_OPERATION_NAME_ATTRIBUTE)
+                {
+                    let inputs = operands
+                        .iter()
+                        .map(|operand| self.lower_operand(body, operand, operations))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let [place] = results.as_slice() else {
+                        return Err(LoweringError::UnsupportedCfgOperation(
+                            "direct MLIR expressions require exactly one result".into(),
+                        ));
+                    };
+                    let result = self.new_value(self.place_type(body, place)?);
+                    let parameters = attributes
+                        .get(&severian_universal::MLIR_OPERATION_PARAMETERS_ATTRIBUTE)
+                        .and_then(|value| match value {
+                            severian_universal::AttrValue::String(value) => Some(value.clone()),
+                            _ => None,
+                        });
+                    operations.push(LirOperation::Mlir {
+                        mnemonic: mnemonic.clone(),
+                        parameters,
+                        operands: inputs,
+                        result,
+                    });
+                    operations.push(LirOperation::Store {
+                        place: self.lower_place(place),
+                        value: result,
+                    });
+                    return Ok(());
+                }
                 let Some(severian_universal::AttrValue::Integer(artifact)) =
                     attributes.get(&severian_universal::COMPILED_ARTIFACT_ATTRIBUTE)
                 else {
@@ -454,7 +485,7 @@ impl CfgLowering<'_> {
             } => {
                 let left = self.lower_operand(body, left, operations)?;
                 let right = self.lower_operand(body, right, operations)?;
-                let result_type = match operator {
+                let result_type = match *operator {
                     BinaryOperator::Equal
                     | BinaryOperator::NotEqual
                     | BinaryOperator::Less
@@ -466,7 +497,7 @@ impl CfgLowering<'_> {
                 };
                 let result = self.new_value(result_type);
                 if self.value_type(left) == LoweredType::String {
-                    match operator {
+                    match *operator {
                         BinaryOperator::Add => operations.push(LirOperation::RuntimeCall {
                             symbol: "__sev_string_concat".into(),
                             arguments: vec![left, right],
@@ -1245,29 +1276,7 @@ fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
 }
 
 fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
-    match operator {
-        BinaryOperator::BitwiseOr => BinaryOperation::BitwiseOr,
-        BinaryOperator::BitwiseAnd => BinaryOperation::BitwiseAnd,
-        BinaryOperator::BitwiseXor => BinaryOperation::BitwiseXor,
-        BinaryOperator::Add => BinaryOperation::Add,
-        BinaryOperator::Subtract => BinaryOperation::Subtract,
-        BinaryOperator::Multiply => BinaryOperation::Multiply,
-        BinaryOperator::Divide => BinaryOperation::Divide,
-        BinaryOperator::FloorDivide => BinaryOperation::FloorDivide,
-        BinaryOperator::Remainder => BinaryOperation::Remainder,
-        BinaryOperator::Power => BinaryOperation::Power,
-        BinaryOperator::ShiftLeft => BinaryOperation::ShiftLeft,
-        BinaryOperator::ShiftRight => BinaryOperation::ShiftRight,
-        BinaryOperator::Equal => BinaryOperation::Equal,
-        BinaryOperator::NotEqual => BinaryOperation::NotEqual,
-        BinaryOperator::Less => BinaryOperation::Less,
-        BinaryOperator::LessEqual => BinaryOperation::LessEqual,
-        BinaryOperator::Greater => BinaryOperation::Greater,
-        BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
-        BinaryOperator::Contains => BinaryOperation::Contains,
-        BinaryOperator::And => BinaryOperation::And,
-        BinaryOperator::Or => BinaryOperation::Or,
-    }
+    operator
 }
 
 fn lower_type(
@@ -2102,26 +2111,7 @@ mod legacy_structured_lowering {
     }
 
     fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
-        match operator {
-            BinaryOperator::BitwiseOr => BinaryOperation::BitwiseOr,
-            BinaryOperator::BitwiseAnd => BinaryOperation::BitwiseAnd,
-            BinaryOperator::BitwiseXor => BinaryOperation::BitwiseXor,
-            BinaryOperator::Add => BinaryOperation::Add,
-            BinaryOperator::Subtract => BinaryOperation::Subtract,
-            BinaryOperator::Multiply => BinaryOperation::Multiply,
-            BinaryOperator::Divide => BinaryOperation::Divide,
-            BinaryOperator::Remainder => BinaryOperation::Remainder,
-            BinaryOperator::Power => BinaryOperation::Power,
-            BinaryOperator::Equal => BinaryOperation::Equal,
-            BinaryOperator::NotEqual => BinaryOperation::NotEqual,
-            BinaryOperator::Less => BinaryOperation::Less,
-            BinaryOperator::LessEqual => BinaryOperation::LessEqual,
-            BinaryOperator::Greater => BinaryOperation::Greater,
-            BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
-            BinaryOperator::Contains => BinaryOperation::Contains,
-            BinaryOperator::And => BinaryOperation::And,
-            BinaryOperator::Or => BinaryOperation::Or,
-        }
+        operator
     }
 
     fn lower_type(

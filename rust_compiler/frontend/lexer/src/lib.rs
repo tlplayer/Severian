@@ -228,4 +228,13 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn source_defined_operator_is_one_open_operator_token() {
+        let source = SourceFile::virtual_source("operator.sev", "left <<< right\n");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Operator("<<<".into())));
+    }
 }

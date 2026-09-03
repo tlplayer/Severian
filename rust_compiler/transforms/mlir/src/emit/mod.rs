@@ -1505,6 +1505,40 @@ fn render_cfg_operation(
                 mlir_type(&input)?
             ));
         }
+        Operation::Mlir {
+            mnemonic,
+            parameters,
+            operands,
+            result,
+        } => {
+            let operand_values = operands
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let operand_types = operands
+                .iter()
+                .map(|value| mlir_type(&value_type(module, *value)?))
+                .collect::<Result<Vec<_>, _>>()?;
+            let result_type = mlir_type(&value_type(module, *result)?)?;
+            if let Some(parameters) = parameters {
+                let input_type = operand_types.first().ok_or_else(|| {
+                    MlirError::UnsupportedOperation(format!(
+                        "parameterized MLIR operation `{mnemonic}` requires an operand"
+                    ))
+                })?;
+                output.push_str(&format!(
+                    "{indentation}%v{} = {mnemonic} {parameters}, {operand_values} : {input_type}\n",
+                    result.0
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}%v{} = \"{mnemonic}\"({operand_values}) : ({}) -> {result_type}\n",
+                    result.0,
+                    operand_types.join(", ")
+                ));
+            }
+        }
         Operation::RuntimeCall {
             symbol,
             arguments,
@@ -2586,6 +2620,40 @@ fn render_block(
                     "{indentation}%v{} = {instruction} %v{}, %v{} : {spelling}\n",
                     result.0, left.0, right.0
                 ));
+            }
+            Operation::Mlir {
+                mnemonic,
+                parameters,
+                operands,
+                result,
+            } => {
+                let operand_values = operands
+                    .iter()
+                    .map(|value| format!("%v{}", value.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let operand_types = operands
+                    .iter()
+                    .map(|value| mlir_type(&value_type(module, *value)?))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result_type = mlir_type(&value_type(module, *result)?)?;
+                if let Some(parameters) = parameters {
+                    let input_type = operand_types.first().ok_or_else(|| {
+                        MlirError::UnsupportedOperation(format!(
+                            "parameterized MLIR operation `{mnemonic}` requires an operand"
+                        ))
+                    })?;
+                    output.push_str(&format!(
+                        "{indentation}%v{} = {mnemonic} {parameters}, {operand_values} : {input_type}\n",
+                        result.0
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "{indentation}%v{} = \"{mnemonic}\"({operand_values}) : ({}) -> {result_type}\n",
+                        result.0,
+                        operand_types.join(", ")
+                    ));
+                }
             }
             Operation::Aggregate {
                 class,

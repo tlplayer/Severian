@@ -1425,4 +1425,47 @@ output = f"""module {{
             } if policy == "gpu"
         ));
     }
+
+    #[test]
+    fn source_defined_operator_tag_is_not_a_rust_enum_variant() {
+        let source = SourceFile::virtual_source(
+            "open-operator.sev",
+            "class Compose: Y :\n    symbol: string = \"<<<\"\n    fixity: Fixity = Fixity.Infix\n    precedence: u8 = 8\n    associativity: Associativity = Associativity.Left\n\ntrait Custom:\n    operator <<<[Compose: Y](left: int, right: int) -> int\n\ndef compose(left: int, right: int) -> int:\n    return left + right <<< right\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(declaration) = &module.items[1] else {
+            panic!("expected operator trait")
+        };
+        let declared = &declaration.operators[0];
+        assert_eq!(declared.tag.as_deref(), Some("Compose"));
+        assert!(declared.type_parameters.is_empty());
+        assert_eq!(
+            declared.operator,
+            severian_ast::OperatorSyntax::from_spelling("<<<")
+        );
+        let severian_ast::Item::Function(function) = &module.items[2] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::Return {
+            value: Some(expression),
+            ..
+        } = &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected return")
+        };
+        let severian_ast::ExpressionKind::Binary {
+            operator,
+            right,
+            ..
+        } = &expression.kind
+        else {
+            panic!("expected outer addition")
+        };
+        assert_eq!(*operator, severian_ast::BinaryOperator::Add);
+        assert!(matches!(
+            right.kind,
+            severian_ast::ExpressionKind::Binary { operator, .. }
+                if operator == declared.operator
+        ));
+    }
 }

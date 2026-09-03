@@ -662,63 +662,26 @@ fn parameter_allows_unary(
 }
 
 fn ast_binary(operator: severian_ast::BinaryOperator) -> severian_universal::BinaryOperator {
-    use severian_ast::BinaryOperator as Ast;
-    use severian_universal::BinaryOperator as Universal;
-    match operator {
-        Ast::Pipe => Universal::BitwiseOr,
-        Ast::BitwiseAnd => Universal::BitwiseAnd,
-        Ast::BitwiseXor => Universal::BitwiseXor,
-        Ast::Add => Universal::Add,
-        Ast::Subtract => Universal::Subtract,
-        Ast::Multiply => Universal::Multiply,
-        Ast::Divide => Universal::Divide,
-        Ast::FloorDivide => Universal::FloorDivide,
-        Ast::Remainder => Universal::Remainder,
-        Ast::Power => Universal::Power,
-        Ast::ShiftLeft => Universal::ShiftLeft,
-        Ast::ShiftRight => Universal::ShiftRight,
-        Ast::Equal | Ast::Identity => Universal::Equal,
-        Ast::NotEqual => Universal::NotEqual,
-        Ast::Less => Universal::Less,
-        Ast::LessEqual => Universal::LessEqual,
-        Ast::Greater => Universal::Greater,
-        Ast::GreaterEqual => Universal::GreaterEqual,
-        Ast::Contains => Universal::Contains,
-        Ast::And => Universal::And,
-        Ast::Or => Universal::Or,
-    }
+    let operator = if operator == severian_ast::BinaryOperator::Identity {
+        severian_ast::BinaryOperator::Equal
+    } else {
+        operator
+    };
+    severian_universal::BinaryOperator::from_stable_id(operator.stable_id())
 }
 
 fn ast_binary_syntax(
     operator: severian_ast::OperatorSyntax,
 ) -> Option<severian_universal::BinaryOperator> {
-    use severian_ast::OperatorSyntax as Ast;
-    Some(ast_binary(match operator {
-        Ast::Index | Ast::If | Ast::Else => return None,
-        Ast::Pipe => severian_ast::BinaryOperator::Pipe,
-        Ast::BitwiseAnd => severian_ast::BinaryOperator::BitwiseAnd,
-        Ast::BitwiseXor => severian_ast::BinaryOperator::BitwiseXor,
-        Ast::Plus => severian_ast::BinaryOperator::Add,
-        Ast::Minus => severian_ast::BinaryOperator::Subtract,
-        Ast::Multiply => severian_ast::BinaryOperator::Multiply,
-        Ast::Divide => severian_ast::BinaryOperator::Divide,
-        Ast::FloorDivide => severian_ast::BinaryOperator::FloorDivide,
-        Ast::Remainder => severian_ast::BinaryOperator::Remainder,
-        Ast::Power => severian_ast::BinaryOperator::Power,
-        Ast::ShiftLeft => severian_ast::BinaryOperator::ShiftLeft,
-        Ast::ShiftRight => severian_ast::BinaryOperator::ShiftRight,
-        Ast::Conversion => return None,
-        Ast::Equal => severian_ast::BinaryOperator::Equal,
-        Ast::NotEqual => severian_ast::BinaryOperator::NotEqual,
-        Ast::Less => severian_ast::BinaryOperator::Less,
-        Ast::LessEqual => severian_ast::BinaryOperator::LessEqual,
-        Ast::Greater => severian_ast::BinaryOperator::Greater,
-        Ast::GreaterEqual => severian_ast::BinaryOperator::GreaterEqual,
-        Ast::Contains => severian_ast::BinaryOperator::Contains,
-        Ast::And => severian_ast::BinaryOperator::And,
-        Ast::Or => severian_ast::BinaryOperator::Or,
-        Ast::Not => return None,
-    }))
+    (!matches!(
+        operator,
+        severian_ast::OperatorSyntax::Index
+            | severian_ast::OperatorSyntax::If
+            | severian_ast::OperatorSyntax::Else
+            | severian_ast::OperatorSyntax::Conversion
+            | severian_ast::OperatorSyntax::Not
+    ))
+    .then(|| ast_binary(operator))
 }
 
 fn trait_supports_source_binary(
@@ -1035,7 +998,7 @@ fn tensor_dimension_constraint(
     };
     let left_dimension = tensor_dimension_expression(left, substitution);
     let right_dimension = tensor_dimension_expression(right, substitution);
-    match operator {
+    match *operator {
         BinaryOperator::Equal => {
             if let (
                 severian_ast::ExpressionKind::Binary {
@@ -1109,7 +1072,7 @@ fn tensor_dimension_expression(
         } => {
             let left = Box::new(tensor_dimension_expression(left, substitution)?);
             let right = Box::new(tensor_dimension_expression(right, substitution)?);
-            match operator {
+            match *operator {
                 BinaryOperator::Add => Some(DimExpr::Add(left, right)),
                 BinaryOperator::Multiply => Some(DimExpr::Multiply(left, right)),
                 BinaryOperator::Divide => Some(DimExpr::DivideExact(left, right)),
@@ -1204,39 +1167,14 @@ fn trait_is_structurally_satisfied(
     }
     let operators_satisfied = declaration.operators.iter().all(|operator| {
         use severian_ast::OperatorSyntax as Syntax;
-        use severian_universal::{BinaryOperator as Binary, UnaryOperator as Unary};
+        use severian_universal::UnaryOperator as Unary;
         match (operator.operator, operator.parameters.is_empty()) {
             (Syntax::Plus, true) => types.supports_unary(Unary::Positive, actual),
             (Syntax::Minus, true) => types.supports_unary(Unary::Negative, actual),
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
             (syntax, _) => {
-                let operator = match syntax {
-                    Syntax::Index | Syntax::If | Syntax::Else => return false,
-                    Syntax::Pipe => Binary::BitwiseOr,
-                    Syntax::BitwiseAnd => Binary::BitwiseAnd,
-                    Syntax::BitwiseXor => Binary::BitwiseXor,
-                    Syntax::Plus => Binary::Add,
-                    Syntax::Minus => Binary::Subtract,
-                    Syntax::Multiply => Binary::Multiply,
-                    Syntax::Divide => Binary::Divide,
-                    Syntax::FloorDivide => Binary::FloorDivide,
-                    Syntax::Remainder => Binary::Remainder,
-                    Syntax::Power => Binary::Power,
-                    Syntax::ShiftLeft => Binary::ShiftLeft,
-                    Syntax::ShiftRight => Binary::ShiftRight,
-                    Syntax::Conversion => return false,
-                    Syntax::Equal => Binary::Equal,
-                    Syntax::NotEqual => Binary::NotEqual,
-                    Syntax::Less => Binary::Less,
-                    Syntax::LessEqual => Binary::LessEqual,
-                    Syntax::Greater => Binary::Greater,
-                    Syntax::GreaterEqual => Binary::GreaterEqual,
-                    Syntax::Contains => Binary::Contains,
-                    Syntax::And => Binary::And,
-                    Syntax::Or => Binary::Or,
-                    Syntax::Not => return false,
-                };
-                types.supports_binary(operator, actual)
+                ast_binary_syntax(syntax)
+                    .is_some_and(|operator| types.supports_binary(operator, actual))
             }
         }
     });
@@ -1981,7 +1919,7 @@ fn visit_expression_for_specializations(
             )?;
         }
         severian_ast::ExpressionKind::Unary { operator, operand } => {
-            let operand_expected = match operator {
+            let operand_expected = match *operator {
                 severian_ast::UnaryOperator::Not => Some("bool"),
                 _ => expected,
             };
@@ -2006,7 +1944,7 @@ fn visit_expression_for_specializations(
             // `generic_call() == 42`). Logical operators, conversely, do
             // require boolean operands. Value-producing operators retain the
             // surrounding expected type.
-            let operand_expected = match operator {
+            let operand_expected = match *operator {
                 Binary::Equal
                 | Binary::Identity
                 | Binary::NotEqual

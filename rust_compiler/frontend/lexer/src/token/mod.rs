@@ -9,6 +9,9 @@ pub enum TokenKind {
     Character(char),
     String(String),
     FormattedString(String),
+    /// A punctuation operator not reserved by the language grammar. The lexer
+    /// does not need a new enum variant when a package declares one.
+    Operator(String),
     At,
     Ampersand,
     AmpersandEqual,

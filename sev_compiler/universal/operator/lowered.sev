@@ -1,22 +1,11 @@
-enum UnaryOperation:
-    Positive
-    Negative
-    Not
+import "registry.sev"
 
 
-enum BinaryOperation:
-    Add
-    Subtract
-    Multiply
-    Divide
-    Remainder
-    Power
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
-    Contains
-    And
-    Or
+# Lowering retains the same open operation identity. These wrappers describe
+# arity only; adding an operation does not add a new lowered variant.
+class UnaryOperation:
+    id: OpId
+
+
+class BinaryOperation:
+    id: OpId

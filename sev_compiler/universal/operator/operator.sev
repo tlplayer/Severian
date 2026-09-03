@@ -21,7 +21,9 @@ enum TypeConstraint:
 
 
 class OperatorSignature:
-    kind: BinaryOperator
+    # The resolved Y tag is converted to the canonical registry OpId. The
+    # signature never re-enumerates individual operators.
+    kind: Operator
 
     left: TypePattern
 

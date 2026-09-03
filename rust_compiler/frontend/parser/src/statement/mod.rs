@@ -11,6 +11,7 @@ use severian_ast::{
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
 use severian_source::{SourceFile, Span};
+use std::collections::BTreeMap;
 
 pub fn parse(tokens: &[Token]) -> Result<Module, Diagnostic> {
     parse_with_max_errors(tokens, 5)
@@ -18,13 +19,7 @@ pub fn parse(tokens: &[Token]) -> Result<Module, Diagnostic> {
 
 pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Module, Diagnostic> {
     let max_errors = max_errors.max(1);
-    let first = match (Parser {
-        tokens,
-        cursor: 0,
-        continuation_indents: 0,
-    })
-    .module()
-    {
+    let first = match Parser::new(tokens).module() {
         Ok(module) => return Ok(module),
         Err(diagnostic) => diagnostic,
     };
@@ -35,13 +30,7 @@ pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Modu
         if !suppress_diagnostic_line(&mut recovered, span) {
             break;
         }
-        match (Parser {
-            tokens: &recovered,
-            cursor: 0,
-            continuation_indents: 0,
-        })
-        .module()
-        {
+        match Parser::new(&recovered).module() {
             Ok(_) => break,
             Err(diagnostic) => {
                 if diagnostics.iter().any(|known| {
@@ -105,9 +94,25 @@ struct Parser<'a> {
     tokens: &'a [Token],
     cursor: usize,
     continuation_indents: usize,
+    operators: BTreeMap<OperatorSyntax, ParserOperator>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ParserOperator {
+    precedence: u8,
+    right_associative: bool,
 }
 
 impl Parser<'_> {
+    fn new(tokens: &[Token]) -> Parser<'_> {
+        Parser {
+            tokens,
+            cursor: 0,
+            continuation_indents: 0,
+            operators: source_operator_table(tokens),
+        }
+    }
+
     fn module(mut self) -> Result<Module, Diagnostic> {
         let mut module = Module::default();
         self.separators();
@@ -2373,7 +2378,7 @@ impl Parser<'_> {
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<OperatorDeclaration, Diagnostic> {
-        let (start, operator, type_parameters, mut constraints, parameters, close) =
+        let (start, operator, tag, type_parameters, mut constraints, parameters, close) =
             self.operator_head()?;
         let result = if self.take(&TokenKind::Arrow).is_some() {
             self.type_annotation()?
@@ -2384,6 +2389,7 @@ impl Parser<'_> {
         Ok(OperatorDeclaration {
             decorators,
             operator,
+            tag,
             type_parameters,
             constraints,
             parameters,
@@ -2396,7 +2402,7 @@ impl Parser<'_> {
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<OperatorImplementation, Diagnostic> {
-        let (start, operator, type_parameters, mut constraints, parameters, close) =
+        let (start, operator, tag, type_parameters, mut constraints, parameters, close) =
             self.operator_head()?;
         let mut expression_body = None;
         let result = if self.take(&TokenKind::Arrow).is_some() {
@@ -2424,6 +2430,7 @@ impl Parser<'_> {
             return Ok(OperatorImplementation {
                 decorators,
                 operator,
+                tag,
                 type_parameters,
                 constraints,
                 parameters,
@@ -2442,6 +2449,7 @@ impl Parser<'_> {
             return Ok(OperatorImplementation {
                 decorators,
                 operator,
+                tag,
                 type_parameters,
                 constraints,
                 parameters,
@@ -2455,6 +2463,7 @@ impl Parser<'_> {
         Ok(OperatorImplementation {
             decorators,
             operator,
+            tag,
             type_parameters,
             constraints,
             parameters,
@@ -2471,6 +2480,7 @@ impl Parser<'_> {
         (
             Span,
             OperatorSyntax,
+            Option<String>,
             Vec<String>,
             Vec<GenericConstraint>,
             Vec<OperatorParameter>,
@@ -2492,7 +2502,21 @@ impl Parser<'_> {
                 )
             })?
         };
-        let (mut type_parameters, constraints) = self.type_parameters()?;
+        let (mut type_parameters, mut constraints) = self.type_parameters()?;
+        let tag = constraints.iter().find_map(|constraint| match constraint {
+            GenericConstraint::Parameter {
+                parameter, bound, ..
+            } if bound.simple_name() == Some("Y") => Some(parameter.clone()),
+            _ => None,
+        });
+        if let Some(tag) = &tag {
+            type_parameters.retain(|parameter| parameter != tag);
+            constraints.retain(|constraint| {
+                !matches!(constraint,
+                    GenericConstraint::Parameter { parameter, bound, .. }
+                    if parameter == tag && bound.simple_name() == Some("Y"))
+            });
+        }
         self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
@@ -2527,7 +2551,7 @@ impl Parser<'_> {
         let close = self
             .expect(&TokenKind::RightParen, "expected `)` after parameters")?
             .span;
-        Ok((start, operator, type_parameters, constraints, parameters, close))
+        Ok((start, operator, tag, type_parameters, constraints, parameters, close))
     }
 
     fn opaque_indented_block(&mut self, owner: &str) -> Result<u32, Diagnostic> {
@@ -2944,6 +2968,7 @@ impl Parser<'_> {
             tokens: self.tokens,
             cursor: self.cursor,
             continuation_indents: self.continuation_indents,
+            operators: self.operators.clone(),
         };
         trial.type_annotation().is_ok()
             && matches!(trial.peek().kind, TokenKind::Identifier(_))
@@ -3099,7 +3124,10 @@ impl Parser<'_> {
             }) else {
                 break;
             };
-            let precedence = precedence(operator);
+            let precedence = self
+                .operators
+                .get(&operator)
+                .map_or_else(|| precedence(operator), |metadata| metadata.precedence);
             if precedence < minimum_precedence {
                 break;
             }
@@ -3107,7 +3135,12 @@ impl Parser<'_> {
             if negated_contains {
                 self.next();
             }
-            let right_precedence = if operator == BinaryOperator::Power {
+            let right_precedence = if self
+                .operators
+                .get(&operator)
+                .is_some_and(|metadata| metadata.right_associative)
+                || operator == BinaryOperator::Power
+            {
                 precedence
             } else {
                 precedence + 1
@@ -4395,11 +4428,7 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
         text: source.to_owned(),
     };
     let tokens = scan(&file)?;
-    let mut parser = Parser {
-        tokens: &tokens,
-        cursor: 0,
-        continuation_indents: 0,
-    };
+    let mut parser = Parser::new(&tokens);
     let expression = parser.expression(0)?;
     if !parser.at(&TokenKind::Eof) {
         return Err(Diagnostic::new(
@@ -4413,6 +4442,7 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
 
 fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     Some(match kind {
+        TokenKind::Operator(symbol) => OperatorSyntax::from_spelling(symbol),
         TokenKind::Identifier(value) if value == "if" => OperatorSyntax::If,
         TokenKind::Identifier(value) if value == "else" => OperatorSyntax::Else,
         TokenKind::Pipe => OperatorSyntax::Pipe,
@@ -4450,68 +4480,112 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     })
 }
 
-fn operator_spelling(operator: OperatorSyntax) -> &'static str {
-    match operator {
-        OperatorSyntax::Index => "[]",
-        OperatorSyntax::If => "if",
-        OperatorSyntax::Else => "else",
-        OperatorSyntax::Pipe => "|",
-        OperatorSyntax::BitwiseAnd => "&",
-        OperatorSyntax::BitwiseXor => "^",
-        OperatorSyntax::Plus => "+",
-        OperatorSyntax::Minus => "-",
-        OperatorSyntax::Multiply => "*",
-        OperatorSyntax::Divide => "/",
-        OperatorSyntax::FloorDivide => "//",
-        OperatorSyntax::Remainder => "%",
-        OperatorSyntax::Power => "**",
-        OperatorSyntax::ShiftLeft => "<<",
-        OperatorSyntax::ShiftRight => ">>",
-        OperatorSyntax::Conversion => "<=>",
-        OperatorSyntax::Equal => "==",
-        OperatorSyntax::NotEqual => "!=",
-        OperatorSyntax::Less => "<",
-        OperatorSyntax::LessEqual => "<=",
-        OperatorSyntax::Greater => ">",
-        OperatorSyntax::GreaterEqual => ">=",
-        OperatorSyntax::Contains => "in",
-        OperatorSyntax::And => "and",
-        OperatorSyntax::Or => "or",
-        OperatorSyntax::Not => "not",
+/// Collect parser mechanics from source operator-symbol declarations before
+/// parsing expressions. This is a syntax prepass over the same token stream,
+/// not a second frontend: the ordinary parser still produces the sole AST.
+fn source_operator_table(tokens: &[Token]) -> BTreeMap<OperatorSyntax, ParserOperator> {
+    let mut table = BTreeMap::new();
+    for (class, token) in tokens.iter().enumerate() {
+        if !matches!(&token.kind, TokenKind::Identifier(value) if value == "class") {
+            continue;
+        }
+        let Some(body) = tokens[class..]
+            .iter()
+            .position(|token| token.kind == TokenKind::Indent)
+            .map(|offset| class + offset + 1)
+        else {
+            continue;
+        };
+        let mut depth = 1usize;
+        let mut end = body;
+        while end < tokens.len() && depth > 0 {
+            match tokens[end].kind {
+                TokenKind::Indent => depth += 1,
+                TokenKind::Dedent => depth -= 1,
+                _ => {}
+            }
+            end += 1;
+        }
+        let body = &tokens[body..end.saturating_sub(1)];
+        let Some(symbol) = operator_string_property(body, "symbol") else {
+            continue;
+        };
+        let Some(precedence) = operator_integer_property(body, "precedence")
+            .and_then(|value| u8::try_from(value).ok())
+        else {
+            continue;
+        };
+        if operator_name_property(body, "fixity").as_deref() != Some("Infix") {
+            continue;
+        }
+        let right_associative =
+            operator_name_property(body, "associativity").as_deref() == Some("Right");
+        table.insert(
+            OperatorSyntax::from_spelling(&symbol),
+            ParserOperator {
+                precedence,
+                right_associative,
+            },
+        );
     }
+    table
+}
+
+fn operator_property_value<'a>(tokens: &'a [Token], property: &str) -> Option<&'a TokenKind> {
+    let start = tokens.iter().position(
+        |token| matches!(&token.kind, TokenKind::Identifier(value) if value == property),
+    )?;
+    tokens[start + 1..]
+        .iter()
+        .take_while(|token| token.kind != TokenKind::Newline)
+        .find_map(|token| match token.kind {
+            TokenKind::String(_) | TokenKind::Integer(_) => Some(&token.kind),
+            _ => None,
+        })
+}
+
+fn operator_string_property(tokens: &[Token], property: &str) -> Option<String> {
+    match operator_property_value(tokens, property)? {
+        TokenKind::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn operator_integer_property(tokens: &[Token], property: &str) -> Option<u64> {
+    match operator_property_value(tokens, property)? {
+        TokenKind::Integer(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn operator_name_property(tokens: &[Token], property: &str) -> Option<String> {
+    let start = tokens.iter().position(
+        |token| matches!(&token.kind, TokenKind::Identifier(value) if value == property),
+    )?;
+    tokens[start + 1..]
+        .iter()
+        .take_while(|token| token.kind != TokenKind::Newline)
+        .filter_map(|token| match &token.kind {
+            TokenKind::Identifier(value) => Some(value.clone()),
+            _ => None,
+        })
+        .last()
+}
+
+fn operator_spelling(operator: OperatorSyntax) -> &'static str {
+    operator
+        .standard_spelling()
+        .unwrap_or("<source-defined operator>")
 }
 
 fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
     if matches!(kind, TokenKind::Identifier(value) if value == "is") {
         return Some(BinaryOperator::Identity);
     }
-    Some(match operator_syntax(kind)? {
-        OperatorSyntax::Index => return None,
-        OperatorSyntax::If | OperatorSyntax::Else => return None,
-        OperatorSyntax::Pipe => BinaryOperator::Pipe,
-        OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
-        OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,
-        OperatorSyntax::Plus => BinaryOperator::Add,
-        OperatorSyntax::Minus => BinaryOperator::Subtract,
-        OperatorSyntax::Multiply => BinaryOperator::Multiply,
-        OperatorSyntax::Divide => BinaryOperator::Divide,
-        OperatorSyntax::FloorDivide => BinaryOperator::FloorDivide,
-        OperatorSyntax::Remainder => BinaryOperator::Remainder,
-        OperatorSyntax::Power => BinaryOperator::Power,
-        OperatorSyntax::ShiftLeft => BinaryOperator::ShiftLeft,
-        OperatorSyntax::ShiftRight => BinaryOperator::ShiftRight,
-        OperatorSyntax::Conversion => return None,
-        OperatorSyntax::Equal => BinaryOperator::Equal,
-        OperatorSyntax::NotEqual => BinaryOperator::NotEqual,
-        OperatorSyntax::Less => BinaryOperator::Less,
-        OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
-        OperatorSyntax::Greater => BinaryOperator::Greater,
-        OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
-        OperatorSyntax::Contains => BinaryOperator::Contains,
-        OperatorSyntax::And => BinaryOperator::And,
-        OperatorSyntax::Or => BinaryOperator::Or,
-        OperatorSyntax::Not => return None,
-    })
+    let operator = operator_syntax(kind)?;
+    (!matches!(operator, OperatorSyntax::Index | OperatorSyntax::If | OperatorSyntax::Else
+        | OperatorSyntax::Conversion | OperatorSyntax::Not))
+        .then_some(operator)
 }
 
 fn is_comparison(operator: BinaryOperator) -> bool {
@@ -4654,5 +4728,6 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::FloorDivide
         | BinaryOperator::Remainder => 8,
         BinaryOperator::Power => 9,
+        _ => 7,
     }
 }
