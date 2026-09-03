@@ -355,6 +355,19 @@ impl TypeContext {
             .any(|(known, operand, _)| *known == operator && *operand == type_id)
     }
 
+    /// Adds an operator signature supplied by an already-resolved source
+    /// declaration. Frontends use this after collapsing a source primitive
+    /// class onto its universal type identity.
+    pub fn add_source_binary(&mut self, signature: OperatorSignature) {
+        self.add_binary(signature);
+    }
+
+    /// Adds a unary operator supplied by an already-resolved source
+    /// declaration.
+    pub fn add_source_unary(&mut self, operator: UnaryOperator, operand: TypeId, result: TypeId) {
+        self.add_unary(operator, operand, result);
+    }
+
     pub fn trait_supports_binary(&self, trait_id: TypeId, operator: BinaryOperator) -> bool {
         self.trait_binary
             .get(&trait_id)

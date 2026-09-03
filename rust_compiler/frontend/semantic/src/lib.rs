@@ -148,7 +148,26 @@ pub(crate) fn analyze_with_package_functions(
                 class.declaration.name == declaration.name && source_module == Some(class.module)
             })
             .map(|class| class.ty);
-        let constructor = if let Some(existing) = existing {
+        let constructor = if declaration.primitive {
+            let primitive = types.resolve_name(&declaration.name).ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    format!(
+                        "primitive declaration `{}` has no compiler-owned type to complete",
+                        declaration.name
+                    ),
+                    Some(declaration.span),
+                )
+            })?;
+            if types.primitive(primitive).is_none() {
+                return Err(Diagnostic::new(
+                    "E000204",
+                    format!("`{}` is not a compiler-owned primitive", declaration.name),
+                    Some(declaration.span),
+                ));
+            }
+            primitive
+        } else if let Some(existing) = existing {
             existing
         } else {
             types
@@ -1666,12 +1685,17 @@ impl Analyzer<'_> {
                 .iter()
                 .any(|implemented| implemented.simple_name() == Some("Error"))
                 || package_class.declaration.name.ends_with("Error");
+            let source_fields = if package_class.declaration.primitive {
+                Vec::new()
+            } else {
+                package_class.declaration.fields.clone()
+            };
             let placeholder = ClassInstance {
                 ty: package_class.ty,
                 name: package_class.declaration.name.clone(),
                 arguments: Vec::new(),
                 fields: Vec::new(),
-                source_fields: package_class.declaration.fields.clone(),
+                source_fields,
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
                 operators: package_class.declaration.operators.clone(),
@@ -1728,17 +1752,21 @@ impl Analyzer<'_> {
                 .iter()
                 .any(|implemented| implemented.simple_name() == Some("Error"))
                 || package_class.declaration.name.ends_with("Error");
-            let mut fields = package_class
-                .declaration
-                .fields
-                .iter()
-                .map(|field| {
-                    Ok(HirClassFieldDeclaration {
-                        name: field.name.clone(),
-                        ty: self.resolve_source_type(&field.annotation)?,
+            let mut fields = if package_class.declaration.primitive {
+                Vec::new()
+            } else {
+                package_class
+                    .declaration
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        Ok(HirClassFieldDeclaration {
+                            name: field.name.clone(),
+                            ty: self.resolve_source_type(&field.annotation)?,
+                        })
                     })
-                })
-                .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    .collect::<Result<Vec<_>, Diagnostic>>()?
+            };
             if is_error && fields.is_empty() {
                 fields.push(HirClassFieldDeclaration {
                     name: "__error".into(),
@@ -1753,7 +1781,11 @@ impl Analyzer<'_> {
                 name: package_class.declaration.name.clone(),
                 arguments: Vec::new(),
                 fields: fields.clone(),
-                source_fields: package_class.declaration.fields.clone(),
+                source_fields: if package_class.declaration.primitive {
+                    Vec::new()
+                } else {
+                    package_class.declaration.fields.clone()
+                },
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
                 operators: package_class.declaration.operators.clone(),
@@ -1779,7 +1811,7 @@ impl Analyzer<'_> {
                 }
             }
             resolved_visible_instances = self.class_instances.clone();
-            if source_module == Some(package_class.module) {
+            if source_module == Some(package_class.module) && !package_class.declaration.primitive {
                 self.lowered_classes.push(HirClassDeclaration {
                     id: package_class.ty,
                     name: package_class.declaration.name.clone(),
@@ -4478,6 +4510,36 @@ impl Analyzer<'_> {
         let value = self.expression(condition, None)?;
         if value.type_id == boolean {
             return Ok(value);
+        }
+        if let Some(operator) = self
+            .class_instances_by_type
+            .get(&value.type_id)
+            .and_then(|instance| {
+                instance
+                    .operators
+                    .iter()
+                    .find(|operator| operator.operator == severian_ast::OperatorSyntax::If)
+            })
+            .cloned()
+        {
+            let [AstStatement::Return {
+                value: Some(result), ..
+            }] = operator.body.as_slice()
+            else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    "`operator if` must currently be a single expression",
+                    Some(operator.span),
+                ));
+            };
+            let previous = self.value_substitutions.insert("self".into(), value);
+            let lowered = self.expression(result, Some(boolean));
+            if let Some(previous) = previous {
+                self.value_substitutions.insert("self".into(), previous);
+            } else {
+                self.value_substitutions.remove("self");
+            }
+            return lowered;
         }
         if value.type_id == string {
             return Ok(self.runtime_call(
@@ -7638,6 +7700,86 @@ impl Analyzer<'_> {
                         ast.span,
                     );
                 }
+                if matches!(operator, AstBinaryOperator::And | AstBinaryOperator::Or) {
+                    let left_value = self.expression(left, None)?;
+                    let source_short_circuit = self
+                        .class_instances_by_type
+                        .get(&left_value.type_id)
+                        .is_some_and(|instance| {
+                            instance.operators.iter().any(|implementation| {
+                                implementation.operator
+                                    == if *operator == AstBinaryOperator::And {
+                                        severian_ast::OperatorSyntax::And
+                                    } else {
+                                        severian_ast::OperatorSyntax::Or
+                                    }
+                                    && !implementation.type_parameters.is_empty()
+                            })
+                        });
+                    if source_short_circuit {
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        if left_value.type_id != boolean {
+                            return Err(Diagnostic::new(
+                                "E000202",
+                                "a source short-circuit operator requires a Boolean receiver",
+                                Some(left.span),
+                            ));
+                        }
+                        if let AstExpressionKind::Literal(AstLiteral::Boolean(value)) = left.kind {
+                            let select_left = match operator {
+                                AstBinaryOperator::And => !value,
+                                AstBinaryOperator::Or => value,
+                                _ => unreachable!(),
+                            };
+                            if select_left {
+                                return if let Some(expected) = expected {
+                                    self.coerce(left_value, expected, false)
+                                } else {
+                                    Ok(left_value)
+                                };
+                            }
+                            return self.expression(right, expected);
+                        }
+                        let right_value = self.expression(right, None)?;
+                        let result = if left_value.type_id == right_value.type_id {
+                            left_value.type_id
+                        } else {
+                            self.instantiate_union_type(&[
+                                left_value.type_id,
+                                right_value.type_id,
+                            ])
+                        };
+                        if expected.is_some_and(|expected| {
+                            expected != result && !self.types.assignable(result, expected)
+                        }) {
+                            return Err(semantic_error(
+                                "logical operator result does not satisfy the expected type".into(),
+                                ast.span,
+                            ));
+                        }
+                        let condition = left_value.clone();
+                        let left_value = self.coerce(left_value, result, false)?;
+                        let right_value = self.coerce(right_value, result, false)?;
+                        let (value, fallback) = if *operator == AstBinaryOperator::And {
+                            (right_value, left_value)
+                        } else {
+                            (left_value, right_value)
+                        };
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: result,
+                            kind: ExpressionKind::Fallback {
+                                condition: Box::new(condition),
+                                value: Box::new(value),
+                                fallback: Box::new(fallback),
+                            },
+                            span: ast.span,
+                        });
+                    }
+                }
                 if matches!(
                     operator,
                     AstBinaryOperator::Add
@@ -8972,12 +9114,14 @@ impl Analyzer<'_> {
             .zip(concrete.iter().copied())
             .collect::<BTreeMap<_, _>>();
         let mut fields = Vec::with_capacity(declaration.fields.len());
-        for field in &declaration.fields {
-            let ty = self.resolve_instantiated_type(&field.annotation, &substitution)?;
-            fields.push(HirClassFieldDeclaration {
-                name: field.name.clone(),
-                ty,
-            });
+        if !declaration.primitive {
+            for field in &declaration.fields {
+                let ty = self.resolve_instantiated_type(&field.annotation, &substitution)?;
+                fields.push(HirClassFieldDeclaration {
+                    name: field.name.clone(),
+                    ty,
+                });
+            }
         }
         let constructor = self
             .generic_class_constructors
@@ -9002,31 +9146,37 @@ impl Analyzer<'_> {
             name: name.to_owned(),
             arguments: concrete.to_vec(),
             fields: fields.clone(),
-            source_fields: declaration.fields.clone(),
+            source_fields: if declaration.primitive {
+                Vec::new()
+            } else {
+                declaration.fields.clone()
+            },
             constructors: declaration.constructors.clone(),
             methods: declaration.methods.clone(),
             operators: declaration.operators.clone(),
         };
         self.class_instances.insert(key, instance.clone());
         self.class_instances_by_type.insert(ty, instance.clone());
-        self.lowered_classes.push(HirClassDeclaration {
-            id: ty,
-            name: format!(
-                "{}[{}]",
-                name,
-                concrete
-                    .iter()
-                    .map(|ty| {
-                        self.types
-                            .definition(*ty)
-                            .map(|definition| definition.name.clone())
-                            .unwrap_or_else(|| format!("type#{}", ty.0))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            fields,
-        });
+        if !declaration.primitive {
+            self.lowered_classes.push(HirClassDeclaration {
+                id: ty,
+                name: format!(
+                    "{}[{}]",
+                    name,
+                    concrete
+                        .iter()
+                        .map(|ty| {
+                            self.types
+                                .definition(*ty)
+                                .map(|definition| definition.name.clone())
+                                .unwrap_or_else(|| format!("type#{}", ty.0))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                fields,
+            });
+        }
         Ok(instance)
     }
 
@@ -15389,7 +15539,9 @@ impl Analyzer<'_> {
         if let Some(return_value) = body.iter().find_map(|statement| match statement {
             AstStatement::Return {
                 value: Some(value), ..
-            } if !matches!(value.kind, AstExpressionKind::Name(_)) => Some(value),
+            } if !matches!(&value.kind, AstExpressionKind::Name(name) if name != "self") => {
+                Some(value)
+            }
             _ => None,
         }) {
             let result_type = if method_substitution.is_empty() {
@@ -15407,6 +15559,8 @@ impl Analyzer<'_> {
             let previous_callables = self.callable_substitutions.clone();
             let previous_suffix_resolution = self.allow_qualified_function_suffix;
             self.allow_qualified_function_suffix = true;
+            self.value_substitutions
+                .insert("self".into(), object.clone());
             for (field, declaration) in instance.fields.iter().enumerate() {
                 let id = self.next_id();
                 self.value_substitutions.insert(
@@ -17472,10 +17626,53 @@ fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
     }
 }
 
+fn universal_binary_syntax(
+    operator: severian_ast::OperatorSyntax,
+) -> Option<severian_universal::BinaryOperator> {
+    use severian_ast::OperatorSyntax as Ast;
+    use severian_universal::BinaryOperator as Universal;
+    Some(match operator {
+        Ast::Index | Ast::If | Ast::Else | Ast::Not => return None,
+        Ast::Pipe => Universal::BitwiseOr,
+        Ast::BitwiseAnd => Universal::BitwiseAnd,
+        Ast::BitwiseXor => Universal::BitwiseXor,
+        Ast::Plus => Universal::Add,
+        Ast::Minus => Universal::Subtract,
+        Ast::Multiply => Universal::Multiply,
+        Ast::Divide => Universal::Divide,
+        Ast::Remainder => Universal::Remainder,
+        Ast::Power => Universal::Power,
+        Ast::Equal => Universal::Equal,
+        Ast::NotEqual => Universal::NotEqual,
+        Ast::Less => Universal::Less,
+        Ast::LessEqual => Universal::LessEqual,
+        Ast::Greater => Universal::Greater,
+        Ast::GreaterEqual => Universal::GreaterEqual,
+        Ast::Contains => Universal::Contains,
+        Ast::And => Universal::And,
+        Ast::Or => Universal::Or,
+    })
+}
+
+fn universal_unary_syntax(
+    operator: severian_ast::OperatorSyntax,
+) -> Option<severian_universal::UnaryOperator> {
+    use severian_ast::OperatorSyntax as Ast;
+    use severian_universal::UnaryOperator as Universal;
+    match operator {
+        Ast::Plus => Some(Universal::Positive),
+        Ast::Minus => Some(Universal::Negative),
+        Ast::Not => Some(Universal::Not),
+        _ => None,
+    }
+}
+
 fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str {
     use severian_ast::OperatorSyntax as Operator;
     match operator {
         Operator::Index => "[]",
+        Operator::If => "if",
+        Operator::Else => "else",
         Operator::Pipe => "|",
         Operator::BitwiseAnd => "&",
         Operator::BitwiseXor => "^",

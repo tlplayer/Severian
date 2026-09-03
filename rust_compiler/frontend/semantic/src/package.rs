@@ -7,8 +7,8 @@ use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
 use severian_universal::{
-    DeclarationId, DefId, GenericParamId, GenericParamKind, GenericParameter, TypeId,
-    UniversalContext,
+    DeclarationId, DefId, GenericParamId, GenericParamKind, GenericParameter, OperatorSignature,
+    TypeId, TypePattern, UniversalContext,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -227,6 +227,7 @@ pub fn analyze_package_with_context(
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
     let package_classes = collect_package_classes(module_graph, &index, &mut types)?;
+    install_primitive_class_operators(&mut types, &package_classes)?;
     validate_generic_bodies(module_graph, &index, &types)?;
     let specializations = collect_generic_specializations(module_graph, &index, &types)?;
     let package_lists = collect_package_lists(module_graph, &types);
@@ -615,6 +616,7 @@ fn collect_package_classes(
                         severian_ast::ClassDeclaration {
                             decorators: Vec::new(),
                             name: declaration.name.clone(),
+                            primitive: false,
                             type_parameters: Vec::new(),
                             constraints: Vec::new(),
                             traits: Vec::new(),
@@ -622,6 +624,7 @@ fn collect_package_classes(
                             constructors: Vec::new(),
                             methods: Vec::new(),
                             operators: Vec::new(),
+                            tests: Vec::new(),
                             span: declaration.span,
                         },
                     ))
@@ -630,16 +633,44 @@ fn collect_package_classes(
             })
         })
         .map(|(module, declaration)| {
-            let path = format!("source.{:032x}.{}", module.0, declaration.name);
-            let ty = types
-                .register_source_declaration(
-                    path,
-                    declaration.name.clone(),
-                    declaration.type_parameters.len(),
-                )
-                .map_err(|error| {
-                    Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+            let ty = if declaration.primitive {
+                if !declaration.type_parameters.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "a primitive declaration cannot have type parameters",
+                        Some(declaration.span),
+                    ));
+                }
+                let ty = types.resolve_name(&declaration.name).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000204",
+                        format!(
+                            "primitive declaration `{}` has no compiler-owned type to complete",
+                            declaration.name
+                        ),
+                        Some(declaration.span),
+                    )
                 })?;
+                if types.primitive(ty).is_none() {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        format!("`{}` is not a compiler-owned primitive", declaration.name),
+                        Some(declaration.span),
+                    ));
+                }
+                ty
+            } else {
+                let path = format!("source.{:032x}.{}", module.0, declaration.name);
+                types
+                    .register_source_declaration(
+                        path,
+                        declaration.name.clone(),
+                        declaration.type_parameters.len(),
+                    )
+                    .map_err(|error| {
+                        Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                    })?
+            };
             if declaration.name == "Tensor" {
                 types.mark_tensor_constructor(ty).map_err(|error| {
                     Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
@@ -662,6 +693,47 @@ fn collect_package_classes(
         }
     }
     Ok(classes)
+}
+
+fn install_primitive_class_operators(
+    types: &mut severian_universal::TypeContext,
+    classes: &[PackageClass],
+) -> Result<(), Diagnostic> {
+    for class in classes.iter().filter(|class| class.declaration.primitive) {
+        for implementation in &class.declaration.operators {
+            // Generic source operators are resolved at their concrete use
+            // sites; they cannot be installed as an exact universal
+            // signature before their type parameters are substituted.
+            if !implementation.type_parameters.is_empty() {
+                continue;
+            }
+            let result =
+                resolve_package_type(types, &implementation.result, class.module, classes, &[])?;
+            match implementation.parameters.as_slice() {
+                [] => {
+                    if let Some(operator) = crate::universal_unary_syntax(implementation.operator) {
+                        types.add_source_unary(operator, class.ty, result);
+                    }
+                }
+                [right] => {
+                    let Some(operator) = crate::universal_binary_syntax(implementation.operator)
+                    else {
+                        continue;
+                    };
+                    let right =
+                        resolve_package_type(types, &right.annotation, class.module, classes, &[])?;
+                    types.add_source_binary(OperatorSignature {
+                        operator,
+                        left: TypePattern::Exact(class.ty),
+                        right: TypePattern::Exact(right),
+                        result: TypePattern::Exact(result),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 fn visible_class_names(
@@ -1534,6 +1606,13 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                 _ => continue,
             };
             if let Some(existing) = index.definitions.get(&id) {
+                if let (DefKind::Trait(existing), DefKind::Trait(candidate)) =
+                    (&existing.kind, &kind)
+                {
+                    if compatible_trait_redeclaration(existing, candidate) {
+                        continue;
+                    }
+                }
                 return Err(Diagnostic::new(
                     "E000203",
                     format!(
@@ -1574,6 +1653,90 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
         index.exports.insert(module.id, exports);
     }
     Ok(index)
+}
+
+fn compatible_trait_redeclaration(left: &TraitDecl, right: &TraitDecl) -> bool {
+    left.type_parameters == right.type_parameters
+        && left.constraints.len() == right.constraints.len()
+        && annotations_match(&left.bases, &right.bases)
+        && left.properties.len() == right.properties.len()
+        && left.methods.len() == right.methods.len()
+        && left.operators.len() == right.operators.len()
+        && left.methods.iter().zip(&right.methods).all(|(left, right)| {
+            left.name == right.name
+                && annotations_match(
+                    &left
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.annotation.clone())
+                        .collect::<Vec<_>>(),
+                    &right
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.annotation.clone())
+                        .collect::<Vec<_>>(),
+                )
+                && annotation_matches(&left.result, &right.result)
+        })
+        && left.operators.iter().zip(&right.operators).all(|(left, right)| {
+            left.operator == right.operator
+                && left.type_parameters == right.type_parameters
+                && annotations_match(
+                    &left
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.annotation.clone())
+                        .collect::<Vec<_>>(),
+                    &right
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.annotation.clone())
+                        .collect::<Vec<_>>(),
+                )
+                && annotation_matches(&left.result, &right.result)
+        })
+}
+
+fn annotations_match(left: &[TypeAnnotation], right: &[TypeAnnotation]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| annotation_matches(left, right))
+}
+
+fn annotation_matches(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
+    use severian_ast::TypeAnnotationKind as Kind;
+    match (&left.kind, &right.kind) {
+        (
+            Kind::Named {
+                name: left_name,
+                arguments: left_arguments,
+            },
+            Kind::Named {
+                name: right_name,
+                arguments: right_arguments,
+            },
+        ) => left_name == right_name && annotations_match(left_arguments, right_arguments),
+        (Kind::DimensionConstant(left), Kind::DimensionConstant(right)) => left == right,
+        (Kind::DimensionRuntime(left), Kind::DimensionRuntime(right)) => left == right,
+        (Kind::ShapeSpread(left), Kind::ShapeSpread(right)) => left == right,
+        (
+            Kind::Function {
+                parameters: left_parameters,
+                result: left_result,
+            },
+            Kind::Function {
+                parameters: right_parameters,
+                result: right_result,
+            },
+        ) => {
+            annotations_match(left_parameters, right_parameters)
+                && annotation_matches(left_result, right_result)
+        }
+        (Kind::Union(left), Kind::Union(right)) => annotations_match(left, right),
+        _ => false,
+    }
 }
 
 fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {

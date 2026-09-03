@@ -2717,6 +2717,34 @@ mod tests {
     }
 
     #[test]
+    fn self_hosted_bool_reaches_verified_mlir_on_the_standard_pipeline() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        let source = repository.join("sev_compiler/universal/primitive/bool.sev");
+        let compiler = Compiler::new(TargetSpec::host()).unwrap();
+        let (hir, _, types) = compiler
+            .check_file_to_hir(&source, CompileMode::Build)
+            .unwrap();
+        let boolean = types.resolve_name("bool").unwrap();
+
+        assert_eq!(
+            types.definition(boolean).unwrap().path,
+            "universal.primitive.bool"
+        );
+        assert!(hir
+            .modules
+            .iter()
+            .flat_map(|module| &module.classes)
+            .all(|class| class.id != boolean));
+
+        let mlir = compiler.emit_file(&source, EmitStage::Mlir).unwrap();
+        assert!(mlir.contains("i1"));
+        assert!(mlir.contains("arith.xori"));
+    }
+
+    #[test]
     fn ranked_tensor_jit_inputs_include_upload_byte_length() {
         let ty = severian_mlir::LoweredType::Tensor {
             element: severian_mlir::LoweredTensorElement::Float {

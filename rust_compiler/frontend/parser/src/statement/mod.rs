@@ -311,6 +311,17 @@ impl Parser<'_> {
             loop {
                 let (parameter_name, parameter_span) =
                     self.identifier("expected a parameter name")?;
+                if parameter_name == "self"
+                    && !self.at(&TokenKind::Colon)
+                    && !self.at(&TokenKind::Ellipsis)
+                {
+                    self.line_breaks();
+                    if self.take(&TokenKind::Comma).is_some() {
+                        self.line_breaks();
+                        continue;
+                    }
+                    break;
+                }
                 let (annotation, variadic) = if self.take(&TokenKind::Colon).is_some() {
                     let annotation = self.type_annotation()?;
                     let variadic = self.take(&TokenKind::Ellipsis).is_some();
@@ -1718,10 +1729,8 @@ impl Parser<'_> {
             }
             constraints.extend(self.declaration_constraints()?);
         }
-        self.expect(
-            &TokenKind::Newline,
-            "expected a newline after class header; implemented traits do not take a trailing `:`",
-        )?;
+        let primitive = self.take(&TokenKind::Colon).is_some();
+        self.expect(&TokenKind::Newline, "expected a newline after class header")?;
         while self.take(&TokenKind::Newline).is_some() {}
         self.expect(&TokenKind::Indent, "expected an indented class body")?;
 
@@ -1729,6 +1738,7 @@ impl Parser<'_> {
         let mut constructors = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
+        let mut tests = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let mut member_has_body = false;
@@ -1755,6 +1765,12 @@ impl Parser<'_> {
             } else if self.at_identifier("operator") {
                 operators.push(self.operator_implementation(member_decorators)?);
                 member_has_body = true;
+            } else if self.at_identifier("test") {
+                tests.push(self.test_declaration()?);
+                member_has_body = true;
+            } else if matches!(self.peek().kind, TokenKind::String(_)) {
+                // Standalone block strings are declaration documentation.
+                self.next();
             } else if !member_decorators.is_empty() {
                 return Err(self.error("expected `def` or `operator` after class member decorator"));
             } else if self.at_identifier("trait") {
@@ -1780,6 +1796,7 @@ impl Parser<'_> {
         Ok(ClassDeclaration {
             decorators,
             name,
+            primitive,
             type_parameters,
             constraints,
             traits,
@@ -1787,6 +1804,7 @@ impl Parser<'_> {
             constructors,
             methods,
             operators,
+            tests,
             span: Span::new(start.source, start.start, end.end),
         })
     }
@@ -2283,10 +2301,19 @@ impl Parser<'_> {
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<OperatorDeclaration, Diagnostic> {
-        let (start, operator, parameters, result) = self.operator_signature()?;
+        let (start, operator, type_parameters, mut constraints, parameters, close) =
+            self.operator_head()?;
+        let result = if self.take(&TokenKind::Arrow).is_some() {
+            self.type_annotation()?
+        } else {
+            TypeAnnotation::named("unit", Vec::new(), close)
+        };
+        constraints.extend(self.declaration_constraints()?);
         Ok(OperatorDeclaration {
             decorators,
             operator,
+            type_parameters,
+            constraints,
             parameters,
             span: Span::new(start.source, start.start, result.span.end),
             result,
@@ -2297,13 +2324,53 @@ impl Parser<'_> {
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<OperatorImplementation, Diagnostic> {
-        let (start, operator, parameters, result) = self.operator_signature()?;
-        let (_, contracts) = self.function_contracts(&[])?;
+        let (start, operator, type_parameters, mut constraints, parameters, close) =
+            self.operator_head()?;
+        let mut expression_body = None;
+        let result = if self.take(&TokenKind::Arrow).is_some() {
+            if matches!(operator, OperatorSyntax::If | OperatorSyntax::Else) {
+                let result_start = self.cursor;
+                let annotation = self.type_annotation()?;
+                if self.at(&TokenKind::Colon) {
+                    annotation
+                } else {
+                    self.cursor = result_start;
+                    let expression = self.expression(0)?;
+                    expression_body = Some(expression);
+                    TypeAnnotation::named("bool", Vec::new(), close)
+                }
+            } else {
+                self.type_annotation()?
+            }
+        } else {
+            TypeAnnotation::named("unit", Vec::new(), close)
+        };
+        let (additional_constraints, contracts) = self.function_contracts(&type_parameters)?;
+        constraints.extend(additional_constraints);
+        if let Some(expression) = expression_body {
+            let end = expression.span.end;
+            return Ok(OperatorImplementation {
+                decorators,
+                operator,
+                type_parameters,
+                constraints,
+                parameters,
+                contracts,
+                result,
+                body: vec![Statement::Return {
+                    value: Some(expression),
+                    span: Span::new(start.source, start.start, end),
+                }],
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         self.expect(&TokenKind::Colon, "expected `:` after operator signature")?;
         let (body, end) = self.indented_block("operator")?;
         Ok(OperatorImplementation {
             decorators,
             operator,
+            type_parameters,
+            constraints,
             parameters,
             contracts,
             result,
@@ -2312,9 +2379,19 @@ impl Parser<'_> {
         })
     }
 
-    fn operator_signature(
+    fn operator_head(
         &mut self,
-    ) -> Result<(Span, OperatorSyntax, Vec<OperatorParameter>, TypeAnnotation), Diagnostic> {
+    ) -> Result<
+        (
+            Span,
+            OperatorSyntax,
+            Vec<String>,
+            Vec<GenericConstraint>,
+            Vec<OperatorParameter>,
+            Span,
+        ),
+        Diagnostic,
+    > {
         let start = self.next().span;
         let operator_token = self.next();
         let operator = if operator_token.kind == TokenKind::LeftBracket {
@@ -2329,11 +2406,18 @@ impl Parser<'_> {
                 )
             })?
         };
+        let (type_parameters, constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
             loop {
                 let (name, span) = self.identifier("expected an operator parameter")?;
+                if name == "self" && !self.at(&TokenKind::Colon) {
+                    if self.take(&TokenKind::Comma).is_some() {
+                        continue;
+                    }
+                    break;
+                }
                 self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
                 let annotation = self.type_annotation()?;
                 parameters.push(OperatorParameter {
@@ -2346,10 +2430,10 @@ impl Parser<'_> {
                 }
             }
         }
-        self.expect(&TokenKind::RightParen, "expected `)` after parameters")?;
-        self.expect(&TokenKind::Arrow, "expected `->` after operator parameters")?;
-        let result = self.type_annotation()?;
-        Ok((start, operator, parameters, result))
+        let close = self
+            .expect(&TokenKind::RightParen, "expected `)` after parameters")?
+            .span;
+        Ok((start, operator, type_parameters, constraints, parameters, close))
     }
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
@@ -2376,6 +2460,9 @@ impl Parser<'_> {
             TokenKind::StarEqual => Some(BinaryOperator::Multiply),
             TokenKind::SlashEqual => Some(BinaryOperator::Divide),
             TokenKind::PercentEqual => Some(BinaryOperator::Remainder),
+            TokenKind::AmpersandEqual => Some(BinaryOperator::BitwiseAnd),
+            TokenKind::PipeEqual => Some(BinaryOperator::Pipe),
+            TokenKind::CaretEqual => Some(BinaryOperator::BitwiseXor),
             _ => None,
         };
         if let Some(operator) = compound {
@@ -2689,6 +2776,9 @@ impl Parser<'_> {
                             | TokenKind::StarEqual
                             | TokenKind::SlashEqual
                             | TokenKind::PercentEqual
+                            | TokenKind::AmpersandEqual
+                            | TokenKind::PipeEqual
+                            | TokenKind::CaretEqual
                     )
                 }))
     }
@@ -3462,6 +3552,14 @@ impl Parser<'_> {
             TokenKind::Identifier(value) if value == "None" => {
                 ExpressionKind::Literal(Literal::None)
             }
+            TokenKind::Colon => {
+                let (symbol, symbol_span) =
+                    self.identifier("expected a symbol name after `:`")?;
+                return Ok(Expression {
+                    kind: ExpressionKind::Name(format!(":{symbol}")),
+                    span: Span::new(token.span.source, token.span.start, symbol_span.end),
+                });
+            }
             TokenKind::Identifier(value) if value == "lambda" => {
                 let mut parameters = Vec::new();
                 if !self.at(&TokenKind::Colon) {
@@ -4143,9 +4241,14 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
 
 fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     Some(match kind {
+        TokenKind::Identifier(value) if value == "if" => OperatorSyntax::If,
+        TokenKind::Identifier(value) if value == "else" => OperatorSyntax::Else,
         TokenKind::Pipe => OperatorSyntax::Pipe,
+        TokenKind::PipeEqual => OperatorSyntax::Pipe,
         TokenKind::Ampersand => OperatorSyntax::BitwiseAnd,
+        TokenKind::AmpersandEqual => OperatorSyntax::BitwiseAnd,
         TokenKind::Caret => OperatorSyntax::BitwiseXor,
+        TokenKind::CaretEqual => OperatorSyntax::BitwiseXor,
         TokenKind::Identifier(value) if value == "and" => OperatorSyntax::And,
         TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
         TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
@@ -4169,6 +4272,8 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
 fn operator_spelling(operator: OperatorSyntax) -> &'static str {
     match operator {
         OperatorSyntax::Index => "[]",
+        OperatorSyntax::If => "if",
+        OperatorSyntax::Else => "else",
         OperatorSyntax::Pipe => "|",
         OperatorSyntax::BitwiseAnd => "&",
         OperatorSyntax::BitwiseXor => "^",
@@ -4197,6 +4302,7 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
     }
     Some(match operator_syntax(kind)? {
         OperatorSyntax::Index => return None,
+        OperatorSyntax::If | OperatorSyntax::Else => return None,
         OperatorSyntax::Pipe => BinaryOperator::Pipe,
         OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
         OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,

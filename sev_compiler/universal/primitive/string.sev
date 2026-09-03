@@ -121,7 +121,8 @@ trait String:
     def empty(self) -> bool
     def raw(self) -> slice[char]
     #starts/ends with the index is where is starts searching from
-    def with(prefix: string,(start: string = "start",direction: string "forward")) -> bool
+    def starts_with(prefix: string) -> bool
+    def ends_with(prefix: string) -> bool
     def contains(self, needle: string) -> bool
     def upper(self) -> string
     def lower(self) -> string
@@ -130,6 +131,8 @@ trait String:
     def find(self,substring: string) -> int
     #Regex match "foo".match(".*") -> ("foo" | ["foo",""foo2"],true)
     def match(self, expression: string) -> tuple(string,bool)
+    #Return sed like object for complex string operations
+    def sed(self) -> Sed
 
 
 '''

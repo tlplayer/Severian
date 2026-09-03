@@ -4,49 +4,49 @@ members = [
     "tools/health",
 
     # Universal semantic authority
-    "compiler/universal",
-    "compiler/target",
-    "compiler/artifact",
-    "compiler/runtime",
+    "rust_compiler/universal",
+    "rust_compiler/target",
+    "rust_compiler/artifact",
+    "rust_compiler/runtime",
 
     # CompileType dispatch and custom compiler integration
-    "compiler/compile",
+    "rust_compiler/compile",
     "library/compute/tensor/compiler",
 
     # Language bootstrap
-    "compiler/bootstrap",
+    "rust_compiler/bootstrap",
     "library/core/compile",
 
     # Boundaries
-    "compiler/boundaries/abi",
-    "compiler/boundaries/backend",
-    "compiler/boundaries/driver",
-    "compiler/boundaries/ffi",
-    "compiler/boundaries/interface",
-    "compiler/boundaries/tokenizer",
-    "compiler/boundaries/tensor-jit-provider",
-    "compiler/boundaries/triton",
-    "compiler/boundaries/xxi",
+    "rust_compiler/boundaries/abi",
+    "rust_compiler/boundaries/backend",
+    "rust_compiler/boundaries/driver",
+    "rust_compiler/boundaries/ffi",
+    "rust_compiler/boundaries/interface",
+    "rust_compiler/boundaries/tokenizer",
+    "rust_compiler/boundaries/tensor-jit-provider",
+    "rust_compiler/boundaries/triton",
+    "rust_compiler/boundaries/xxi",
 
     # Cross-cutting
-    "compiler/diagnostics",
+    "rust_compiler/diagnostics",
 
     # Frontend
-    "compiler/frontend/ast",
-    "compiler/frontend/hir",
-    "compiler/frontend/lexer",
-    "compiler/frontend/modules",
-    "compiler/frontend/ownership",
-    "compiler/frontend/parser",
-    "compiler/frontend/semantic",
-    "compiler/source",
+    "rust_compiler/frontend/ast",
+    "rust_compiler/frontend/hir",
+    "rust_compiler/frontend/lexer",
+    "rust_compiler/frontend/modules",
+    "rust_compiler/frontend/ownership",
+    "rust_compiler/frontend/parser",
+    "rust_compiler/frontend/semantic",
+    "rust_compiler/source",
 
     # Transforms
-    "compiler/transforms/fusion",
-    "compiler/transforms/lir",
-    "compiler/transforms/lowering",
-    "compiler/transforms/mir",
-    "compiler/transforms/mlir",
+    "rust_compiler/transforms/fusion",
+    "rust_compiler/transforms/lir",
+    "rust_compiler/transforms/lowering",
+    "rust_compiler/transforms/mir",
+    "rust_compiler/transforms/mlir",
 ]
 resolver = "2"
 

@@ -311,7 +311,7 @@ fn universal_unary(operator: OperatorSyntax) -> Option<UnaryOperator> {
 
 fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
     Some(match operator {
-        OperatorSyntax::Index => return None,
+        OperatorSyntax::Index | OperatorSyntax::If | OperatorSyntax::Else => return None,
         OperatorSyntax::Pipe => BinaryOperator::BitwiseOr,
         OperatorSyntax::BitwiseAnd => BinaryOperator::BitwiseAnd,
         OperatorSyntax::BitwiseXor => BinaryOperator::BitwiseXor,

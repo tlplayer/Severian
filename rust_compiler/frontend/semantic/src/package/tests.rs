@@ -47,6 +47,48 @@ fn temporary() -> PathBuf {
 }
 
 #[test]
+fn primitive_class_collapses_to_the_universal_identity_and_installs_operators() {
+    let source = severian_source::SourceFile::virtual_source(
+        "bool.sev",
+        "class bool: Primitive :\n    default_literal: bool = true\n    operator &(right: bool) -> bool:\n        return right\n",
+    );
+    let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+    let graph = severian_modules::ModuleGraph {
+        modules: vec![severian_modules::ResolvedModule {
+            id: severian_modules::ModuleId(1),
+            path: PathBuf::from("bool.sev"),
+            source,
+            package: severian_modules::PackageId(0),
+            ast,
+            imports: Vec::new(),
+        }],
+    };
+    let universal = severian_bootstrap::load().unwrap();
+    let universal_bool = universal.types.resolve_name("bool").unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+
+    assert_eq!(typed.types.resolve_name("bool"), Some(universal_bool));
+    assert_eq!(
+        typed
+            .types
+            .definitions()
+            .filter(|definition| definition.name == "bool")
+            .count(),
+        1
+    );
+    assert!(typed.types.supports_binary(
+        severian_universal::BinaryOperator::BitwiseAnd,
+        universal_bool
+    ));
+    assert!(typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.classes)
+        .all(|class| class.id != universal_bool));
+}
+
+#[test]
 fn injected_prelude_declarations_are_local_and_not_reexported() {
     let mut source = severian_source::SourceFile::virtual_source(
         "bootstrap-prelude.sev",

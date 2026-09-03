@@ -209,6 +209,8 @@ impl TypeAnnotation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorSyntax {
     Index,
+    If,
+    Else,
     Pipe,
     BitwiseAnd,
     BitwiseXor,
@@ -260,6 +262,8 @@ pub struct OperatorParameter {
 pub struct OperatorDeclaration {
     pub decorators: Vec<Decorator>,
     pub operator: OperatorSyntax,
+    pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub parameters: Vec<OperatorParameter>,
     pub result: TypeAnnotation,
     pub span: Span,
@@ -269,6 +273,8 @@ pub struct OperatorDeclaration {
 pub struct OperatorImplementation {
     pub decorators: Vec<Decorator>,
     pub operator: OperatorSyntax,
+    pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub parameters: Vec<OperatorParameter>,
     pub contracts: Vec<FunctionContract>,
     pub result: TypeAnnotation,
@@ -295,6 +301,10 @@ pub struct TraitDeclaration {
 pub struct ClassDeclaration {
     pub decorators: Vec<Decorator>,
     pub name: String,
+    /// A trailing `:` after the implemented traits declares that this source
+    /// class completes a compiler-owned primitive rather than introducing a
+    /// second nominal type.
+    pub primitive: bool,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,
     pub traits: Vec<TypeAnnotation>,
@@ -302,6 +312,7 @@ pub struct ClassDeclaration {
     pub constructors: Vec<FunctionDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
     pub operators: Vec<OperatorImplementation>,
+    pub tests: Vec<crate::TestDeclaration>,
     pub span: Span,
 }
 

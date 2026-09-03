@@ -687,7 +687,7 @@ fn ast_binary_syntax(
 ) -> Option<severian_universal::BinaryOperator> {
     use severian_ast::OperatorSyntax as Ast;
     Some(ast_binary(match operator {
-        Ast::Index => return None,
+        Ast::Index | Ast::If | Ast::Else => return None,
         Ast::Pipe => severian_ast::BinaryOperator::Pipe,
         Ast::BitwiseAnd => severian_ast::BinaryOperator::BitwiseAnd,
         Ast::BitwiseXor => severian_ast::BinaryOperator::BitwiseXor,
@@ -1200,7 +1200,7 @@ fn trait_is_structurally_satisfied(
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
             (syntax, _) => {
                 let operator = match syntax {
-                    Syntax::Index => return false,
+                    Syntax::Index | Syntax::If | Syntax::Else => return false,
                     Syntax::Pipe => Binary::BitwiseOr,
                     Syntax::BitwiseAnd => Binary::BitwiseAnd,
                     Syntax::BitwiseXor => Binary::BitwiseXor,

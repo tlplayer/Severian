@@ -9,13 +9,13 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-severian-artifact = { path = "../../../../compiler/artifact" }
-severian-compile = { path = "../../../../compiler/compile" }
-severian-fusion = { path = "../../../../compiler/transforms/fusion" }
-severian-mir = { path = "../../../../compiler/transforms/mir" }
-severian-mlir = { path = "../../../../compiler/transforms/mlir" }
-severian-target = { path = "../../../../compiler/target" }
-severian-universal = { path = "../../../../compiler/universal" }
+severian-artifact = { path = "../../../../rust_compiler/artifact" }
+severian-compile = { path = "../../../../rust_compiler/compile" }
+severian-fusion = { path = "../../../../rust_compiler/transforms/fusion" }
+severian-mir = { path = "../../../../rust_compiler/transforms/mir" }
+severian-mlir = { path = "../../../../rust_compiler/transforms/mlir" }
+severian-target = { path = "../../../../rust_compiler/target" }
+severian-universal = { path = "../../../../rust_compiler/universal" }
 
 [lib]
 path = "src/lib.rs"

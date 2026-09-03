@@ -19,6 +19,53 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             if cursor >= bytes.len() {
                 break;
             }
+            // Four-backtick fences embed non-executable source examples in a
+            // `.sev` documentation stream.  Consume the complete fence before
+            // layout tokens are emitted so its indentation cannot affect the
+            // surrounding declaration.
+            if bytes.get(cursor..cursor + 4) == Some(b"````") {
+                cursor += 4;
+                while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                    cursor += 1;
+                }
+                if cursor < bytes.len() {
+                    cursor += 1;
+                }
+                let mut closed = false;
+                while cursor < bytes.len() {
+                    let line = cursor;
+                    while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+                        cursor += 1;
+                    }
+                    if bytes.get(cursor..cursor + 4) == Some(b"````") {
+                        cursor += 4;
+                        while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                            cursor += 1;
+                        }
+                        if cursor < bytes.len() {
+                            cursor += 1;
+                        }
+                        closed = true;
+                        break;
+                    }
+                    cursor = line;
+                    while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                        cursor += 1;
+                    }
+                    if cursor < bytes.len() {
+                        cursor += 1;
+                    }
+                }
+                if !closed {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "unterminated four-backtick documentation fence",
+                        Some(Span::new(source.id, start as u32, bytes.len() as u32)),
+                    ));
+                }
+                line_start = true;
+                continue;
+            }
             if bytes[cursor] == b'\n' || bytes[cursor] == b'#' {
                 if bytes[cursor] == b'#' {
                     while cursor < bytes.len() && bytes[cursor] != b'\n' {
@@ -77,7 +124,15 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::Newline
             }
             b'@' => one(&mut cursor, TokenKind::At),
+            b'&' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::AmpersandEqual
+            }
             b'&' => one(&mut cursor, TokenKind::Ampersand),
+            b'^' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::CaretEqual
+            }
             b'^' => one(&mut cursor, TokenKind::Caret),
             b',' => one(&mut cursor, TokenKind::Comma),
             b'.' if bytes.get(cursor + 1) == Some(&b'.')
@@ -131,6 +186,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             // nested map literal without erasing that brace-block structure.
             b'{' => one(&mut cursor, TokenKind::LeftBrace),
             b'}' => one(&mut cursor, TokenKind::RightBrace),
+            b'|' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::PipeEqual
+            }
             b'|' => one(&mut cursor, TokenKind::Pipe),
             b'+' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;

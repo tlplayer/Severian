@@ -552,6 +552,21 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_primitive_completion_marker() {
+        let source = SourceFile::virtual_source(
+            "bool.sev",
+            "class bool: Boolean :\n    default_literal: bool = true\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Class(boolean) = &module.items[0] else {
+            panic!("expected bool class")
+        };
+        assert!(boolean.primitive);
+        assert_eq!(boolean.name, "bool");
+        assert_eq!(boolean.traits[0].simple_name(), Some("Boolean"));
+    }
+
+    #[test]
     fn parses_generic_class_construction_and_field_update_methods() {
         let source = SourceFile::virtual_source(
             "box.sev",
@@ -581,11 +596,14 @@ output = f"""module {{
     }
 
     #[test]
-    fn implemented_trait_header_rejects_a_terminal_colon() {
+    fn implemented_trait_header_with_a_terminal_colon_is_a_primitive_completion() {
         let source =
-            SourceFile::virtual_source("invalid.sev", "class Point: Drawable:\n    x: int\n");
-        let error = parse(&scan(&source).unwrap()).unwrap_err();
-        assert!(error.message.contains("do not take a trailing `:`"));
+            SourceFile::virtual_source("point.sev", "class Point: Drawable :\n    x: int\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Class(point) = &module.items[0] else {
+            panic!("expected Point class")
+        };
+        assert!(point.primitive);
     }
 
     #[test]
