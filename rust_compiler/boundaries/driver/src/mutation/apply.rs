@@ -268,7 +268,7 @@ fn apply_expression(expression: &mut Expression, edit: MutationEdit) -> bool {
     }
 
     match &mut expression.kind {
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => false,
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::Symbol(_) => false,
         ExpressionKind::List(values)
         | ExpressionKind::Set(values)
         | ExpressionKind::Tuple(values) => {

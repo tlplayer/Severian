@@ -124,6 +124,9 @@ pub enum ExpressionKind {
     },
     Tuple(Vec<Expression>),
     Name(String),
+    /// An internable compiler symbol written as `:name` (`Y` in the
+    /// universal compiler-term taxonomy).
+    Symbol(String),
     Member {
         object: Box<Expression>,
         name: String,

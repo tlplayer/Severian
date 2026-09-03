@@ -3556,7 +3556,7 @@ impl Parser<'_> {
                 let (symbol, symbol_span) =
                     self.identifier("expected a symbol name after `:`")?;
                 return Ok(Expression {
-                    kind: ExpressionKind::Name(format!(":{symbol}")),
+                    kind: ExpressionKind::Symbol(symbol),
                     span: Span::new(token.span.source, token.span.start, symbol_span.end),
                 });
             }
@@ -4439,7 +4439,7 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
         ExpressionKind::Binary { left, right, .. } => {
             expression_mentions(left, expected) || expression_mentions(right, expected)
         }
-        ExpressionKind::Literal(_) => false,
+        ExpressionKind::Literal(_) | ExpressionKind::Symbol(_) => false,
     }
 }
 

@@ -4304,6 +4304,7 @@ impl Analyzer<'_> {
             AstExpressionKind::Mock { .. }
             | AstExpressionKind::Literal(_)
             | AstExpressionKind::Name(_)
+            | AstExpressionKind::Symbol(_)
             | AstExpressionKind::ListComprehension { .. }
             | AstExpressionKind::SetComprehension { .. }
             | AstExpressionKind::MapComprehension { .. } => {}
@@ -5164,6 +5165,11 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Symbol(symbol) => Err(Diagnostic::new(
+                "E000204",
+                format!("symbol `:{symbol}` is metadata and cannot be evaluated as a value"),
+                Some(ast.span),
+            )),
             AstExpressionKind::Lambda { .. } => Err(Diagnostic::new(
                 "E000205",
                 "a lambda must be bound or passed to a function-typed parameter",
@@ -8246,6 +8252,7 @@ impl Analyzer<'_> {
                         if self
                             .class_instances_by_type
                             .contains_key(&resolved_left.type_id)
+                            && self.types.primitive(resolved_left.type_id).is_none()
                         {
                             let resolved_right =
                                 self.expression(right, Some(resolved_left.type_id))?;
@@ -14739,6 +14746,64 @@ impl Analyzer<'_> {
         if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
             return Ok(None);
         }
+        if let AstExpressionKind::Name(class_name) = &object.kind {
+            if let Some(instance) = self
+                .class_instances
+                .get(&(class_name.clone(), Vec::new()))
+                .cloned()
+            {
+                if let Some(method) = instance
+                    .methods
+                    .iter()
+                    .find(|method| method.name == *name)
+                    .cloned()
+                {
+                    if arguments.len() != method.parameters.len() {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            format!(
+                                "static method `{}.{name}` expects {} argument(s), received {}",
+                                instance.name,
+                                method.parameters.len(),
+                                arguments.len()
+                            ),
+                            Some(span),
+                        ));
+                    }
+                    let result_type = self.resolve_source_type(&method.result)?;
+                    if expected.is_some_and(|expected| {
+                        !self.types.assignable(result_type, expected)
+                    }) {
+                        return Err(semantic_error(
+                            "static method result does not satisfy the expected type".into(),
+                            span,
+                        ));
+                    }
+                    let previous = self.value_substitutions.clone();
+                    for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                        let value = self.expression(&argument.value, Some(parameter_type))?;
+                        self.value_substitutions
+                            .insert(parameter.name.clone(), value);
+                    }
+                    let lowered = match method.body.as_deref() {
+                        Some([AstStatement::Return {
+                            value: Some(value), ..
+                        }]) => self.expression(value, Some(result_type)),
+                        _ => Err(Diagnostic::new(
+                            "E000211",
+                            format!(
+                                "static method `{}.{name}` must currently be a single return expression",
+                                instance.name
+                            ),
+                            Some(method.span),
+                        )),
+                    };
+                    self.value_substitutions = previous;
+                    return lowered.map(Some);
+                }
+            }
+        }
         if matches!(name.as_str(), "map" | "filter" | "reduce")
             && matches!(object.kind, AstExpressionKind::List(_))
         {
@@ -14870,6 +14935,18 @@ impl Analyzer<'_> {
             }
         }
         let object = self.expression(object, None)?;
+        if name == "clone" && arguments.is_empty() {
+            if expected.is_some_and(|expected| !self.types.assignable(object.type_id, expected)) {
+                return Err(semantic_error(
+                    "cloned value does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                ..object
+            }));
+        }
         let string = self
             .types
             .resolve_name("string")
@@ -15421,10 +15498,18 @@ impl Analyzer<'_> {
             }
             return Ok(Some(selected));
         }
+        let method_name = if name == "display"
+            && !instance.methods.iter().any(|method| method.name == *name)
+            && instance.methods.iter().any(|method| method.name == "print")
+        {
+            "print"
+        } else {
+            name.as_str()
+        };
         let Some(method) = instance
             .methods
             .iter()
-            .find(|method| method.name == *name)
+            .find(|method| method.name == method_name)
             .cloned()
         else {
             return Err(Diagnostic::new(
@@ -17221,6 +17306,7 @@ fn substituted_expression(
             **fallback = substituted_expression(fallback, substitutions);
         }
         AstExpressionKind::Literal(_)
+        | AstExpressionKind::Symbol(_)
         | AstExpressionKind::Lambda { .. }
         | AstExpressionKind::Mock { .. }
         | AstExpressionKind::ListComprehension { .. }
@@ -17522,7 +17608,7 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
             collect_expression_names(fallback, names);
         }
         AstExpressionKind::Throw { error } => collect_expression_names(error, names),
-        AstExpressionKind::Literal(_) => {}
+        AstExpressionKind::Literal(_) | AstExpressionKind::Symbol(_) => {}
     }
 }
 

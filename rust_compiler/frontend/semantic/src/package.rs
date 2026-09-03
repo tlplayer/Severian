@@ -325,6 +325,21 @@ pub fn analyze_package_with_context(
                 _ => ast.items.push(item.clone()),
             }
         }
+        if context.test_package == Some(source_module.package) {
+            ast.items.extend(
+                source_module
+                    .ast
+                    .items
+                    .iter()
+                    .filter_map(|item| match item {
+                        Item::Class(class) => Some(class.tests.iter()),
+                        _ => None,
+                    })
+                    .flatten()
+                    .cloned()
+                    .map(Item::Test),
+            );
+        }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
         // Class methods retain the lexical module in which they were declared,
         // even when a downstream package is the first caller that makes the

@@ -555,7 +555,7 @@ output = f"""module {{
     fn parses_primitive_completion_marker() {
         let source = SourceFile::virtual_source(
             "bool.sev",
-            "class bool: Boolean :\n    default_literal: bool = true\n",
+            "class bool: Boolean :\n    default_literal: bool = true\n    constructors: list[Constructor] = :conversions\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let severian_ast::Item::Class(boolean) = &module.items[0] else {
@@ -564,6 +564,10 @@ output = f"""module {{
         assert!(boolean.primitive);
         assert_eq!(boolean.name, "bool");
         assert_eq!(boolean.traits[0].simple_name(), Some("Boolean"));
+        assert!(matches!(
+            boolean.fields[1].default.as_ref().map(|value| &value.kind),
+            Some(severian_ast::ExpressionKind::Symbol(symbol)) if symbol == "conversions"
+        ));
     }
 
     #[test]

@@ -280,7 +280,7 @@ impl Collector<'_> {
                     value: *value,
                 },
             ),
-            ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+            ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::Symbol(_) => {}
             ExpressionKind::List(values)
             | ExpressionKind::Set(values)
             | ExpressionKind::Tuple(values) => {

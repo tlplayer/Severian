@@ -416,7 +416,7 @@ fn validate_generic_expression(
     use severian_ast::ExpressionKind as Expression;
     match &expression.kind {
         Expression::Name(name) => Ok(names.get(name).cloned()),
-        Expression::Literal(_) => Ok(None),
+        Expression::Literal(_) | Expression::Symbol(_) => Ok(None),
         Expression::List(values) | Expression::Set(values) | Expression::Tuple(values) => {
             for value in values {
                 validate_generic_expression(value, names, function, index, types)?;
@@ -2159,7 +2159,9 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
-        severian_ast::ExpressionKind::Literal(_) | severian_ast::ExpressionKind::Name(_) => {}
+        severian_ast::ExpressionKind::Literal(_)
+        | severian_ast::ExpressionKind::Name(_)
+        | severian_ast::ExpressionKind::Symbol(_) => {}
     }
     Ok(())
 }
@@ -2953,7 +2955,7 @@ fn specialize_statement(statement: &mut severian_ast::Statement, substitution: &
 fn specialize_expression(expression: &mut severian_ast::Expression, substitution: &Substitution) {
     use severian_ast::ExpressionKind;
     match &mut expression.kind {
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::Symbol(_) => {}
         ExpressionKind::List(values)
         | ExpressionKind::Set(values)
         | ExpressionKind::Tuple(values) => {
