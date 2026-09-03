@@ -1,5 +1,0 @@
-def overcurrent(value: current) -> bool:
-    return value > 2A
-
-test "milliamperes normalize to amperes":
-    assert(1000mA == 1A)

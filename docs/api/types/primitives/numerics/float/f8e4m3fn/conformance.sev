@@ -1,2 +1,0 @@
-def preserve(value: f8e4m3fn) -> f8e4m3fn:
-    return +value

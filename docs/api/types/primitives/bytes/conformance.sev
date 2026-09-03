@@ -1,5 +1,0 @@
-def combine(left: bytes, right: bytes) -> bytes:
-    return left + right
-
-def preserve(value: bytes) -> bytes:
-    return value

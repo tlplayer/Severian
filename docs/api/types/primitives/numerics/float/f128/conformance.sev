@@ -1,2 +1,0 @@
-def preserve(value: f128) -> f128:
-    return +value

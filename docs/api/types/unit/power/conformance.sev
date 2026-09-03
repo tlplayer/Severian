@@ -1,2 +1,0 @@
-def within_budget(value: power) -> bool:
-    return value <= 220W

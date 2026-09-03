@@ -1,2 +1,0 @@
-def offset(base: isize, delta: isize) -> isize:
-    return base + delta

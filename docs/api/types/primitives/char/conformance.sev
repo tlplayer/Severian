@@ -1,6 +1,0 @@
-def preserve(value: char) -> char:
-    return value
-
-test "character literals are ordered":
-    assert(preserve('a') == 'a')
-    assert('a' < 'b')

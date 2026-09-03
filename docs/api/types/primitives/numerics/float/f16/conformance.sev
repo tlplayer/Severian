@@ -1,2 +1,0 @@
-def scale(value: f16, factor: f16) -> f16:
-    return value * factor

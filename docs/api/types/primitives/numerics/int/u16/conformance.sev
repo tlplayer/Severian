@@ -1,2 +1,0 @@
-def flags(left: u16, right: u16) -> u16:
-    return left | right

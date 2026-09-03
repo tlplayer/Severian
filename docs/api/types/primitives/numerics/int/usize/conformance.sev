@@ -1,2 +1,0 @@
-def total(left: usize, right: usize) -> usize:
-    return left + right

@@ -1,2 +1,0 @@
-def combine(left: u64, right: u64) -> u64:
-    return left ^ right

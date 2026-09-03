@@ -1,6 +1,0 @@
-def step(value: i32, delta: i32) -> i32:
-    return value + delta
-
-test "literal receives i32 context":
-    value: i32 = 41
-    assert(value + 1 == 42)

@@ -1,2 +1,0 @@
-def average(left: float, right: float) -> float:
-    return (left + right) / 2.0

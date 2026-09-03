@@ -1,2 +1,0 @@
-def affine(value: f32, scale: f32, bias: f32) -> f32:
-    return value * scale + bias

@@ -1,2 +1,0 @@
-def masked(value: i8, mask: i8) -> i8:
-    return value & mask

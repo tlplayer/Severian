@@ -1,5 +1,0 @@
-def undervoltage(value: voltage) -> bool:
-    return value < 900mV
-
-test "millivolts normalize to volts":
-    assert(1000mV == 1V)

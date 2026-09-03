@@ -1,2 +1,0 @@
-def ratio(left: f64, right: f64) -> f64:
-    return left / right
