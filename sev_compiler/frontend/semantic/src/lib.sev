@@ -209,23 +209,8 @@ def lower_binary(operator: universal.BinaryOperator) -> universal.BinaryOperator
     return operator
 
 
-def trait_binary_operator(operator: universal.OperatorSyntax) -> universal.BinaryOperator | None:
-    if operator == universal.Plus: return universal.Add
-    if operator == universal.Minus: return universal.Subtract
-    if operator == universal.Multiply: return universal.Multiply
-    if operator == universal.Divide: return universal.Divide
-    if operator == universal.Remainder: return universal.Remainder
-    if operator == universal.Power: return universal.Power
-    if operator == universal.Equal: return universal.Equal
-    if operator == universal.NotEqual: return universal.NotEqual
-    if operator == universal.Less: return universal.Less
-    if operator == universal.LessEqual: return universal.LessEqual
-    if operator == universal.Greater: return universal.Greater
-    if operator == universal.GreaterEqual: return universal.GreaterEqual
-    if operator == universal.Contains: return universal.Contains
-    if operator == universal.And: return universal.And
-    if operator == universal.Or: return universal.Or
-    return None
+def trait_binary_operator(operator: universal.BinaryOperator) -> universal.BinaryOperator:
+    return operator
 
 
 def generic_binary_result(

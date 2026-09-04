@@ -384,15 +384,13 @@ def mlir_identity_component(value: string) -> string:
 
 
 def mlir_function_identity_text(identity: MlirFunctionIdentity) -> string:
-    components: list[string] = [
-        mlir_identity_component(identity.package),
-        mlir_identity_component(identity.module),
-        mlir_identity_component(identity.callable),
-        string(identity.ordinal),
-    ]
+    encoded := mlir_identity_component(identity.package)
+    encoded += "|" + mlir_identity_component(identity.module)
+    encoded += "|" + mlir_identity_component(identity.callable)
+    encoded += "|" + string(identity.ordinal)
     for argument in identity.specialization:
-        components.append(mlir_identity_component(argument))
-    return components.join("|")
+        encoded += "|" + mlir_identity_component(argument)
+    return encoded
 
 
 def generated_mlir_function_name(identity: MlirFunctionIdentity) -> MlirFunctionName:

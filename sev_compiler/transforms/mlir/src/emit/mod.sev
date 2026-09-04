@@ -29,10 +29,24 @@ def mlir_value(builder: MlirOpBuilder, module: universal.Module, value: universa
     return builder_value(builder, value.index, lowered_type(value_type(module, value)))
 
 
-def function_symbol(function: universal.FunctionDeclaration) -> string:
+def function_identity(module: universal.Module, function: universal.FunctionDeclaration) -> MlirFunctionIdentity:
+    specialization: list[string] = []
+    for type_id in function.parameter_types:
+        specialization.append(string(type_id.index))
+    specialization.append("result=" + string(function.result_type.index))
+    return MlirFunctionIdentity(
+        string(module.package.index),
+        string(module.id.value),
+        function.name + "@" + string(function.id.value),
+        specialization,
+        0,
+    )
+
+
+def function_symbol(module: universal.Module, function: universal.FunctionDeclaration) -> string:
     match function.linkage:
         case External: return symbol
-        case Internal: return "__sev_fn_" + string(function.id.value)
+        case Internal: return generated_mlir_function_name(function_identity(module, function)).value
 
 
 def function_results(result: universal.LoweredType) -> list[MlirType] | MlirError:
@@ -163,7 +177,7 @@ def lower_block(builder: MlirOpBuilder, module: universal.Module, block: univers
                 target_name := ""
                 for function_declaration in module.functions:
                     if function_declaration.id == function:
-                        target_name = function_symbol(function_declaration)
+                        target_name = function_symbol(module, function_declaration)
                 if target_name == "":
                     return error(UnsupportedOperation("call references an unknown function"))
                 builder_call(builder, target_name, arguments_values, result_values)
@@ -215,7 +229,18 @@ def create_function(builder: MlirOpBuilder, module: universal.Module, function: 
     for parameter in function.values:
         arguments.append(mlir_value(builder, module, parameter))
     declaration = function.body == None
-    return builder_create_function(builder, function_symbol(function), private_visibility(), arguments, function_results(function.lowered_result), declaration)
+    match function.linkage:
+        case External:
+            return builder_create_function(builder, symbol, private_visibility(), arguments, function_results(function.lowered_result), declaration)
+        case Internal:
+            return builder_create_generated_function(
+                builder,
+                function_identity(module, function),
+                private_visibility(),
+                arguments,
+                function_results(function.lowered_result),
+                declaration,
+            )
 
 
 def lower(module: universal.Module) -> MlirProgram | MlirError | MlirBuilderError | MlirVerificationError:
@@ -237,7 +262,7 @@ def lower(module: universal.Module) -> MlirProgram | MlirError | MlirBuilderErro
         entry_name := ""
         for function in module.functions:
             if function.id == module.entry:
-                entry_name = function_symbol(function)
+                entry_name = function_symbol(module, function)
         if entry_name == "":
             return error(UnsupportedOperation("entry references an unknown function"))
         builder_call(builder, entry_name, [], [])

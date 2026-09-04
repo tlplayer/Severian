@@ -3,7 +3,8 @@ import "syntax.sev"
 
 # Y is the compiler-term kind for an interned, resolved symbol. Operator tags
 # are symbols, not strings and not Rust enum variants.
-trait Y
+trait Y:
+    pass
 
 
 trait Operator:
@@ -22,168 +23,168 @@ trait BinaryOperator:
     Operator
 
 
-class Positive: UnaryOperator :
+class Positive: UnaryOperator
     symbol: string = "+"
     fixity: Fixity = Fixity.Prefix
     precedence: u8 = 10
     associativity: Associativity = Associativity.Right
 
 
-class Negative: UnaryOperator :
+class Negative: UnaryOperator
     symbol: string = "-"
     fixity: Fixity = Fixity.Prefix
     precedence: u8 = 10
     associativity: Associativity = Associativity.Right
 
 
-class Not: UnaryOperator :
+class Not: UnaryOperator
     symbol: string = "not"
     fixity: Fixity = Fixity.Prefix
     precedence: u8 = 10
     associativity: Associativity = Associativity.Right
 
 
-class BitwiseOr: BinaryOperator :
+class BitwiseOr: BinaryOperator
     symbol: string = "|"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 4
     associativity: Associativity = Associativity.Left
 
 
-class BitwiseAnd: BinaryOperator :
+class BitwiseAnd: BinaryOperator
     symbol: string = "&"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 6
     associativity: Associativity = Associativity.Left
 
 
-class BitwiseXor: BinaryOperator :
+class BitwiseXor: BinaryOperator
     symbol: string = "^"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 5
     associativity: Associativity = Associativity.Left
 
 
-class LeftShift: BinaryOperator :
+class LeftShift: BinaryOperator
     symbol: string = "<<"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 7
     associativity: Associativity = Associativity.Left
 
 
-class RightShift: BinaryOperator :
+class RightShift: BinaryOperator
     symbol: string = ">>"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 7
     associativity: Associativity = Associativity.Left
 
 
-class Add: BinaryOperator :
+class Add: BinaryOperator
     symbol: string = "+"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 7
     associativity: Associativity = Associativity.Left
 
 
-class Subtract: BinaryOperator :
+class Subtract: BinaryOperator
     symbol: string = "-"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 7
     associativity: Associativity = Associativity.Left
 
 
-class Multiply: BinaryOperator :
+class Multiply: BinaryOperator
     symbol: string = "*"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 8
     associativity: Associativity = Associativity.Left
 
 
-class Divide: BinaryOperator :
+class Divide: BinaryOperator
     symbol: string = "/"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 8
     associativity: Associativity = Associativity.Left
 
 
-class FloorDivide: BinaryOperator :
+class FloorDivide: BinaryOperator
     symbol: string = "//"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 8
     associativity: Associativity = Associativity.Left
 
 
-class Remainder: BinaryOperator :
+class Remainder: BinaryOperator
     symbol: string = "%"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 8
     associativity: Associativity = Associativity.Left
 
 
-class Power: BinaryOperator :
+class Power: BinaryOperator
     symbol: string = "**"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 9
     associativity: Associativity = Associativity.Right
 
 
-class Equal: BinaryOperator :
+class Equal: BinaryOperator
     symbol: string = "=="
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class NotEqual: BinaryOperator :
+class NotEqual: BinaryOperator
     symbol: string = "!="
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class Less: BinaryOperator :
+class Less: BinaryOperator
     symbol: string = "<"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class LessEqual: BinaryOperator :
+class LessEqual: BinaryOperator
     symbol: string = "<="
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class Greater: BinaryOperator :
+class Greater: BinaryOperator
     symbol: string = ">"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class GreaterEqual: BinaryOperator :
+class GreaterEqual: BinaryOperator
     symbol: string = ">="
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class Contains: BinaryOperator :
+class Contains: BinaryOperator
     symbol: string = "in"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 3
     associativity: Associativity = Associativity.None
 
 
-class LogicalAnd: BinaryOperator :
+class LogicalAnd: BinaryOperator
     symbol: string = "and"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 2
     associativity: Associativity = Associativity.Left
 
 
-class LogicalOr: BinaryOperator :
+class LogicalOr: BinaryOperator
     symbol: string = "or"
     fixity: Fixity = Fixity.Infix
     precedence: u8 = 1

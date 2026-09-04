@@ -1,4 +1,4 @@
-import "lib.sev"
+import "validate.sev"
 
 
 test "open operation identities do not require compiler enum cases":
@@ -11,11 +11,9 @@ test "open operation identities do not require compiler enum cases":
     builder_create_operation_at(builder, operation_name("severian", "future_op"), [argument], [result], [], [], false, location)
     builder_return(builder, [result])
     validate(builder.program)
-    text = print_program_unchecked(builder.program)
     emitted = builder.program.regions[0].blocks[0].operations[0]
     assert(operation_name_text(emitted.name) == "severian.future_op", "unknown operations remain open builder data")
     assert(emitted.location.line == 2, "operation locations remain structured data")
-    assert(text != "", "validated object programs remain printable for inspection")
 
 
 test "ranked dynamic tensor types remain typed builder data":

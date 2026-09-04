@@ -2,7 +2,7 @@ import source
 import "../id/compiler.sev"
 import "../type/annotation.sev"
 import "../expression/expression.sev"
-import "../operator/syntax.sev"
+import "../operator/kind.sev"
 import "../statement/statement.sev"
 
 
@@ -68,7 +68,7 @@ class OperatorParameter:
 
 
 class OperatorDeclaration:
-    syntax: OperatorSyntax
+    syntax: BinaryOperator
     parameters: list[OperatorParameter]
     result: TypeAnnotation
     span: source.Span

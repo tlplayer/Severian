@@ -3,6 +3,50 @@
 import "../src/ir/validate.sev"
 
 
+def fixed_point_add_program() -> MlirProgram:
+    builder = MlirOpBuilder(0)
+    left = builder_value(builder, 0, integer_type(32))
+    right = builder_value(builder, 1, integer_type(32))
+    identity = MlirFunctionIdentity("compiler", "fixed_point", "add", ["i32"], 0)
+    no_name: MlirFunctionName | None = None
+    function = builder_create_generated_function(
+        builder,
+        identity,
+        public_visibility(),
+        [left, right],
+        [integer_type(32)],
+        false,
+        no_name,
+    )
+    builder_set_insertion_point(builder, function.entry)
+    operands: list[MlirValue] = [left, right]
+    result_types: list[MlirType] = [integer_type(32)]
+    attributes: list[MlirNamedAttribute] = []
+    properties: list[MlirNamedProperty] = []
+    successors: list[int] = []
+    regions: list[int] = []
+    region_requires_terminator: list[bool] = []
+    location: MlirLocation | None = None
+    state = MlirOperationState(
+        operation_definition("arith", "addi"),
+        operands,
+        result_types,
+        attributes,
+        properties,
+        successors,
+        regions,
+        region_requires_terminator,
+        location,
+        false,
+    )
+    builder_create(builder, state)
+    operation = builder.program.regions[0].blocks[0].operations[0]
+    return_values: list[MlirValue] = [operation.results[0]]
+    builder_return(builder, return_values)
+    validate(builder.program)
+    return builder.program
+
+
 # This is executable compiler-source corpus, not documentation pseudocode.
 # It constructs a module as objects, validates those objects, and leaves text
 # printing as an optional final inspection step.
@@ -35,3 +79,52 @@ test "rank and dynamic dimensions are independent values":
     assert(len(tensor.dimensions) == 3, "rank is the number of dimension records")
     assert(tensor.dimensions[0] == 4, "known dimensions remain concrete")
     assert(tensor.dimensions[1] < 0, "dynamic size does not mean unknown rank")
+
+
+test "generated functions are stable unique and source owned":
+    builder = MlirOpBuilder(0)
+    arguments: list[MlirValue] = []
+    results: list[MlirType] = []
+    no_name: MlirFunctionName | None = None
+    first_identity = MlirFunctionIdentity("compiler", "lowering", "add", ["i32"], 0)
+    repeated_identity = MlirFunctionIdentity("compiler", "lowering", "add", ["i32"], 0)
+    second_identity = MlirFunctionIdentity("compiler", "lowering", "add", ["i32"], 1)
+    callable_identity = MlirFunctionIdentity("compiler", "lowering", "subtract", ["i32"], 0)
+    floating_identity = MlirFunctionIdentity("compiler", "lowering", "add", ["f32"], 0)
+
+    first = builder_create_generated_function(builder, first_identity, private_visibility(), arguments, results, true, no_name)
+    second = builder_create_generated_function(builder, second_identity, private_visibility(), arguments, results, true, no_name)
+
+    assert(second_identity.ordinal == 1, "the builder identity must preserve its anonymous-function ordinal")
+    assert(generated_mlir_function_name(first_identity).value != generated_mlir_function_name(second_identity).value, "the generated name must encode its anonymous-function ordinal")
+    assert(first.name.value == generated_mlir_function_name(repeated_identity).value, "rebuilding one F specialization must preserve its MLIR symbol")
+    assert(first.name.value != second.name.value, "two anonymous generated functions require different ordinal identities")
+    assert(first.name.value != generated_mlir_function_name(callable_identity).value, "different resolved F identities require different MLIR symbols")
+    assert(first.name.value != generated_mlir_function_name(floating_identity).value, "different generic specializations require different MLIR symbols")
+    validate(builder.program)
+
+
+test "explicit MLIR names are preserved and duplicate names are rejected":
+    builder = MlirOpBuilder(0)
+    arguments: list[MlirValue] = []
+    results: list[MlirType] = []
+    identity = MlirFunctionIdentity("application", "entry", "lower", [], 0)
+    requested = explicit_mlir_function_name("application_entry")
+    first = builder_create_generated_function(builder, identity, public_visibility(), arguments, results, true, requested)
+    assert(first.name.value == "application_entry", "the source-selected MLIR symbol must be preserved exactly")
+
+    builder_create_generated_function(builder, identity, private_visibility(), arguments, results, true, requested)
+    assert(not program_is_valid(builder.program), "source validation must reject duplicate explicit MLIR symbols")
+
+
+test "fixed point rebuilds are structurally identical":
+    stage_one = fixed_point_add_program()
+    stage_two = fixed_point_add_program()
+    assert(stage_one.functions[0].name == stage_two.functions[0].name, "stage rebuilds must preserve generated F identity")
+    assert(len(stage_one.regions) == len(stage_two.regions), "stage rebuilds must preserve region structure")
+    first_operation = stage_one.regions[0].blocks[0].operations[0]
+    second_operation = stage_two.regions[0].blocks[0].operations[0]
+    assert(operation_name_text(first_operation.name) == operation_name_text(second_operation.name), "stage rebuilds must preserve O identity")
+    assert(first_operation.operands[0].id == second_operation.operands[0].id, "stage rebuilds must preserve SSA operands")
+    assert(first_operation.results[0].id == second_operation.results[0].id, "stage rebuilds must preserve SSA results")
+    assert(same_type(first_operation.results[0].type_id, second_operation.results[0].type_id), "stage rebuilds must preserve result types")

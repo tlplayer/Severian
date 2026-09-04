@@ -1,4 +1,4 @@
-import "registry.sev"
+import "../id/compiler.sev"
 
 
 # Lowering retains the same open operation identity. These wrappers describe
