@@ -1,21 +1,33 @@
 # T - Type
-# Use T when the generic parameter represents a compiler type.
+# Substitute one compiler type while preserving the concrete type representation.
 
 trait TypeTerm:
-    def name() -> string
+    def same_type(other: Self) -> bool
 
 
-class NamedType: TypeTerm
-    text: string
+class TypeReference: TypeTerm
+    id: u64
+    is_parameter: bool
 
-    def name() -> string:
-        return text
+    def same_type(other: Self) -> bool:
+        return id == other.id
 
 
-def type_name[T: TypeTerm](type_term: T) -> string:
-    return type_term.name()
+def substitute_type[T: TypeTerm](subject: T, parameter: T, replacement: T) -> T:
+    if subject.same_type(parameter):
+        return replacement
+
+    return subject
 
 
 test:
-    integer := NamedType("i64")
-    assert(type_name(integer) == "i64")
+    parameter := TypeReference(1, true)
+    integer := TypeReference(2, false)
+    floating := TypeReference(3, false)
+
+    substituted := substitute_type(parameter, parameter, integer)
+    unchanged := substitute_type(integer, parameter, floating)
+
+    assert(substituted.id == 2)
+    assert(substituted.is_parameter == false)
+    assert(unchanged.id == 2)

@@ -1,21 +1,33 @@
 # A - Argument
-# Use A when a generic parameter represents a call or declaration argument.
+# Lower a method call by prepending its receiver while preserving argument type.
 
 trait ArgumentTerm:
-    def name() -> string
+    def value_id() -> u64
 
 
-class NamedArgument: ArgumentTerm
-    text: string
+class CallArgument: ArgumentTerm
+    id: u64
 
-    def name() -> string:
-        return text
+    def value_id() -> u64:
+        return id
 
 
-def argument_name[A: ArgumentTerm](argument: A) -> string:
-    return argument.name()
+def prepend_receiver[A: ArgumentTerm](receiver: A, arguments: list[A]) -> list[A]:
+    lowered: list[A] = []
+    lowered.append(receiver)
+
+    for argument in arguments:
+        lowered.append(argument)
+
+    return lowered
 
 
 test:
-    argument := NamedArgument("input")
-    assert(argument_name(argument) == "input")
+    receiver := CallArgument(10)
+    arguments := [CallArgument(20), CallArgument(30)]
+    lowered := prepend_receiver(receiver, arguments)
+
+    assert(size(lowered) == 3)
+    assert(lowered[0].value_id() == 10)
+    assert(lowered[1].value_id() == 20)
+    assert(lowered[2].value_id() == 30)

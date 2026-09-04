@@ -1,21 +1,29 @@
 # K - Kind
-# Use K when a generic parameter represents a compiler classification.
+# Select the wider compiler kind while preserving its concrete kind type.
 
 trait KindTerm:
-    def name() -> string
+    def width() -> usize
 
 
-class BinaryKind: KindTerm
-    text: string
+class IntegerKind: KindTerm
+    bits: usize
+    signed: bool
 
-    def name() -> string:
-        return text
+    def width() -> usize:
+        return bits
 
 
-def kind_name[K: KindTerm](kind_term: K) -> string:
-    return kind_term.name()
+def wider_kind[K: KindTerm](left: K, right: K) -> K:
+    if left.width() >= right.width():
+        return left
+
+    return right
 
 
 test:
-    kind_term := BinaryKind("binary")
-    assert(kind_name(kind_term) == "binary")
+    narrow := IntegerKind(16, true)
+    wide := IntegerKind(64, true)
+    selected := wider_kind(narrow, wide)
+
+    assert(selected.bits == 64)
+    assert(selected.signed == true)

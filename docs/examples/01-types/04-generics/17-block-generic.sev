@@ -1,21 +1,32 @@
 # B - Block
-# Use B when a generic parameter represents a control-flow block.
+# Ensure a control-flow block has a terminator while preserving its block type.
 
 trait BlockTerm:
-    def label() -> string
+    def terminated() -> bool
+    def with_terminator() -> Self
 
 
-class EntryBlock: BlockTerm
-    text: string
+class BasicBlock: BlockTerm
+    operations: list[i64]
+    has_terminator: bool
 
-    def label() -> string:
-        return text
+    def terminated() -> bool:
+        return has_terminator
+
+    def with_terminator() -> Self:
+        return BasicBlock(operations, true)
 
 
-def block_label[B: BlockTerm](block: B) -> string:
-    return block.label()
+def ensure_terminated[B: BlockTerm](block: B) -> B:
+    if block.terminated():
+        return block
+
+    return block.with_terminator()
 
 
 test:
-    block := EntryBlock("entry")
-    assert(block_label(block) == "entry")
+    block := BasicBlock([10, 20, 12], false)
+    terminated := ensure_terminated(block)
+
+    assert(terminated.has_terminator == true)
+    assert(size(terminated.operations) == 3)

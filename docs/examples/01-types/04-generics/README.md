@@ -14,30 +14,32 @@ Every `.sev` file in this directory is a standalone documentation example and va
 
 ## Compiler-term generic symbols
 
-| Symbol | Category | Example |
-| --- | --- | --- |
-| `T` | Type | `06-type-generic.sev` |
-| `V` | Value | `07-value-generic.sev` |
-| `E` | Error | `08-error-generic.sev` |
-| `Ex` | Expression | `09-expression-generic.sev` |
-| `M` | Macro | `10-macro-generic.sev` |
-| `S` | Statement | `11-statement-generic.sev` |
-| `D` | Declaration | `12-declaration-generic.sev` |
-| `P` | Pattern | `13-pattern-generic.sev` |
-| `L` | Literal | `14-literal-generic.sev` |
-| `O` | Operation | `15-operation-generic.sev` |
-| `I` | Instruction | `16-instruction-generic.sev` |
-| `B` | Block | `17-block-generic.sev` |
-| `A` | Argument | `18-argument-generic.sev` |
-| `R` | Result | `19-result-generic.sev` |
-| `F` | Callable | `20-callable-generic.sev` |
-| `C` | Constraint | `21-constraint-generic.sev` |
-| `K` | Kind | `22-kind-generic.sev` |
-| `Y` | Symbol | `23-symbol-generic.sev` |
-| `N` | Node | `24-node-generic.sev` |
-| `X` | Any compiler term | `25-compiler-term-generic.sev` |
+Each example performs a compiler operation. The generic term is transformed, executed, matched, folded, bound, or preserved; it is not reduced to a display string.
 
-`E` is Error and `Ex` is Expression. `O` is a semantic operation; `Y` is the symbol or resolved identity that names it. `X` is the umbrella compiler-term parameter, conceptually `X: T | V | E | Ex | M | S | D | P | L | O | I | B | A | R | F | C | K | Y | N`.
+| Symbol | Category | Example operation | File |
+| --- | --- | --- | --- |
+| `T` | Type | Substitute a type parameter | `06-type-generic.sev` |
+| `V` | Value | Fold compile-time values | `07-value-generic.sev` |
+| `E` | Error | Wrap a concrete error with pass and source context | `08-error-generic.sev` |
+| `Ex` | Expression | Constant-fold an expression | `09-expression-generic.sev` |
+| `M` | Macro | Expand compiler input | `10-macro-generic.sev` |
+| `S` | Statement | Execute a statement sequence | `11-statement-generic.sev` |
+| `D` | Declaration | Bind declarations to symbols | `12-declaration-generic.sev` |
+| `P` | Pattern | Select a matching pattern | `13-pattern-generic.sev` |
+| `L` | Literal | Fold literal values | `14-literal-generic.sev` |
+| `O` | Operation | Execute operation semantics | `15-operation-generic.sev` |
+| `I` | Instruction | Remove no-op instructions | `16-instruction-generic.sev` |
+| `B` | Block | Add a missing terminator | `17-block-generic.sev` |
+| `A` | Argument | Prepend a receiver without erasing argument type | `18-argument-generic.sev` |
+| `R` | Result | Merge pass results | `19-result-generic.sev` |
+| `F` | Callable | Invoke a callable generically | `20-callable-generic.sev` |
+| `C` | Constraint | Evaluate semantic constraints | `21-constraint-generic.sev` |
+| `K` | Kind | Select a compatible wider kind | `22-kind-generic.sev` |
+| `Y` | Symbol | Resolve symbol identity to operation semantics | `23-symbol-generic.sev` |
+| `N` | Node | Traverse nodes across IR levels | `24-node-generic.sev` |
+| `X` | Any compiler term | Run a category-independent pass | `25-compiler-term-generic.sev` |
+
+`E` is Error; `Ex` is Expression. `O` executes semantic behavior; `Y` identifies the resolved symbol that refers to behavior. `X` is the umbrella compiler-term parameter, conceptually `X: E | S | D | P | T | ...`.
 
 ## Compiler type representation
 

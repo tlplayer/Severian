@@ -1,21 +1,35 @@
 # M - Macro
-# Use M when a generic parameter represents a macro definition or expansion.
+# Expand compiler input through the concrete macro implementation.
 
 trait MacroTerm:
-    def expansion() -> string
+    def expand(input_tokens: list[i64]) -> list[i64]
 
 
-class TraceMacro: MacroTerm
-    text: string
+class RepeatMacro: MacroTerm
+    repetitions: usize
 
-    def expansion() -> string:
-        return text
+    def expand(input_tokens: list[i64]) -> list[i64]:
+        output: list[i64] = []
+        remaining := repetitions
+
+        while remaining > 0:
+            for token in input_tokens:
+                output.append(token)
+
+            remaining -= 1
+
+        return output
 
 
-def macro_expansion[M: MacroTerm](macro_term: M) -> string:
-    return macro_term.expansion()
+def expand_macro[M: MacroTerm](macro: M, input_tokens: list[i64]) -> list[i64]:
+    return macro.expand(input_tokens)
 
 
 test:
-    macro_term := TraceMacro("print(value)")
-    assert(macro_expansion(macro_term) == "print(value)")
+    expanded := expand_macro(RepeatMacro(3), [4, 2])
+
+    assert(size(expanded) == 6)
+    assert(expanded[0] == 4)
+    assert(expanded[1] == 2)
+    assert(expanded[4] == 4)
+    assert(expanded[5] == 2)

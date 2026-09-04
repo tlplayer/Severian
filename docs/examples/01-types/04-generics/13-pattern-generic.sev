@@ -1,21 +1,32 @@
 # P - Pattern
-# Use P when a generic parameter represents a match or destructuring pattern.
+# Select the first matching pattern instead of exposing pattern metadata.
 
 trait PatternTerm:
-    def binding() -> string
+    def matches(value: i64) -> bool
 
 
-class BindingPattern: PatternTerm
-    text: string
+class RangePattern: PatternTerm
+    minimum: i64
+    maximum: i64
 
-    def binding() -> string:
-        return text
+    def matches(value: i64) -> bool:
+        return minimum <= value and value <= maximum
 
 
-def pattern_binding[P: PatternTerm](pattern: P) -> string:
-    return pattern.binding()
+def select_pattern[P: PatternTerm](patterns: list[P], value: i64) -> i64:
+    index: i64 = 0
+
+    for pattern in patterns:
+        if pattern.matches(value):
+            return index
+
+        index += 1
+
+    return -1
 
 
 test:
-    pattern := BindingPattern("value")
-    assert(pattern_binding(pattern) == "value")
+    patterns := [RangePattern(0, 9), RangePattern(10, 19), RangePattern(20, 29)]
+
+    assert(select_pattern(patterns, 17) == 1)
+    assert(select_pattern(patterns, 42) == -1)

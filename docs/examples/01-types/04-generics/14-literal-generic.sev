@@ -1,21 +1,32 @@
 # L - Literal
-# Use L when a generic parameter represents literal source data.
+# Constant-fold literals while retaining the concrete literal representation.
 
 trait LiteralTerm:
-    def source() -> string
+    def zero() -> Self
+    def add(other: Self) -> Self
 
 
 class IntegerLiteral: LiteralTerm
-    text: string
+    value: i64
 
-    def source() -> string:
-        return text
+    def zero() -> Self:
+        return IntegerLiteral(0)
+
+    def add(other: Self) -> Self:
+        return IntegerLiteral(value + other.value)
 
 
-def literal_source[L: LiteralTerm](literal: L) -> string:
-    return literal.source()
+def fold_literals[L: LiteralTerm](literals: list[L]) -> L:
+    result := L.zero()
+
+    for literal in literals:
+        result = result.add(literal)
+
+    return result
 
 
 test:
-    literal := IntegerLiteral("42")
-    assert(literal_source(literal) == "42")
+    literals := [IntegerLiteral(7), IntegerLiteral(11), IntegerLiteral(24)]
+    folded := fold_literals(literals)
+
+    assert(folded.value == 42)

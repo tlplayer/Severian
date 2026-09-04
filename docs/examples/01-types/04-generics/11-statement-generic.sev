@@ -1,21 +1,29 @@
 # S - Statement
-# Use S when a generic parameter represents a statement.
+# Execute a sequence of statements against compiler state.
 
 trait StatementTerm:
-    def source() -> string
+    def execute(state: i64) -> i64
 
 
-class ReturnStatement: StatementTerm
-    text: string
+class AffineStatement: StatementTerm
+    scale: i64
+    bias: i64
 
-    def source() -> string:
-        return text
+    def execute(state: i64) -> i64:
+        return state * scale + bias
 
 
-def statement_source[S: StatementTerm](statement: S) -> string:
-    return statement.source()
+def execute_statements[S: StatementTerm](statements: list[S], initial: i64) -> i64:
+    state := initial
+
+    for statement in statements:
+        state = statement.execute(state)
+
+    return state
 
 
 test:
-    statement := ReturnStatement("return value")
-    assert(statement_source(statement) == "return value")
+    statements := [AffineStatement(2, 1), AffineStatement(3, -1)]
+    result := execute_statements(statements, 2)
+
+    assert(result == 14)

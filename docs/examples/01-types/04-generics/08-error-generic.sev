@@ -1,21 +1,27 @@
 # E - Error
-# E is reserved for errors. Expression uses Ex.
+# Attach compiler context while preserving the concrete Error subtype.
 
-trait ErrorTerm:
-    def message() -> string
+class CompileFailure: Error
+    code: u64
 
-
-class ParseFailure: ErrorTerm
-    text: string
-
-    def message() -> string:
-        return text
+    def CompileFailure(code_value: u64):
+        code := code_value
 
 
-def error_message[E: ErrorTerm](error_term: E) -> string:
-    return error_term.message()
+class ContextualError[E]:
+    error: E
+    pass_id: u64
+    offset: usize
+
+
+def contextualize_error[E: Error](error: E, pass_id: u64, offset: usize) -> ContextualError[E]:
+    return ContextualError[E](error, pass_id, offset)
 
 
 test:
-    failure := ParseFailure("unexpected token")
-    assert(error_message(failure) == "unexpected token")
+    contextualized := contextualize_error(CompileFailure(17), 4, 128)
+
+    assert(contextualized.error is CompileFailure)
+    assert(contextualized.error.code == 17)
+    assert(contextualized.pass_id == 4)
+    assert(contextualized.offset == 128)

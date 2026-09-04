@@ -1,21 +1,27 @@
 # Ex - Expression
-# Use Ex instead of E so Error and Expression remain distinct.
+# Rewrite an expression and return the same concrete expression representation.
 
 trait ExpressionTerm:
-    def source() -> string
+    def fold_constants() -> Self
 
 
-class NameExpression: ExpressionTerm
-    text: string
+class AddExpression: ExpressionTerm
+    left: i64
+    right: i64
+    value: i64
+    folded: bool
 
-    def source() -> string:
-        return text
+    def fold_constants() -> Self:
+        return AddExpression(left, right, left + right, true)
 
 
-def expression_source[Ex: ExpressionTerm](expression: Ex) -> string:
-    return expression.source()
+def fold_expression[Ex: ExpressionTerm](expression: Ex) -> Ex:
+    return expression.fold_constants()
 
 
 test:
-    expression := NameExpression("value + 1")
-    assert(expression_source(expression) == "value + 1")
+    expression := AddExpression(19, 23, 0, false)
+    folded := fold_expression(expression)
+
+    assert(folded.value == 42)
+    assert(folded.folded == true)

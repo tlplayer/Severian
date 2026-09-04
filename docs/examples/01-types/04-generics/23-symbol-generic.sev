@@ -1,21 +1,56 @@
 # Y - Symbol
-# Y is the symbol or resolved identity. O is the operation it denotes.
+# Y identifies syntax. It resolves to O, which owns executable semantics.
+
+enum OperationKind:
+    Add
+    Multiply
+
 
 trait SymbolTerm:
-    def spelling() -> string
+    def same_symbol(other: Self) -> bool
 
 
-class OperatorSymbol: SymbolTerm
-    text: string
+class ResolvedSymbol: SymbolTerm
+    id: u64
 
-    def spelling() -> string:
-        return text
+    def same_symbol(other: Self) -> bool:
+        return id == other.id
 
 
-def symbol_spelling[Y: SymbolTerm](symbol: Y) -> string:
-    return symbol.spelling()
+class OperationBinding[Y]:
+    symbol: Y
+    operation: OperationKind
+
+
+def resolve_operation[Y: SymbolTerm](
+    first: OperationBinding[Y],
+    second: OperationBinding[Y],
+    symbol: Y,
+) -> OperationKind:
+    if first.symbol.same_symbol(symbol):
+        return first.operation
+
+    return second.operation
+
+
+def apply_operation(operation: OperationKind, left: i64, right: i64) -> i64:
+    match operation:
+        case Add:
+            return left + right
+
+        case Multiply:
+            return left * right
 
 
 test:
-    symbol := OperatorSymbol("+")
-    assert(symbol_spelling(symbol) == "+")
+    plus := ResolvedSymbol(1)
+    multiply := ResolvedSymbol(2)
+
+    add_binding := OperationBinding[ResolvedSymbol](plus, Add)
+    multiply_binding := OperationBinding[ResolvedSymbol](multiply, Multiply)
+
+    add := resolve_operation(add_binding, multiply_binding, plus)
+    product := resolve_operation(add_binding, multiply_binding, multiply)
+
+    assert(apply_operation(add, 19, 23) == 42)
+    assert(apply_operation(product, 6, 7) == 42)

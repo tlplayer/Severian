@@ -1,21 +1,43 @@
 # I - Instruction
-# Use I when a generic parameter represents a lowered instruction.
+# Remove no-op instructions, then execute the optimized instruction stream.
 
 trait InstructionTerm:
-    def opcode() -> string
+    def is_noop() -> bool
+    def execute(register: i64) -> i64
 
 
-class LoadInstruction: InstructionTerm
-    text: string
+class AddImmediate: InstructionTerm
+    amount: i64
 
-    def opcode() -> string:
-        return text
+    def is_noop() -> bool:
+        return amount == 0
+
+    def execute(register: i64) -> i64:
+        return register + amount
 
 
-def instruction_opcode[I: InstructionTerm](instruction: I) -> string:
-    return instruction.opcode()
+def remove_noops[I: InstructionTerm](instructions: list[I]) -> list[I]:
+    optimized: list[I] = []
+
+    for instruction in instructions:
+        if instruction.is_noop() == false:
+            optimized.append(instruction)
+
+    return optimized
+
+
+def execute_instructions[I: InstructionTerm](instructions: list[I], initial: i64) -> i64:
+    register := initial
+
+    for instruction in instructions:
+        register = instruction.execute(register)
+
+    return register
 
 
 test:
-    instruction := LoadInstruction("load")
-    assert(instruction_opcode(instruction) == "load")
+    instructions := [AddImmediate(0), AddImmediate(2), AddImmediate(0), AddImmediate(5)]
+    optimized := remove_noops(instructions)
+
+    assert(size(optimized) == 2)
+    assert(execute_instructions(optimized, 35) == 42)

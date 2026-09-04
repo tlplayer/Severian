@@ -1,21 +1,32 @@
 # V - Value
-# Use V when the generic parameter represents a compiler value.
+# Fold compiler values without erasing their concrete representation.
 
 trait ValueTerm:
-    def render() -> string
+    def zero() -> Self
+    def add(other: Self) -> Self
 
 
 class ConstantValue: ValueTerm
-    text: string
+    value: i64
 
-    def render() -> string:
-        return text
+    def zero() -> Self:
+        return ConstantValue(0)
+
+    def add(other: Self) -> Self:
+        return ConstantValue(value + other.value)
 
 
-def value_text[V: ValueTerm](value_term: V) -> string:
-    return value_term.render()
+def fold_values[V: ValueTerm](values: list[V]) -> V:
+    total := V.zero()
+
+    for value in values:
+        total = total.add(value)
+
+    return total
 
 
 test:
-    value := ConstantValue("42")
-    assert(value_text(value) == "42")
+    values := [ConstantValue(10), ConstantValue(20), ConstantValue(12)]
+    folded := fold_values(values)
+
+    assert(folded.value == 42)

@@ -1,21 +1,28 @@
 # C - Constraint
-# Use C when a generic parameter represents a semantic requirement.
+# Evaluate every semantic constraint against the same candidate value.
 
 trait ConstraintTerm:
-    def description() -> string
+    def accepts(value: i64) -> bool
 
 
-class TraitConstraint: ConstraintTerm
-    text: string
+class RangeConstraint: ConstraintTerm
+    minimum: i64
+    maximum: i64
 
-    def description() -> string:
-        return text
+    def accepts(value: i64) -> bool:
+        return minimum <= value and value <= maximum
 
 
-def constraint_description[C: ConstraintTerm](constraint: C) -> string:
-    return constraint.description()
+def satisfies_all[C: ConstraintTerm](constraints: list[C], value: i64) -> bool:
+    for constraint in constraints:
+        if constraint.accepts(value) == false:
+            return false
+
+    return true
 
 
 test:
-    constraint := TraitConstraint("T: Numeric")
-    assert(constraint_description(constraint) == "T: Numeric")
+    constraints := [RangeConstraint(0, 100), RangeConstraint(4, 9)]
+
+    assert(satisfies_all(constraints, 7) == true)
+    assert(satisfies_all(constraints, 12) == false)

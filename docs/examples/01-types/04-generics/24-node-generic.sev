@@ -1,21 +1,32 @@
 # N - Node
-# Use N when a generic parameter represents a syntax or IR node.
+# Traverse nodes without assuming a particular AST, HIR, MIR, or LIR node type.
 
 trait NodeTerm:
-    def kind() -> string
+    def parent_id() -> u64
 
 
 class SyntaxNode: NodeTerm
-    text: string
+    id: u64
+    parent: u64
 
-    def kind() -> string:
-        return text
+    def parent_id() -> u64:
+        return parent
 
 
-def node_kind[N: NodeTerm](node: N) -> string:
-    return node.kind()
+def root_nodes[N: NodeTerm](nodes: list[N]) -> list[N]:
+    roots: list[N] = []
+
+    for node in nodes:
+        if node.parent_id() == 0:
+            roots.append(node)
+
+    return roots
 
 
 test:
-    node := SyntaxNode("binary_expression")
-    assert(node_kind(node) == "binary_expression")
+    nodes := [SyntaxNode(1, 0), SyntaxNode(2, 1), SyntaxNode(3, 1), SyntaxNode(4, 0)]
+    roots := root_nodes(nodes)
+
+    assert(size(roots) == 2)
+    assert(roots[0].id == 1)
+    assert(roots[1].id == 4)

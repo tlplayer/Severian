@@ -1,21 +1,33 @@
 # D - Declaration
-# Use D when a generic parameter represents a declaration.
+# Bind declarations to resolved symbol identifiers.
 
 trait DeclarationTerm:
-    def name() -> string
+    def bind(symbol_id: u64) -> Self
 
 
-class FunctionDeclaration: DeclarationTerm
-    text: string
+class LocalDeclaration: DeclarationTerm
+    symbol_id: u64
+    slots: usize
 
-    def name() -> string:
-        return text
+    def bind(symbol_id: u64) -> Self:
+        return LocalDeclaration(symbol_id, slots)
 
 
-def declaration_name[D: DeclarationTerm](declaration: D) -> string:
-    return declaration.name()
+def bind_declarations[D: DeclarationTerm](declarations: list[D], first_symbol: u64) -> list[D]:
+    bound: list[D] = []
+    next_symbol := first_symbol
+
+    for declaration in declarations:
+        bound.append(declaration.bind(next_symbol))
+        next_symbol += 1
+
+    return bound
 
 
 test:
-    declaration := FunctionDeclaration("compile")
-    assert(declaration_name(declaration) == "compile")
+    declarations := [LocalDeclaration(0, 1), LocalDeclaration(0, 3)]
+    bound := bind_declarations(declarations, 100)
+
+    assert(bound[0].symbol_id == 100)
+    assert(bound[1].symbol_id == 101)
+    assert(bound[1].slots == 3)

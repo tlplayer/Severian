@@ -1,21 +1,23 @@
 # F - Callable
-# Use F for functions, methods, constructors, and other callable terms.
+# Invoke a concrete callable through a generic callable parameter.
 
 trait CallableTerm:
-    def name() -> string
+    def call(value: i64) -> i64
 
 
-class FunctionCallable: CallableTerm
-    text: string
+class AffineCallable: CallableTerm
+    scale: i64
+    bias: i64
 
-    def name() -> string:
-        return text
+    def call(value: i64) -> i64:
+        return value * scale + bias
 
 
-def callable_name[F: CallableTerm](callable_term: F) -> string:
-    return callable_term.name()
+def invoke_twice[F: CallableTerm](callable: F, value: i64) -> i64:
+    return callable.call(callable.call(value))
 
 
 test:
-    callable_term := FunctionCallable("lower")
-    assert(callable_name(callable_term) == "lower")
+    callable := AffineCallable(2, 1)
+
+    assert(invoke_twice(callable, 3) == 15)

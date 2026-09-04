@@ -1,21 +1,24 @@
 # O - Operation
-# O represents the semantic operation, not the source symbol that names it.
+# O carries executable semantics. Y carries only the resolved symbol identity.
 
 trait OperationTerm:
-    def name() -> string
+    def apply(left: i64, right: i64) -> i64
 
 
 class AddOperation: OperationTerm
-    text: string
-
-    def name() -> string:
-        return text
+    def apply(left: i64, right: i64) -> i64:
+        return left + right
 
 
-def operation_name[O: OperationTerm](operation: O) -> string:
-    return operation.name()
+class MultiplyOperation: OperationTerm
+    def apply(left: i64, right: i64) -> i64:
+        return left * right
+
+
+def apply_operation[O: OperationTerm](left: i64, right: i64, operation: O) -> i64:
+    return operation.apply(left, right)
 
 
 test:
-    operation := AddOperation("add")
-    assert(operation_name(operation) == "add")
+    assert(apply_operation(19, 23, AddOperation()) == 42)
+    assert(apply_operation(6, 7, MultiplyOperation()) == 42)

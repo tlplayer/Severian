@@ -1,32 +1,48 @@
 # X - Any compiler term
-# X is the umbrella generic for T, V, E, Ex, M, S, D, P, L, O, I,
-# B, A, R, F, C, K, Y, N, and future compiler-term categories.
+# X is the umbrella parameter used by passes shared across compiler categories.
 
 trait CompilerTerm:
-    def category() -> string
+    def apply_pass(revision: u64) -> Self
 
 
 class TypeCompilerTerm: CompilerTerm
-    name: string
+    revision: u64
+    normalized: bool
 
-    def category() -> string:
-        return name
+    def apply_pass(revision: u64) -> Self:
+        return TypeCompilerTerm(revision, true)
+
+
+class ExpressionCompilerTerm: CompilerTerm
+    revision: u64
+    left: i64
+    right: i64
+    value: i64
+
+    def apply_pass(revision: u64) -> Self:
+        return ExpressionCompilerTerm(revision, left, right, left + right)
 
 
 class StatementCompilerTerm: CompilerTerm
-    name: string
+    revision: u64
+    reachable: bool
 
-    def category() -> string:
-        return name
+    def apply_pass(revision: u64) -> Self:
+        return StatementCompilerTerm(revision, true)
 
 
-def term_category[X: CompilerTerm](term: X) -> string:
-    return term.category()
+def run_pass[X: CompilerTerm](term: X, revision: u64) -> X:
+    return term.apply_pass(revision)
 
 
 test:
-    type_term := TypeCompilerTerm("type")
-    statement_term := StatementCompilerTerm("statement")
+    type_term := run_pass(TypeCompilerTerm(0, false), 1)
+    expression_term := run_pass(ExpressionCompilerTerm(0, 19, 23, 0), 2)
+    statement_term := run_pass(StatementCompilerTerm(0, false), 3)
 
-    assert(term_category(type_term) == "type")
-    assert(term_category(statement_term) == "statement")
+    assert(type_term.revision == 1)
+    assert(type_term.normalized == true)
+    assert(expression_term.revision == 2)
+    assert(expression_term.value == 42)
+    assert(statement_term.revision == 3)
+    assert(statement_term.reachable == true)
