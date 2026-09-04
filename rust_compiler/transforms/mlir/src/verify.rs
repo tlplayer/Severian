@@ -609,6 +609,7 @@ impl<'context> Module<'context> {
             "linalg",
             "llvm",
             "math",
+            "memref",
             "scf",
             "tensor",
         ]

@@ -2487,13 +2487,12 @@ fn collect_rvalue_functions(
             collect_operand_function(left, definitions);
             collect_operand_function(right, definitions);
         }
-        severian_mir::Rvalue::Aggregate { fields, .. } => {
+        severian_mir::Rvalue::Aggregate { fields, .. } | severian_mir::Rvalue::Variant { fields, .. } => {
             for field in fields {
                 collect_operand_function(field, definitions);
             }
         }
-        severian_mir::Rvalue::Undefined(_)
-        | severian_mir::Rvalue::BorrowShared(_)
+        severian_mir::Rvalue::BorrowShared(_)
         | severian_mir::Rvalue::BorrowExclusive(_)
         | severian_mir::Rvalue::AddressOf(_) => {}
     }

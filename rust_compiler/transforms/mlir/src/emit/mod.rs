@@ -1169,13 +1169,8 @@ fn render_cfg_operation(
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
     match operation {
-        Operation::Undefined { result } => {
-            let ty = mlir_type(&value_type(module, *result)?)?;
-            output.push_str(&format!(
-                "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
-                result.0
-            ));
-        }
+        Operation::Variant { class, variant, fields, result } =>
+            render_variant(output, module, *class, *variant, fields, *result, indent)?,
         Operation::Coverage { key } => {
             let symbol = coverage_symbol(key);
             let value = format!("{symbol}_bb{}_op{operation_index}", block.0);
@@ -1215,10 +1210,16 @@ fn render_cfg_operation(
             }
         }
         Operation::Aggregate {
-            class: _,
+            class,
             fields,
             result,
         } => {
+            if let Some(declaration) = module.classes.iter().find(|item| item.id == *class) {
+                if !declaration.variants.is_empty() {
+                    return Err(MlirError::UnsupportedOperation(format!(
+                        "record construction of sum {} requires an active variant", declaration.name)));
+                }
+            }
             let aggregate_type = value_type(module, *result)?;
             let ty = mlir_type(&aggregate_type)?;
             if fields.is_empty() {
@@ -1317,7 +1318,8 @@ fn render_cfg_operation(
                 }
             }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
-                let base_type = mlir_type(&cfg_place_base_type(module, body, place)?)?;
+                let object_type = cfg_place_base_type(module, body, place)?;
+                let base_type = mlir_type(&object_type)?;
                 let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
                 output.push_str(&format!(
                     "{indentation}%load_base_b{}_o{} = llvm.load {} : !llvm.ptr -> {base_type}\n",
@@ -1326,10 +1328,9 @@ fn render_cfg_operation(
                     cfg_place_base_address(place)
                 ));
                 if tensor_aggregate_abi_type(&stored_type).is_some() {
-                    output.push_str(&format!(
-                        "{indentation}%load_tensor_b{}_o{} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
-                        block.0, operation_index, block.0, operation_index, field
-                    ));
+                    render_field_extract(output, module, &object_type,
+                        &format!("%load_base_b{}_o{}", block.0, operation_index), *field,
+                        &format!("%load_tensor_b{}_o{}", block.0, operation_index), indent)?;
                     render_tensor_aggregate_unbox(
                         output,
                         &format!("%load_tensor_b{}_o{}", block.0, operation_index),
@@ -1341,10 +1342,9 @@ fn render_cfg_operation(
                     )?;
                 } else {
                     let extracted = format!("%load_field_b{}_o{}", block.0, operation_index);
-                    output.push_str(&format!(
-                        "{indentation}{extracted} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
-                        block.0, operation_index, field
-                    ));
+                    render_field_extract(output, module, &object_type,
+                        &format!("%load_base_b{}_o{}", block.0, operation_index), *field,
+                        &extracted, indent)?;
                     let converted = render_named_conversion(
                         output,
                         &extracted,
@@ -1443,7 +1443,9 @@ fn render_cfg_operation(
                 }
             }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
-                let base_type = mlir_type(&cfg_place_base_type(module, body, place)?)?;
+                let object_type = cfg_place_base_type(module, body, place)?;
+                verify_record_update(module, &object_type)?;
+                let base_type = mlir_type(&object_type)?;
                 let address = cfg_place_base_address(place);
                 let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
                 output.push_str(&format!(
@@ -2390,16 +2392,19 @@ fn lowered_type_layout(
     let LoweredType::Aggregate(id) = ty else {
         unreachable!("non-scalar layout is aggregate")
     };
-    if !visiting.insert(*id) {
-        return Err(MlirError::UnsupportedOperation(format!(
-            "aggregate class {id} has a recursive inline layout"
-        )));
-    }
     let declaration = module
         .classes
         .iter()
         .find(|declaration| declaration.id == *id)
         .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown aggregate class {id}")))?;
+    if !declaration.variants.is_empty() {
+        return Ok((16, 8));
+    }
+    if !visiting.insert(*id) {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "aggregate class {id} has a recursive inline layout"
+        )));
+    }
     let mut size = 0u64;
     let mut aggregate_alignment = 1u64;
     for field in &declaration.fields {
@@ -2546,13 +2551,8 @@ fn render_block(
     let indentation = " ".repeat(indent);
     for operation in &block.operations {
         match operation {
-            Operation::Undefined { result } => {
-                let ty = mlir_type(&value_type(module, *result)?)?;
-                output.push_str(&format!(
-                    "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
-                    result.0
-                ));
-            }
+            Operation::Variant { class, variant, fields, result } =>
+                render_variant(output, module, *class, *variant, fields, *result, indent)?,
             Operation::Coverage { key } => {
                 let symbol = coverage_symbol(key);
                 let value = format!("{symbol}_{}", *coverage_ordinal);
@@ -2691,6 +2691,7 @@ fn render_block(
                 fields,
                 result,
             } => {
+                verify_record_update(module, &LoweredType::Aggregate(*class))?;
                 let ty = mlir_type(&LoweredType::Aggregate(*class))?;
                 if fields.is_empty() {
                     output.push_str(&format!(
@@ -2725,11 +2726,8 @@ fn render_block(
                 field,
                 result,
             } => {
-                let ty = mlir_type(&value_type(module, *object)?)?;
-                output.push_str(&format!(
-                    "{indentation}%v{} = llvm.extractvalue %v{}[{field}] : {ty}\n",
-                    result.0, object.0
-                ));
+                render_field_extract(output, module, &value_type(module, *object)?,
+                    &format!("%v{}", object.0), *field, &format!("%v{}", result.0), indent)?;
             }
             Operation::FieldSet {
                 object,
@@ -2737,7 +2735,9 @@ fn render_block(
                 value,
                 result,
             } => {
-                let ty = mlir_type(&value_type(module, *object)?)?;
+                let object_type = value_type(module, *object)?;
+                verify_record_update(module, &object_type)?;
+                let ty = mlir_type(&object_type)?;
                 output.push_str(&format!(
                     "{indentation}%v{} = llvm.insertvalue %v{}, %v{}[{field}] : {ty}\n",
                     result.0, value.0, object.0
@@ -3737,6 +3737,7 @@ mod tests {
         let module = Module {
             classes: vec![
                 severian_lir::ClassDeclaration {
+                    variants: Vec::new(),
                     id: 3,
                     name: "Outer".into(),
                     fields: vec![severian_lir::ClassFieldDeclaration {
@@ -3745,6 +3746,7 @@ mod tests {
                     }],
                 },
                 severian_lir::ClassDeclaration {
+                    variants: Vec::new(),
                     id: 22,
                     name: "Inner".into(),
                     fields: vec![severian_lir::ClassFieldDeclaration {
@@ -4350,6 +4352,123 @@ mod tests {
         ));
     }
 }
+fn verify_record_update(module: &Module, ty: &LoweredType) -> Result<(), MlirError> {
+    if let LoweredType::Aggregate(id) = ty {
+        if module.classes.iter().any(|class| class.id == *id && !class.variants.is_empty()) {
+            return Err(MlirError::UnsupportedOperation(
+                "a sum must be replaced as a complete variant, not by mutating its physical fields".into()));
+        }
+    }
+    Ok(())
+}
+
+fn sum_payload_type(
+    declaration: &severian_lir::ClassDeclaration,
+    variant: u32,
+) -> Result<String, MlirError> {
+    let fields = declaration.variants.get(variant as usize).ok_or_else(|| {
+        MlirError::UnsupportedOperation(format!("invalid variant {variant} for {}", declaration.name))
+    })?;
+    let fields = fields.iter().map(|field| {
+        let field = declaration.fields.get(*field as usize).ok_or_else(|| {
+            MlirError::UnsupportedOperation("invalid sum payload field".into())
+        })?;
+        aggregate_field_type(&field.ty)
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok(format!("!llvm.struct<({})>", fields.join(", ")))
+}
+
+/// Sums use a finite discriminant/reference header. Only the selected payload
+/// is materialized. Heap storage deliberately follows the bootstrap's current
+/// process-lifetime policy; a stack temporary would dangle on return.
+fn render_variant(
+    output: &mut String,
+    module: &Module,
+    class: u32,
+    variant: u32,
+    fields: &[ValueId],
+    result: ValueId,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let declaration = module.classes.iter().find(|item| item.id == class)
+        .ok_or_else(|| MlirError::UnsupportedOperation("unknown sum type".into()))?;
+    let payload_type = sum_payload_type(declaration, variant)?;
+    let logical_fields = &declaration.variants[variant as usize];
+    if fields.len() != logical_fields.len() {
+        return Err(MlirError::UnsupportedOperation("sum payload arity mismatch".into()));
+    }
+    let indentation = " ".repeat(indent);
+    let stem = format!("%variant_{}", result.0);
+    let header_type = format!("!sev_class_{class}");
+    let tag_type = mlir_type(&declaration.fields[0].ty)?;
+    output.push_str(&format!("{indentation}{stem}_tag = arith.constant {variant} : {tag_type}\n"));
+    output.push_str(&format!("{indentation}{stem}_null = llvm.mlir.zero : !llvm.ptr\n"));
+    let pointer = if fields.is_empty() {
+        format!("{stem}_null")
+    } else {
+        // Upstream layout determines the allocation size, including padding.
+        // This uses MLIR allocation, not a compiler-specific runtime helper.
+        output.push_str(&format!("{indentation}{stem}_end = llvm.getelementptr {stem}_null[1] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
+        output.push_str(&format!("{indentation}{stem}_bytes = llvm.ptrtoint {stem}_end : !llvm.ptr to i64\n"));
+        output.push_str(&format!("{indentation}{stem}_size = arith.index_cast {stem}_bytes : i64 to index\n"));
+        output.push_str(&format!("{indentation}{stem}_storage = memref.alloc({stem}_size) {{alignment = 64 : i64}} : memref<?xi8>\n"));
+        output.push_str(&format!("{indentation}{stem}_address = memref.extract_aligned_pointer_as_index {stem}_storage : memref<?xi8> -> index\n"));
+        output.push_str(&format!("{indentation}{stem}_address_int = arith.index_cast {stem}_address : index to i64\n"));
+        output.push_str(&format!("{indentation}{stem}_payload = llvm.inttoptr {stem}_address_int : i64 to !llvm.ptr\n"));
+        for (index, (field, logical)) in fields.iter().zip(logical_fields).enumerate() {
+            let field_type = value_type(module, *field)?;
+            let target_type = declaration.fields[*logical as usize].ty.clone();
+            let converted = if tensor_aggregate_abi_type(&target_type).is_some() {
+                let converted = format!("{stem}_field_{index}");
+                render_tensor_aggregate_box(output, &format!("%v{}", field.0), &field_type,
+                    &target_type, &converted, &format!("variant_{}_{index}", result.0), indent)?;
+                converted
+            } else {
+                render_named_conversion(output, &format!("%v{}", field.0), &field_type,
+                    &target_type, &format!("{stem}_field_{index}"), indent)?
+            };
+            output.push_str(&format!("{indentation}{stem}_slot_{index} = llvm.getelementptr {stem}_payload[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
+            output.push_str(&format!("{indentation}llvm.store {converted}, {stem}_slot_{index} : {}, !llvm.ptr\n", aggregate_field_type(&target_type)?));
+        }
+        format!("{stem}_payload")
+    };
+    output.push_str(&format!("{indentation}{stem}_header = llvm.mlir.zero : {header_type}\n"));
+    output.push_str(&format!("{indentation}{stem}_tagged = llvm.insertvalue {stem}_tag, {stem}_header[0] : {header_type}\n"));
+    output.push_str(&format!("{indentation}%v{} = llvm.insertvalue {pointer}, {stem}_tagged[1] : {header_type}\n", result.0));
+    Ok(())
+}
+
+fn render_field_extract(
+    output: &mut String,
+    module: &Module,
+    object_type: &LoweredType,
+    object: &str,
+    field: u32,
+    result: &str,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let spelling = mlir_type(object_type)?;
+    if let LoweredType::Aggregate(id) = object_type {
+        let declaration = module.classes.iter().find(|item| item.id == *id)
+            .ok_or_else(|| MlirError::UnsupportedOperation("unknown aggregate type".into()))?;
+        if !declaration.variants.is_empty() && field != 0 {
+            let (variant, index) = declaration.variants.iter().enumerate()
+                .find_map(|(variant, fields)| fields.iter().position(|logical| *logical == field)
+                    .map(|index| (variant, index)))
+                .ok_or_else(|| MlirError::UnsupportedOperation("invalid sum field projection".into()))?;
+            let payload = sum_payload_type(declaration, variant as u32)?;
+            let stored_type = aggregate_field_type(&declaration.fields[field as usize].ty)?;
+            output.push_str(&format!("{indentation}{result}_payload = llvm.extractvalue {object}[1] : {spelling}\n"));
+            output.push_str(&format!("{indentation}{result}_slot = llvm.getelementptr {result}_payload[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {payload}\n"));
+            output.push_str(&format!("{indentation}{result} = llvm.load {result}_slot : !llvm.ptr -> {stored_type}\n"));
+            return Ok(());
+        }
+    }
+    output.push_str(&format!("{indentation}{result} = llvm.extractvalue {object}[{field}] : {spelling}\n"));
+    Ok(())
+}
+
 fn render_class_aliases(output: &mut String, module: &Module) -> Result<(), MlirError> {
     let declared = module
         .classes
@@ -4361,6 +4480,12 @@ fn render_class_aliases(output: &mut String, module: &Module) -> Result<(), Mlir
         let before = emitted.len();
         for declaration in &module.classes {
             if emitted.contains(&declaration.id) {
+                continue;
+            }
+            if !declaration.variants.is_empty() {
+                let tag = aggregate_field_type(&declaration.fields[0].ty)?;
+                output.push_str(&format!("!sev_class_{} = !llvm.struct<({tag}, !llvm.ptr)>\n", declaration.id));
+                emitted.insert(declaration.id);
                 continue;
             }
             let ready = declaration.fields.iter().all(|field| match field.ty {

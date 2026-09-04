@@ -38,6 +38,23 @@ pointer array. It is a shallow container copy, so referenced/boxed elements are
 shared. Other value kinds currently lower `clone` to the same runtime value and
 need type-specific clone implementations before they can promise a deep copy.
 
+## Sum payload storage during bootstrap
+
+Enums, unions, and fallible results carry a discriminant and a reference to
+the selected payload. Only that payload is constructed; inactive variants have
+no values or storage slots. Recursive nominal types therefore do not require
+recursively expanding their physical layout. `T | None` retains `None` as a
+distinct member instead of substituting a default `T`.
+
+The MLIR bootstrap allocates payload storage with upstream `memref.alloc`.
+Payloads survive function returns and copies of their enclosing sum header.
+Matching and structural equality access payloads only on the selected branch.
+Replacing a sum replaces its complete header, rather than mutating an inactive
+slot. Payload allocations currently remain live until process exit, consistent
+with the bootstrap's existing lack of lifetime-driven heap release insertion.
+This is not a reference-counting or garbage-collection implementation; owner-
+driven reclamation remains required before promising bounded heap use.
+
 See `docs/examples/05-ownership-borrowing/04-inferred-parameter-effects.sev`
 for an executable profile example.
 

@@ -17,6 +17,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
             .classes
             .extend(hir_module.classes.iter().map(|declaration| {
                 crate::ClassDeclaration {
+                    variants: declaration.variants.clone(),
                     id: declaration.id,
                     name: declaration.name.clone(),
                     fields: declaration

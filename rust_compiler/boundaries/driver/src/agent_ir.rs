@@ -608,9 +608,8 @@ fn collect_rvalue_moves(edges: &mut Vec<Value>, owner: &str, rvalue: &Rvalue) {
         | Rvalue::Convert { operand, .. } => vec![operand],
         Rvalue::Unary { operand, .. } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
-        Rvalue::Aggregate { fields, .. } => fields.iter().collect(),
-        Rvalue::Undefined(_)
-        | Rvalue::BorrowShared(_)
+        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => fields.iter().collect(),
+        Rvalue::BorrowShared(_)
         | Rvalue::BorrowExclusive(_)
         | Rvalue::AddressOf(_) => Vec::new(),
     };

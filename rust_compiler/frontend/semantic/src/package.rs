@@ -1041,6 +1041,7 @@ fn resolve_package_type(
         let mut errors = Vec::new();
         for member in members {
             if matches!(member.simple_name(), Some("None" | "absent")) {
+                success.push(types.resolve_name("None").expect("bootstrap defines None"));
                 continue;
             }
             let ty = resolve_package_type(types, member, module, classes, lists, index)?;
@@ -1241,6 +1242,7 @@ fn resolve_package_union_members(
     let mut resolved = Vec::new();
     for member in members {
         if matches!(member.simple_name(), Some("None" | "absent")) {
+            resolved.push(types.resolve_name("None").expect("bootstrap defines None"));
             continue;
         }
         let ty = resolve_package_type(types, member, module, classes, lists, index)?;
@@ -2420,7 +2422,7 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
         ExpressionKind::Binding(binding) | ExpressionKind::AddressOf(binding) => {
             binding.0 += offset
         }
-        ExpressionKind::Aggregate { fields, .. } => {
+        ExpressionKind::Aggregate { fields, .. } | ExpressionKind::Variant { fields, .. } => {
             for field in fields {
                 remap_expression_bindings(field, offset);
             }
@@ -2458,6 +2460,6 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
             remap_expression_bindings(left, offset);
             remap_expression_bindings(right, offset);
         }
-        ExpressionKind::Undefined | ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
+        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
     }
 }

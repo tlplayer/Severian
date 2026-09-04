@@ -479,13 +479,12 @@ fn verify_rvalue(
     state: &mut BTreeSet<LocalId>,
 ) -> Result<(), VerifyError> {
     let operands = match value {
-        Rvalue::Undefined(_) => Vec::new(),
         Rvalue::Use(value) => vec![value],
         Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }
         | Rvalue::Await { task: operand } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
-        Rvalue::Aggregate { fields, .. } => fields.iter().collect(),
+        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => fields.iter().collect(),
         Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) | Rvalue::AddressOf(place) => {
             verify_place(body, globals, place)?;
             if let Some(local) = place.local_id().filter(|local| !state.contains(local)) {

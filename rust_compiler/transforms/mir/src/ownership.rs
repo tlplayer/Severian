@@ -464,7 +464,6 @@ fn inspect_rvalue(
     errors: &mut BTreeSet<OwnershipError>,
 ) {
     match value {
-        Rvalue::Undefined(_) => {}
         Rvalue::Use(operand) => {
             let propagated = if let (Some(source), Some(holder)) =
                 (operand_local(operand), destination.local_id())
@@ -506,7 +505,7 @@ fn inspect_rvalue(
             );
         }
         Rvalue::AddressOf(place) => inspect_operand(&Operand::Copy(place.clone()), state, errors),
-        Rvalue::Aggregate { fields, .. } => {
+        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => {
             for field in fields {
                 inspect_operand(field, state, errors);
             }
@@ -716,7 +715,6 @@ fn apply_terminator_liveness(terminator: &Terminator, live: &mut BTreeSet<LocalI
 
 fn use_rvalue(value: &Rvalue, live: &mut BTreeSet<LocalId>) {
     match value {
-        Rvalue::Undefined(_) => {}
         Rvalue::Use(operand)
         | Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }
@@ -728,7 +726,7 @@ fn use_rvalue(value: &Rvalue, live: &mut BTreeSet<LocalId>) {
         Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) | Rvalue::AddressOf(place) => {
             use_place(place, live)
         }
-        Rvalue::Aggregate { fields, .. } => {
+        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => {
             for field in fields {
                 use_operand(field, live);
             }

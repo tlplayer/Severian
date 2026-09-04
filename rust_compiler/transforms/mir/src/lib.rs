@@ -54,6 +54,7 @@ pub struct ClassDeclaration {
     pub id: severian_universal::TypeId,
     pub name: String,
     pub fields: Vec<ClassFieldDeclaration>,
+    pub variants: Vec<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -10,7 +10,7 @@ class VerifiedMlirArtifact:
 
 
 def allowed_dialect(name: string, target_spec: target.TargetSpec) -> bool:
-    if name == "builtin" or name == "arith" or name == "cf" or name == "func" or name == "llvm" or name == "math" or name == "scf":
+    if name == "builtin" or name == "arith" or name == "cf" or name == "func" or name == "llvm" or name == "math" or name == "memref" or name == "scf":
         return true
     return target_spec.capabilities.contains("mlir.dialect." + name)
 

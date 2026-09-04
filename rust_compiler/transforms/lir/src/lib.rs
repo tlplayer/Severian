@@ -209,7 +209,10 @@ pub enum TaskOwner {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation {
-    Undefined {
+    Variant {
+        class: u32,
+        variant: u32,
+        fields: Vec<ValueId>,
         result: ValueId,
     },
     Coverage {
@@ -408,6 +411,7 @@ pub struct ClassDeclaration {
     pub id: u32,
     pub name: String,
     pub fields: Vec<ClassFieldDeclaration>,
+    pub variants: Vec<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

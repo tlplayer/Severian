@@ -1,0 +1,66 @@
+import source
+import "../expression/expression.sev"
+import "../cfg/cfg.sev"
+
+
+def returned_expression(span: source.Span) -> Expression:
+    leaf = Expression(ExpressionKind.Name("leaf"), span, HirId(1), TypeId(0))
+    return Expression(ExpressionKind.Member(leaf, "member"), span, HirId(2), TypeId(0))
+
+
+def selected_name(expression: Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return name
+        case _:
+            return "not a name"
+
+
+def child_name(expression: Expression) -> string:
+    match expression.kind:
+        case Member:
+            return selected_name(object)
+        case _:
+            return "no child"
+
+
+def absent_operand() -> Operand | None:
+    return None
+
+
+def present_operand() -> Operand | None:
+    return Operand.Copy(local_place(LocalId(7)))
+
+
+def same_literal(left: LiteralValue, right: LiteralValue) -> bool:
+    return left == right
+
+
+test "recursive compiler payload survives return and selects only its active fields":
+    span = source.span(source.source_id(0), 0, 4)
+    expression = returned_expression(span)
+    another = returned_expression(span)
+    assert(selected_name(expression) == "member")
+    assert(child_name(expression) == "leaf")
+    assert(child_name(another) == "leaf")
+
+
+test "absence does not construct a recursive compiler operand":
+    assert(absent_operand() == None)
+    assert(present_operand() != None)
+    body = empty_cfg(TypeId(0))
+    match body.blocks[0].terminator:
+        case Return:
+            assert(value == None)
+        case _:
+            assert(false)
+
+
+test "sum equality compares tags and only the active payload":
+    assert(same_literal(LiteralValue.IntegerValue("12"), LiteralValue.IntegerValue("12")))
+    assert(not same_literal(LiteralValue.IntegerValue("12"), LiteralValue.IntegerValue("13")))
+    assert(not same_literal(LiteralValue.IntegerValue("12"), LiteralValue.NoneValue))
+    assert(same_literal(LiteralValue.NoneValue, LiteralValue.NoneValue))
+    assert(not same_literal(LiteralValue.BooleanValue(true), LiteralValue.BooleanValue(false)))

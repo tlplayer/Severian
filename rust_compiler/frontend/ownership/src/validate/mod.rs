@@ -347,7 +347,7 @@ fn validate_slice_expression(
         }
     }
     match &expression.kind {
-        ExpressionKind::Aggregate { fields, .. } => {
+        ExpressionKind::Aggregate { fields, .. } | ExpressionKind::Variant { fields, .. } => {
             for field in fields {
                 validate_slice_expression(
                     field,
@@ -441,8 +441,7 @@ fn validate_slice_expression(
                 regions,
             )?;
         }
-        ExpressionKind::Undefined
-        | ExpressionKind::Literal(_)
+        ExpressionKind::Literal(_)
         | ExpressionKind::Binding(_)
         | ExpressionKind::AddressOf(_)
         | ExpressionKind::Function(_) => {}
@@ -743,14 +742,14 @@ fn validate_expression(
     declared: &BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match &expression.kind {
-        ExpressionKind::Aggregate { fields, .. } => {
+        ExpressionKind::Aggregate { fields, .. } | ExpressionKind::Variant { fields, .. } => {
             for field in fields {
                 validate_expression(field, declared)?;
             }
             Ok(())
         }
         ExpressionKind::Field { object, .. } => validate_expression(object, declared),
-        ExpressionKind::Undefined | ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
+        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
         ExpressionKind::Binding(id) if declared.contains(id) => Ok(()),
         ExpressionKind::Binding(_) => Err(Diagnostic::new(
             "E000301",

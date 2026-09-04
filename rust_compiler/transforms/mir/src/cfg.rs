@@ -106,7 +106,11 @@ pub enum Callee {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rvalue {
-    Undefined(TypeId),
+    Variant {
+        type_id: TypeId,
+        variant: u32,
+        fields: Vec<Operand>,
+    },
     Use(Operand),
     Unary {
         operator: UnaryOperator,
@@ -946,10 +950,12 @@ impl BodyBuilder {
                 .expect("expression results are local places"),
         ));
         match &expression.kind {
-            severian_hir::ExpressionKind::Undefined => {
+            severian_hir::ExpressionKind::Variant { class, variant, fields } => {
+                let fields = fields.iter()
+                    .map(|field| Operand::Copy(self.expression(field))).collect();
                 self.push(Statement::Assign(
                     result.clone(),
-                    Rvalue::Undefined(expression.type_id),
+                    Rvalue::Variant { type_id: *class, variant: *variant, fields },
                 ));
             }
             severian_hir::ExpressionKind::Aggregate { class, fields } => {
@@ -1096,6 +1102,30 @@ impl BodyBuilder {
                         operand,
                     },
                 ));
+            }
+            severian_hir::ExpressionKind::Binary { operator, left, right }
+                if matches!(*operator, BinaryOperator::And | BinaryOperator::Or) =>
+            {
+                let left = self.expression(left);
+                let evaluate_right = self.block();
+                let short_circuit = self.block();
+                let join = self.block();
+                let (then_block, else_block) = if *operator == BinaryOperator::And {
+                    (evaluate_right, short_circuit)
+                } else { (short_circuit, evaluate_right) };
+                self.terminate(Terminator::Branch {
+                    condition: Operand::Copy(left.clone()), then_block, else_block,
+                });
+                self.current = short_circuit;
+                self.push(Statement::Assign(result.clone(), Rvalue::Use(Operand::Copy(left))));
+                self.terminate(Terminator::Goto(join, Vec::new()));
+                self.current = evaluate_right;
+                let right = self.expression(right);
+                if self.open(self.current) {
+                    self.push(Statement::Assign(result.clone(), Rvalue::Use(Operand::Copy(right))));
+                    self.terminate(Terminator::Goto(join, Vec::new()));
+                }
+                self.current = join;
             }
             severian_hir::ExpressionKind::Binary {
                 operator,

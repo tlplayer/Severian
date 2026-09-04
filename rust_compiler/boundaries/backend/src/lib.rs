@@ -229,9 +229,9 @@ fn render_block(
 ) -> Result<(), BackendError> {
     for operation in &block.operations {
         match operation {
-            Operation::Undefined { .. } => {
+            Operation::Variant { .. } => {
                 return Err(BackendError::UnsupportedOperation(
-                    "undefined aggregate storage requires the MLIR pipeline".into(),
+                    "sum payload storage requires the MLIR pipeline".into(),
                 ));
             }
             Operation::Coverage { key } => {

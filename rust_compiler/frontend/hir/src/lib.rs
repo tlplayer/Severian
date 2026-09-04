@@ -216,6 +216,9 @@ pub struct ClassDeclaration {
     pub id: TypeId,
     pub name: String,
     pub fields: Vec<ClassFieldDeclaration>,
+    /// Empty for a record. For a sum, each entry lists the logical fields
+    /// belonging to that tag; field zero is the discriminant, not a payload.
+    pub variants: Vec<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

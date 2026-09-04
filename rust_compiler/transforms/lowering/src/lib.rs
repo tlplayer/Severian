@@ -78,6 +78,7 @@ mod cfg_lowering_entry {
             .enumerate()
             .map(|(id, declaration)| {
                 Ok(severian_lir::ClassDeclaration {
+                    variants: declaration.variants.clone(),
                     id: id as u32,
                     name: declaration.name.clone(),
                     fields: declaration
@@ -442,9 +443,14 @@ impl CfgLowering<'_> {
         operations: &mut Vec<LirOperation>,
     ) -> Result<ValueId, LoweringError> {
         match rvalue {
-            severian_mir::Rvalue::Undefined(type_id) => {
+            severian_mir::Rvalue::Variant { type_id, variant, fields } => {
+                let fields = fields.iter()
+                    .map(|field| self.lower_operand(body, field, operations))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let result = self.new_value(self.lower_mir_type(*type_id)?);
-                operations.push(LirOperation::Undefined { result });
+                let class = self.mir.classes.iter().position(|class| class.id == *type_id)
+                    .ok_or(LoweringError::NotPrimitive(*type_id))? as u32;
+                operations.push(LirOperation::Variant { class, variant: *variant, fields, result });
                 Ok(result)
             }
             severian_mir::Rvalue::Use(operand) => self.lower_operand(body, operand, operations),
@@ -1668,6 +1674,7 @@ mod legacy_structured_lowering {
                 .enumerate()
                 .map(|(id, declaration)| {
                     Ok(severian_lir::ClassDeclaration {
+                        variants: declaration.variants.clone(),
                         id: id as u32,
                         name: declaration.name.clone(),
                         fields: declaration
@@ -2008,7 +2015,7 @@ mod legacy_structured_lowering {
             // become the corresponding release point once destructors are
             // represented in LIR; until then, retain the allocation.
             if operations.iter().any(|operation| match operation {
-                LirOperation::Aggregate { fields, .. } => fields.contains(value),
+                LirOperation::Aggregate { fields, .. } | LirOperation::Variant { fields, .. } => fields.contains(value),
                 LirOperation::FieldSet {
                     value: field_value, ..
                 } => field_value == value,
@@ -2050,7 +2057,7 @@ mod legacy_structured_lowering {
 
     fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
         match operation {
-            LirOperation::Aggregate { fields, .. } => fields.contains(&value),
+            LirOperation::Aggregate { fields, .. } | LirOperation::Variant { fields, .. } => fields.contains(&value),
             LirOperation::FieldGet { object, .. } => *object == value,
             LirOperation::FieldSet {
                 object,
@@ -2107,8 +2114,7 @@ mod legacy_structured_lowering {
             LirOperation::ArtifactCall {
                 inputs, outputs, ..
             } => inputs.contains(&value) || outputs.contains(&value),
-            LirOperation::Undefined { .. }
-            | LirOperation::Coverage { .. }
+            LirOperation::Coverage { .. }
             | LirOperation::Constant { .. }
             | LirOperation::Break
             | LirOperation::Continue => false,
