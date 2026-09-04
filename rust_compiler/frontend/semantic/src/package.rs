@@ -413,6 +413,7 @@ pub fn analyze_package_with_context(
                     &types,
                     definition.module,
                     &package_classes,
+                    &index,
                 )?;
                 Ok(PackageFunction {
                     lookup: binding.lookup,
@@ -2262,6 +2263,7 @@ fn universal_substitution(
     types: &severian_universal::TypeContext,
     module: ModuleId,
     classes: &[PackageClass],
+    index: &ProgramIndex,
 ) -> Result<severian_universal::Substitution, Diagnostic> {
     let arguments = function
         .type_parameters
@@ -2281,6 +2283,9 @@ fn universal_substitution(
             types
                 .resolve_name(name)
                 .or_else(|| (name == "Any").then_some(crate::any_type_id()))
+                .or_else(|| {
+                    package_trait_for_lookup(index, module, name).then_some(crate::any_type_id())
+                })
                 .or_else(|| {
                     classes
                         .iter()

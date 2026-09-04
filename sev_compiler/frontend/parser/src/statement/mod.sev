@@ -5,8 +5,8 @@ import universal
 
 def formatted_string_expression(value: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
     characters = value.characters()
-    cursor = 0
-    literal = ""
+    cursor := 0
+    literal := ""
     parts: list[universal.Expression] = []
     while cursor < len(characters):
         if characters[cursor] == "{" and cursor + 1 < len(characters) and characters[cursor + 1] == "{":
@@ -28,7 +28,7 @@ def formatted_string_expression(value: string, span: source.Span) -> universal.E
             literal = ""
         expression_start = cursor + 1
         cursor = expression_start
-        nesting = 0
+        nesting := 0
         while cursor < len(characters):
             if characters[cursor] == "(" or characters[cursor] == "[":
                 nesting += 1
@@ -50,7 +50,7 @@ def formatted_string_expression(value: string, span: source.Span) -> universal.E
         parts.append(universal.Expression(universal.LiteralValue(universal.StringValue(literal)), span))
     if len(parts) == 0:
         return universal.Expression(universal.LiteralValue(universal.StringValue("")), span)
-    result = parts[0]
+    result := parts[0]
     for part in parts[1:]:
         result = universal.Expression(universal.Binary(universal.Add, result, part), span)
     return result

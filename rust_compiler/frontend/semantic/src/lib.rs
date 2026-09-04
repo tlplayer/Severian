@@ -19625,7 +19625,10 @@ fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnos
             .iter()
             .map(|field| field.name.as_str())
             .collect::<BTreeSet<_>>();
-        for method in class.constructors.iter().chain(&class.methods) {
+        for constructor in &class.constructors {
+            validate_hook_context(constructor)?;
+        }
+        for method in &class.methods {
             validate_hook_context(method)?;
             if let Some(parameter) = method
                 .parameters
