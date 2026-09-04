@@ -41,6 +41,19 @@ Each example performs a compiler operation. The generic term is transformed, exe
 
 `E` is Error; `Ex` is Expression. `O` executes semantic behavior; `Y` identifies the resolved symbol that refers to behavior. `X` is the umbrella compiler-term parameter, conceptually `X: E | S | D | P | T | ...`.
 
+## Generative callables
+
+An arrow-prefixed declaration is a compile-time callable. It uses the same generic parameters, parameters, return annotation, body syntax, and call syntax as an ordinary function:
+
+```sev
+-> expand_macro[M: MacroTerm](macro_term: M, input_tokens: list[i64]) -> list[i64]:
+    return macro_term.expand(input_tokens)
+
+expanded := expand_macro[RepeatMacro](RepeatMacro(3), [4, 2])
+```
+
+The arrow belongs before the callable name. Postfix spellings such as `expand_macro->` are not part of the syntax. The declaration is resolved and specialized through the existing semantic, HIR, MIR, and MLIR pipeline.
+
 ## Compiler type representation
 
 - `PrimitiveType`

@@ -2722,6 +2722,48 @@ mod tests {
     }
 
     #[test]
+    fn compiler_term_generic_examples_reach_verified_mlir() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .to_path_buf();
+        std::thread::Builder::new()
+            .name("compiler-term-generics-mlir".into())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let compiler = Compiler::new(TargetSpec::host()).unwrap();
+                for ordinal in 6..=25 {
+                    let prefix = format!("{ordinal:02}-");
+                    let directory = repository.join("docs/examples/01-types/04-generics");
+                    let source = std::fs::read_dir(&directory)
+                        .unwrap()
+                        .map(|entry| entry.unwrap().path())
+                        .find(|path| {
+                            path.file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| name.starts_with(&prefix))
+                        })
+                        .unwrap_or_else(|| panic!("missing generic example {prefix}"));
+                    let mir = compiler
+                        .check_file_to_mir(&source, CompileMode::Test)
+                        .unwrap_or_else(|error| panic!("{}: {error}", source.display()));
+                    let test = mir
+                        .tests
+                        .first()
+                        .unwrap_or_else(|| panic!("{} has no test", source.display()));
+                    let mlir = compiler
+                        .compile_mir_to_mlir(&select_test(&mir, test.function))
+                        .unwrap_or_else(|error| panic!("{}: {error}", source.display()));
+                    assert!(mlir.contains("module {"), "{}: {mlir}", source.display());
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn ranked_tensor_jit_inputs_include_upload_byte_length() {
         let ty = severian_mlir::LoweredType::Tensor {
             element: severian_mlir::LoweredTensorElement::Float {

@@ -55,6 +55,70 @@ mod tests {
     }
 
     #[test]
+    fn arrow_prefixed_generative_callables_use_normal_generic_function_syntax() {
+        let source = SourceFile::virtual_source(
+            "macro.sev",
+            "-> expand[M: MacroTerm](macro_term: M, value: int) -> int:\n    return macro_term.expand(value)\ntest:\n    result := expand[RepeatMacro](RepeatMacro(3), 14)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(expand) = &module.items[0] else {
+            panic!("expected a generative function")
+        };
+        assert!(expand.compile_time);
+        assert_eq!(expand.name, "expand");
+        assert_eq!(expand.type_parameters, ["M"]);
+        assert_eq!(expand.parameters.len(), 2);
+        let severian_ast::Item::Test(test) = &module.items[1] else {
+            panic!("expected a test")
+        };
+        let severian_ast::Statement::Binding(result) = &test.body[0] else {
+            panic!("expected a binding")
+        };
+        assert!(matches!(
+            &result.value.kind,
+            severian_ast::ExpressionKind::Call { callee, .. }
+                if matches!(
+                    &callee.kind,
+                    severian_ast::ExpressionKind::TypeApplication { arguments, .. }
+                        if arguments.len() == 1
+                )
+        ));
+    }
+
+    #[test]
+    fn dimension_expressions_are_valid_in_constructor_type_applications() {
+        let source = SourceFile::virtual_source(
+            "dimension-constructor.sev",
+            "def make_bytes() -> bytes[int.bits / 8]:\n    return bytes[int.bits / 8]()\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::Return {
+            value:
+                Some(severian_ast::Expression {
+                    kind: severian_ast::ExpressionKind::Call { callee, .. },
+                    ..
+                }),
+            ..
+        } = &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected constructor call")
+        };
+        let severian_ast::ExpressionKind::TypeApplication { arguments, .. } = &callee.kind else {
+            panic!("expected an applied bytes type")
+        };
+        assert!(matches!(
+            arguments[0].kind,
+            severian_ast::TypeAnnotationKind::Named {
+                ref name,
+                ref arguments,
+            } if name == "__dimension_divide" && arguments.len() == 2
+        ));
+    }
+
+    #[test]
     fn rejects_parameters_after_a_variadic_parameter() {
         let source = SourceFile::virtual_source(
             "invalid-variadic.sev",

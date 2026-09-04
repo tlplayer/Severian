@@ -586,7 +586,7 @@ extend int:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
-        integer_conversion-> [T:target_int] with target_int in int:
+        -> integer_conversion[T: target_int]() with target_int in int:
 
             self -> target_int with self.min >= target_int.min and self.max <= target_int.max:
                 if int.bits < target_int.bits:
@@ -610,7 +610,7 @@ extend int:
                     return mlir(arith.trunci, self, to=target_int)
                 return mlir(arith.bitcast, self, to=target_int)
 
-        integer_conversion -> int
+        integer_conversion[int]()
 
         '''
         ## Floating conversion family
@@ -620,7 +620,7 @@ extend int:
         floats may contain fractions, infinities, NaNs, or values outside the target
         integer range. Both directions are therefore `~>` relationships.
         '''
-        float_conversion-> [T:target_float] with target_float in float:
+        -> float_conversion[T: target_float]() with target_float in float:
 
             self ~> target_float:
                 if int.signed:
@@ -638,7 +638,7 @@ extend int:
                     return mlir(arith.fptosi, target_float, to=int)
                 return mlir(arith.fptoui, target_float, to=int)
 
-        float_conversion -> float
+        float_conversion[float]()
 
         '''
         ## String conversion

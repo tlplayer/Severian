@@ -2388,6 +2388,15 @@ impl Analyzer<'_> {
             if matching.len() == 1 {
                 return Ok(matching.pop_first().expect("one matching class type"));
             }
+            let mut matching = self
+                .class_instances_by_type
+                .values()
+                .filter(|instance| instance.name.rsplit('.').next() == Some(name))
+                .map(|instance| instance.ty)
+                .collect::<BTreeSet<_>>();
+            if matching.len() == 1 {
+                return Ok(matching.pop_first().expect("one matching source class type"));
+            }
         }
         resolve_type_annotation(self.types, annotation)
     }
@@ -10788,7 +10797,7 @@ impl Analyzer<'_> {
             if let Some(ty) = substitution.get(name) {
                 return Ok(*ty);
             }
-            return resolve_type_annotation(self.types, annotation);
+            return self.resolve_source_type(annotation);
         }
         if name == "list" && arguments.len() == 1 {
             let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
@@ -16427,7 +16436,9 @@ impl Analyzer<'_> {
                             Some(span),
                         ));
                     }
-                    let result_type = self.resolve_source_type(&method.result)?;
+                    let self_substitution = BTreeMap::from([("Self".to_owned(), instance.ty)]);
+                    let result_type =
+                        self.resolve_instantiated_type(&method.result, &self_substitution)?;
                     if expected.is_some_and(|expected| {
                         !self.types.assignable(result_type, expected)
                     }) {
@@ -16438,7 +16449,10 @@ impl Analyzer<'_> {
                     }
                     let previous = self.value_substitutions.clone();
                     for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                        let parameter_type = self.resolve_instantiated_type(
+                            &parameter.annotation,
+                            &self_substitution,
+                        )?;
                         let value = self.expression(&argument.value, Some(parameter_type))?;
                         self.value_substitutions
                             .insert(parameter.name.clone(), value);
@@ -17280,7 +17294,7 @@ impl Analyzer<'_> {
                 return Ok(Some(lowered));
             }
         }
-        let method_substitution = self
+        let mut method_substitution = self
             .classes
             .get(&instance.name)
             .map(|declaration| {
@@ -17292,6 +17306,7 @@ impl Analyzer<'_> {
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
+        method_substitution.insert("Self".to_owned(), object.type_id);
         let required_parameters = method
             .parameters
             .iter()
@@ -17428,7 +17443,11 @@ impl Analyzer<'_> {
                     } else {
                         self.resolve_instantiated_type(&parameter.annotation, &method_substitution)?
                     };
-                    let value = self.expression(argument, Some(parameter_type))?;
+                    let method_environment = self.value_substitutions.clone();
+                    self.value_substitutions = previous.clone();
+                    let value = self.expression(argument, Some(parameter_type));
+                    self.value_substitutions = method_environment;
+                    let value = value?;
                     self.value_substitutions
                         .insert(parameter.name.clone(), value);
                 }
@@ -17487,7 +17506,11 @@ impl Analyzer<'_> {
                         .or(parameter.default.as_ref())
                         .expect("method arity validation requires a value or default");
                     if let Some(signature) = self.function_annotation(&parameter.annotation)? {
-                        let callable = self.resolve_callable_value(argument, &signature)?;
+                        let method_environment = self.value_substitutions.clone();
+                        self.value_substitutions = previous.clone();
+                        let callable = self.resolve_callable_value(argument, &signature);
+                        self.value_substitutions = method_environment;
+                        let callable = callable?;
                         self.callable_substitutions
                             .insert(parameter.name.clone(), callable);
                     } else {
@@ -17499,7 +17522,11 @@ impl Analyzer<'_> {
                                 &method_substitution,
                             )?
                         };
-                        let value = self.expression(argument, Some(parameter_type))?;
+                        let method_environment = self.value_substitutions.clone();
+                        self.value_substitutions = previous.clone();
+                        let value = self.expression(argument, Some(parameter_type));
+                        self.value_substitutions = method_environment;
+                        let value = value?;
                         self.value_substitutions
                             .insert(parameter.name.clone(), value);
                     }

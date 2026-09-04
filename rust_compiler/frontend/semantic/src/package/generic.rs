@@ -2509,6 +2509,25 @@ fn expression_type_name(
                             .flatten()
                     }
                     DefKind::Type => Some(index.definitions[&definition].name.clone()),
+                    DefKind::Class(class) => {
+                        let name = &index.definitions[&definition].name;
+                        let explicit = match &callee.kind {
+                            severian_ast::ExpressionKind::TypeApplication {
+                                arguments, ..
+                            } => arguments
+                                .iter()
+                                .map(type_annotation_name)
+                                .collect::<Option<Vec<_>>>()?,
+                            _ => Vec::new(),
+                        };
+                        if explicit.is_empty() {
+                            Some(name.clone())
+                        } else if explicit.len() <= class.type_parameters.len() {
+                            Some(format!("{name}[{}]", explicit.join(", ")))
+                        } else {
+                            None
+                        }
+                    }
                     _ => None,
                 });
             if direct.is_some() {

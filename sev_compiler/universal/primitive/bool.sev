@@ -89,14 +89,15 @@ Conversions:
 None -> false
 not None -> true
 
-## Typed -> expansion
+## Typed compile-time expansion
 
-A declaration -> is applied with `-> -> Type`. When the right side is
-a closed union, the compiler expands the -> once for every member and checks
+A compile-time generator is declared with `-> name[T](...)` and applied with an
+ordinary typed call such as `name[int](...)`. When a type argument is a closed
+union, the compiler expands the call once for every member and checks
 each generated declaration independently. The -> emits typed AST rather than
 text.
 
-For example, `integer_conversion -> int` emits one `<=>` relation for every
+For example, `integer_conversion[int]()` emits one `<=>` relation for every
 signed and unsigned integer member of the `int` union. This replaces a Rust-like
 list of concrete conversion implementations while retaining concrete conversion
 edges for coherence, diagnostics, monomorphization, and documentation.
@@ -370,11 +371,11 @@ class bool: Boolean :
     through `TypeConversionError` rather than widening the successful value type.
     '''
     operator <=>(self, T) -> T | TypeConversionError:
-        integer_conversion-> [T:I]: 
-            self => I:
+        -> integer_conversion[T: target_int]() with target_int in int:
+            self => target_int:
                 return 1 if self else 0
 
-            I -> self:
+            target_int -> self:
                 match value:
                     case 0:
                         return false
@@ -396,11 +397,15 @@ class bool: Boolean :
     `bool(value)` uses the canonical Boolean conversion. `value as bool` may use the
     broader conversion graph when a more permissive conversion relationship exists.
     '''
-        float_conversion-> [T:F]:
-            self => F:
+        integer_conversion[int]()
+
+        -> float_conversion[T: target_float]() with target_float in float:
+            self => target_float:
                 return 1.0 if self else 0.0
-            F => self:
-                return false if F == 0 else return true 
+            target_float => self:
+                return false if target_float == 0 else return true
+
+        float_conversion[float]()
         _ -> [T]:
             throw TypeConversionError(f"Failed to convert {type(T)} to bool, no compatible types")
 ````
@@ -483,4 +488,3 @@ test "bool value traits are stable":
     assert(true.hash() == 1)
     assert(false.display() == "false")
     assert(true.display() == "true")
-

@@ -1514,3 +1514,37 @@ fn tensor_intrinsics_do_not_consume_other_package_namespaces_as_receivers() {
     severian_mir::build(&typed.hir).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn source_class_constructors_infer_generic_arguments_and_self_methods() {
+    let root = temporary();
+    let source = root.join("class-generic-self.sev");
+    std::fs::write(
+        &source,
+        "trait Term:\n    def replace(other: Self) -> Self\nclass Concrete: Term\n    value: i64\n    def replace(other: Self) -> Self:\n        return Concrete(other.value)\ndef apply[T: Term](left: T, right: T) -> T:\n    return left.replace(right)\ntest:\n    result := apply(Concrete(1), Concrete(42))\n    assert(result.value == 42)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(
+        &severian_modules::resolve(&source).unwrap(),
+        &universal,
+    )
+    .unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn generic_class_fields_resolve_source_enum_types() {
+    let root = temporary();
+    let source = root.join("generic-enum-field.sev");
+    std::fs::write(
+        &source,
+        "enum OperationKind:\n    Add\n    Multiply\nclass Symbol:\n    id: u64\nclass Binding[Y]:\n    symbol: Y\n    operation: OperationKind\ntest:\n    binding := Binding[Symbol](Symbol(1), Add)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -515,7 +515,7 @@ extend float:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
-        float_conversion-> [T:target_float] with target_float in float:
+        -> float_conversion[T: target_float]() with target_float in float:
 
             self -> target_float with (
                 float.precision_bits <= target_float.precision_bits
@@ -551,7 +551,7 @@ extend float:
                 widened := mlir(arith.extf, self, to=f32)
                 return mlir(arith.truncf, widened, to=target_float)
 
-        float_conversion -> float
+        float_conversion[float]()
 
         '''
         ## Integer conversion family
@@ -560,7 +560,7 @@ extend float:
         exceed a float's exact significand precision; a float may contain a
         fraction, NaN, infinity, or a value outside the destination integer range.
         '''
-        integer_conversion-> [T:target_int] with target_int in int:
+        -> integer_conversion[T: target_int]() with target_int in int:
 
             self ~> target_int:
                 if not self.finite():
@@ -582,7 +582,7 @@ extend float:
                     return mlir(arith.sitofp, target_int, to=float)
                 return mlir(arith.uitofp, target_int, to=float)
 
-        integer_conversion -> int
+        integer_conversion[int]()
 
         '''
         ## String conversion

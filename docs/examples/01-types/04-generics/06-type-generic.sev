@@ -14,10 +14,7 @@ class TypeReference: TypeTerm
 
 
 def substitute_type[T: TypeTerm](subject: T, parameter: T, replacement: T) -> T:
-    if subject.same_type(parameter):
-        return replacement
-
-    return subject
+    return replacement if subject.same_type(parameter) else subject
 
 
 test:

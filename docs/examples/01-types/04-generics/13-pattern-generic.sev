@@ -14,9 +14,7 @@ class RangePattern: PatternTerm
 
 
 def select_pattern[P: PatternTerm](patterns: list[P], value: i64) -> i64:
-    index: i64 = 0
-
-    for pattern in patterns:
+    for pattern in patterns with index := 0:
         if pattern.matches(value):
             return index
 

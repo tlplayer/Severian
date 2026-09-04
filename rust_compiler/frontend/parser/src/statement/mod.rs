@@ -3533,7 +3533,7 @@ impl Parser<'_> {
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightBracket) {
                     loop {
-                        arguments.push(self.type_annotation()?);
+                        arguments.push(self.type_argument_annotation()?);
                         if self.take(&TokenKind::Comma).is_none() {
                             break;
                         }

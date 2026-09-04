@@ -9,24 +9,28 @@ class RepeatMacro: MacroTerm
     repetitions: usize
 
     def expand(input_tokens: list[i64]) -> list[i64]:
-        output: list[i64] = []
-        remaining := repetitions
-
-        while remaining > 0:
-            for token in input_tokens:
-                output.append(token)
-
-            remaining -= 1
-
-        return output
+        return repeat_tokens(input_tokens, repetitions)
 
 
-def expand_macro[M: MacroTerm](macro: M, input_tokens: list[i64]) -> list[i64]:
-    return macro.expand(input_tokens)
+def repeat_tokens(input_tokens: list[i64], repetitions: usize) -> list[i64]:
+    output: list[i64] = []
+    remaining := repetitions
+
+    while remaining > 0:
+        for token in input_tokens:
+            output.append(token)
+
+        remaining -= 1
+
+    return output
+
+
+-> expand_macro[M: MacroTerm](macro_term: M, input_tokens: list[i64]) -> list[i64]:
+    return macro_term.expand(input_tokens)
 
 
 test:
-    expanded := expand_macro(RepeatMacro(3), [4, 2])
+    expanded := expand_macro[RepeatMacro](RepeatMacro(3), [4, 2])
 
     assert(size(expanded) == 6)
     assert(expanded[0] == 4)
