@@ -1,6 +1,9 @@
 '''
 Table cases share one declaration shape: named parameters followed by `with
 cases` and a brace-delimited table. Each row executes the same test body.
+
+Parameterized sets may also form a Cartesian product. Every value of `a`
+executes against every value of `b`.
 '''
 
 
@@ -33,3 +36,12 @@ test clamp(value, minimum, maximum, expected) with cases "clamps each range posi
     (15, 0, 10, 10),
 }:
     assert(clamp(value, minimum, maximum) == expected)
+
+
+test
+[
+    a in [1, 2, 3],
+    b in [2, 3, 4],
+] with cases "executes the Cartesian product":
+    assert(a in [1, 2, 3])
+    assert(b in [2, 3, 4])
