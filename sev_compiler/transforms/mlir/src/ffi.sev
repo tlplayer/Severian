@@ -163,6 +163,15 @@ def native_operation_draft_region(draft: NativeMlirOperationDraft, region: Nativ
 @c(symbol = "__sev_mlir_operation_draft_attribute_v1")
 def native_operation_draft_attribute(draft: NativeMlirOperationDraft, name: string, value: NativeMlirAttribute)
 
+@c(symbol = "__sev_mlir_operation_state_property_v1")
+def native_operation_state_property(draft: NativeMlirOperationDraft, name: string, value: NativeMlirAttribute)
+
+@c(symbol = "__sev_mlir_operation_state_successor_v1")
+def native_operation_state_successor(draft: NativeMlirOperationDraft, block: NativeMlirBlock)
+
+@c(symbol = "__sev_mlir_operation_state_infer_results_v1")
+def native_operation_state_infer_results(draft: NativeMlirOperationDraft)
+
 @c(symbol = "__sev_mlir_operation_draft_finish_v1")
 def native_operation_draft_finish(session: NativeMlirSession, draft: NativeMlirOperationDraft) -> NativeMlirOperation
 

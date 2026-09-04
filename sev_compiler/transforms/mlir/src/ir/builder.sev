@@ -8,6 +8,7 @@ class MlirBlockHandle:
 
 class MlirFunctionHandle:
     function: int
+    name: MlirFunctionName
     entry: MlirBlockHandle
     arguments: list[MlirValue]
     declaration: bool
@@ -18,6 +19,7 @@ enum MlirBuilderError:
     MissingBlock(block: int)
     MissingInsertionPoint
     ValueIdCollision(value: int)
+    InvalidOperationState(name: string)
 
 
 class MlirOpBuilder:
@@ -88,12 +90,61 @@ def builder_append_operation(builder: MlirOpBuilder, operation: MlirOperation) -
     return error(MissingRegion(insertion.region))
 
 
+def builder_operation_from_state(builder: MlirOpBuilder, state: MlirOperationState, results: list[MlirValue]) -> MlirOperation | MlirBuilderError:
+    if len(results) != len(state.result_types):
+        return error(InvalidOperationState(operation_name_text(state.definition.name)))
+    index := 0
+    while index < int(len(results)):
+        if not same_type(results[index].type_id, state.result_types[index]):
+            return error(InvalidOperationState(operation_name_text(state.definition.name)))
+        index += 1
+    operation = MlirOperation(
+        state.definition.name,
+        state.operands,
+        results,
+        state.attributes,
+        state.properties,
+        state.successors,
+        state.regions,
+        state.region_requires_terminator,
+        state.definition.terminator,
+        state.location,
+        state.infer_results,
+    )
+    return builder_append_operation(builder, operation)
+
+
+def builder_create(builder: MlirOpBuilder, state: MlirOperationState) -> MlirOperation | MlirBuilderError:
+    results: list[MlirValue] = []
+    for result_type in state.result_types:
+        results.append(builder_new_value(builder, result_type))
+    return builder_operation_from_state(builder, state, results)
+
+
 def builder_create_operation(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue] = [], results: list[MlirValue] = [], attributes: list[MlirNamedAttribute] = [], regions: list[int] = [], terminator: bool = false) -> MlirOperation | MlirBuilderError:
-    return builder_append_operation(builder, MlirOperation(name, operands, results, attributes, regions, terminator, None))
+    result_types: list[MlirType] = []
+    for result in results:
+        result_types.append(result.type_id)
+    properties: list[MlirNamedProperty] = []
+    successors: list[int] = []
+    region_requires_terminator: list[bool] = []
+    for _ in regions:
+        region_requires_terminator.append(false)
+    state = MlirOperationState(MlirOperationDefinition(name, terminator), operands, result_types, attributes, properties, successors, regions, region_requires_terminator, None, false)
+    return builder_operation_from_state(builder, state, results)
 
 
 def builder_create_operation_at(builder: MlirOpBuilder, name: MlirOperationName, operands: list[MlirValue], results: list[MlirValue], attributes: list[MlirNamedAttribute], regions: list[int], terminator: bool, location: MlirLocation) -> MlirOperation | MlirBuilderError:
-    return builder_append_operation(builder, MlirOperation(name, operands, results, attributes, regions, terminator, location))
+    result_types: list[MlirType] = []
+    for result in results:
+        result_types.append(result.type_id)
+    properties: list[MlirNamedProperty] = []
+    successors: list[int] = []
+    region_requires_terminator: list[bool] = []
+    for _ in regions:
+        region_requires_terminator.append(false)
+    state = MlirOperationState(MlirOperationDefinition(name, terminator), operands, result_types, attributes, properties, successors, regions, region_requires_terminator, location, false)
+    return builder_operation_from_state(builder, state, results)
 
 
 def builder_create_function_at(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool, location: MlirLocation | None) -> MlirFunctionHandle:
@@ -101,7 +152,7 @@ def builder_create_function_at(builder: MlirOpBuilder, name: string, visibility:
     if declaration:
         program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true, location))
         builder.program = program
-        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirBlockHandle(-1, -1), arguments, true)
+        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirFunctionName(name), MlirBlockHandle(-1, -1), arguments, true)
     region = builder_create_region(builder)
     program = builder.program
     block_id = builder.counters[2]
@@ -110,7 +161,7 @@ def builder_create_function_at(builder: MlirOpBuilder, name: string, visibility:
     entry = MlirBlockHandle(region, block_id)
     program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false, location))
     builder.program = program
-    return MlirFunctionHandle(int(len(program.functions)) - 1, entry, arguments, false)
+    return MlirFunctionHandle(int(len(program.functions)) - 1, MlirFunctionName(name), entry, arguments, false)
 
 
 def builder_create_function(builder: MlirOpBuilder, name: string, visibility: MlirVisibility, arguments: list[MlirValue], result_types: list[MlirType], declaration: bool = false) -> MlirFunctionHandle:
@@ -118,7 +169,7 @@ def builder_create_function(builder: MlirOpBuilder, name: string, visibility: Ml
     if declaration:
         program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, -1, true, None))
         builder.program = program
-        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirBlockHandle(-1, -1), arguments, true)
+        return MlirFunctionHandle(int(len(program.functions)) - 1, MlirFunctionName(name), MlirBlockHandle(-1, -1), arguments, true)
     region = builder_create_region(builder)
     program = builder.program
     block_id = builder.counters[2]
@@ -127,7 +178,20 @@ def builder_create_function(builder: MlirOpBuilder, name: string, visibility: Ml
     entry = MlirBlockHandle(region, block_id)
     program.functions.append(MlirFunctionOp(name, visibility, arguments, result_types, region, false, None))
     builder.program = program
-    return MlirFunctionHandle(int(len(program.functions)) - 1, entry, arguments, false)
+    return MlirFunctionHandle(int(len(program.functions)) - 1, MlirFunctionName(name), entry, arguments, false)
+
+
+def builder_create_generated_function(
+    builder: MlirOpBuilder,
+    identity: MlirFunctionIdentity,
+    visibility: MlirVisibility,
+    arguments: list[MlirValue],
+    result_types: list[MlirType],
+    declaration: bool = false,
+    mlir_function_name: MlirFunctionName | None = None,
+) -> MlirFunctionHandle:
+    selected = select_mlir_function_name(identity, mlir_function_name)
+    return builder_create_function(builder, selected.value, visibility, arguments, result_types, declaration)
 
 
 def builder_constant(builder: MlirOpBuilder, result: MlirValue, value: MlirAttributeValue) -> MlirOperation | MlirBuilderError:
@@ -140,7 +204,7 @@ def builder_binary(builder: MlirOpBuilder, result: MlirValue, name: MlirOperatio
 
 
 def builder_call(builder: MlirOpBuilder, callee: string, arguments: list[MlirValue], results: list[MlirValue]) -> MlirOperation | MlirBuilderError:
-    attribute = MlirNamedAttribute("callee", string_attribute_value(callee))
+    attribute = MlirNamedAttribute("callee", symbol_attribute(callee))
     return builder_create_operation(builder, operation_name("func", "call"), arguments, results, [attribute])
 
 
@@ -158,4 +222,12 @@ def builder_assert(builder: MlirOpBuilder, condition: MlirValue, message: string
 
 
 def builder_if(builder: MlirOpBuilder, condition: MlirValue, then_region: int, else_region: int) -> MlirOperation | MlirBuilderError:
-    return builder_create_operation(builder, operation_name("scf", "if"), [condition], [], [], [then_region, else_region])
+    operands: list[MlirValue] = [condition]
+    result_types: list[MlirType] = []
+    attributes: list[MlirNamedAttribute] = []
+    properties: list[MlirNamedProperty] = []
+    successors: list[int] = []
+    regions: list[int] = [then_region, else_region]
+    region_requires_terminator: list[bool] = [true, true]
+    state = MlirOperationState(operation_definition("scf", "if"), operands, result_types, attributes, properties, successors, regions, region_requires_terminator, None, false)
+    return builder_create(builder, state)

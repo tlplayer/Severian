@@ -263,14 +263,67 @@ class MlirNamedAttribute:
     value: MlirAttributeValue
 
 
+# Properties are deliberately distinct from discardable attributes. `A` is
+# Severian's Argument category, so this API spells Attribute and Property out.
+class MlirNamedProperty:
+    name: string
+    value: MlirAttributeValue
+
+
+class MlirOperationDefinition:
+    # An operation definition is open data. Dialect libraries create these;
+    # neither the compiler nor the builder owns an operation-name registry.
+    name: MlirOperationName
+    terminator: bool = false
+
+
+def operation_definition(dialect: string, mnemonic: string, terminator: bool = false) -> MlirOperationDefinition:
+    return MlirOperationDefinition(operation_name(dialect, mnemonic), terminator)
+
+
+# This is the universal source-owned construction boundary. It mirrors MLIR's
+# OperationState while retaining expected result types so the source object
+# graph remains typed even when native MLIR performs result inference.
+class MlirOperationState:
+    definition: MlirOperationDefinition
+    operands: list[MlirValue] = []
+    result_types: list[MlirType] = []
+    attributes: list[MlirNamedAttribute] = []
+    properties: list[MlirNamedProperty] = []
+    successors: list[int] = []
+    regions: list[int] = []
+    region_requires_terminator: list[bool] = []
+    location: MlirLocation | None = None
+    infer_results: bool = false
+
+
+def operation_state(
+    definition: MlirOperationDefinition,
+    operands: list[MlirValue] = [],
+    result_types: list[MlirType] = [],
+    attributes: list[MlirNamedAttribute] = [],
+    properties: list[MlirNamedProperty] = [],
+    successors: list[int] = [],
+    regions: list[int] = [],
+    region_requires_terminator: list[bool] = [],
+    location: MlirLocation | None = None,
+    infer_results: bool = false,
+) -> MlirOperationState:
+    return MlirOperationState(definition, operands, result_types, attributes, properties, successors, regions, region_requires_terminator, location, infer_results)
+
+
 class MlirOperation:
     name: MlirOperationName
     operands: list[MlirValue]
     results: list[MlirValue]
     attributes: list[MlirNamedAttribute]
+    properties: list[MlirNamedProperty]
+    successors: list[int]
     regions: list[int]
+    region_requires_terminator: list[bool]
     terminator: bool
     location: MlirLocation | None = None
+    infer_results: bool = false
 
 
 class MlirBlock:
@@ -305,6 +358,54 @@ class MlirFunctionOp:
     body_region: int
     declaration: bool
     location: MlirLocation | None = None
+
+
+class MlirFunctionName:
+    value: string
+
+
+def explicit_mlir_function_name(value: string) -> MlirFunctionName:
+    assert(value != "", "an explicit MLIR function name cannot be empty")
+    return MlirFunctionName(value)
+
+
+class MlirFunctionIdentity:
+    package: string
+    module: string
+    callable: string
+    specialization: list[string]
+    ordinal: int = 0
+
+
+def mlir_identity_component(value: string) -> string:
+    # Length prefixes make the identity unambiguous even when a source name
+    # contains the separator used between components.
+    return string(len(value)) + ":" + value
+
+
+def mlir_function_identity_text(identity: MlirFunctionIdentity) -> string:
+    components: list[string] = [
+        mlir_identity_component(identity.package),
+        mlir_identity_component(identity.module),
+        mlir_identity_component(identity.callable),
+        string(identity.ordinal),
+    ]
+    for argument in identity.specialization:
+        components.append(mlir_identity_component(argument))
+    return components.join("|")
+
+
+def generated_mlir_function_name(identity: MlirFunctionIdentity) -> MlirFunctionName:
+    # The naming policy lives in Severian. The compiler carries the resulting
+    # symbol as ordinary Y/F identity and never searches for this prefix.
+    return MlirFunctionName("__sev_mlir|" + mlir_function_identity_text(identity))
+
+
+def select_mlir_function_name(identity: MlirFunctionIdentity, mlir_function_name: MlirFunctionName | None = None) -> MlirFunctionName:
+    if mlir_function_name != None:
+        assert(mlir_function_name.value != "", "an explicit MLIR function name cannot be empty")
+        return mlir_function_name
+    return generated_mlir_function_name(identity)
 
 
 class MlirProgram:

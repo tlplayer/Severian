@@ -194,7 +194,10 @@ pub struct OperationState {
     operands: Vec<Value>,
     regions: Vec<Region>,
     attributes: Vec<(String, Attribute)>,
+    properties: Vec<(String, Attribute)>,
+    successors: Vec<BlockRef>,
     location: Option<Location>,
+    infer_results: bool,
 }
 
 impl OperationState {
@@ -209,7 +212,10 @@ impl OperationState {
             operands: Vec::new(),
             regions: Vec::new(),
             attributes: Vec::new(),
+            properties: Vec::new(),
+            successors: Vec::new(),
             location: None,
+            infer_results: false,
         })
     }
 
@@ -230,6 +236,21 @@ impl OperationState {
 
     pub fn attribute(mut self, name: impl Into<String>, attribute: Attribute) -> Self {
         self.attributes.push((name.into(), attribute));
+        self
+    }
+
+    pub fn property(mut self, name: impl Into<String>, property: Attribute) -> Self {
+        self.properties.push((name.into(), property));
+        self
+    }
+
+    pub fn successor(mut self, block: BlockRef) -> Self {
+        self.successors.push(block);
+        self
+    }
+
+    pub fn infer_results(mut self) -> Self {
+        self.infer_results = true;
         self
     }
 
@@ -663,6 +684,36 @@ impl ModuleBuilder {
                 )));
             }
         }
+        let mut property_names = std::collections::BTreeSet::new();
+        for (name, property) in &operation.properties {
+            if name.is_empty() || !property_names.insert(name) {
+                return Err(NativeBuilderError(format!(
+                    "MLIR operation `{}` contains an empty or duplicate property `{name}`",
+                    operation.name
+                )));
+            }
+            if attribute_names.contains(name) {
+                return Err(NativeBuilderError(format!(
+                    "MLIR operation `{}` uses `{name}` as both an attribute and a property",
+                    operation.name
+                )));
+            }
+            if !self.owns_context(property.1) {
+                return Err(self.foreign_handle("property"));
+            }
+            if property.0.is_null() {
+                return Err(NativeBuilderError(format!(
+                    "MLIR operation `{}` contains a null property `{name}`",
+                    operation.name
+                )));
+            }
+        }
+        if operation.infer_results && !operation.result_types.is_empty() {
+            return Err(NativeBuilderError(format!(
+                "MLIR operation `{}` cannot supply result types and request result inference",
+                operation.name
+            )));
+        }
         if operation
             .result_types
             .iter()
@@ -702,7 +753,19 @@ impl ModuleBuilder {
                 operation.name
             )));
         }
-        let result_count = operation.result_types.len();
+        if operation
+            .successors
+            .iter()
+            .any(|block| !self.owns_context(block.1))
+        {
+            return Err(self.foreign_handle("successor block"));
+        }
+        if operation.successors.iter().any(|block| block.0.is_null()) {
+            return Err(NativeBuilderError(format!(
+                "MLIR operation `{}` contains a null successor block",
+                operation.name
+            )));
+        }
         let location = self.native_location(operation.location.as_ref());
         let result_types = operation
             .result_types
@@ -718,6 +781,11 @@ impl ModuleBuilder {
             .regions
             .into_iter()
             .map(|region| region.0)
+            .collect::<Vec<_>>();
+        let successors = operation
+            .successors
+            .iter()
+            .map(|block| block.0)
             .collect::<Vec<_>>();
         let attributes = operation
             .attributes
@@ -748,11 +816,19 @@ impl ModuleBuilder {
                 regions.len() as isize,
                 regions.as_ptr(),
             );
+            ffi::mlirOperationStateAddSuccessors(
+                &mut state,
+                successors.len() as isize,
+                successors.as_ptr(),
+            );
             ffi::mlirOperationStateAddAttributes(
                 &mut state,
                 attributes.len() as isize,
                 attributes.as_ptr(),
             );
+            if operation.infer_results {
+                ffi::mlirOperationStateEnableResultTypeInference(&mut state);
+            }
             let created = ffi::mlirOperationCreate(&mut state);
             if created.is_null() {
                 return Err(NativeBuilderError(format!(
@@ -760,6 +836,18 @@ impl ModuleBuilder {
                     operation.name
                 )));
             }
+            for (name, property) in &operation.properties {
+                let name_ref = ffi::string_ref(name);
+                if !ffi::mlirOperationHasInherentAttributeByName(created, name_ref) {
+                    ffi::mlirOperationDestroy(created);
+                    return Err(NativeBuilderError(format!(
+                        "MLIR operation `{}` has no inherent property `{name}`",
+                        operation.name
+                    )));
+                }
+                ffi::mlirOperationSetInherentAttributeByName(created, name_ref, property.0);
+            }
+            let result_count = ffi::mlirOperationGetNumResults(created) as usize;
             Ok(Operation {
                 raw: created,
                 result_count,
@@ -1110,7 +1198,80 @@ mod tests {
             )
             .unwrap();
         assert!(builder.result(&constant, 1).is_err());
+        assert!(builder
+            .create_operation(
+                OperationState::new("arith", "addi")
+                    .unwrap()
+                    .result(builder.integer_type(32))
+                    .infer_results(),
+            )
+            .is_err());
         assert!(builder.take_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn operation_state_carries_properties_successors_and_result_inference() {
+        let parse_calls = crate::ffi::module_parse_calls();
+        let builder = ModuleBuilder::new().unwrap();
+        let i32_type = builder.integer_type(32);
+        let body = builder.region();
+        let entry = builder.block();
+        let left = builder.add_argument(&entry, i32_type, None).unwrap();
+        let right = builder.add_argument(&entry, i32_type, None).unwrap();
+        let entry = builder.append_block(&body, entry).unwrap();
+        let exit = builder.append_block(&body, builder.block()).unwrap();
+
+        let sum = builder
+            .create_operation(
+                OperationState::new("arith", "addi")
+                    .unwrap()
+                    .operand(left)
+                    .operand(right)
+                    .infer_results(),
+            )
+            .unwrap();
+        let sum_value = builder.result(&sum, 0).unwrap();
+        builder.append_operation(entry, sum).unwrap();
+
+        let branch = builder
+            .create_operation(OperationState::new("cf", "br").unwrap().successor(exit))
+            .unwrap();
+        builder.append_operation(entry, branch).unwrap();
+
+        let zero = builder
+            .create_operation(
+                OperationState::new("arith", "constant")
+                    .unwrap()
+                    .result(i32_type)
+                    .property("value", builder.integer_attribute(i32_type, 0).unwrap()),
+            )
+            .unwrap();
+        builder.append_operation(exit, zero).unwrap();
+        let returned = builder
+            .create_operation(
+                OperationState::new("func", "return")
+                    .unwrap()
+                    .operand(sum_value),
+            )
+            .unwrap();
+        builder.append_operation(exit, returned).unwrap();
+
+        let signature = builder
+            .function_type(&[i32_type, i32_type], &[i32_type])
+            .unwrap();
+        let function = builder
+            .create_operation(
+                OperationState::new("func", "func")
+                    .unwrap()
+                    .attribute("sym_name", builder.string_attribute("state_contract"))
+                    .attribute("function_type", builder.type_attribute(signature).unwrap())
+                    .region(body),
+            )
+            .unwrap();
+        builder.append_to_module(function).unwrap();
+
+        assert!(builder.verify(), "{:?}", builder.take_diagnostics());
+        assert_eq!(crate::ffi::module_parse_calls(), parse_calls);
     }
 
     #[test]

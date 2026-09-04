@@ -12,12 +12,11 @@ enum MlirVerificationError:
     MissingBlock(region: int)
     UndefinedValue(value: int)
     InvalidOperationName(name: string)
-    MissingAttribute(operation: string, attribute: string)
-    InvalidArity(operation: string)
-    TypeMismatch(operation: string)
-    InvalidCondition(operation: string)
-    UnknownCallee(callee: string)
-    CallSignatureMismatch(callee: string)
+    DuplicateAttribute(operation: string, attribute: string)
+    DuplicateProperty(operation: string, property: string)
+    AttributePropertyCollision(operation: string, name: string)
+    MissingSuccessor(operation: string, block: int)
+    InvalidRegionContract(operation: string)
     ReturnSignatureMismatch(function: string)
     OperationAfterTerminator(block: int)
     MissingTerminator(region: int)
@@ -87,28 +86,6 @@ def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationErro
     return true
 
 
-def has_string_attribute(operation: MlirOperation, name: string) -> bool:
-    for attribute in operation.attributes:
-        if attribute.name == name and attribute_kind_name(attribute.value.kind) == "string":
-            return true
-    return false
-
-
-def has_attribute(operation: MlirOperation, name: string) -> bool:
-    for attribute in operation.attributes:
-        if attribute.name == name:
-            return true
-    return false
-
-
-def required_string_attribute(operation: MlirOperation, name: string) -> string:
-    for attribute in operation.attributes:
-        if attribute.name == name and attribute_kind_name(attribute.value.kind) == "string":
-            return attribute.value.text
-    assert(false, "validated MLIR operation is missing a string attribute")
-    return ""
-
-
 def copy_values(values: list[int]) -> list[int]:
     copied: list[int] = []
     for value in values:
@@ -120,15 +97,6 @@ def region_index(program: MlirProgram, id: int) -> int:
     index := 0
     for region in program.regions:
         if region.id == id:
-            return index
-        index += 1
-    return -1
-
-
-def function_index_by_name(program: MlirProgram, name: string) -> int:
-    index := 0
-    for function in program.functions:
-        if function.name == name:
             return index
         index += 1
     return -1
@@ -146,58 +114,30 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
         validate_type(operand.type_id)
     for result in operation.results:
         validate_type(result.type_id)
+    attribute_names: list[string] = []
     for attribute in operation.attributes:
+        if attribute.name == "" or attribute.name in attribute_names:
+            return error(DuplicateAttribute(name, attribute.name))
+        attribute_names.append(attribute.name)
         validate_attribute(attribute.value)
-    if name == "arith.constant":
-        if len(operation.operands) != 0 or len(operation.results) != 1:
-            return error(InvalidArity(name))
-        if not has_attribute(operation, "value"):
-            return error(MissingAttribute(name, "value"))
-    if name == "arith.addi" or name == "arith.addf" or name == "arith.subi" or name == "arith.subf" or name == "arith.muli" or name == "arith.mulf" or name == "arith.divsi" or name == "arith.divui" or name == "arith.divf" or name == "arith.remsi" or name == "arith.remui" or name == "arith.andi" or name == "arith.ori" or name == "arith.xori":
-        if len(operation.operands) != 2 or len(operation.results) != 1:
-            return error(InvalidArity(name))
-        if not same_type(operation.operands[0].type_id, operation.operands[1].type_id) or not same_type(operation.operands[0].type_id, operation.results[0].type_id):
-            return error(TypeMismatch(name))
-    if name == "arith.cmpi" or name == "arith.cmpf":
-        if len(operation.operands) != 2 or len(operation.results) != 1:
-            return error(InvalidArity(name))
-        if not same_type(operation.operands[0].type_id, operation.operands[1].type_id) or not is_boolean(operation.results[0].type_id):
-            return error(TypeMismatch(name))
-        if not has_string_attribute(operation, "predicate"):
-            return error(MissingAttribute(name, "predicate"))
-    if name == "func.call":
-        if not has_string_attribute(operation, "callee"):
-            return error(MissingAttribute(name, "callee"))
-        callee = required_string_attribute(operation, "callee")
-        function_index = function_index_by_name(program, callee)
-        if function_index < 0:
-            return error(UnknownCallee(callee))
-        function = program.functions[function_index]
-        if len(function.arguments) != len(operation.operands) or len(function.result_types) != len(operation.results):
-            return error(CallSignatureMismatch(callee))
-        index := 0
-        while index < int(len(operation.operands)):
-            if not same_type(function.arguments[index].type_id, operation.operands[index].type_id):
-                return error(CallSignatureMismatch(callee))
-            index += 1
-        index = 0
-        while index < int(len(operation.results)):
-            if not same_type(function.result_types[index], operation.results[index].type_id):
-                return error(CallSignatureMismatch(callee))
-            index += 1
-    if name == "func.return" or name == "scf.yield":
-        if len(operation.results) != 0 or not operation.terminator:
-            return error(InvalidArity(name))
-    if name == "cf.assert":
-        if len(operation.operands) != 1 or not is_boolean(operation.operands[0].type_id):
-            return error(InvalidCondition(name))
-        if not has_string_attribute(operation, "msg"):
-            return error(MissingAttribute(name, "msg"))
-    if name == "scf.if":
-        if len(operation.operands) != 1 or not is_boolean(operation.operands[0].type_id):
-            return error(InvalidCondition(name))
-        if len(operation.regions) != 2:
-            return error(InvalidArity(name))
+    property_names: list[string] = []
+    for property in operation.properties:
+        if property.name == "" or property.name in property_names:
+            return error(DuplicateProperty(name, property.name))
+        if property.name in attribute_names:
+            return error(AttributePropertyCollision(name, property.name))
+        property_names.append(property.name)
+        validate_attribute(property.value)
+    if len(operation.region_requires_terminator) != len(operation.regions):
+        return error(InvalidRegionContract(name))
+    for successor in operation.successors:
+        found := false
+        for region in program.regions:
+            for block in region.blocks:
+                if block.id == successor:
+                    found = true
+        if not found:
+            return error(MissingSuccessor(name, successor))
     return true
 
 
@@ -206,16 +146,17 @@ def validate_operation(program: MlirProgram, operation: MlirOperation, defined: 
         if operand.id not in defined:
             return error(UndefinedValue(operand.id))
     validate_operation_signature(program, operation)
-    expected = "scf.yield" if operation_name_text(operation.name) == "scf.if" else ""
+    region_index := 0
     for region in operation.regions:
         if region in owned_regions:
             return error(DuplicateRegionOwnership(region))
         owned_regions.append(region)
-        validate_region(program, region, copy_values(defined), expected, owned_regions)
+        validate_region(program, region, copy_values(defined), operation.region_requires_terminator[region_index], owned_regions)
+        region_index += 1
     return true
 
 
-def validate_region(program: MlirProgram, region_id: int, inherited: list[int], expected_terminator: string, owned_regions: list[int]) -> bool | MlirVerificationError:
+def validate_region(program: MlirProgram, region_id: int, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
     index = region_index(program, region_id)
     if index < 0:
         return error(MissingRegion(region_id))
@@ -229,23 +170,18 @@ def validate_region(program: MlirProgram, region_id: int, inherited: list[int], 
                 return error(DuplicateValue(argument.id))
             defined.append(argument.id)
         terminated := false
-        actual_terminator := ""
         for operation in block.operations:
             if terminated:
                 return error(OperationAfterTerminator(block.id))
             validate_operation(program, operation, defined, owned_regions)
             if operation.terminator:
                 terminated = true
-                actual_terminator = operation_name_text(operation.name)
             for result in operation.results:
                 if result.id in defined:
                     return error(DuplicateValue(result.id))
                 defined.append(result.id)
-        if expected_terminator != "":
-            if not terminated:
-                return error(MissingTerminator(region_id))
-            if actual_terminator != expected_terminator:
-                return error(WrongTerminator(region_id, expected_terminator, actual_terminator))
+        if requires_terminator and not terminated:
+            return error(MissingTerminator(region_id))
     return true
 
 
@@ -273,7 +209,7 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
             if function.body_region in owned_regions:
                 return error(DuplicateRegionOwnership(function.body_region))
             owned_regions.append(function.body_region)
-            validate_region(program, function.body_region, [], "func.return", owned_regions)
+            validate_region(program, function.body_region, [], true, owned_regions)
             region = program.regions[region_index(program, function.body_region)]
             entry = region.blocks[0]
             if len(entry.arguments) != len(function.arguments):

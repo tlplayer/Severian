@@ -78,3 +78,64 @@ test "verification rejects a region with multiple owners":
     shared_region = builder.program.functions[function.function].body_region
     builder.program.functions.append(MlirFunctionOp("duplicate_owner", public_visibility(), [], [], shared_region, false, None))
     assert(not program_is_valid(builder.program), "native regions must have exactly one owner")
+
+
+test "operation state is the canonical open construction boundary":
+    builder = MlirOpBuilder(0)
+    left = builder_value(builder, 0, integer_type(32))
+    right = builder_value(builder, 1, integer_type(32))
+    function = builder_create_function(builder, "state_add", public_visibility(), [left, right], [integer_type(32)])
+    builder_set_insertion_point(builder, function.entry)
+
+    attributes: list[MlirNamedAttribute] = []
+    properties: list[MlirNamedProperty] = [MlirNamedProperty("severian.contract", string_attribute_value("same-type"))]
+    successors: list[int] = []
+    regions: list[int] = []
+    region_requires_terminator: list[bool] = []
+    state = MlirOperationState(
+        operation_definition("arith", "addi"),
+        [left, right],
+        [integer_type(32)],
+        attributes,
+        properties,
+        successors,
+        regions,
+        region_requires_terminator,
+        None,
+        false,
+    )
+    builder_create(builder, state)
+    operation = builder.program.regions[0].blocks[0].operations[0]
+    return_values: list[MlirValue] = [operation.results[0]]
+    builder_return(builder, return_values)
+
+    validate(builder.program)
+    assert(operation_name_text(operation.name) == "arith.addi", "operation identity remains source data")
+    assert(len(operation.results) == 1 and operation.results[0].type_id.scalar.bits == 32, "the builder creates typed SSA results from state")
+    assert(operation.properties[0].name == "severian.contract", "properties do not collapse into attributes")
+
+
+test "generated MLIR function names are stable and specialization-aware":
+    integer_identity = MlirFunctionIdentity("core", "numeric", "add", ["i32"], 0)
+    repeated_identity = MlirFunctionIdentity("core", "numeric", "add", ["i32"], 0)
+    floating_identity = MlirFunctionIdentity("core", "numeric", "add", ["f32"], 0)
+
+    integer_name = generated_mlir_function_name(integer_identity)
+    repeated_name = generated_mlir_function_name(repeated_identity)
+    floating_name = generated_mlir_function_name(floating_identity)
+
+    assert(integer_name.value == repeated_name.value, "the same resolved F identity must generate the same MLIR symbol")
+    assert(integer_name.value != floating_name.value, "generic specializations must generate distinct MLIR symbols")
+
+
+test "explicit MLIR function names are optional source-owned data":
+    builder = MlirOpBuilder(0)
+    identity = MlirFunctionIdentity("application", "entry", "lower", [], 0)
+    explicit = explicit_mlir_function_name("application_entry")
+    function = builder_create_generated_function(builder, identity, public_visibility(), [], [], false, explicit)
+    builder_set_insertion_point(builder, function.entry)
+    builder_return(builder, [])
+
+    validate(builder.program)
+    assert(function.name.value == "application_entry", "an explicit mlir_function_name is preserved")
+    assert(builder.program.functions[0].name == "application_entry", "the compiler does not replace the source-selected name")

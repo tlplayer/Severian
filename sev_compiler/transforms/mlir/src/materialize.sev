@@ -250,11 +250,20 @@ def materialize_region_operations(session: native.NativeMlirSession, tables: Nat
                 native.native_operation_draft_operand(draft, value)
             for attribute in operation.attributes:
                 native.native_operation_draft_attribute(draft, attribute.name, materialize_attribute(session, tables, attribute.value))
+            for property in operation.properties:
+                native.native_operation_state_property(draft, property.name, materialize_attribute(session, tables, property.value))
+            for successor in operation.successors:
+                target = tables.blocks.get(successor)
+                if target == None:
+                    return error(MissingNativeBlock(successor))
+                native.native_operation_state_successor(draft, target)
             for nested_region in operation.regions:
                 owned = tables.regions.get(nested_region)
                 if owned == None:
                     return error(MissingNativeRegion(nested_region))
                 native.native_operation_draft_region(draft, owned)
+            if operation.infer_results:
+                native.native_operation_state_infer_results(draft)
             materialized = native.native_operation_draft_finish(session, draft)
             result_index := 0
             for result in operation.results:

@@ -1,9 +1,9 @@
 #![allow(unsafe_code)]
 #![allow(dead_code)]
 
-#[path = "../../../../compiler/transforms/mlir/src/ffi.rs"]
+#[path = "../../../../rust_compiler/transforms/mlir/src/ffi.rs"]
 mod ffi;
-#[path = "../../../../compiler/transforms/mlir/src/native.rs"]
+#[path = "../../../../rust_compiler/transforms/mlir/src/native.rs"]
 mod native;
 
 use native::{
@@ -56,7 +56,10 @@ struct OperationDraft {
     operands: Vec<Value>,
     regions: Vec<*mut c_void>,
     attributes: Vec<(String, Attribute)>,
+    properties: Vec<(String, Attribute)>,
+    successors: Vec<BlockRef>,
     location: Option<Location>,
+    infer_results: bool,
 }
 
 impl Session {
@@ -120,7 +123,9 @@ unsafe fn text(value: *const c_char) -> String {
     if value.is_null() {
         return String::new();
     }
-    unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[no_mangle]
@@ -179,7 +184,9 @@ pub unsafe extern "C" fn __sev_mlir_type_float_v1(
         (false, 32) => session.builder.f32_type(),
         (false, 64) => session.builder.f64_type(),
         _ => {
-            session.fail(format!("unsupported native floating type: brain={brain}, bits={bits}"));
+            session.fail(format!(
+                "unsupported native floating type: brain={brain}, bits={bits}"
+            ));
             return std::ptr::null_mut();
         }
     };
@@ -226,30 +233,21 @@ pub unsafe extern "C" fn __sev_mlir_type_draft_v1(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn __sev_mlir_type_draft_dimension_v1(
-    draft: *mut c_void,
-    dimension: i64,
-) {
+pub unsafe extern "C" fn __sev_mlir_type_draft_dimension_v1(draft: *mut c_void, dimension: i64) {
     unsafe { &mut *draft.cast::<TypeDraft>() }
         .dimensions
         .push(dimension);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn __sev_mlir_type_draft_input_v1(
-    draft: *mut c_void,
-    ty: *mut c_void,
-) {
+pub unsafe extern "C" fn __sev_mlir_type_draft_input_v1(draft: *mut c_void, ty: *mut c_void) {
     unsafe { &mut *draft.cast::<TypeDraft>() }
         .inputs
         .push(unsafe { copied(ty) });
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn __sev_mlir_type_draft_result_v1(
-    draft: *mut c_void,
-    ty: *mut c_void,
-) {
+pub unsafe extern "C" fn __sev_mlir_type_draft_result_v1(draft: *mut c_void, ty: *mut c_void) {
     unsafe { &mut *draft.cast::<TypeDraft>() }
         .results
         .push(unsafe { copied(ty) });
@@ -263,12 +261,18 @@ pub unsafe extern "C" fn __sev_mlir_type_draft_finish_v1(
     let session = unsafe { session(value) };
     let draft = unsafe { &*draft.cast::<TypeDraft>() };
     let result = match draft.kind {
-        0 => session.builder.ranked_tensor_type(&draft.dimensions, draft.element),
+        0 => session
+            .builder
+            .ranked_tensor_type(&draft.dimensions, draft.element),
         1 => session.builder.unranked_tensor_type(draft.element),
-        2 => session.builder.memref_type(&draft.dimensions, draft.element),
+        2 => session
+            .builder
+            .memref_type(&draft.dimensions, draft.element),
         3 => session.builder.unranked_memref_type(draft.element),
         4 => session.builder.function_type(&draft.inputs, &draft.results),
-        _ => Err(native::NativeBuilderError("unknown native type draft kind".into())),
+        _ => Err(native::NativeBuilderError(
+            "unknown native type draft kind".into(),
+        )),
     };
     match result {
         Ok(ty) => session.keep_type(ty),
@@ -309,7 +313,9 @@ pub unsafe extern "C" fn __sev_mlir_location_unknown_v1(value: *mut c_void) -> *
 #[no_mangle]
 pub unsafe extern "C" fn __sev_mlir_region_v1(value: *mut c_void) -> *mut c_void {
     let session = unsafe { session(value) };
-    session.regions.push(Box::new(Some(session.builder.region())));
+    session
+        .regions
+        .push(Box::new(Some(session.builder.region())));
     session.regions.last_mut().unwrap().as_mut() as *mut Option<Region> as *mut c_void
 }
 
@@ -379,7 +385,9 @@ pub unsafe extern "C" fn __sev_mlir_attribute_string_v1(
     text_value: *const c_char,
 ) -> *mut c_void {
     let session = unsafe { session(value) };
-    let attribute = session.builder.string_attribute(&unsafe { text(text_value) });
+    let attribute = session
+        .builder
+        .string_attribute(&unsafe { text(text_value) });
     session.keep_attribute(attribute)
 }
 
@@ -389,7 +397,10 @@ pub unsafe extern "C" fn __sev_mlir_attribute_symbol_v1(
     text_value: *const c_char,
 ) -> *mut c_void {
     let session = unsafe { session(value) };
-    match session.builder.symbol_attribute(&unsafe { text(text_value) }) {
+    match session
+        .builder
+        .symbol_attribute(&unsafe { text(text_value) })
+    {
         Ok(attribute) => session.keep_attribute(attribute),
         Err(error) => {
             session.fail(error);
@@ -405,7 +416,10 @@ pub unsafe extern "C" fn __sev_mlir_attribute_integer_v1(
     integer: i64,
 ) -> *mut c_void {
     let session = unsafe { session(value) };
-    match session.builder.integer_attribute(unsafe { copied(ty) }, integer) {
+    match session
+        .builder
+        .integer_attribute(unsafe { copied(ty) }, integer)
+    {
         Ok(attribute) => session.keep_attribute(attribute),
         Err(error) => {
             session.fail(error);
@@ -421,7 +435,10 @@ pub unsafe extern "C" fn __sev_mlir_attribute_float_v1(
     floating: f64,
 ) -> *mut c_void {
     let session = unsafe { session(value) };
-    match session.builder.float_attribute(unsafe { copied(ty) }, floating) {
+    match session
+        .builder
+        .float_attribute(unsafe { copied(ty) }, floating)
+    {
         Ok(attribute) => session.keep_attribute(attribute),
         Err(error) => {
             session.fail(error);
@@ -609,16 +626,16 @@ pub unsafe extern "C" fn __sev_mlir_operation_draft_v1(
         operands: vec![],
         regions: vec![],
         attributes: vec![],
+        properties: vec![],
+        successors: vec![],
         location: unsafe { &*location.cast::<Option<Location>>() }.clone(),
+        infer_results: false,
     }));
     session.operation_drafts.last_mut().unwrap().as_mut() as *mut OperationDraft as *mut c_void
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn __sev_mlir_operation_draft_result_v1(
-    draft: *mut c_void,
-    ty: *mut c_void,
-) {
+pub unsafe extern "C" fn __sev_mlir_operation_draft_result_v1(draft: *mut c_void, ty: *mut c_void) {
     unsafe { &mut *draft.cast::<OperationDraft>() }
         .results
         .push(unsafe { copied(ty) });
@@ -656,6 +673,32 @@ pub unsafe extern "C" fn __sev_mlir_operation_draft_attribute_v1(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn __sev_mlir_operation_state_property_v1(
+    draft: *mut c_void,
+    name: *const c_char,
+    property: *mut c_void,
+) {
+    unsafe { &mut *draft.cast::<OperationDraft>() }
+        .properties
+        .push((unsafe { text(name) }, unsafe { copied(property) }));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_mlir_operation_state_successor_v1(
+    draft: *mut c_void,
+    block: *mut c_void,
+) {
+    unsafe { &mut *draft.cast::<OperationDraft>() }
+        .successors
+        .push(unsafe { copied(block) });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_mlir_operation_state_infer_results_v1(draft: *mut c_void) {
+    unsafe { &mut *draft.cast::<OperationDraft>() }.infer_results = true;
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn __sev_mlir_operation_draft_finish_v1(
     value: *mut c_void,
     draft: *mut c_void,
@@ -669,14 +712,24 @@ pub unsafe extern "C" fn __sev_mlir_operation_draft_finish_v1(
             return std::ptr::null_mut();
         }
     };
-    for result in &draft.results {
-        state = state.result(*result);
+    if draft.infer_results {
+        state = state.infer_results();
+    } else {
+        for result in &draft.results {
+            state = state.result(*result);
+        }
     }
     for operand in &draft.operands {
         state = state.operand(*operand);
     }
     for (name, attribute) in &draft.attributes {
         state = state.attribute(name, *attribute);
+    }
+    for (name, property) in &draft.properties {
+        state = state.property(name, *property);
+    }
+    for successor in &draft.successors {
+        state = state.successor(*successor);
     }
     if let Some(location) = &draft.location {
         state = state.location(location.clone());

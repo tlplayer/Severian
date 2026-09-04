@@ -169,12 +169,20 @@ unsafe extern "C" {
         count: isize,
         regions: *const MlirRegion,
     );
+    pub fn mlirOperationStateAddSuccessors(
+        state: *mut MlirOperationState,
+        count: isize,
+        successors: *const MlirBlock,
+    );
     pub fn mlirOperationStateAddAttributes(
         state: *mut MlirOperationState,
         count: isize,
         attributes: *const MlirNamedAttribute,
     );
+    pub fn mlirOperationStateEnableResultTypeInference(state: *mut MlirOperationState);
     pub fn mlirOperationCreate(state: *mut MlirOperationState) -> MlirOperation;
+    pub fn mlirOperationDestroy(operation: MlirOperation);
+    pub fn mlirOperationGetNumResults(operation: MlirOperation) -> isize;
     pub fn mlirOperationGetResult(operation: MlirOperation, position: isize) -> MlirValue;
     pub fn mlirOperationVerify(operation: MlirOperation) -> bool;
     pub fn mlirOperationGetAttributeByName(
@@ -182,6 +190,15 @@ unsafe extern "C" {
         name: MlirStringRef,
     ) -> MlirAttribute;
     pub fn mlirOperationSetAttributeByName(
+        operation: MlirOperation,
+        name: MlirStringRef,
+        attribute: MlirAttribute,
+    );
+    pub fn mlirOperationHasInherentAttributeByName(
+        operation: MlirOperation,
+        name: MlirStringRef,
+    ) -> bool;
+    pub fn mlirOperationSetInherentAttributeByName(
         operation: MlirOperation,
         name: MlirStringRef,
         attribute: MlirAttribute,
