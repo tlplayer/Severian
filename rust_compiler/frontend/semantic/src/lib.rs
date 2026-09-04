@@ -10463,8 +10463,10 @@ impl Analyzer<'_> {
             .zip(&instance.source_fields)
             .zip(supplied)
             .map(|((field, source), supplied)| {
-                if let Some(value) = supplied.or_else(|| source.default.clone()) {
+                if let Some(value) = supplied {
                     self.expression(&value, Some(field.ty))
+                } else if let Some(value) = &source.default {
+                    self.class_field_default(instance.ty, value, field.ty)
                 } else if allow_implicit_zero {
                     self.default_expression(field.ty, span)
                 } else {
@@ -10479,6 +10481,28 @@ impl Analyzer<'_> {
                 }
             })
             .collect()
+    }
+
+    fn class_field_default(
+        &mut self,
+        class: TypeId,
+        value: &AstExpression,
+        expected: TypeId,
+    ) -> Result<Expression, Diagnostic> {
+        // Defaults retain the constructor names visible at their declaration.
+        // Explicit field arguments are still evaluated in the caller's scope.
+        let scope = self
+            .class_defining_modules
+            .get(&class)
+            .and_then(|module| self.module_class_scopes.get(module))
+            .cloned();
+        let Some(scope) = scope else {
+            return self.expression(value, Some(expected));
+        };
+        let previous = std::mem::replace(&mut self.class_instances, scope);
+        let result = self.expression(value, Some(expected));
+        self.class_instances = previous;
+        result
     }
 
     fn array_constructor_fields(

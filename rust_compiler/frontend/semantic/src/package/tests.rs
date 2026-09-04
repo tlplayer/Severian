@@ -354,6 +354,36 @@ fn package_signatures_preserve_named_parameters_and_defaults() {
 }
 
 #[test]
+fn imported_class_defaults_resolve_constructors_in_the_defining_module() {
+    let root = temporary();
+    std::fs::write(root.join("ids.sev"), "class HirId:\n    index: u32\n").unwrap();
+    std::fs::write(
+        root.join("expression.sev"),
+        "import \"ids.sev\"\nclass Expression:\n    id: HirId = HirId(7)\n    label: string = \"default\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("wrapper.sev"),
+        "import \"expression.sev\" as syntax\nclass Wrapper:\n    expression: syntax.Expression = syntax.Expression()\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    for source in [
+        "import \"expression.sev\" as syntax\ndef selected() -> u32:\n    return syntax.Expression().id.index\n",
+        // The caller's constructor remains visible in explicit arguments and
+        // after a nested default returns, but cannot shadow the default's ID.
+        "import \"wrapper.sev\" as wrapper\nimport \"expression.sev\" as syntax\nclass HirId:\n    label: string\ndef selected() -> u32:\n    wrapped = wrapper.Wrapper()\n    expression = syntax.Expression(label=HirId(\"argument\").label)\n    after = HirId(\"after\")\n    return wrapped.expression.id.index + expression.id.index\n",
+    ] {
+        std::fs::write(root.join("app.sev"), source).unwrap();
+        let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+        let typed = analyze_package(&graph, &universal).unwrap();
+        let mut mir = severian_mir::build(&typed.hir).unwrap();
+        severian_mir::run_required_pipeline(&mut mir, &universal).unwrap();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_union_parameters_preserve_members_and_accept_injections() {
     let root = temporary();
     std::fs::write(
