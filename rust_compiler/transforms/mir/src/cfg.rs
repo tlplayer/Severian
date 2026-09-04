@@ -677,18 +677,14 @@ impl BodyBuilder {
             severian_hir::Statement::Try {
                 body,
                 catch_binding,
+                catch_type,
                 catch_body,
                 ..
             } => {
-                let binding = module
-                    .bindings
-                    .iter()
-                    .find(|binding| binding.id == *catch_binding)
-                    .expect("typed HIR catch binding exists");
-                let local = self.local(binding.type_id, false, false);
+                let local = self.local(*catch_type, false, false);
                 let catch_place = Place::local(local);
                 self.push(Statement::StorageLive(local));
-                self.variables.insert(binding.variable, catch_place.clone());
+                self.variables.insert(severian_hir::VariableId(catch_binding.0), catch_place.clone());
                 self.bindings.insert(*catch_binding, catch_place.clone());
 
                 let caught = self.block();
@@ -864,6 +860,20 @@ impl BodyBuilder {
         }
     }
 
+    fn inherit_expression_values(&mut self, targets: &[BlockId]) {
+        // These values were evaluated before the branch, so they dominate
+        // both successors and the join. Do not inherit arm-local values.
+        let available = self.expressions.iter()
+            .filter(|((block, _), _)| *block == self.current)
+            .map(|((_, id), place)| (*id, place.clone()))
+            .collect::<Vec<_>>();
+        for target in targets {
+            for (id, place) in &available {
+                self.expressions.insert((*target, *id), place.clone());
+            }
+        }
+    }
+
     fn expression(&mut self, expression: &severian_hir::Expression) -> Place {
         if let Some(place) = self.expressions.get(&(self.current, expression.id)) {
             return place.clone();
@@ -1019,6 +1029,7 @@ impl BodyBuilder {
                 let present = self.block();
                 let absent = self.block();
                 let join = self.block();
+                self.inherit_expression_values(&[present, absent, join]);
                 self.terminate(Terminator::Branch {
                     condition,
                     then_block: present,
@@ -1110,6 +1121,7 @@ impl BodyBuilder {
                 let evaluate_right = self.block();
                 let short_circuit = self.block();
                 let join = self.block();
+                self.inherit_expression_values(&[evaluate_right, short_circuit, join]);
                 let (then_block, else_block) = if *operator == BinaryOperator::And {
                     (evaluate_right, short_circuit)
                 } else { (short_circuit, evaluate_right) };
@@ -1165,6 +1177,7 @@ impl BodyBuilder {
                 }
                 let continuation = self.block();
                 let callee = self.callee(callee);
+                self.inherit_expression_values(&[continuation]);
                 self.terminate(Terminator::Call {
                     callee,
                     arguments,

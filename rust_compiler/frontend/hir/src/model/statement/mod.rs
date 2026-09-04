@@ -53,6 +53,7 @@ pub enum Statement {
     Try {
         body: Block,
         catch_binding: BindingId,
+        catch_type: crate::TypeId,
         catch_body: Block,
         span: Span,
     },

@@ -830,17 +830,6 @@ pub(crate) fn analyze_with_package_functions(
         }
         if let Some(fallible) = analyzer.fallible_types.get(&result_type).copied() {
             let catch_binding = analyzer.new_binding_id();
-            let catch_variable = severian_hir::VariableId(catch_binding.0);
-            let catch_value = analyzer.default_expression(fallible.error, ast_function.span)?;
-            module.bindings.push(Binding {
-                id: catch_binding,
-                variable: catch_variable,
-                type_id: fallible.error,
-                value: catch_value,
-                mutable: false,
-                preserve_error: false,
-                span: ast_function.span,
-            });
             let error = Expression {
                 id: analyzer.next_id(),
                 type_id: fallible.error,
@@ -882,6 +871,7 @@ pub(crate) fn analyze_with_package_functions(
                 statements: vec![Statement::Try {
                     body,
                     catch_binding,
+                    catch_type: fallible.error,
                     catch_body: Block {
                         statements: vec![Statement::Return(Some(propagated))],
                     },
@@ -2918,22 +2908,13 @@ impl Analyzer<'_> {
                 }
                 self.names
                     .insert(catch_binding.clone(), (id, variable, error_type));
-                let default = self.default_expression(error_type, *span)?;
-                bindings.push(Binding {
-                    id,
-                    variable,
-                    type_id: error_type,
-                    value: default,
-                    mutable: false,
-                    preserve_error: false,
-                    span: *span,
-                });
                 let catch_body = self.block(catch_body, bindings, result_type)?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
                 Ok(Statement::Try {
                     body,
                     catch_binding: id,
+                    catch_type: error_type,
                     catch_body,
                     span: *span,
                 })
@@ -4197,6 +4178,10 @@ impl Analyzer<'_> {
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
                 let outer_substitutions = self.value_substitutions.clone();
+                let optional_guard = self.optional_guard_projection(condition_ast);
+                if let Some((name, true, value)) = &optional_guard {
+                    self.value_substitutions.insert(name.clone(), value.clone());
+                }
                 if let AstExpressionKind::Binary {
                     operator: AstBinaryOperator::Identity,
                     left,
@@ -4253,6 +4238,9 @@ impl Analyzer<'_> {
                 self.names.clone_from(&outer_names);
                 self.declarations.clone_from(&outer_declarations);
                 self.value_substitutions.clone_from(&outer_substitutions);
+                if let Some((name, false, value)) = &optional_guard {
+                    self.value_substitutions.insert(name.clone(), value.clone());
+                }
                 let else_block = self.block(else_block, bindings, result_type)?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
@@ -4494,6 +4482,39 @@ impl Analyzer<'_> {
         }))
     }
 
+    fn optional_guard_projection(
+        &mut self, condition: &AstExpression,
+    ) -> Option<(String, bool, Expression)> {
+        let AstExpressionKind::Binary { operator, left, right } = &condition.kind else { return None; };
+        let present_when_true = match *operator {
+            AstBinaryOperator::NotEqual => true,
+            AstBinaryOperator::Equal | AstBinaryOperator::Identity => false,
+            _ => return None,
+        };
+        let AstExpressionKind::Name(name) = &left.kind else { return None; };
+        if !matches!(&right.kind, AstExpressionKind::Literal(AstLiteral::None))
+            && !matches!(&right.kind, AstExpressionKind::Name(name) if name == "absent") {
+            return None;
+        }
+        let (binding, variable, ty) = *self.names.get(name)?;
+        // An immutable sum's discriminant cannot change during this branch.
+        // Mutable refinements require invalidation/loan tracking, not an
+        // unchecked projection retained after reassignment.
+        if self.mutable_variables.contains(&variable) { return None; }
+        let none = self.types.resolve_name("None")?;
+        let members = self.union_types.get(&ty)?;
+        if !members.contains(&none) { return None; }
+        let present = members.iter().enumerate().filter(|(_, member)| **member != none)
+            .map(|(index, member)| (index as u32 + 1, *member)).collect::<Vec<_>>();
+        let [(index, member)] = present.as_slice() else { return None; };
+        let (index, member) = (*index, *member);
+        let object = Expression { id: self.next_id(), type_id: ty,
+            kind: ExpressionKind::Binding(binding), span: left.span };
+        let value = Expression { id: self.next_id(), type_id: member,
+            kind: ExpressionKind::Field { object: Box::new(object), index }, span: left.span };
+        Some((name.clone(), present_when_true, value))
+    }
+
     fn match_statement(
         &mut self,
         subject: &AstExpression,
@@ -4509,7 +4530,19 @@ impl Analyzer<'_> {
             .values()
             .any(|instance| instance.ty == subject_type)
         {
-            return self.enum_match_statement(subject, cases, span, bindings, result_type);
+            // Freeze the scrutinee once. Its tag and payload must come from
+            // the same evaluation, even when a later arm is selected.
+            let id = self.new_binding_id();
+            bindings.push(Binding {
+                id, variable: severian_hir::VariableId(id.0), type_id: subject_type,
+                value: subject, mutable: false, preserve_error: false, span,
+            });
+            let subject = Expression { id: self.next_id(), type_id: subject_type,
+                kind: ExpressionKind::Binding(id), span };
+            let matched = self.enum_match_statement(subject, cases, span, bindings, result_type)?;
+            return Ok(Statement::Sequence(Block {
+                statements: vec![Statement::Binding(id), matched],
+            }));
         }
         let outer_names = self.names.clone();
         let outer_declarations = self.declarations.clone();
@@ -5809,11 +5842,30 @@ impl Analyzer<'_> {
             let expression = self.expression_inner(ast, None)?;
             return self.box_any_value(expression, ast.span);
         }
-        let expression = self.expression_inner(ast, expected)?;
+        // A structural literal in an optional context is checked against its
+        // present member, then injected into the union by ordinary coercion.
+        // The union identity is never erased from the resulting expression.
+        let contextual = if matches!(&ast.kind,
+            AstExpressionKind::Tuple(_) | AstExpressionKind::List(_)
+            | AstExpressionKind::Map(_) | AstExpressionKind::Set(_))
+        {
+            expected.and_then(|ty| self.union_types.get(&ty)).and_then(|members| {
+                let none = self.types.resolve_name("None")?;
+                if !members.contains(&none) { return None; }
+                let present = members.iter().copied().filter(|member| *member != none).collect::<Vec<_>>();
+                match present.as_slice() { [only] => Some(*only), _ => None }
+            }).or(expected)
+        } else { expected };
+        let expression = self.expression_inner(ast, contextual)?;
         match expected {
             Some(expected) => self.coerce(expression, expected, false),
             None => Ok(expression),
         }
+    }
+
+    fn accepts_expression_type(&self, actual: TypeId, expected: TypeId) -> bool {
+        self.types.assignable(actual, expected)
+            || self.union_types.get(&expected).is_some_and(|members| members.contains(&actual))
     }
 
     fn expression_inner(
@@ -6303,7 +6355,7 @@ impl Analyzer<'_> {
                         .types
                         .resolve_name("f64")
                         .expect("bootstrap defines f64");
-                    if expected.is_some_and(|expected| !self.types.assignable(f64_type, expected)) {
+                    if expected.is_some_and(|expected| !self.accepts_expression_type(f64_type, expected)) {
                         return Err(semantic_error(
                             "Euler's number does not satisfy the expected type".into(),
                             ast.span,
@@ -6379,7 +6431,7 @@ impl Analyzer<'_> {
                         if let Some((annotation, value)) = metadata {
                             let metadata_type = self.resolve_source_type(&annotation)?;
                             if expected.is_some_and(|expected| {
-                                !self.types.assignable(metadata_type, expected)
+                                !self.accepts_expression_type(metadata_type, expected)
                             }) {
                                 return Err(semantic_error(
                                     "primitive metadata does not satisfy the expected type".into(),
@@ -6396,7 +6448,7 @@ impl Analyzer<'_> {
                     }
                     if let Some(mut value) = self.value_substitutions.get(&path).cloned() {
                         if expected
-                            .is_some_and(|expected| !self.types.assignable(value.type_id, expected))
+                            .is_some_and(|expected| !self.accepts_expression_type(value.type_id, expected))
                         {
                             return Err(semantic_error(
                                 "package constant does not satisfy the expected type".into(),
@@ -6542,7 +6594,7 @@ impl Analyzer<'_> {
                     ));
                 };
                 let field_type = field.ty;
-                if expected.is_some_and(|expected| !self.types.assignable(field_type, expected)) {
+                if expected.is_some_and(|expected| !self.accepts_expression_type(field_type, expected)) {
                     return Err(semantic_error(
                         "field type does not satisfy the expected type".into(),
                         ast.span,
@@ -6657,7 +6709,7 @@ impl Analyzer<'_> {
                 if let Some((key_type, value_type)) =
                     self.map_elements.get(&object.type_id).copied()
                 {
-                    if expected.is_some_and(|expected| !self.types.assignable(value_type, expected))
+                    if expected.is_some_and(|expected| !self.accepts_expression_type(value_type, expected))
                     {
                         return Err(semantic_error(
                             "map value does not satisfy the expected type".into(),
@@ -6685,7 +6737,7 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
-                if expected.is_some_and(|expected| !self.types.assignable(element, expected)) {
+                if expected.is_some_and(|expected| !self.accepts_expression_type(element, expected)) {
                     return Err(semantic_error(
                         "indexed value does not satisfy the expected type".into(),
                         ast.span,
@@ -6780,7 +6832,7 @@ impl Analyzer<'_> {
                         };
                     }
                     let slice = self.instantiate_class_types("slice", &[element], ast.span)?;
-                    if expected.is_some_and(|expected| !self.types.assignable(slice.ty, expected)) {
+                    if expected.is_some_and(|expected| !self.accepts_expression_type(slice.ty, expected)) {
                         return Err(semantic_error(
                             "slice result does not satisfy the expected type".into(),
                             ast.span,
@@ -6929,7 +6981,7 @@ impl Analyzer<'_> {
                     ));
                 }
                 let result_type = object_value.type_id;
-                if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+                if expected.is_some_and(|expected| !self.accepts_expression_type(result_type, expected)) {
                     return Err(semantic_error(
                         "slice result does not satisfy the expected type".into(),
                         ast.span,
@@ -7049,7 +7101,7 @@ impl Analyzer<'_> {
                         }
                         let value = self.expression(&argument.value, Some(ty))?;
                         let value = self.coerce(value, ty, false)?;
-                        if expected.is_some_and(|expected| !self.types.assignable(ty, expected)) {
+                        if expected.is_some_and(|expected| !self.accepts_expression_type(ty, expected)) {
                             return Err(semantic_error(
                                 format!("constructed `{name}` does not satisfy the expected type"),
                                 ast.span,
@@ -7776,7 +7828,7 @@ impl Analyzer<'_> {
                         let list = self.expression(object, None)?;
                         if let Some(element) = self.list_elements.get(&list.type_id).copied() {
                             if expected
-                                .is_some_and(|expected| !self.types.assignable(element, expected))
+                                .is_some_and(|expected| !self.accepts_expression_type(element, expected))
                             {
                                 return Err(semantic_error(
                                     "list element does not satisfy the expected type".into(),
@@ -7996,7 +8048,7 @@ impl Analyzer<'_> {
                     };
                     if let Some(runtime_type) = runtime_type {
                         if expected
-                            .is_some_and(|expected| !self.types.assignable(runtime_type, expected))
+                            .is_some_and(|expected| !self.accepts_expression_type(runtime_type, expected))
                         {
                             return Err(semantic_error(
                                 "runtime value does not satisfy the expected type".into(),
@@ -8115,7 +8167,7 @@ impl Analyzer<'_> {
                                         left.type_id
                                     };
                                     if expected.is_some_and(|expected| {
-                                        !self.types.assignable(result, expected)
+                                        !self.accepts_expression_type(result, expected)
                                     }) {
                                         return Err(semantic_error(
                                             "method result does not satisfy the expected type"
@@ -8394,7 +8446,7 @@ impl Analyzer<'_> {
                         .get(&signature.result)
                         .map_or(signature.result, |fallible| fallible.success);
                     if expected
-                        .is_some_and(|expected| !self.types.assignable(exposed_result, expected))
+                        .is_some_and(|expected| !self.accepts_expression_type(exposed_result, expected))
                     {
                         continue;
                     }
@@ -8858,7 +8910,7 @@ impl Analyzer<'_> {
                             self.instantiate_union_type(&[left_value.type_id, right_value.type_id])
                         };
                         if expected.is_some_and(|expected| {
-                            expected != result && !self.types.assignable(result, expected)
+                            expected != result && !self.accepts_expression_type(result, expected)
                         }) {
                             return Err(semantic_error(
                                 "logical operator result does not satisfy the expected type".into(),
@@ -10180,7 +10232,8 @@ impl Analyzer<'_> {
         } else {
             self.instantiate_class(class, type_arguments, span)?
         };
-        if let Some(expected) = expected.filter(|expected| *expected != instance.ty) {
+        if let Some(expected) = expected.filter(|expected| *expected != instance.ty
+            && !self.union_types.get(expected).is_some_and(|members| members.contains(&instance.ty))) {
             if let Some(expected_instance) = self
                 .class_instances_by_type
                 .get(&expected)
@@ -11718,7 +11771,8 @@ impl Analyzer<'_> {
             ));
         }
         let instance = self.enums[enum_name].clone();
-        if expected.is_some_and(|expected| expected != instance.ty) {
+        if expected.is_some_and(|expected| expected != instance.ty
+            && !self.union_types.get(&expected).is_some_and(|members| members.contains(&instance.ty))) {
             return Err(semantic_error(
                 "enum conversion does not satisfy the expected type".into(),
                 span,
@@ -13589,12 +13643,7 @@ impl Analyzer<'_> {
                 .map(|class| class.variants.clone()))
             .unwrap_or_default();
         let tag_type = fields.first().map(|field| field.ty);
-        let mut comparison = Expression {
-            id: self.next_id(),
-            type_id: boolean,
-            kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
-            span,
-        };
+        let mut comparison = None;
         for (index, field) in fields.into_iter().enumerate() {
             let left_field = Expression {
                 id: self.next_id(),
@@ -13650,19 +13699,20 @@ impl Analyzer<'_> {
                     kind: ExpressionKind::Fallback { condition: Box::new(active),
                         value: Box::new(equal), fallback: Box::new(inactive) }, span };
             }
-            comparison = Expression {
-                id: self.next_id(),
-                type_id: boolean,
-                kind: ExpressionKind::Binary {
-                    operator: BinaryOperator::And,
-                    left: Box::new(comparison),
-                    right: Box::new(equal),
+            comparison = Some(match comparison {
+                None => equal,
+                Some(previous) => Expression {
+                    id: self.next_id(), type_id: boolean,
+                    kind: ExpressionKind::Binary { operator: BinaryOperator::And,
+                        left: Box::new(previous), right: Box::new(equal) }, span,
                 },
-                span,
-            };
+            });
         }
         visiting.remove(&left.type_id);
-        Ok(comparison)
+        Ok(comparison.unwrap_or_else(|| Expression {
+            id: self.next_id(), type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(true)), span,
+        }))
     }
 
     fn runtime_call(

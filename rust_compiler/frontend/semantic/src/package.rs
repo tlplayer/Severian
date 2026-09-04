@@ -530,6 +530,13 @@ pub fn analyze_package_with_context(
         .expect("single-module analysis returns one HIR module");
 
         remap_module_bindings(&mut analyzed, next_binding);
+        let mut scoped_bindings = Vec::new();
+        collect_scoped_binding_ids(&analyzed.initializer, &mut scoped_bindings);
+        for function in &analyzed.functions {
+            if let Some(body) = &function.body {
+                collect_scoped_binding_ids(body, &mut scoped_bindings);
+            }
+        }
         next_binding = analyzed
             .bindings
             .iter()
@@ -541,6 +548,7 @@ pub fn analyze_package_with_context(
                     .flat_map(|function| function.parameters.iter())
                     .map(|parameter| parameter.binding.0),
             )
+            .chain(scoped_bindings)
             .max()
             .map_or(next_binding, |id| id + 1);
         hir.modules.push(analyzed);
@@ -1008,6 +1016,31 @@ fn class_lexical_modules(source: ModuleId, classes: &[PackageClass]) -> BTreeSet
         if selected.len() == previous {
             modules.extend(selected.iter().map(|index| classes[*index].module));
             return modules;
+        }
+    }
+}
+
+fn collect_scoped_binding_ids(block: &severian_hir::Block, ids: &mut Vec<u32>) {
+    use severian_hir::Statement;
+    for statement in &block.statements {
+        match statement {
+            Statement::Try { body, catch_binding, catch_body, .. } => {
+                ids.push(catch_binding.0);
+                collect_scoped_binding_ids(body, ids);
+                collect_scoped_binding_ids(catch_body, ids);
+            }
+            Statement::Sequence(body) | Statement::Placement { body, .. }
+            | Statement::While { body, .. } | Statement::ExpectThrow { body, .. } =>
+                collect_scoped_binding_ids(body, ids),
+            Statement::If { then_block, else_block, .. } => {
+                collect_scoped_binding_ids(then_block, ids);
+                collect_scoped_binding_ids(else_block, ids);
+            }
+            Statement::Match { arms, .. } => for arm in arms {
+                if let Some(binding) = arm.binding { ids.push(binding.0); }
+                collect_scoped_binding_ids(&arm.body, ids);
+            },
+            _ => {}
         }
     }
 }

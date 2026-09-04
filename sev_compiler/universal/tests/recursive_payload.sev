@@ -38,6 +38,11 @@ def same_literal(left: LiteralValue, right: LiteralValue) -> bool:
     return left == right
 
 
+def counted_literal(calls: list[int]) -> LiteralValue:
+    calls.append(1)
+    return LiteralValue.BooleanValue(true)
+
+
 test "recursive compiler payload survives return and selects only its active fields":
     span = source.span(source.source_id(0), 0, 4)
     expression = returned_expression(span)
@@ -45,6 +50,10 @@ test "recursive compiler payload survives return and selects only its active fie
     assert(selected_name(expression) == "member")
     assert(child_name(expression) == "leaf")
     assert(child_name(another) == "leaf")
+    unnamed = CallArgument(absent, expression, span)
+    empty_name = CallArgument("", expression, span)
+    assert(unnamed.name == None)
+    assert(empty_name.name != None)
 
 
 test "absence does not construct a recursive compiler operand":
@@ -64,3 +73,17 @@ test "sum equality compares tags and only the active payload":
     assert(not same_literal(LiteralValue.IntegerValue("12"), LiteralValue.NoneValue))
     assert(same_literal(LiteralValue.NoneValue, LiteralValue.NoneValue))
     assert(not same_literal(LiteralValue.BooleanValue(true), LiteralValue.BooleanValue(false)))
+
+
+test "tag checks and payload reads share one scrutinee evaluation":
+    calls: list[int] = []
+    match counted_literal(calls):
+        case IntegerValue:
+            assert(false)
+        case BooleanValue:
+            assert(value)
+        case _:
+            assert(false)
+    assert(len(calls) == 1)
+    assert(counted_literal(calls) == LiteralValue.BooleanValue(true))
+    assert(len(calls) == 2)
