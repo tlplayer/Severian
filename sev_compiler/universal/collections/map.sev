@@ -1,0 +1,126 @@
+import "../primitive/primitive.sev"
+
+
+'''
+# `Map[K, V]`
+
+The implementation is a B-Tree underneath
+
+`Map` is the semantic contract for keyed Severian collections. It is intentionally
+a trait rather than a second concrete hash container beside `dict[K, V]`.
+
+Type parameters:
+
+```text
+K    key type
+V    mapped value type
+```
+
+Key requirements:
+
+```text
+K: Hash + Equatable
+```
+
+Concrete implementations may add bootstrap/storage constraints. The mapping
+contract itself describes key uniqueness, lookup, replacement, removal,
+iteration, ownership, and truth behavior.
+
+## Key identity
+
+A map contains at most one value for an equality class of keys.
+
+```text
+hash(left) == hash(right) is required when left == right
+hash equality alone never proves key equality
+```
+
+## Ownership
+
+The intended end-state contract is:
+
+```text
+lookup       borrows V
+iteration    borrows K and V
+insert       takes ownership of new K and V
+replace      transfers ownership of the previous V
+remove       transfers ownership of the removed V
+clear/drop   destroy all remaining owned keys and values
+```
+
+The initial collection bootstrap may use copied values while generic placement,
+borrowing through collection storage, and per-element destruction are brought
+online. Those implementation restrictions must not change the semantic operation
+set in this file.
+
+## Truth
+
+A mapping is false exactly when its logical entry count is zero.
+
+## Literal relationship
+
+`{key: value, ...}` should resolve to the language's concrete `dict[K, V]` unless
+an expected type selects another `Map[K, V]` implementation. The compiler should
+not hardcode map operations independently of this contract.
+'''
+
+
+trait Map[K: Hash + Equatable, V]:
+    Truth
+
+    property length: usize
+
+    def len(self) -> usize
+    def contains(self, key: K) -> bool
+
+    # Bootstrap copy-return form. End state: `borrow V | None`.
+    def get(self, key: K) -> (V, bool)
+
+    # Insert or replace. `replace` preserves the previous value for the caller.
+    def set(self, key: K, value: V)
+    def replace(self, key: K, value: V) -> (V, bool)
+
+    # Removal transfers the removed value when present.
+    def remove(self, key: K) -> (V, bool)
+
+    def clear(self)
+
+    def keys(self) -> Iterator[K]
+    def values(self) -> Iterator[V]
+    def items(self) -> Iterator[(K, V)]
+
+
+'''
+# Mapping operator contract
+
+Concrete mapping types should expose key indexing in addition to the named
+operations above:
+
+```sev
+value := values[key]
+values[key] = replacement
+```
+
+`[]` is strict and throws `KeyError` when the key is absent. `get` is the
+non-throwing lookup form. This keeps absence policy at the call site instead of
+encoding an implicit default value into lookup.
+'''
+
+
+trait MapIndex[K: Hash + Equatable, V]:
+    operator [](key: K) -> V
+    operator []=(key: K, value: V)
+
+
+'''
+# Bootstrap acceptance specification
+
+These are type-surface tests. Runtime behavior is exercised by concrete mapping
+implementations such as `dict[K, V]`.
+'''
+
+
+def mapping_size[K: Hash + Equatable, V, M: Map[K, V]](values: M) -> usize:
+    return values.len()
+
+

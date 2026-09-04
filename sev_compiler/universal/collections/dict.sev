@@ -1,0 +1,310 @@
+import "../primitive/primitive.sev"
+import "list.sev"
+import "map.sev"
+
+
+'''
+# `dict[K, V]`
+
+`dict` is Severian's concrete insertion-ordered keyed collection and the default
+concrete target for `{key: value, ...}` literals.
+
+Type parameters:
+
+```text
+K    key type
+V    mapped value type
+```
+
+Semantic key constraint:
+
+```text
+K: Hash + Equatable
+```
+
+Bootstrap storage constraints:
+
+```text
+K: Copy + Default
+V: Copy + Default
+```
+
+The reference bootstrap implementation below uses parallel `list` storage and a
+linear key probe. That is deliberate: this file establishes language semantics,
+ownership, type parameters, operators, and compiler behavior without requiring a
+second compiler-owned hash-table implementation.
+
+The production provider may replace the O(n) probe with an open-addressed or
+Swiss-table-style hash representation. It must preserve the contract in this
+file, including insertion order.
+
+## Semantics
+
+- keys are unique under `==`;
+- replacing a value does not move its key in insertion order;
+- removing then reinserting a key places it at the end;
+- `dict[key]` is strict and throws on absence;
+- `get` is non-throwing;
+- `set_default` inserts only when absent;
+- truth depends only on entry count.
+
+## Ownership
+
+The dictionary owns inserted keys and values. The bootstrap implementation copies
+`K` and `V`; the end-state implementation should borrow on read and transfer
+ownership on `replace`/`remove`.
+'''
+
+
+trait Dict[K: Hash + Equatable, V]:
+    Map[K, V]
+    MapIndex[K, V]
+
+    property capacity: usize
+
+    def cap(self) -> usize
+    def reserve(self, additional: usize)
+    def set_default(self, key: K, value: V) -> V
+    def copy(self) -> dict[K, V]
+
+
+class dict[K: Hash + Equatable + Copy + Default, V: Copy + Default]:
+    trait Dict[K, V]
+
+    __keys: list[K]
+    __values: list[V]
+    length: usize
+    capacity: usize
+
+
+    def dict():
+        __keys = list[K]()
+        __values = list[V]()
+        length = 0
+        capacity = 0
+
+
+    operator if(self) -> self.length != 0
+    operator else(self) -> self.length == 0
+
+
+    def len(self) -> usize:
+        return length
+
+
+    def cap(self) -> usize:
+        return capacity
+
+
+    def reserve(self, additional: usize):
+        __keys.reserve(additional)
+        __values.reserve(additional)
+        capacity = min(__keys.cap(), __values.cap())
+
+
+    def __find_index(self, key: K) -> (usize, bool):
+        for index in range(length):
+            if __keys[index] == key:
+                return (index, true)
+
+        return (0, false)
+
+
+    def contains(self, key: K) -> bool:
+        _, found := __find_index(key)
+        return found
+
+
+    def get(self, key: K) -> (V, bool):
+        index, found := __find_index(key)
+
+        if not found:
+            return (V.default(), false)
+
+        return (__values[index], true)
+
+
+    operator [](key: K) -> V:
+        value, found := get(key)
+
+        if not found:
+            throw KeyError("dictionary key is not present")
+
+        return value
+
+
+    operator []=(key: K, value: V):
+        set(key, value)
+
+
+    def set(self, key: K, value: V):
+        index, found := __find_index(key)
+
+        if found:
+            __values[index] = value
+            return
+
+        __keys.append(key)
+        __values.append(value)
+        length += 1
+        capacity = min(__keys.cap(), __values.cap())
+
+
+    def replace(self, key: K, value: V) -> (V, bool):
+        index, found := __find_index(key)
+
+        if not found:
+            set(key, value)
+            return (V.default(), false)
+
+        previous := __values[index]
+        __values[index] = value
+        return (previous, true)
+
+
+    def set_default(self, key: K, value: V) -> V:
+        current, found := get(key)
+
+        if found:
+            return current
+
+        set(key, value)
+        return value
+
+
+    def remove(self, key: K) -> (V, bool):
+        index, found := __find_index(key)
+
+        if not found:
+            return (V.default(), false)
+
+        _, key_ok := __keys.pop(index)
+        value, value_ok := __values.pop(index)
+
+        assert(key_ok)
+        assert(value_ok)
+
+        length -= 1
+        return (value, true)
+
+
+    def clear(self):
+        __keys.clear()
+        __values.clear()
+        length = 0
+
+
+    def keys(self) -> Iterator[K]:
+        for index in range(length):
+            yield __keys[index]
+
+
+    def values(self) -> Iterator[V]:
+        for index in range(length):
+            yield __values[index]
+
+
+    def items(self) -> Iterator[(K, V)]:
+        for index in range(length):
+            yield (__keys[index], __values[index])
+
+
+    def copy(self) -> dict[K, V]:
+        result := dict[K, V]()
+        result.reserve(length)
+
+        for key, value in items():
+            result.set(key, value)
+
+        return result
+
+
+'''
+# Executable specification
+'''
+
+
+test "dict inserts and strictly indexes values":
+    values := dict[i32, i32]()
+
+    values[1] = 10
+    values[2] = 20
+
+    assert(values.len() == 2)
+    assert(values[1] == 10)
+    assert(values[2] == 20)
+    throws(values[99])
+
+
+test "dict replacement does not grow shape":
+    values := dict[i32, i32]()
+    values[7] = 1
+
+    previous, replaced := values.replace(7, 2)
+
+    assert(replaced)
+    assert(previous == 1)
+    assert(values.len() == 1)
+    assert(values[7] == 2)
+
+
+test "dict set_default writes only on absence":
+    values := dict[i32, i32]()
+
+    first := values.set_default(7, 10)
+    second := values.set_default(7, 99)
+
+    assert(first == 10)
+    assert(second == 10)
+    assert(values[7] == 10)
+
+
+test "dict iteration preserves insertion order":
+    values := dict[i32, i32]()
+    values[10] = 1
+    values[20] = 2
+    values[30] = 3
+
+    observed := list[i32]()
+
+    for key in values.keys():
+        observed.append(key)
+
+    assert(observed[0] == 10)
+    assert(observed[1] == 20)
+    assert(observed[2] == 30)
+
+
+test "dict removal returns the removed value":
+    values := dict[i32, i32]()
+    values[10] = 1
+    values[20] = 2
+
+    removed, ok := values.remove(10)
+
+    assert(ok)
+    assert(removed == 1)
+    assert(values.len() == 1)
+    assert(not values.contains(10))
+
+
+test "dict truth follows entry count":
+    values := dict[i32, i32]()
+
+    if values:
+        throw Error("empty dict must be false")
+
+    values[7] = 1
+
+    if values:
+        pass
+    else:
+        throw Error("non-empty dict must be true")
+
+
+test with compiler "dict key requires hash and equality":
+    reject:
+        class Unkeyed:
+            value: i32
+
+        values := dict[Unkeyed, i32]()

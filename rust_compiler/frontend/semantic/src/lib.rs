@@ -1088,41 +1088,16 @@ pub(crate) fn normalize_extensions(
                             Some(extension.span),
                         ));
                     };
-                    let replacement = TypeAnnotation::named(
-                        member.clone(),
-                        Vec::new(),
-                        extension.target.span,
-                    );
-                    let substitution = BTreeMap::from([(parameter.clone(), replacement)]);
-                    class.methods.extend(extension.methods.iter().cloned().map(|mut method| {
-                        for argument in &mut method.parameters {
-                            argument.annotation = substitute_type_annotation(
-                                &argument.annotation,
-                                &substitution,
-                            );
-                        }
-                        method.result = substitute_type_annotation(&method.result, &substitution);
-                        method
+                    let substitution = package::generic::Substitution::from_iter([(
+                        parameter.clone(),
+                        member,
+                    )]);
+                    class.methods.extend(extension.methods.iter().map(|method| {
+                        package::generic::specialize_function(method, &substitution)
                     }));
-                    class.operators.extend(
-                        extension
-                            .operators
-                            .iter()
-                            .cloned()
-                            .map(|mut implementation| {
-                                for argument in &mut implementation.parameters {
-                                    argument.annotation = substitute_type_annotation(
-                                        &argument.annotation,
-                                        &substitution,
-                                    );
-                                }
-                                implementation.result = substitute_type_annotation(
-                                    &implementation.result,
-                                    &substitution,
-                                );
-                                implementation
-                            }),
-                    );
+                    class.operators.extend(extension.operators.iter().map(|operator| {
+                        package::generic::specialize_operator(operator, &substitution)
+                    }));
                 }
                 continue;
             }
@@ -1225,7 +1200,122 @@ pub(crate) fn normalize_extensions(
     normalized.items.retain(|item| {
         !matches!(item, severian_ast::Item::Extension(extension) if extension.decorators.is_empty())
     });
+    collapse_zipped_type_families(&mut normalized, &union_members)?;
     Ok(normalized)
+}
+
+fn collapse_zipped_type_families(
+    ast: &mut severian_ast::Module,
+    unions: &BTreeMap<String, Vec<String>>,
+) -> Result<(), Diagnostic> {
+    let families = ast
+        .items
+        .iter()
+        .filter_map(|item| {
+            let severian_ast::Item::Binding(binding) = item else {
+                return None;
+            };
+            is_zipped_type_family_binding(binding).then(|| binding.name.clone())
+        })
+        .collect::<Vec<_>>();
+
+    for family in &families {
+        if !unions.contains_key(family) {
+            let span = ast.items.iter().find_map(|item| match item {
+                severian_ast::Item::Binding(binding)
+                    if is_zipped_type_family_binding(binding) && binding.name == *family =>
+                {
+                    Some(binding.span)
+                }
+                _ => None,
+            });
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("`zip({family})` requires `{family}` to be a closed union"),
+                span,
+            ));
+        }
+
+        let template = ast
+            .items
+            .iter()
+            .find_map(|item| match item {
+                severian_ast::Item::Class(class) if class.name == *family => Some(class.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    format!(
+                        "`zip({family})` requires a same-named class that defines the family behavior"
+                    ),
+                    None,
+                )
+            })?;
+
+        if !template.fields.is_empty() || !template.constructors.is_empty() {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!(
+                    "zipped type-family class `{family}` may define behavior but not storage or constructors"
+                ),
+                Some(template.span),
+            ));
+        }
+
+        let mut members = Vec::new();
+        collect_closed_union_members(family, unions, &mut members);
+        members.sort();
+        members.dedup();
+
+        for member in members {
+            let class = ast.items.iter_mut().find_map(|item| match item {
+                severian_ast::Item::Class(class) if class.name == member => Some(class),
+                _ => None,
+            });
+            let Some(class) = class else {
+                return Err(Diagnostic::new(
+                    "E000204",
+                    format!("closed union member `{member}` has no class declaration"),
+                    Some(template.span),
+                ));
+            };
+            let substitution =
+                package::generic::Substitution::from_iter([(family.clone(), member)]);
+            class.methods.extend(
+                template
+                    .methods
+                    .iter()
+                    .map(|method| package::generic::specialize_function(method, &substitution)),
+            );
+            class.operators.extend(template.operators.iter().map(|operator| {
+                package::generic::specialize_operator(operator, &substitution)
+            }));
+        }
+    }
+
+    ast.items.retain(|item| match item {
+        severian_ast::Item::Class(class) => !families.contains(&class.name),
+        severian_ast::Item::Binding(binding) => !is_zipped_type_family_binding(binding),
+        _ => true,
+    });
+    Ok(())
+}
+
+fn is_zipped_type_family_binding(binding: &severian_ast::Binding) -> bool {
+    let AstExpressionKind::Call { callee, arguments } = &binding.value.kind else {
+        return false;
+    };
+    let AstExpressionKind::Name(callee) = &callee.kind else {
+        return false;
+    };
+    let [argument] = arguments.as_slice() else {
+        return false;
+    };
+    callee == "zip"
+        && argument.name.is_none()
+        && !argument.spread
+        && matches!(&argument.value.kind, AstExpressionKind::Name(name) if name == &binding.name)
 }
 
 fn collect_closed_union_members(
@@ -5887,15 +5977,9 @@ impl Analyzer<'_> {
                     return self.enum_constructor(name, &[], expected, ast.span);
                 }
                 if let Some(value) = self.value_substitutions.get(name).cloned() {
-                    if expected
-                        .is_some_and(|expected| !self.types.assignable(value.type_id, expected))
-                    {
-                        return Err(semantic_error(
-                            "substituted value does not satisfy the expected type".into(),
-                            ast.span,
-                        ));
-                    }
-                    return Ok(value);
+                    return expected.map_or(Ok(value.clone()), |expected| {
+                        self.coerce(value, expected, false)
+                    });
                 }
                 let Some((binding, _, type_id)) = self.names.get(name).copied() else {
                     return Err(Diagnostic::new(
@@ -5904,17 +5988,14 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
-                if expected.is_some_and(|expected| !self.types.assignable(type_id, expected)) {
-                    return Err(semantic_error(
-                        "binding type does not satisfy the expected type".into(),
-                        ast.span,
-                    ));
-                }
-                Ok(Expression {
+                let value = Expression {
                     id: self.next_id(),
                     type_id,
                     kind: ExpressionKind::Binding(binding),
                     span: ast.span,
+                };
+                expected.map_or(Ok(value.clone()), |expected| {
+                    self.coerce(value, expected, false)
                 })
             }
             AstExpressionKind::Member { object, name } => {
@@ -6421,15 +6502,22 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Call { callee, arguments } => {
                 if let AstExpressionKind::Name(name) = &callee.kind {
-                    let generic_expected = (name.len() == 1
-                        && name.as_bytes()[0].is_ascii_uppercase())
-                        .then_some(expected)
-                        .flatten();
                     if let Some(ty) = self
                         .active_type_aliases
                         .get(name)
                         .copied()
-                        .or(generic_expected)
+                        .or_else(|| {
+                            (name == "self")
+                                .then(|| {
+                                    self.value_substitutions
+                                        .get("self")
+                                        .map(|value| value.type_id)
+                                        .or_else(|| {
+                                            self.names.get("self").map(|(_, _, ty)| *ty)
+                                        })
+                                })
+                                .flatten()
+                        })
                     {
                         let [argument] = arguments.as_slice() else {
                             return Err(Diagnostic::new(
@@ -8334,6 +8422,22 @@ impl Analyzer<'_> {
                                     span: ast.span,
                                 });
                             }
+                            if self.types.primitive(target).is_some()
+                                && self.types.primitive(left.type_id).is_some()
+                            {
+                                let boolean = self
+                                    .types
+                                    .resolve_name("bool")
+                                    .expect("bootstrap defines bool");
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Literal(LiteralValue::Boolean(
+                                        left.type_id == target,
+                                    )),
+                                    span: ast.span,
+                                });
+                            }
                         }
                     }
                 }
@@ -9014,6 +9118,17 @@ impl Analyzer<'_> {
                     primitive.category == severian_universal::PrimitiveCategory::Float
                 })
             {
+                if matches!(
+                    &expression.kind,
+                    ExpressionKind::Literal(LiteralValue::String(value))
+                        if value.parse::<f64>().is_err()
+                ) {
+                    return Ok(self.throw_expression(
+                        "invalid floating-point string conversion",
+                        expected,
+                        expression.span,
+                    ));
+                }
                 let string = expression.type_id;
                 let span = expression.span;
                 let runtime_float = self
@@ -9126,6 +9241,58 @@ impl Analyzer<'_> {
             },
             span,
         };
+        if explicit
+            && self.types.primitive(expression.type_id).is_some_and(|primitive| {
+                primitive.category == severian_universal::PrimitiveCategory::Float
+            })
+            && self.integer_primitive(expected)
+        {
+            let boolean = self
+                .types
+                .resolve_name("bool")
+                .expect("bootstrap defines bool");
+            let difference = Expression {
+                id: self.next_id(),
+                type_id: expression.type_id,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Subtract,
+                    left: Box::new(expression.clone()),
+                    right: Box::new(expression),
+                },
+                span,
+            };
+            let zero = Expression {
+                id: self.next_id(),
+                type_id: difference.type_id,
+                kind: ExpressionKind::Literal(LiteralValue::Float("0.0".into())),
+                span,
+            };
+            let finite = Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Equal,
+                    left: Box::new(difference),
+                    right: Box::new(zero),
+                },
+                span,
+            };
+            let failure = self.throw_expression(
+                "non-finite float cannot convert to integer",
+                expected,
+                span,
+            );
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id: expected,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(finite),
+                    value: Box::new(converted),
+                    fallback: Box::new(failure),
+                },
+                span,
+            });
+        }
         if explicit && conversion.kind == severian_universal::ConversionKind::Checked {
             if let Some(condition) =
                 self.checked_integer_conversion_condition(&expression, expected, span)
@@ -18777,7 +18944,16 @@ fn expression_conversion_rank(
 ) -> Option<ConversionRank> {
     match &expression.kind {
         ExpressionKind::Convert { conversion, .. } if conversion.to == expected => {
-            conversion_rank(types, conversion.from, expected)
+            match conversion.kind {
+                severian_universal::ConversionKind::Identity => Some(ConversionRank::Exact),
+                severian_universal::ConversionKind::Promote => types
+                    .numeric_conversion_cost(conversion.from, expected)
+                    .and_then(|cost| cost.try_into().ok())
+                    .map(ConversionRank::Widening)
+                    .or(Some(ConversionRank::General)),
+                severian_universal::ConversionKind::Checked
+                | severian_universal::ConversionKind::Lossy => Some(ConversionRank::General),
+            }
         }
         _ => conversion_rank(types, expression.type_id, expected),
     }
@@ -19554,6 +19730,43 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn zip_collapses_a_same_named_union_behavior_class_into_its_members() {
+        let source = SourceFile::virtual_source(
+            "zip-family.sev",
+            "union scalar:\n    narrow\n    wide\n\nclass narrow:\n    payload: i32\n\nclass wide:\n    payload: i64\n\nclass scalar:\n    def select(self, right: scalar) -> scalar:\n        return right\n\n    operator +(right: scalar) -> scalar:\n        return right\n\nscalar = zip(scalar)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let normalized = normalize_extensions(&ast).unwrap();
+
+        assert!(!normalized.items.iter().any(|item| {
+            matches!(item, severian_ast::Item::Class(class) if class.name == "scalar")
+                || matches!(item, severian_ast::Item::Binding(binding) if binding.name == "scalar")
+        }));
+
+        for member in ["narrow", "wide"] {
+            let class = normalized
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    severian_ast::Item::Class(class) if class.name == member => Some(class),
+                    _ => None,
+                })
+                .unwrap();
+            let method = class
+                .methods
+                .iter()
+                .find(|method| method.name == "select")
+                .unwrap();
+            assert_eq!(method.parameters[0].annotation.simple_name(), Some(member));
+            assert_eq!(method.result.simple_name(), Some(member));
+            let operator = class.operators.first().unwrap();
+            assert_eq!(operator.parameters[0].annotation.simple_name(), Some(member));
+            assert_eq!(operator.result.simple_name(), Some(member));
+        }
     }
 
     #[test]
@@ -20634,14 +20847,26 @@ mod tests {
             "ratio = 0.1010\ndefaulted = int(ratio)\nselected = int(ratio, lossy)\nwide: i64 = 12\nnarrowed = i8(wide, checked)\n",
         );
         let bindings = &program.modules[0].bindings;
-        let kind = |index: usize| match &bindings[index].value.kind {
-            ExpressionKind::Convert { conversion, .. } => conversion.kind,
-            other => panic!("expected conversion, found {other:?}"),
-        };
+        fn conversion_kind(expression: &Expression) -> severian_universal::ConversionKind {
+            match &expression.kind {
+                ExpressionKind::Convert { conversion, .. } => conversion.kind,
+                ExpressionKind::Fallback { value, .. } => conversion_kind(value),
+                other => panic!("expected conversion, found {other:?}"),
+            }
+        }
 
-        assert_eq!(kind(1), severian_universal::ConversionKind::Lossy);
-        assert_eq!(kind(2), severian_universal::ConversionKind::Lossy);
-        assert_eq!(kind(4), severian_universal::ConversionKind::Checked);
+        assert_eq!(
+            conversion_kind(&bindings[1].value),
+            severian_universal::ConversionKind::Lossy
+        );
+        assert_eq!(
+            conversion_kind(&bindings[2].value),
+            severian_universal::ConversionKind::Lossy
+        );
+        assert_eq!(
+            conversion_kind(&bindings[4].value),
+            severian_universal::ConversionKind::Checked
+        );
     }
 
     #[test]

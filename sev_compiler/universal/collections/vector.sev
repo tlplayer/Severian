@@ -1,0 +1,279 @@
+import "../primitive/primitive.sev"
+import "../primitive/array.sev"
+
+
+'''
+# `vector[T, N]`
+
+`vector` is Severian's fixed-width numeric value collection.
+
+It is distinct from `list[T]`:
+
+```text
+list[T]       runtime-sized owned sequence
+array[T, N]   fixed-size general storage
+vector[T, N]  fixed-lane arithmetic value
+```
+
+Type parameters:
+
+```text
+T    scalar lane type
+N    compile-time lane count
+```
+
+`T` must satisfy the arithmetic lane contract. `N` is part of the type.
+
+A backend may lower a vector directly to an MLIR vector type when the active
+target supports the lane shape. The source contract remains valid when lowering
+falls back to scalar operations.
+
+## Truth
+
+`vector` intentionally does not implement `Truth`. Multi-lane truth would be
+ambiguous: `any`, `all`, and lane-zero semantics are different operations.
+Callers must state the reduction they want.
+
+## Operators
+
+Vector-vector arithmetic is lane-wise:
+
+```text
+[a, b] + [c, d] = [a+c, b+d]
+[a, b] - [c, d] = [a-c, b-d]
+[a, b] * [c, d] = [a*c, b*d]
+[a, b] / [c, d] = [a/c, b/d]
+```
+
+Vector-scalar multiplication and division broadcast the scalar to every lane.
+`dot` performs multiply-then-sum and returns one `T`.
+'''
+
+
+trait VectorScalar:
+    Copy
+    Default
+
+    operator +(right: Self) -> Self
+    operator -(right: Self) -> Self
+    operator *(right: Self) -> Self
+    operator /(right: Self) -> Self
+
+
+trait Vector[T: VectorScalar, N: usize]:
+    property length: usize
+
+    operator [](index: usize) -> T
+    operator []=(index: usize, value: T)
+
+    operator +(right: vector[T, N]) -> vector[T, N]
+    operator -(right: vector[T, N]) -> vector[T, N]
+    operator *(right: vector[T, N]) -> vector[T, N]
+    operator /(right: vector[T, N]) -> vector[T, N]
+
+    operator *(right: T) -> vector[T, N]
+    operator /(right: T) -> vector[T, N]
+
+    def len(self) -> usize
+    def sum(self) -> T
+    def dot(self, right: vector[T, N]) -> T
+    def length_squared(self) -> T
+    def map[R: VectorScalar](self, operation: F[T, R]) -> vector[R, N]
+    def copy(self) -> vector[T, N]
+    def iter(self) -> Iterator[T]
+
+
+class vector[T: VectorScalar, N: usize]:
+    trait Vector[T, N]
+
+    __values: array[T, N]
+    length: usize = N
+
+
+    def vector():
+        __values = array[T, N]()
+
+
+    def vector(values: array[T, N]):
+        __values = values.copy()
+
+
+    def len(self) -> usize:
+        return N
+
+
+    operator [](index: usize) -> T:
+        return __values[index]
+
+
+    operator []=(index: usize, value: T):
+        __values[index] = value
+
+
+    operator +(right: vector[T, N]) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] + right[index]
+
+        return result
+
+
+    operator -(right: vector[T, N]) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] - right[index]
+
+        return result
+
+
+    operator *(right: vector[T, N]) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] * right[index]
+
+        return result
+
+
+    operator /(right: vector[T, N]) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] / right[index]
+
+        return result
+
+
+    operator *(right: T) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] * right
+
+        return result
+
+
+    operator /(right: T) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index] / right
+
+        return result
+
+
+    def sum(self) -> T:
+        total := T.default()
+
+        for index in range(N):
+            total = total + self[index]
+
+        return total
+
+
+    def dot(self, right: vector[T, N]) -> T:
+        total := T.default()
+
+        for index in range(N):
+            total = total + self[index] * right[index]
+
+        return total
+
+
+    def length_squared(self) -> T:
+        return dot(self)
+
+
+    def map[R: VectorScalar](self, operation: F[T, R]) -> vector[R, N]:
+        result := vector[R, N]()
+
+        for index in range(N):
+            result[index] = operation(self[index])
+
+        return result
+
+
+    def copy(self) -> vector[T, N]:
+        result := vector[T, N]()
+
+        for index in range(N):
+            result[index] = self[index]
+
+        return result
+
+
+    def iter(self) -> Iterator[T]:
+        for index in range(N):
+            yield self[index]
+
+
+'''
+# Executable specification
+'''
+
+
+test "vector length is part of its type and value contract":
+    values := vector[i32, 4](array[i32, 4]([1, 2, 3, 4]))
+
+    assert(values.len() == 4)
+    assert(values[0] == 1)
+    assert(values[3] == 4)
+
+
+test "vector arithmetic is lane wise":
+    left := vector[i32, 3](array[i32, 3]([1, 2, 3]))
+    right := vector[i32, 3](array[i32, 3]([4, 5, 6]))
+
+    sum := left + right
+    product := left * right
+
+    assert(sum[0] == 5)
+    assert(sum[1] == 7)
+    assert(sum[2] == 9)
+
+    assert(product[0] == 4)
+    assert(product[1] == 10)
+    assert(product[2] == 18)
+
+
+test "vector scalar multiplication broadcasts":
+    values := vector[i32, 3](array[i32, 3]([1, 2, 3]))
+    scaled := values * 4
+
+    assert(scaled[0] == 4)
+    assert(scaled[1] == 8)
+    assert(scaled[2] == 12)
+
+
+test "vector reductions are explicit":
+    left := vector[i32, 3](array[i32, 3]([1, 2, 3]))
+    right := vector[i32, 3](array[i32, 3]([4, 5, 6]))
+
+    assert(left.sum() == 6)
+    assert(left.dot(right) == 32)
+    assert(left.length_squared() == 14)
+
+
+test "vector map preserves lane count while changing scalar type":
+    values := vector[i32, 3](array[i32, 3]([1, 2, 3]))
+    doubled := values.map(lambda value: value * 2)
+
+    assert(doubled.len() == 3)
+    assert(doubled[0] == 2)
+    assert(doubled[2] == 6)
+
+
+test with compiler "vector lane count is part of the type":
+    reject:
+        small := vector[i32, 2]()
+        large: vector[i32, 4] = small
+
+
+test with compiler "vector does not have implicit truth":
+    reject:
+        values := vector[i32, 2](array[i32, 2]([1, 0]))
+
+        if values:
+            pass

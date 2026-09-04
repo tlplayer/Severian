@@ -2,7 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub(super) struct Substitution {
+pub(crate) struct Substitution {
     kinds: BTreeMap<String, severian_universal::GenericParamKind>,
     types: BTreeMap<String, String>,
     dimensions: BTreeMap<String, severian_universal::DimExpr>,
@@ -2691,7 +2691,7 @@ fn specialized_type_name(
     type_annotation_name(&specialize_annotation(annotation, substitution))
 }
 
-pub(super) fn specialize_function(
+pub(crate) fn specialize_function(
     function: &severian_ast::FunctionDeclaration,
     substitution: &Substitution,
 ) -> severian_ast::FunctionDeclaration {
@@ -2728,6 +2728,36 @@ pub(super) fn specialize_function(
         specialize_statements(body, substitution);
     }
     function
+}
+
+pub(crate) fn specialize_operator(
+    implementation: &severian_ast::OperatorImplementation,
+    substitution: &Substitution,
+) -> severian_ast::OperatorImplementation {
+    let mut implementation = implementation.clone();
+    for parameter in &mut implementation.parameters {
+        parameter.annotation = specialize_annotation(&parameter.annotation, substitution);
+    }
+    implementation.result = specialize_annotation(&implementation.result, substitution);
+    for constraint in &mut implementation.constraints {
+        match constraint {
+            severian_ast::GenericConstraint::Parameter { bound, .. } => {
+                *bound = specialize_annotation(bound, substitution);
+            }
+            severian_ast::GenericConstraint::VariadicPack { .. } => {}
+            severian_ast::GenericConstraint::Predicate(predicate) => {
+                specialize_expression(predicate, substitution);
+            }
+        }
+    }
+    for contract in &mut implementation.contracts {
+        specialize_expression(&mut contract.condition, substitution);
+        if let Some(failure) = &mut contract.failure {
+            specialize_expression(failure, substitution);
+        }
+    }
+    specialize_statements(&mut implementation.body, substitution);
+    implementation
 }
 
 pub(super) fn specialize_signature(

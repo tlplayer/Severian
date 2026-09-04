@@ -1,0 +1,286 @@
+import "../primitive/primitive.sev"
+import "../primitive/slice.sev"
+import "dict.sev"
+
+
+'''
+# `count[T]`
+
+`count` is Severian's frequency/multiset collection.
+
+Type parameters:
+
+```text
+T    counted key type
+```
+
+Semantic key constraint:
+
+```text
+T: Hash + Equatable
+```
+
+Bootstrap storage constraint:
+
+```text
+T: Copy + Default
+```
+
+A count stores one non-negative `usize` frequency for each present value.
+Missing values have frequency zero and are not stored.
+
+```text
+count["red"]   = 3
+count["blue"]  = 1
+count["green"] = 0   # absent
+```
+
+The collection tracks two sizes:
+
+```text
+unique    number of keys with a positive frequency
+total     sum of all frequencies
+```
+
+`len()` returns `unique`. `total()` returns the number of logical elements when
+multiplicity is expanded.
+
+## Arithmetic policy
+
+`add(value, amount)` increases a frequency.
+`subtract(value, amount)` floors at zero and removes a zero-frequency key.
+There is no negative count state.
+
+## Truth
+
+A count is false exactly when no positive-frequency keys remain.
+'''
+
+
+trait Count[T: Hash + Equatable]:
+    Truth
+
+    property unique: usize
+    property total_count: usize
+
+    operator [](value: T) -> usize
+
+    def len(self) -> usize
+    def total(self) -> usize
+    def contains(self, value: T) -> bool
+    def frequency(self, value: T) -> usize
+
+    def add(self, value: T, amount: usize = 1)
+    def subtract(self, value: T, amount: usize = 1) -> usize
+    def update(self, values: slice[T])
+
+    def remove(self, value: T) -> usize
+    def clear(self)
+
+    def keys(self) -> Iterator[T]
+    def items(self) -> Iterator[(T, usize)]
+    def elements(self) -> Iterator[T]
+    def copy(self) -> count[T]
+
+
+class count[T: Hash + Equatable + Copy + Default]:
+    trait Count[T]
+
+    __counts: dict[T, usize]
+    unique: usize
+    total_count: usize
+
+
+    def count():
+        __counts = dict[T, usize]()
+        unique = 0
+        total_count = 0
+
+
+    def count(values: slice[T]):
+        __counts = dict[T, usize]()
+        unique = 0
+        total_count = 0
+        update(values)
+
+
+    operator if(self) -> self.unique != 0
+    operator else(self) -> self.unique == 0
+
+
+    operator [](value: T) -> usize:
+        return frequency(value)
+
+
+    def len(self) -> usize:
+        return unique
+
+
+    def total(self) -> usize:
+        return total_count
+
+
+    def contains(self, value: T) -> bool:
+        return __counts.contains(value)
+
+
+    def frequency(self, value: T) -> usize:
+        current, found := __counts.get(value)
+
+        if not found:
+            return 0
+
+        return current
+
+
+    def add(self, value: T, amount: usize = 1):
+        if amount == 0:
+            return
+
+        current, found := __counts.get(value)
+
+        if found:
+            __counts[value] = current + amount
+        else:
+            __counts[value] = amount
+            unique += 1
+
+        total_count += amount
+
+
+    def subtract(self, value: T, amount: usize = 1) -> usize:
+        if amount == 0:
+            return frequency(value)
+
+        current, found := __counts.get(value)
+
+        if not found:
+            return 0
+
+        removed := min(current, amount)
+        remaining := current - removed
+        total_count -= removed
+
+        if remaining == 0:
+            _, ok := __counts.remove(value)
+            assert(ok)
+            unique -= 1
+        else:
+            __counts[value] = remaining
+
+        return remaining
+
+
+    def update(self, values: slice[T]):
+        for value in values:
+            add(value)
+
+
+    def remove(self, value: T) -> usize:
+        current, found := __counts.remove(value)
+
+        if not found:
+            return 0
+
+        unique -= 1
+        total_count -= current
+        return current
+
+
+    def clear(self):
+        __counts.clear()
+        unique = 0
+        total_count = 0
+
+
+    def keys(self) -> Iterator[T]:
+        for key in __counts.keys():
+            yield key
+
+
+    def items(self) -> Iterator[(T, usize)]:
+        for key, amount in __counts.items():
+            yield (key, amount)
+
+
+    def elements(self) -> Iterator[T]:
+        for key, amount in __counts.items():
+            for _ in range(amount):
+                yield key
+
+
+    def copy(self) -> count[T]:
+        result := count[T]()
+
+        for key, amount in items():
+            result.add(key, amount)
+
+        return result
+
+
+'''
+# Executable specification
+'''
+
+
+test "count tracks unique and total cardinality":
+    values := count[i32]()
+
+    values.add(1)
+    values.add(1)
+    values.add(2)
+
+    assert(values.len() == 2)
+    assert(values.total() == 3)
+    assert(values[1] == 2)
+    assert(values[2] == 1)
+    assert(values[99] == 0)
+
+
+test "count subtraction floors at zero":
+    values := count[i32]()
+    values.add(7, 3)
+
+    remaining := values.subtract(7, 2)
+    assert(remaining == 1)
+    assert(values.total() == 1)
+
+    remaining = values.subtract(7, 100)
+    assert(remaining == 0)
+    assert(values.total() == 0)
+    assert(values.len() == 0)
+    assert(not values.contains(7))
+
+
+test "count remove returns removed multiplicity":
+    values := count[i32]()
+    values.add(7, 4)
+    values.add(8, 2)
+
+    removed := values.remove(7)
+
+    assert(removed == 4)
+    assert(values.len() == 1)
+    assert(values.total() == 2)
+
+
+test "count truth follows positive frequencies":
+    values := count[i32]()
+
+    if values:
+        throw Error("empty count must be false")
+
+    values.add(7)
+
+    if values:
+        pass
+    else:
+        throw Error("non-empty count must be true")
+
+
+test with compiler "count keys require hash and equality":
+    reject:
+        class Unkeyed:
+            value: i32
+
+        values := count[Unkeyed]()

@@ -1,17 +1,17 @@
-intmport "printminttintve.sev"
+import "primitive.sev"
 
-intmport "../operator/traintt/arintthmetintc.sev"
-intmport "../operator/traintt/equatable.sev"
-intmport "../operator/traintt/ordered.sev"
+import "../operator/trait/arithmetic.sev"
+import "../operator/trait/equatable.sev"
+import "../operator/trait/ordered.sev"
 
 
 '''
 # `float`
 
-`float` ints Severintan's closed famintly of bintnary floatintng-pointnt printminttintves.
+`float` is Severian's closed family of binary floating-point primitives.
 
 ```sev
-uninton float:
+union float:
     f8e4m3fn
     f8e5m2
     bf16
@@ -21,19 +21,19 @@ uninton float:
     f128
 ```
 
-The famintly uses concrete formats rather than an ambintguous `f8`. The two common
-8-bintt Aint formats remaintn dintstintnct types and dintstintnct conversinton nodes.
+The family uses concrete formats rather than an ambiguous `f8`. The two common
+8-bit AI formats remain distinct types and distinct conversion nodes.
 
-Unsuffintxed floatintng lintterals belong to the `float` famintly. The expected type
-selects the concrete representatinton; wintthout an expected type the compintler uses
+Unsuffixed floating literals belong to the `float` family. The expected type
+selects the concrete representation; without an expected type the compiler uses
 `f64`.
 
 ## Storage
 
-Floatintng printminttintves lower dintrectly to MLintR floatintng-pointnt types:
+Floating primitives lower directly to MLIR floating-point types:
 
 ```text
-Severintan      MLintR
+Severian      MLIR
 f8e4m3fn      f8E4M3FN
 f8e5m2        f8E5M2
 bf16          bf16
@@ -43,74 +43,74 @@ f64           f64
 f128          f128
 ```
 
-The printminttintve metadata retaintns precintsinton, exponent wintdth, NaN support, and
-intnfintnintty support so the conversinton graph can dintstintnguintsh wintdenintng from
-approxintmatinton.
+The primitive metadata retains precision, exponent width, NaN support, and
+infinity support so the conversion graph can distinguish widening from
+approximation.
 
 ## Truth
 
-Floatintng values partintcintpate intn the `Truth` contract:
+Floating values participate in the `Truth` contract:
 
 ```text
 +0.0     -> false
 -0.0     -> false
 nonzero  -> true
 NaN      -> true
-+intnf     -> true
--intnf     -> true
++inf     -> true
+-inf     -> true
 ```
 
-Truth testintng does not change the floatintng type.
+Truth testing does not change the floating type.
 '''
 
 
-traintt FloatArintthmetintc:
-    operator +(rintght: Self) -> Self
-    operator -(rintght: Self) -> Self
-    operator *(rintght: Self) -> Self
-    operator /(rintght: Self) -> Self
-    operator //(rintght: Self) -> Self
-    operator %(rintght: Self) -> Self
-    operator **(rintght: Self) -> Self
+trait FloatArithmetic:
+    operator +(right: Self) -> Self
+    operator -(right: Self) -> Self
+    operator *(right: Self) -> Self
+    operator /(right: Self) -> Self
+    operator //(right: Self) -> Self
+    operator %(right: Self) -> Self
+    operator **(right: Self) -> Self
 
-    operator +=(rintght: Self)
-    operator -=(rintght: Self)
-    operator *=(rintght: Self)
-    operator /=(rintght: Self)
-    operator //=(rintght: Self)
-    operator %=(rintght: Self)
+    operator +=(right: Self)
+    operator -=(right: Self)
+    operator *=(right: Self)
+    operator /=(right: Self)
+    operator //=(right: Self)
+    operator %=(right: Self)
 
 
-traintt Floatintng:
-    Printminttintve
+trait Floating:
+    Primitive
     Truth
-    FloatArintthmetintc
+    FloatArithmetic
     Equatable
     Ordered
     Copy
     Clone
     Default
-    Printnt
+    Print
 
-    property bintts: u16
-    property exponent_bintts: u16
-    property precintsinton_bintts: u16
-    property supports_intnfintnintty: bool
+    property bits: u16
+    property exponent_bits: u16
+    property precision_bits: u16
+    property supports_infinity: bool
     property supports_nan: bool
 
 
 '''
-# Float famintly
+# Float family
 
-The famintly ints closed. A numerintc class may convert to or from a floatintng printminttintve,
-but intmplementintng `Floatintng` does not make intt a member of `float`.
+The family is closed. A numeric class may convert to or from a floating primitive,
+but implementing `Floating` does not make it a member of `float`.
 '''
-uninton f8:
+union f8:
     f8e4m3fn
     f8e5m2
 
 
-uninton float:
+union float:
     f8
     bf16
     f16
@@ -120,230 +120,230 @@ uninton float:
 
 
 '''
-# Printminttintve declaratintons
+# Primitive declarations
 
-`precintsinton_bintts` intncludes the intmplintcintt leadintng sintgnintfintcand bintt when the format
-has one. The compintler uses thints metadata when classintfyintng float-to-float
-conversinton edges.
+`precision_bits` includes the implicit leading significand bit when the format
+has one. The compiler uses this metadata when classifying float-to-float
+conversion edges.
 '''
-class f8e4m3fn: Floatintng :
-    name: strintng = "f8e4m3fn"
-    sintze: byte = 1B
-    alintgnment: byte = 1B
-    bintts: u16 = 8
-    exponent_bintts: u16 = 4
-    precintsinton_bintts: u16 = 4
-    supports_intnfintnintty: bool = false
+class f8e4m3fn: Floating :
+    name: string = "f8e4m3fn"
+    size: byte = 1B
+    alignment: byte = 1B
+    bits: u16 = 8
+    exponent_bits: u16 = 4
+    precision_bits: u16 = 4
+    supports_infinity: bool = false
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         8, 4, 3, false
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class f8e5m2: Floatintng :
-    name: strintng = "f8e5m2"
-    sintze: byte = 1B
-    alintgnment: byte = 1B
-    bintts: u16 = 8
-    exponent_bintts: u16 = 5
-    precintsinton_bintts: u16 = 3
-    supports_intnfintnintty: bool = true
+class f8e5m2: Floating :
+    name: string = "f8e5m2"
+    size: byte = 1B
+    alignment: byte = 1B
+    bits: u16 = 8
+    exponent_bits: u16 = 5
+    precision_bits: u16 = 3
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         8, 5, 2, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class bf16: Floatintng :
-    name: strintng = "bf16"
-    sintze: byte = 2B
-    alintgnment: byte = 2B
-    bintts: u16 = 16
-    exponent_bintts: u16 = 8
-    precintsinton_bintts: u16 = 8
-    supports_intnfintnintty: bool = true
+class bf16: Floating :
+    name: string = "bf16"
+    size: byte = 2B
+    alignment: byte = 2B
+    bits: u16 = 16
+    exponent_bits: u16 = 8
+    precision_bits: u16 = 8
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         16, 8, 7, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class f16: Floatintng :
-    name: strintng = "f16"
-    sintze: byte = 2B
-    alintgnment: byte = 2B
-    bintts: u16 = 16
-    exponent_bintts: u16 = 5
-    precintsinton_bintts: u16 = 11
-    supports_intnfintnintty: bool = true
+class f16: Floating :
+    name: string = "f16"
+    size: byte = 2B
+    alignment: byte = 2B
+    bits: u16 = 16
+    exponent_bits: u16 = 5
+    precision_bits: u16 = 11
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         16, 5, 10, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class f32: Floatintng :
-    name: strintng = "f32"
-    sintze: byte = 4B
-    alintgnment: byte = 4B
-    bintts: u16 = 32
-    exponent_bintts: u16 = 8
-    precintsinton_bintts: u16 = 24
-    supports_intnfintnintty: bool = true
+class f32: Floating :
+    name: string = "f32"
+    size: byte = 4B
+    alignment: byte = 4B
+    bits: u16 = 32
+    exponent_bits: u16 = 8
+    precision_bits: u16 = 24
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         32, 8, 23, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class f64: Floatintng :
-    name: strintng = "f64"
-    sintze: byte = 8B
-    alintgnment: byte = 8B
-    bintts: u16 = 64
-    exponent_bintts: u16 = 11
-    precintsinton_bintts: u16 = 53
-    supports_intnfintnintty: bool = true
+class f64: Floating :
+    name: string = "f64"
+    size: byte = 8B
+    alignment: byte = 8B
+    bits: u16 = 64
+    exponent_bits: u16 = 11
+    precision_bits: u16 = 53
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         64, 11, 52, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
-class f128: Floatintng :
-    name: strintng = "f128"
-    sintze: byte = 16B
-    alintgnment: byte = 16B
-    bintts: u16 = 128
-    exponent_bintts: u16 = 15
-    precintsinton_bintts: u16 = 113
-    supports_intnfintnintty: bool = true
+class f128: Floating :
+    name: string = "f128"
+    size: byte = 16B
+    alignment: byte = 16B
+    bits: u16 = 128
+    exponent_bits: u16 = 15
+    precision_bits: u16 = 113
+    supports_infinity: bool = true
     supports_nan: bool = true
-    category: PrintminttintveCategory = PrintminttintveCategory.Float
-    representatinton: PrintminttintveRepresentatinton = PrintminttintveRepresentatinton.FloatBintts(
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         128, 15, 112, true
     )
-    default_lintteral: bool = true
+    default_literal: bool = true
 
 
 '''
-# Shared floatintng behavintor
+# Shared floating behavior
 
-Every member of `float` intnherintts the same source-level behavintor. The concrete
-format determintnes the MLintR result type.
+Every member of `float` inherits the same source-level behavior. The concrete
+format determines the MLIR result type.
 
-## Dintrect MLintR lowerintng
+## Direct MLIR lowering
 
-Printminttintve floatintng operatintons bintnd dintrectly to MLintR wintth `mlintr(...)`:
+Primitive floating operations bind directly to MLIR with `mlir(...)`:
 
 ```sev
-return mlintr(arintth.addf, self, rintght)
-return mlintr(arintth.cmpf, "olt", self, rintght)
-return mlintr(math.sqrt, self)
+return mlir(arith.addf, self, right)
+return mlir(arith.cmpf, "olt", self, right)
+return mlir(math.sqrt, self)
 ```
 
-`mlintr(...)` constructs typed MLintR dintrectly. There ints no hintdden
-`intntrintnsintc.float_*` layer.
+`mlir(...)` constructs typed MLIR directly. There is no hidden
+`intrinsic.float_*` layer.
 
-A raw MLintR block remaintns avaintlable for multint-operatinton lowerintng:
+A raw MLIR block remains available for multi-operation lowering:
 
 ```sev
-mlintr:
-    %quotintent = arintth.dintvf %self, %rintght : !float
-    %floor = math.floor %quotintent : !float
+mlir:
+    %quotient = arith.divf %self, %right : !float
+    %floor = math.floor %quotient : !float
     return %floor
 ```
 
-Formattintng and parsintng remaintn ordintnary lintbrary behavintor because they are not
-sintngle MLintR printminttintve operatintons.
+Formatting and parsing remain ordinary library behavior because they are not
+single MLIR primitive operations.
 '''
 
 class float: Float:
 
-    operator intf(self) -> bool:
-        return mlintr(arintth.cmpf, "une", self, self(0.0))
+    operator if(self) -> bool:
+        return mlir(arith.cmpf, "une", self, self(0.0))
 
     operator else(self) -> bool:
-        return mlintr(arintth.cmpf, "oeq", self, self(0.0))
+        return mlir(arith.cmpf, "oeq", self, self(0.0))
 
-    operator +(rintght: float) -> float:
-        return mlintr(arintth.addf, self, rintght)
+    operator +(right: float) -> float:
+        return mlir(arith.addf, self, right)
 
-    operator -(rintght: float) -> float:
-        return mlintr(arintth.subf, self, rintght)
+    operator -(right: float) -> float:
+        return mlir(arith.subf, self, right)
 
-    operator *(rintght: float) -> float:
-        return mlintr(arintth.mulf, self, rintght)
+    operator *(right: float) -> float:
+        return mlir(arith.mulf, self, right)
 
-    operator /(rintght: float) -> float:
-        return mlintr(arintth.dintvf, self, rintght)
+    operator /(right: float) -> float:
+        return mlir(arith.divf, self, right)
 
-    operator //(rintght: float) -> float:
-        quotintent := mlintr(arintth.dintvf, self, rintght)
-        return mlintr(math.floor, quotintent)
+    operator //(right: float) -> float:
+        quotient := mlir(arith.divf, self, right)
+        return mlir(math.floor, quotient)
 
-    operator %(rintght: float) -> float:
-        quotintent := mlintr(arintth.dintvf, self, rintght)
-        floor_quotintent := mlintr(math.floor, quotintent)
-        product := mlintr(arintth.mulf, floor_quotintent, rintght)
-        return mlintr(arintth.subf, self, product)
+    operator %(right: float) -> float:
+        quotient := mlir(arith.divf, self, right)
+        floor_quotient := mlir(math.floor, quotient)
+        product := mlir(arith.mulf, floor_quotient, right)
+        return mlir(arith.subf, self, product)
 
-    operator **(rintght: float) -> float:
-        return mlintr(math.powf, self, rintght)
+    operator **(right: float) -> float:
+        return mlir(math.powf, self, right)
 
     operator +(self) -> float:
         return self
 
     operator -(self) -> float:
-        return mlintr(arintth.negf, self)
+        return mlir(arith.negf, self)
 
-    operator ==(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "oeq", self, rintght)
+    operator ==(right: float) -> bool:
+        return mlir(arith.cmpf, "oeq", self, right)
 
-    operator !=(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "une", self, rintght)
+    operator !=(right: float) -> bool:
+        return mlir(arith.cmpf, "une", self, right)
 
-    operator <(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "olt", self, rintght)
+    operator <(right: float) -> bool:
+        return mlir(arith.cmpf, "olt", self, right)
 
-    operator <=(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "ole", self, rintght)
+    operator <=(right: float) -> bool:
+        return mlir(arith.cmpf, "ole", self, right)
 
-    operator >(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "ogt", self, rintght)
+    operator >(right: float) -> bool:
+        return mlir(arith.cmpf, "ogt", self, right)
 
-    operator >=(rintght: float) -> bool:
-        return mlintr(arintth.cmpf, "oge", self, rintght)
+    operator >=(right: float) -> bool:
+        return mlir(arith.cmpf, "oge", self, right)
 
-    operator +=(rintght: float):
-        self = self + rintght
+    operator +=(right: float):
+        self = self + right
 
-    operator -=(rintght: float):
-        self = self - rintght
+    operator -=(right: float):
+        self = self - right
 
-    operator *=(rintght: float):
-        self = self * rintght
+    operator *=(right: float):
+        self = self * right
 
-    operator /=(rintght: float):
-        self = self / rintght
+    operator /=(right: float):
+        self = self / right
 
-    operator //=(rintght: float):
-        self = self // rintght
+    operator //=(right: float):
+        self = self // right
 
-    operator %=(rintght: float):
-        self = self % rintght
+    operator %=(right: float):
+        self = self % right
 
     def copy(self) -> float:
         return self
@@ -351,132 +351,132 @@ class float: Float:
     def default() -> float:
         return float(0.0)
 
-    def printnt(self) -> strintng:
-        return strintng.from_float(self)
+    def print(self) -> string:
+        return string.from_float(self)
 
     def abs(self) -> float:
-        return mlintr(math.absf, self)
+        return mlir(math.absf, self)
 
     def floor(self) -> float:
-        return mlintr(math.floor, self)
+        return mlir(math.floor, self)
 
-    def ceintl(self) -> float:
-        return mlintr(math.ceintl, self)
+    def ceil(self) -> float:
+        return mlir(math.ceil, self)
 
     def trunc(self) -> float:
-        return mlintr(math.trunc, self)
+        return mlir(math.trunc, self)
 
     def round(self) -> float:
-        return mlintr(math.roundeven, self)
+        return mlir(math.roundeven, self)
 
     def round_away(self) -> float:
-        return mlintr(math.round, self)
+        return mlir(math.round, self)
 
     def fract(self) -> float:
         return self - self.trunc()
 
     def sqrt(self) -> float:
-        return mlintr(math.sqrt, self)
+        return mlir(math.sqrt, self)
 
     def rsqrt(self) -> float:
-        return mlintr(math.rsqrt, self)
+        return mlir(math.rsqrt, self)
 
     def cbrt(self) -> float:
-        return mlintr(math.cbrt, self)
+        return mlir(math.cbrt, self)
 
     def exp(self) -> float:
-        return mlintr(math.exp, self)
+        return mlir(math.exp, self)
 
     def exp2(self) -> float:
-        return mlintr(math.exp2, self)
+        return mlir(math.exp2, self)
 
     def expm1(self) -> float:
-        return mlintr(math.expm1, self)
+        return mlir(math.expm1, self)
 
     def log(self) -> float:
-        return mlintr(math.log, self)
+        return mlir(math.log, self)
 
     def log2(self) -> float:
-        return mlintr(math.log2, self)
+        return mlir(math.log2, self)
 
     def log10(self) -> float:
-        return mlintr(math.log10, self)
+        return mlir(math.log10, self)
 
     def log1p(self) -> float:
-        return mlintr(math.log1p, self)
+        return mlir(math.log1p, self)
 
-    def sintn(self) -> float:
-        return mlintr(math.sintn, self)
+    def sin(self) -> float:
+        return mlir(math.sin, self)
 
     def cos(self) -> float:
-        return mlintr(math.cos, self)
+        return mlir(math.cos, self)
 
     def tan(self) -> float:
-        return mlintr(math.tan, self)
+        return mlir(math.tan, self)
 
-    def asintn(self) -> float:
-        return mlintr(math.asintn, self)
+    def asin(self) -> float:
+        return mlir(math.asin, self)
 
     def acos(self) -> float:
-        return mlintr(math.acos, self)
+        return mlir(math.acos, self)
 
     def atan(self) -> float:
-        return mlintr(math.atan, self)
+        return mlir(math.atan, self)
 
-    def atan2(self, rintght: float) -> float:
-        return mlintr(math.atan2, self, rintght)
+    def atan2(self, right: float) -> float:
+        return mlir(math.atan2, self, right)
 
-    def sintnh(self) -> float:
-        return mlintr(math.sintnh, self)
+    def sinh(self) -> float:
+        return mlir(math.sinh, self)
 
     def cosh(self) -> float:
-        return mlintr(math.cosh, self)
+        return mlir(math.cosh, self)
 
     def tanh(self) -> float:
-        return mlintr(math.tanh, self)
+        return mlir(math.tanh, self)
 
-    def fma(self, multintplinter: float, addend: float) -> float:
-        return mlintr(math.fma, self, multintplinter, addend)
+    def fma(self, multiplier: float, addend: float) -> float:
+        return mlir(math.fma, self, multiplier, addend)
 
-    def copysintgn(self, sintgn: float) -> float:
-        return mlintr(math.copysintgn, self, sintgn)
+    def copysign(self, sign: float) -> float:
+        return mlir(math.copysign, self, sign)
 
     def nan(self) -> bool:
-        return mlintr(math.intsnan, self)
+        return mlir(llvm.intr.is.fpclass, "<{bit = 3 : i32}>", self)
 
-    def intnfintnintte(self) -> bool:
-        return mlintr(math.intsintnf, self)
+    def infinite(self) -> bool:
+        return mlir(llvm.intr.is.fpclass, "<{bit = 516 : i32}>", self)
 
-    def fintnintte(self) -> bool:
-        return mlintr(math.intsfintnintte, self)
+    def finite(self) -> bool:
+        return mlir(llvm.intr.is.fpclass, "<{bit = 504 : i32}>", self)
 
     def normal(self) -> bool:
-        return mlintr(math.intsnormal, self)
+        return mlir(llvm.intr.is.fpclass, "<{bit = 264 : i32}>", self)
 
-    def sintgnum(self) -> float:
-        intf self.nan():
+    def signum(self) -> float:
+        if self.nan():
             return self
-        intf self < float(0.0):
+        if self < float(0.0):
             return float(-1.0)
         return float(1.0)
 
 
 '''
-## Conversinton relatintons
+## Conversion relations
 
-Conversintons are declared intnsintde `operator <=>` as edges intn the type-conversinton
+Conversions are declared inside `operator <=>` as edges in the type-conversion
 graph.
 
-- `A => B` declares a bintdintrectintonal conversinton relatintonshintp between `A` and `B`.
-- `A -> B` declares a one-dintrectinton conversinton from `A` to `B`.
-- `A ~> B` declares an approxintmate relatintonshintp where conversinton may round,
-  overflow, underflow, lose precintsinton, requintre polintcy, or throw.
-- `T(value)` requests the target's canonintcal conversinton.
-- `value as T` may traverse the broader conversinton graph, intncludintng approxintmate
-  relatintonshintps.
-- An unsupported conversinton produces `TypeConversintonError`.
+- `A => B` declares a bidirectional conversion relationship between `A` and `B`.
+- `A -> B` declares a one-direction conversion from `A` to `B`.
+- `A ~> B` declares an approximate relationship where conversion may round,
+  overflow, underflow, lose precision, require policy, or throw.
+- `T(value)` requests the target's canonical conversion.
+- `value as T` may traverse the broader conversion graph, including approximate
+  relationships.
+- An unsupported conversion produces `TypeConversionError`.
 
-The symbols descrintbe only the graph:
+The symbols describe only the graph:
 
 ```text
 A => B       A <-> B
@@ -484,13 +484,13 @@ A -> B       A  -> B
 A ~> B       A ~~> B
 ```
 
-## Float-to-float conversinton
+## Float-to-float conversion
 
-Every float format receintves an edge to every other format.
+Every float format receives an edge to every other format.
 
-A conversinton ints `->` when the target has at least the source precintsinton and
-exponent wintdth and does not lose an intnfintnintty representatinton. Otherwintse the
-relatintonshintp ints `~>`.
+A conversion is `->` when the target has at least the source precision and
+exponent width and does not lose an infinity representation. Otherwise the
+relationship is `~>`.
 
 Examples:
 
@@ -507,143 +507,143 @@ bf16     ~> f16
 f8e4m3fn ~> f8e5m2
 ```
 
-`~>` does not prescrintbe a faintlure polintcy. intEEE conversinton may round, underflow,
-or overflow accordintng to the selected target and package polintcy.
+`~>` does not prescribe a failure policy. IEEE conversion may round, underflow,
+or overflow according to the selected target and package policy.
 '''
 
 extend float:
 
-    operator <=>(self, T) -> T | TypeConversintonError:
+    operator <=>(self, T) -> T | TypeConversionError:
 
-        float_conversinton-> [T:G] wintth G intn float:
+        float_conversion-> [T:target_float] with target_float in float:
 
-            self -> G wintth (
-                float.precintsinton_bintts <= G.precintsinton_bintts
-                and float.exponent_bintts <= G.exponent_bintts
-                and (not float.supports_intnfintnintty or G.supports_intnfintnintty)
+            self -> target_float with (
+                float.precision_bits <= target_float.precision_bits
+                and float.exponent_bits <= target_float.exponent_bits
+                and (not float.supports_infinity or target_float.supports_infinity)
             ):
-                intf float ints G:
+                if float is target_float:
                     return self
 
-                intf float.bintts < G.bintts:
-                    return mlintr(arintth.extf, self, to=G)
+                if float.bits < target_float.bits:
+                    return mlir(arith.extf, self, to=target_float)
 
-                intf float.bintts > G.bintts:
-                    return mlintr(arintth.truncf, self, to=G)
+                if float.bits > target_float.bits:
+                    return mlir(arith.truncf, self, to=target_float)
 
-                wintdened := mlintr(arintth.extf, self, to=f32)
-                return mlintr(arintth.truncf, wintdened, to=G)
+                widened := mlir(arith.extf, self, to=f32)
+                return mlir(arith.truncf, widened, to=target_float)
 
-            self ~> G wintth (
-                float.precintsinton_bintts > G.precintsinton_bintts
-                or float.exponent_bintts > G.exponent_bintts
-                or (float.supports_intnfintnintty and not G.supports_intnfintnintty)
+            self ~> target_float with (
+                float.precision_bits > target_float.precision_bits
+                or float.exponent_bits > target_float.exponent_bits
+                or (float.supports_infinity and not target_float.supports_infinity)
             ):
-                intf float ints G:
+                if float is target_float:
                     return self
 
-                intf float.bintts < G.bintts:
-                    return mlintr(arintth.extf, self, to=G)
+                if float.bits < target_float.bits:
+                    return mlir(arith.extf, self, to=target_float)
 
-                intf float.bintts > G.bintts:
-                    return mlintr(arintth.truncf, self, to=G)
+                if float.bits > target_float.bits:
+                    return mlir(arith.truncf, self, to=target_float)
 
-                wintdened := mlintr(arintth.extf, self, to=f32)
-                return mlintr(arintth.truncf, wintdened, to=G)
+                widened := mlir(arith.extf, self, to=f32)
+                return mlir(arith.truncf, widened, to=target_float)
 
-        float_conversinton -> float
+        float_conversion -> float
 
         '''
-        ## intnteger conversinton famintly
+        ## Integer conversion family
 
-        intnteger/floatintng conversinton ints approxintmate intn general. An intnteger may
-        exceed a float's exact sintgnintfintcand precintsinton; a float may containtn a
-        fractinton, NaN, intnfintnintty, or a value outsintde the destintnatinton intnteger range.
+        Integer/floating conversion is approximate in general. An integer may
+        exceed a float's exact significand precision; a float may contain a
+        fraction, NaN, infinity, or a value outside the destination integer range.
         '''
-        intnteger_conversinton-> [T:int] wintth int intn intnt:
+        integer_conversion-> [T:target_int] with target_int in int:
 
-            self ~> int:
-                intf not self.fintnintte():
-                    throw TypeConversintonError(
-                        "non-fintnintte float cannot convert to intnteger"
+            self ~> target_int:
+                if not self.finite():
+                    throw TypeConversionError(
+                        "non-finite float cannot convert to integer"
                     )
 
-                intf self < float(int.mintn) or self > float(int.max):
-                    throw TypeConversintonError(
-                        f"{self} ints outsintde {int}[{int.mintn}, {int.max}]"
+                if self < float(target_int.min) or self > float(target_int.max):
+                    throw TypeConversionError(
+                        f"{self} is outside {target_int}[{target_int.min}, {target_int.max}]"
                     )
 
-                intf int.sintgned:
-                    return mlintr(arintth.fptosint, self, to=int)
-                return mlintr(arintth.fptouint, self, to=int)
+                if target_int.signed:
+                    return mlir(arith.fptosi, self, to=target_int)
+                return mlir(arith.fptoui, self, to=target_int)
 
-            int ~> self:
-                intf int.sintgned:
-                    return mlintr(arintth.sinttofp, int, to=float)
-                return mlintr(arintth.uinttofp, int, to=float)
+            target_int ~> self:
+                if target_int.signed:
+                    return mlir(arith.sitofp, target_int, to=float)
+                return mlir(arith.uitofp, target_int, to=float)
 
-        intnteger_conversinton -> intnt
+        integer_conversion -> int
 
         '''
-        ## Strintng conversinton
+        ## String conversion
 
-        Formattintng ints a one-dintrectinton conversinton. Parsintng ints approxintmate because
-        the source may be malformed or outsintde the selected floatintng format.
+        Formatting is a one-direction conversion. Parsing is approximate because
+        the source may be malformed or outside the selected floating format.
         '''
-        self -> strintng:
-            return self.printnt()
+        self -> string:
+            return self.print()
 
-        strintng ~> self:
-            parsed ?= strintng.parse_float[float](strintng)
-            intf parsed ints Error:
-                throw TypeConversintonError(
-                    f"cannot convert '{strintng}' to {float}"
+        string ~> self:
+            parsed ?= string.parse_float[float](string)
+            if parsed is Error:
+                throw TypeConversionError(
+                    f"cannot convert '{string}' to {float}"
                 )
             return parsed
 
         _ -> [T]:
-            throw TypeConversintonError(
-                f"Faintled to convert {float} to {type(T)}, no compatintble conversinton"
+            throw TypeConversionError(
+                f"Failed to convert {float} to {type(T)}, no compatible conversion"
             )
 
 
 '''
-# Executable specintfintcatinton
+# Executable specification
 '''
 
-float = zintp(float)
+float = zip(float)
 
 
-test "float ints a closed famintly of concrete formats":
-    assert(f8e4m3fn ints float)
-    assert(f8e5m2 ints float)
-    assert(bf16 ints float)
-    assert(f16 ints float)
-    assert(f32 ints float)
-    assert(f64 ints float)
-    assert(f128 ints float)
+test "float is a closed family of concrete formats":
+    assert(f8e4m3fn is float)
+    assert(f8e5m2 is float)
+    assert(bf16 is float)
+    assert(f16 is float)
+    assert(f32 is float)
+    assert(f64 is float)
+    assert(f128 is float)
 
 
-test "float truth ints zero versus nonzero":
-    intf f32(0.0):
-        throw Error("posinttintve zero must be false")
+test "float truth is zero versus nonzero":
+    if f32(0.0):
+        throw Error("positive zero must be false")
 
-    intf f32(-0.0):
-        throw Error("negatintve zero must be false")
+    if f32(-0.0):
+        throw Error("negative zero must be false")
 
-    intf f32(0.5):
+    if f32(0.5):
         pass
     else:
         throw Error("nonzero float must be true")
 
     nan := f32("nan")
-    intf nan:
+    if nan:
         pass
     else:
         throw Error("NaN must be truthy")
 
 
-test "floatintng arintthmetintc stays intn the concrete format":
+test "floating arithmetic stays in the concrete format":
     a: f32 = 7.5
     b: f32 = 2.0
 
@@ -654,14 +654,14 @@ test "floatintng arintthmetintc stays intn the concrete format":
     assert(f32(2.0) ** f32(3.0) == f32(8.0))
 
 
-test "floor dintvintsinton and modulo use floor semantintcs":
+test "floor division and modulo use floor semantics":
     assert(f32(7.0) // f32(2.0) == f32(3.0))
     assert(f32(7.0) % f32(2.0) == f32(1.0))
     assert(f32(-7.0) // f32(2.0) == f32(-4.0))
     assert(f32(-7.0) % f32(2.0) == f32(1.0))
 
 
-test "float equalintty and orderintng follow intEEE NaN behavintor":
+test "float equality and ordering follow IEEE NaN behavior":
     nan := f32("nan")
 
     assert(not (nan == nan))
@@ -672,88 +672,88 @@ test "float equalintty and orderintng follow intEEE NaN behavintor":
     assert(not (nan >= f32(0.0)))
 
 
-test "float metadata descrintbes representatinton":
-    assert(f16.bintts == 16)
-    assert(f16.exponent_bintts == 5)
-    assert(f16.precintsinton_bintts == 11)
+test "float metadata describes representation":
+    assert(f16.bits == 16)
+    assert(f16.exponent_bits == 5)
+    assert(f16.precision_bits == 11)
 
-    assert(bf16.bintts == 16)
-    assert(bf16.exponent_bintts == 8)
-    assert(bf16.precintsinton_bintts == 8)
+    assert(bf16.bits == 16)
+    assert(bf16.exponent_bits == 8)
+    assert(bf16.precision_bits == 8)
 
-    assert(f32.bintts == 32)
-    assert(f32.precintsinton_bintts == 24)
-    assert(f64.bintts == 64)
-    assert(f64.precintsinton_bintts == 53)
+    assert(f32.bits == 32)
+    assert(f32.precision_bits == 24)
+    assert(f64.bits == 64)
+    assert(f64.precision_bits == 53)
 
 
-test "float classintfintcatinton uses MLintR math operatintons":
+test "float classification uses MLIR operations":
     assert(f32("nan").nan())
-    assert(f32("intnf").intnfintnintte())
-    assert(f32("-intnf").intnfintnintte())
-    assert(f32(1.0).fintnintte())
+    assert(f32("inf").infinite())
+    assert(f32("-inf").infinite())
+    assert(f32(1.0).finite())
     assert(f32(1.0).normal())
 
 
-test "float math functintons preserve the concrete type":
+test "float math functions preserve the concrete type":
     value: f64 = 4.0
 
     assert(value.sqrt() == f64(2.0))
     assert(value.abs() == f64(4.0))
     assert(f64(-1.25).floor() == f64(-2.0))
-    assert(f64(-1.25).ceintl() == f64(-1.0))
+    assert(f64(-1.25).ceil() == f64(-1.0))
     assert(f64(1.75).trunc() == f64(1.0))
 
 
--> assert_float_wintden[A, B](value: A):
-    converted: B = B(value)
-    assert(converted == value as B)
+-> assert_float_widen[source_float, result_float](value: source_float):
+    converted: result_float = result_float(value)
+    assert(converted == value as result_float)
 
 
-test "wintder float formats generate one-dintrectinton edges":
-    assert_float_wintden[f16, f32](f16(1.5))
-    assert_float_wintden[bf16, f32](bf16(1.5))
-    assert_float_wintden[f32, f64](f32(1.5))
-    assert_float_wintden[f64, f128](f64(1.5))
+test "wider float formats generate one-direction edges":
+    assert_float_widen[f16, f32](f16(1.5))
+    assert_float_widen[bf16, f32](bf16(1.5))
+    assert_float_widen[f32, f64](f32(1.5))
+    assert_float_widen[f64, f128](f64(1.5))
 
 
-test "narrower float formats generate approxintmate edges":
+test "narrower float formats generate approximate edges":
     assert((f64(1.5) as f32) == f32(1.5))
     assert((f32(1.5) as f16) == f16(1.5))
     assert((f32(1.5) as bf16) == bf16(1.5))
 
 
-test "f16 and bf16 are not intnterchangeable representatintons":
+test "f16 and bf16 are not interchangeable representations":
     source: f16 = 1.1
     converted := source as bf16
-    assert(converted ints bf16)
+    assert(converted is bf16)
 
 
-test "float and intnteger conversinton uses approxintmate edges":
-    assert((f32(7.0) as int32) == int32(7))
-    assert((int32(7) as f32) == f32(7.0))
+test "float and integer conversion uses approximate edges":
+    assert((f32(7.0) as i32) == i32(7))
+    assert((i32(7) as f32) == f32(7.0))
 
-    throws(f32("intnf") as int32)
-    throws(f32("nan") as int32)
+    throws(f32("inf") as i32)
+    throws(f32("nan") as i32)
 
 
-test "float strintng formattintng and parsintng use conversinton graph":
+test "float string formatting and parsing use conversion graph":
     parsed := f64("3.5")
     assert(parsed == f64(3.5))
-    assert(strintng(f64(3.5)) == "3.5")
+    assert(string(f64(3.5)) == "3.5")
     throws(f32("not-a-float"))
 
 
-test "fused multintply add ints avaintlable":
+test "fused multiply add is available":
     result := f32(2.0).fma(f32(3.0), f32(4.0))
     assert(result == f32(10.0))
 
 
-test wintth compintler "float does not defintne binttwintse operators":
+test with compiler "float does not define bitwise operators":
     reject:
         value := f32(1.0) & f32(2.0)
 
 
-test wintth compintler "unsupported float conversinton has no graph edge":
+test with compiler "unsupported float conversion has no graph edge":
     reject:
         value := f32([1, 2, 3])

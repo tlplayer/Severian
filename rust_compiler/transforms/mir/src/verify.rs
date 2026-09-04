@@ -339,6 +339,22 @@ fn transfer(
                     }
                 }
                 if let Some(context) = context {
+                    if let Some(severian_universal::AttrValue::String(name)) =
+                        attributes.get(&severian_universal::MLIR_OPERATION_NAME_ATTRIBUTE)
+                    {
+                        let Some((dialect, operation)) = name.split_once('.') else {
+                            return Err(VerifyError::InvalidOperation(
+                                "a direct MLIR operation must use a dialect.operation name".into(),
+                            ));
+                        };
+                        if severian_universal::OpId::named(dialect, operation) != *id {
+                            return Err(VerifyError::InvalidOperation(
+                                "direct MLIR operation metadata does not match its operation ID"
+                                    .into(),
+                            ));
+                        }
+                        continue;
+                    }
                     let interface = context
                         .operations
                         .interface(*id)

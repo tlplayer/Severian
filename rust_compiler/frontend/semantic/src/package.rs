@@ -12,7 +12,7 @@ use severian_universal::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-mod generic;
+pub(crate) mod generic;
 #[cfg(test)]
 mod tests;
 

@@ -1521,7 +1521,16 @@ fn render_cfg_operation(
                 .map(|value| mlir_type(&value_type(module, *value)?))
                 .collect::<Result<Vec<_>, _>>()?;
             let result_type = mlir_type(&value_type(module, *result)?)?;
-            if let Some(parameters) = parameters {
+            if let Some(attributes) = parameters
+                .as_deref()
+                .filter(|parameters| parameters.trim_start().starts_with("<{"))
+            {
+                output.push_str(&format!(
+                    "{indentation}%v{} = \"{mnemonic}\"({operand_values}) {attributes} : ({}) -> {result_type}\n",
+                    result.0,
+                    operand_types.join(", ")
+                ));
+            } else if let Some(parameters) = parameters {
                 let input_type = operand_types.first().ok_or_else(|| {
                     MlirError::UnsupportedOperation(format!(
                         "parameterized MLIR operation `{mnemonic}` requires an operand"
@@ -2452,7 +2461,12 @@ fn binary_mnemonic(operator: BinaryOperation, ty: &LoweredType) -> Result<String
             "arith.remui"
         }
         .into(),
-        BinaryOperation::Power => "math.ipowi".into(),
+        BinaryOperation::Power => if floating {
+            "math.powf"
+        } else {
+            "math.ipowi"
+        }
+        .into(),
         BinaryOperation::ShiftLeft => "arith.shli".into(),
         BinaryOperation::ShiftRight => if signed {
             "arith.shrsi"
@@ -2467,7 +2481,7 @@ fn binary_mnemonic(operator: BinaryOperation, ty: &LoweredType) -> Result<String
         }
         .into(),
         BinaryOperation::NotEqual => if floating {
-            "arith.cmpf one,"
+            "arith.cmpf une,"
         } else {
             "arith.cmpi ne,"
         }
@@ -2637,7 +2651,16 @@ fn render_block(
                     .map(|value| mlir_type(&value_type(module, *value)?))
                     .collect::<Result<Vec<_>, _>>()?;
                 let result_type = mlir_type(&value_type(module, *result)?)?;
-                if let Some(parameters) = parameters {
+                if let Some(attributes) = parameters
+                    .as_deref()
+                    .filter(|parameters| parameters.trim_start().starts_with("<{"))
+                {
+                    output.push_str(&format!(
+                        "{indentation}%v{} = \"{mnemonic}\"({operand_values}) {attributes} : ({}) -> {result_type}\n",
+                        result.0,
+                        operand_types.join(", ")
+                    ));
+                } else if let Some(parameters) = parameters {
                     let input_type = operand_types.first().ok_or_else(|| {
                         MlirError::UnsupportedOperation(format!(
                             "parameterized MLIR operation `{mnemonic}` requires an operand"
@@ -3615,6 +3638,7 @@ fn mlir_binary(operator: BinaryOperation, ty: &LoweredType) -> Result<&'static s
         (BinaryOperation::Multiply, true, false) => "arith.mulf",
         (BinaryOperation::Divide, true, false) => "arith.divf",
         (BinaryOperation::Remainder, true, false) => "arith.remf",
+        (BinaryOperation::Power, true, false) => "math.powf",
         (BinaryOperation::Equal, true, false) => "arith.cmpf oeq,",
         (BinaryOperation::NotEqual, true, false) => "arith.cmpf une,",
         (BinaryOperation::Less, true, false) => "arith.cmpf olt,",

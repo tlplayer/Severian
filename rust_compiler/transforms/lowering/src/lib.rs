@@ -485,6 +485,7 @@ impl CfgLowering<'_> {
             } => {
                 let left = self.lower_operand(body, left, operations)?;
                 let right = self.lower_operand(body, right, operations)?;
+                let left_type = self.value_type(left);
                 let result_type = match *operator {
                     BinaryOperator::Equal
                     | BinaryOperator::NotEqual
@@ -493,10 +494,10 @@ impl CfgLowering<'_> {
                     | BinaryOperator::Greater
                     | BinaryOperator::GreaterEqual
                     | BinaryOperator::Contains => self.lower_type_named("bool")?,
-                    _ => self.value_type(left),
+                    _ => left_type.clone(),
                 };
                 let result = self.new_value(result_type);
-                if self.value_type(left) == LoweredType::String {
+                if left_type == LoweredType::String {
                     match *operator {
                         BinaryOperator::Add => operations.push(LirOperation::RuntimeCall {
                             symbol: "__sev_string_concat".into(),
@@ -532,6 +533,52 @@ impl CfgLowering<'_> {
                             return Err(LoweringError::UnsupportedStringOperation(*operator));
                         }
                     }
+                } else if matches!(left_type, LoweredType::Float { .. })
+                    && *operator == BinaryOperator::FloorDivide
+                {
+                    let quotient = self.new_value(left_type);
+                    operations.push(LirOperation::Binary {
+                        operator: BinaryOperator::Divide,
+                        left,
+                        right,
+                        result: quotient,
+                    });
+                    operations.push(LirOperation::Mlir {
+                        mnemonic: "math.floor".into(),
+                        parameters: None,
+                        operands: vec![quotient],
+                        result,
+                    });
+                } else if matches!(left_type, LoweredType::Float { .. })
+                    && *operator == BinaryOperator::Remainder
+                {
+                    let quotient = self.new_value(left_type.clone());
+                    let floored = self.new_value(left_type.clone());
+                    let product = self.new_value(left_type);
+                    operations.push(LirOperation::Binary {
+                        operator: BinaryOperator::Divide,
+                        left,
+                        right,
+                        result: quotient,
+                    });
+                    operations.push(LirOperation::Mlir {
+                        mnemonic: "math.floor".into(),
+                        parameters: None,
+                        operands: vec![quotient],
+                        result: floored,
+                    });
+                    operations.push(LirOperation::Binary {
+                        operator: BinaryOperator::Multiply,
+                        left: floored,
+                        right,
+                        result: product,
+                    });
+                    operations.push(LirOperation::Binary {
+                        operator: BinaryOperator::Subtract,
+                        left,
+                        right: product,
+                        result,
+                    });
                 } else {
                     operations.push(LirOperation::Binary {
                         operator: lower_binary(*operator),

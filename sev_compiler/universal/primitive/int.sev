@@ -75,10 +75,10 @@ trait IntegerArithmetic:
 
 
 trait IntegerShift:
-    operator <<[LeftShift: Y, I: int](right: I) -> Self
-    operator >>[RightShift: Y, I: int](right: I) -> Self
-    operator <<=[LeftShift: Y, I: int](right: I)
-    operator >>=[RightShift: Y, I: int](right: I)
+    operator <<[LeftShift: Y, int: int](right: int) -> Self
+    operator >>[RightShift: Y, int: int](right: int) -> Self
+    operator <<=[LeftShift: Y, int: int](right: int)
+    operator >>=[RightShift: Y, int: int](right: int)
 
 
 trait IntegerBitwiseAssign:
@@ -331,7 +331,7 @@ Operations that care about signedness therefore choose the concrete MLIR op or
 predicate explicitly:
 
 ```sev
-if I.signed:
+if int.signed:
     return mlir(arith.divsi, self, right)
 return mlir(arith.divui, self, right)
 ```
@@ -340,7 +340,7 @@ A raw block is available when an operation needs several MLIR statements:
 
 ```sev
 mlir:
-    %result = arith.addi %self, %right : !I
+    %result = arith.addi %self, %right : !int
     return %result
 ```
 
@@ -348,7 +348,7 @@ Formatting, parsing, hashing, and other library behavior are not disguised as
 compiler intrinsics. They remain ordinary Severian/library operations unless
 they have a real MLIR operation to bind to.
 '''
-extend [I: int] I:
+class int: Integer:
 
     operator if(self) -> bool:
         return self != 0
@@ -356,107 +356,107 @@ extend [I: int] I:
     operator else(self) -> bool:
         return self == 0
 
-    operator +(right: I) -> I:
+    operator +(right: int) -> int:
         return mlir(arith.addi, self, right)
 
-    operator -(right: I) -> I:
+    operator -(right: int) -> int:
         return mlir(arith.subi, self, right)
 
-    operator *(right: I) -> I:
+    operator *(right: int) -> int:
         return  mlir(arith.muli, self, right)
 
-    operator /(right: I) -> I:
-        if I.signed:
+    operator /(right: int) -> int:
+        if int.signed:
             return mlir(arith.divsi, self, right)
         return mlir(arith.divui, self, right)
 
-    operator //(right: I) -> I:
-        if I.signed:
+    operator //(right: int) -> int:
+        if int.signed:
             return mlir(arith.floordivsi, self, right)
         return mlir(arith.divui, self, right)
 
-    operator %(right: I) -> I:
-        if I.signed:
+    operator %(right: int) -> int:
+        if int.signed:
             return mlir(arith.remsi, self, right)
         return mlir(arith.remui, self, right)
 
-    operator **(right: u32) -> I:
-        return mlir(math.ipowi, self, right as I)
+    operator **(right: u32) -> int:
+        return mlir(math.ipowi, self, right as int)
 
-    operator &(right: I) -> I:
+    operator &(right: int) -> int:
         return mlir(arith.andi, self, right)
 
-    operator |(right: I) -> I:
+    operator |(right: int) -> int:
         return mlir(arith.ori, self, right)
 
-    operator ^(right: I) -> I:
+    operator ^(right: int) -> int:
         return mlir(arith.xori, self, right)
 
-    operator <<[LeftShift: Y, S: int](right: S) -> I:
-        return mlir(arith.shli, self, right as I)
+    operator <<[LeftShift: Y, shift_int: int](right: shift_int) -> int:
+        return mlir(arith.shli, self, right as int)
 
-    operator >>[RightShift: Y, S: int](right: S) -> I:
-        if I.signed:
-            return mlir(arith.shrsi, self, right as I)
-        return mlir(arith.shrui, self, right as I)
+    operator >>[RightShift: Y, shift_int: int](right: shift_int) -> int:
+        if int.signed:
+            return mlir(arith.shrsi, self, right as int)
+        return mlir(arith.shrui, self, right as int)
 
-    operator ==(right: I) -> bool:
+    operator ==(right: int) -> bool:
         return mlir(arith.cmpi, "eq", self, right)
 
-    operator !=(right: I) -> bool:
+    operator !=(right: int) -> bool:
         return not (self == right)
 
-    operator <(right: I) -> bool:
-        if I.signed:
+    operator <(right: int) -> bool:
+        if int.signed:
             return mlir(arith.cmpi, "slt", self, right)
         return mlir(arith.cmpi, "ult", self, right)
 
-    operator <=(right: I) -> bool:
+    operator <=(right: int) -> bool:
         return self < right or self == right
 
-    operator >(right: I) -> bool:
+    operator >(right: int) -> bool:
         return right < self
 
-    operator >=(right: I) -> bool:
+    operator >=(right: int) -> bool:
         return right <= self
 
-    operator +=(right: I):
+    operator +=(right: int):
         self = self + right
 
-    operator -=(right: I):
+    operator -=(right: int):
         self = self - right
 
-    operator *=(right: I):
+    operator *=(right: int):
         self = self * right
 
-    operator /=(right: I):
+    operator /=(right: int):
         self = self / right
 
-    operator //=(right: I):
+    operator //=(right: int):
         self = self // right
 
-    operator %=(right: I):
+    operator %=(right: int):
         self = self % right
 
-    operator &=(right: I):
+    operator &=(right: int):
         self = self & right
 
-    operator |=(right: I):
+    operator |=(right: int):
         self = self | right
 
-    operator ^=(right: I):
+    operator ^=(right: int):
         self = self ^ right
 
-    operator <<=[LeftShift: Y, S: int](right: S):
+    operator <<=[LeftShift: Y, shift_int: int](right: shift_int):
         self = self << right
 
-    operator >>=[RightShift: Y, S: int](right: S):
+    operator >>=[RightShift: Y, shift_int: int](right: shift_int):
         self = self >> right
 
-    def copy(self) -> I:
+    def copy(self) -> int:
         return self
 
-    def default() -> I:
+    def default() -> int:
         return 0
 
     def hash(self) -> u64:
@@ -465,65 +465,65 @@ extend [I: int] I:
     def print(self) -> string:
         return string.from_integer(self, base=10)
 
-    def abs(self) -> I:
-        if I.signed:
+    def abs(self) -> int:
+        if int.signed:
             return mlir(math.absi, self)
         return self
 
-    def rotate_left(self, count: u32) -> I:
-        shift := count % u32(I.bits)
+    def rotate_left(self, count: u32) -> int:
+        shift := count % u32(int.bits)
         if shift == 0:
             return self
 
-        left := mlir(arith.shli, self, shift as I)
-        right := mlir(arith.shrui, self, (u32(I.bits) - shift) as I)
+        left := mlir(arith.shli, self, shift as int)
+        right := mlir(arith.shrui, self, (u32(int.bits) - shift) as int)
         return mlir(arith.ori, left, right)
 
-    def rotate_right(self, count: u32) -> I:
-        shift := count % u32(I.bits)
+    def rotate_right(self, count: u32) -> int:
+        shift := count % u32(int.bits)
         if shift == 0:
             return self
 
-        right := mlir(arith.shrui, self, shift as I)
-        left := mlir(arith.shli, self, (u32(I.bits) - shift) as I)
+        right := mlir(arith.shrui, self, shift as int)
+        left := mlir(arith.shli, self, (u32(int.bits) - shift) as int)
         return mlir(arith.ori, left, right)
 
-    def little_endian(self) -> bytes[I.bits / 8]:
-        result := bytes[I.bits / 8]()
-        for index in range(I.bits / 8):
-            shifted := mlir(arith.shrui, self, I(index * 8))
-            if I.bits == 8:
+    def little_endian(self) -> bytes[int.bits / 8]:
+        result := bytes[int.bits / 8]()
+        for index in range(int.bits / 8):
+            shifted := mlir(arith.shrui, self, int(index * 8))
+            if int.bits == 8:
                 result[index] = mlir(arith.bitcast, shifted, to=u8)
             else:
                 result[index] = mlir(arith.trunci, shifted, to=u8)
         return result
 
-    def big_endian(self) -> bytes[I.bits / 8]:
-        result := bytes[I.bits / 8]()
-        for index in range(I.bits / 8):
-            shift := (I.bits / 8 - index - 1) * 8
-            shifted := mlir(arith.shrui, self, I(shift))
-            if I.bits == 8:
+    def big_endian(self) -> bytes[int.bits / 8]:
+        result := bytes[int.bits / 8]()
+        for index in range(int.bits / 8):
+            shift := (int.bits / 8 - index - 1) * 8
+            shifted := mlir(arith.shrui, self, int(shift))
+            if int.bits == 8:
                 result[index] = mlir(arith.bitcast, shifted, to=u8)
             else:
                 result[index] = mlir(arith.trunci, shifted, to=u8)
         return result
 
-    def native_endian(self) -> bytes[I.bits / 8]:
+    def native_endian(self) -> bytes[int.bits / 8]:
         if target.endian == Endian.Little:
             return self.to_le_bytes()
         return self.to_be_bytes()
 
 
-extend [I: signed_int] I:
+extend [int: signed_int] int:
 
-    operator +(self) -> I:
+    operator +(self) -> int:
         return self
 
-    operator -(self) -> I:
-        return mlir(arith.subi, I(0), self)
+    operator -(self) -> int:
+        return mlir(arith.subi, int(0), self)
 
-    def signum(self) -> I:
+    def signum(self) -> int:
         if self < 0:
             return -1
         if self > 0:
@@ -537,9 +537,9 @@ extend [I: signed_int] I:
         return self > 0
 
 
-extend [I: unsigned_int] I:
+extend [int: unsigned_int] int:
 
-    operator +(self) -> I:
+    operator +(self) -> int:
         return self
 
 
@@ -582,33 +582,33 @@ as approximate.
 The `~>` body checks the value before lowering the cast. `as` may request the edge,
 but it does not disable the check.
 '''
-extend [I: int] I:
+extend int:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
-        integer_conversion-> [T:J] with J in int:
+        integer_conversion-> [T:target_int] with target_int in int:
 
-            self -> J with self.min >= J.min and self.max <= J.max:
-                if I.bits < J.bits:
-                    if I.signed:
-                        return mlir(arith.extsi, self, to=J)
-                    return mlir(arith.extui, self, to=J)
-                if I.bits > J.bits:
-                    return mlir(arith.trunci, self, to=J)
-                return mlir(arith.bitcast, self, to=J)
+            self -> target_int with self.min >= target_int.min and self.max <= target_int.max:
+                if int.bits < target_int.bits:
+                    if int.signed:
+                        return mlir(arith.extsi, self, to=target_int)
+                    return mlir(arith.extui, self, to=target_int)
+                if int.bits > target_int.bits:
+                    return mlir(arith.trunci, self, to=target_int)
+                return mlir(arith.bitcast, self, to=target_int)
 
-            self ~> J with self.min < J.min or self.max > J.max:
-                if self < J.min or self > J.max:
+            self ~> target_int with self.min < target_int.min or self.max > target_int.max:
+                if self < target_int.min or self > target_int.max:
                     throw TypeConversionError(
-                        f"{I} value {self} is outside {J}[{J.min}, {J.max}]"
+                        f"{int} value {self} is outside {target_int}[{target_int.min}, {target_int.max}]"
                     )
-                if I.bits < J.bits:
-                    if I.signed:
-                        return mlir(arith.extsi, self, to=J)
-                    return mlir(arith.extui, self, to=J)
-                if I.bits > J.bits:
-                    return mlir(arith.trunci, self, to=J)
-                return mlir(arith.bitcast, self, to=J)
+                if int.bits < target_int.bits:
+                    if int.signed:
+                        return mlir(arith.extsi, self, to=target_int)
+                    return mlir(arith.extui, self, to=target_int)
+                if int.bits > target_int.bits:
+                    return mlir(arith.trunci, self, to=target_int)
+                return mlir(arith.bitcast, self, to=target_int)
 
         integer_conversion -> int
 
@@ -620,23 +620,23 @@ extend [I: int] I:
         floats may contain fractions, infinities, NaNs, or values outside the target
         integer range. Both directions are therefore `~>` relationships.
         '''
-        float_conversion-> [T:F] with F in float:
+        float_conversion-> [T:target_float] with target_float in float:
 
-            self ~> F:
-                if I.signed:
-                    return mlir(arith.sitofp, self, to=F)
-                return mlir(arith.uitofp, self, to=F)
+            self ~> target_float:
+                if int.signed:
+                    return mlir(arith.sitofp, self, to=target_float)
+                return mlir(arith.uitofp, self, to=target_float)
 
-            F ~> self:
-                if not F.is_finite():
+            target_float ~> self:
+                if not target_float.is_finite():
                     throw TypeConversionError("non-finite float cannot convert to int")
-                if F < I.min or F > I.max:
+                if target_float < int.min or target_float > int.max:
                     throw TypeConversionError(
-                        f"{F} is outside {I}[{I.min}, {I.max}]"
+                        f"{target_float} is outside {int}[{int.min}, {int.max}]"
                     )
-                if I.signed:
-                    return mlir(arith.fptosi, F, to=I)
-                return mlir(arith.fptoui, F, to=I)
+                if int.signed:
+                    return mlir(arith.fptosi, target_float, to=int)
+                return mlir(arith.fptoui, target_float, to=int)
 
         float_conversion -> float
 
@@ -653,13 +653,16 @@ extend [I: int] I:
         string ~> self:
             parsed ?= string.parse_integer[int](string, base=10)
             if parsed is Error:
-                throw TypeConversionError(f"cannot convert '{string}' to {I}")
+                throw TypeConversionError(f"cannot convert '{string}' to {int}")
             return parsed
 
         _ -> [T]:
             throw TypeConversionError(
-                f"Failed to convert {I} to {type(T)}, no compatible conversion"
+                f"Failed to convert {int} to {type(T)}, no compatible conversion"
             )
+
+
+int = zip(int)
 
 
 '''
@@ -748,9 +751,9 @@ test "integer metadata defines range and width":
     assert(u8.max == 255)
 
 
--> assert_lossless_integer_conversion[A, B](value: A):
-    converted: B = B(value)
-    assert(converted == value as B)
+-> assert_lossless_integer_conversion[source_int, result_int](value: source_int):
+    converted: result_int = result_int(value)
+    assert(converted == value as result_int)
 
 
 test "widening integer conversions generate one directional edges":
@@ -804,9 +807,9 @@ test with compiler "package level no loss of data for conversion":
     package.config.set("lossless.conversion",true)
     reject:
         big_number: i64 = 10**10
-        small_representation: f8 = big_number
+        small_representation: f8e4m3fn = big_number
 
     package.config.set("lossless.conversion",false)
     accept:
         big_number: i64 = 10**10
-        small_representation: f8 = big_number
+        small_representation: f8e4m3fn = big_number
