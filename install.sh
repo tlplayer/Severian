@@ -14,6 +14,68 @@ fail() {
     exit 1
 }
 
+usage() {
+    cat <<'USAGE'
+usage: ./install.sh [--source]
+
+With no arguments, download and install a verified Severian release.
+With --source, build this checkout and install its `sev` through Cargo.
+
+source-install environment:
+  SEV_CARGO_INSTALL_ROOT  Cargo installation root (default: $CARGO_HOME or ~/.cargo)
+USAGE
+}
+
+install_from_source() {
+    command -v cargo >/dev/null 2>&1 || fail \
+        "cargo is required for a source installation"
+    SOURCE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || fail \
+        "could not resolve the Severian checkout"
+    [ -f "$SOURCE_ROOT/Cargo.toml" ] || fail \
+        "--source must be run from a Severian source checkout"
+    [ -f "$SOURCE_ROOT/rust_compiler/boundaries/driver/Cargo.toml" ] || fail \
+        "the Severian driver crate is missing from $SOURCE_ROOT"
+
+    CARGO_INSTALL_ROOT=${SEV_CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}
+    COMMAND="$CARGO_INSTALL_ROOT/bin/sev"
+    say "Building and installing Severian from $SOURCE_ROOT"
+    cargo install \
+        --locked \
+        --force \
+        --root "$CARGO_INSTALL_ROOT" \
+        --path "$SOURCE_ROOT/rust_compiler/boundaries/driver" \
+        --bin sev
+
+    [ -x "$COMMAND" ] || fail "cargo did not install $COMMAND"
+    HELP=$($COMMAND --help 2>&1) || fail "installed sev did not start"
+    printf '%s\n' "$HELP" | grep -Fq 'agent-ir' || fail \
+        "installed sev does not contain this checkout's Agent IR support"
+
+    say "Installed this Severian checkout to $COMMAND"
+    case ":${PATH:-}:" in
+        *":$CARGO_INSTALL_ROOT/bin:"*) ;;
+        *) say "Add $CARGO_INSTALL_ROOT/bin to PATH to invoke sev directly." ;;
+    esac
+    say "Run 'hash -r' if this shell cached an older sev command."
+}
+
+case ${1:-} in
+    --source)
+        [ "$#" -eq 1 ] || fail "--source accepts no additional arguments"
+        install_from_source
+        exit 0
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    '') ;;
+    *)
+        usage >&2
+        fail "unknown installer option '$1'"
+        ;;
+esac
+
 cleanup() {
     if [ -n "$TEMPORARY" ] && [ -d "$TEMPORARY" ]; then
         rm -rf "$TEMPORARY"

@@ -30,8 +30,19 @@ Currently tested release targets are `x86_64-unknown-linux-gnu` and
 installation; inspect them separately with `sev doctor`.
 
 Contributors building Severian itself should use Cargo as described in
-[CONTRIBUTING.md](CONTRIBUTING.md). Building the compiler and using the compiler
-are intentionally separate workflows.
+[CONTRIBUTING.md](CONTRIBUTING.md). To build this checkout and replace an older
+Cargo-installed `sev` command with it, run:
+
+```sh
+./install.sh --source
+hash -r
+sev --help | grep agent-ir
+```
+
+The source installer uses `${CARGO_HOME:-$HOME/.cargo}` by default, so the new
+binary replaces an older `$HOME/.cargo/bin/sev` instead of being hidden behind
+it on `PATH`. Set `SEV_CARGO_INSTALL_ROOT` to select another Cargo installation
+root. Building the compiler and installing a release remain separate workflows.
 
 ## Nightly Bootstrapped compiler
 

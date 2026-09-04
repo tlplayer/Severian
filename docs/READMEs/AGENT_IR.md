@@ -4,6 +4,18 @@ Agent IR is Severian's compiler-derived semantic interface for development
 tools and software agents. It exposes the compiler's existing understanding of
 a package; it does not parse source again and is not an MLIR dialect.
 
+Install the compiler from the current checkout before inspecting work that has
+not reached a release:
+
+```sh
+./install.sh --source
+hash -r
+sev --help | grep agent-ir
+```
+
+The final command prevents an older `sev` with the same version number from
+silently remaining first on `PATH`.
+
 ```text
 source -> lexer -> parser -> AST -> semantic/HIR -> MIR -> Agent IR
                                                    -> MLIR
