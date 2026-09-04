@@ -42,4 +42,4 @@ enum Statement:
 
 
 def empty_block() -> Block:
-    return Block([])
+    return Block([], [], [])

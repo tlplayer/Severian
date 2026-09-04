@@ -35,7 +35,7 @@ class SourceMap:
         return id
 
     def load(path: string) -> SourceId | io.IOError:
-        text = file.read(path)
+        text: string = file.raw(path)
         return add_virtual(path, text)
 
     def get(id: SourceId) -> SourceFile:
@@ -56,5 +56,5 @@ def virtual_source(name: string, text: string) -> SourceFile:
 
 
 def load(path: string) -> SourceFile | io.IOError:
-    text = file.read(path)
+    text: string = file.raw(path)
     return SourceFile(SourceId(0), path, text)

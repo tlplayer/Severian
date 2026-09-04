@@ -26,7 +26,7 @@ class Module:
     source_file: source.SourceFile | None = None
     resolved_imports: list[ModuleId] = []
     bindings: list[Binding] = []
-    initializer: Block = Block([])
+    initializer: Block = Block([], [], [])
     initializer_cfg: CfgBody | None = None
     functions: list[FunctionDeclaration] = []
     entry: FunctionId | None = None

@@ -16078,7 +16078,8 @@ impl Analyzer<'_> {
                         Some(implementation.span),
                     ));
                 };
-                let value = self.expression(value, Some(result))?;
+                let implementation_result = self.resolve_source_type(&implementation.result)?;
+                let value = self.expression(value, Some(implementation_result))?;
                 Ok((condition, value))
             })();
             self.allow_qualified_function_suffix = previous_suffix_resolution;
@@ -22008,6 +22009,25 @@ mod tests {
             selected.body.as_ref().unwrap().statements.as_slice(),
             [Statement::Return(Some(Expression { type_id, .. }))]
                 if *type_id == integer
+        ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn namespace_implementation_resolves_helper_for_its_covariant_result() {
+        let source = "trait Reader:\n    @reader\n    def read(path: string) -> string | int with { (path) -> bool }\ndef decode_number(path: string) -> int:\n    return 42\nclass NumberReader: Reader\n    def read(path: string) -> int with { path.ends_with(\".number\") }:\n        return decode_number(path)\ndef selected(path: string) -> string | int:\n    return reader.read(path)\n";
+        let (program, _) = analyze_source(source);
+        let selected = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "selected")
+            .unwrap();
+        assert!(matches!(
+            selected.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Return(Some(Expression {
+                kind: ExpressionKind::Fallback { .. },
+                ..
+            }))]
         ));
         severian_mir::build(&program).unwrap();
     }

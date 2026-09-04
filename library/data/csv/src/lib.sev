@@ -8,7 +8,7 @@ import os
 
 class CsvFile: File
     def read(path: string) -> Csv with { path.ends_with(".csv") }:
-        return decode(file.read_text(path))
+        return csv_decode_file(path)
 
 class Csv: Data
     source_text: string
@@ -103,11 +103,15 @@ def csv_rows_native(source: string) -> list[list[Any]]
 def decode(source: string) -> Csv:
     return Csv(source, Table(csv_columns_native(source), csv_rows_native(source)))
 
+def csv_decode_file(path: string) -> Csv:
+    source: string = file.raw(path)
+    return decode(source)
+
 def encode(value: Csv) -> string:
     return value.text()
 
 def read(path: string) -> Csv:
-    return decode(file.read_text(path))
+    return csv_decode_file(path)
 
 test "CSV values implement Data directly":
     value: Csv = decode("name,value,note\nseverian,1,\"hello, world\"\ncompiler,2,\"two \"\"quotes\"\"\"")

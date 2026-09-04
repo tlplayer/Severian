@@ -19,4 +19,6 @@ def simple_type_name(annotation: TypeAnnotation) -> string | None:
         case Named:
             if len(arguments) == 0:
                 return name
+        case Union:
+            return None
     return None

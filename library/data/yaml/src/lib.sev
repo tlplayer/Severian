@@ -7,11 +7,11 @@ import tensor
 
 class YamlStreamFile: File
     def read(path: string) -> Yaml with { path.ends_with(".ymls") }:
-        return decode_stream(file.read_text(path))
+        return yaml_decode_stream_file(path)
 
 class YamlFile: File
     def read(path: string) -> Yaml with { path.ends_with(".yml") or path.ends_with(".yaml") }:
-        return decode(file.read_text(path))
+        return yaml_decode_file(path)
 
 class Yaml: Data
     source_text: string
@@ -132,14 +132,22 @@ def decode(source: string) -> Yaml:
 def decode_stream(source: string) -> Yaml:
     return tabular(source, true)
 
+def yaml_decode_file(path: string) -> Yaml:
+    source: string = file.raw(path)
+    return decode(source)
+
+def yaml_decode_stream_file(path: string) -> Yaml:
+    source: string = file.raw(path)
+    return decode_stream(source)
+
 def encode(value: Yaml) -> string:
     return value.text()
 
 def read(path: string) -> Yaml:
-    return decode(file.read_text(path))
+    return yaml_decode_file(path)
 
 def read_stream(path: string) -> Yaml:
-    return decode_stream(file.read_text(path))
+    return yaml_decode_stream_file(path)
 
 test "YAML values implement Data directly":
     ordinary = decode("human:\n- Ada\n- Grace\nzone: Stormwind")

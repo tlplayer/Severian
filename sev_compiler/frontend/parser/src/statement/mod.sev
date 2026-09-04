@@ -302,7 +302,7 @@ class Parser:
                 statements.append(block_statement())
             separators()
         end = expect(Dedent, "expected end of " + owner + " body").span.end
-        return (universal.Block(statements), end)
+        return (universal.Block(statements, [], []), end)
 
     def block_statement() -> universal.Statement | diagnostics.Diagnostic:
         if at_identifier("return"):
