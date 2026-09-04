@@ -229,6 +229,11 @@ fn render_block(
 ) -> Result<(), BackendError> {
     for operation in &block.operations {
         match operation {
+            Operation::Undefined { .. } => {
+                return Err(BackendError::UnsupportedOperation(
+                    "undefined aggregate storage requires the MLIR pipeline".into(),
+                ));
+            }
             Operation::Coverage { key } => {
                 output.push_str(&format!(
                     "    __sev_coverage_hit({});\n",

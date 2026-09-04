@@ -19,6 +19,10 @@ pub struct Expression {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpressionKind {
+    /// A typed value whose bits are intentionally unspecified. This is used
+    /// for storage which is inactive by construction, such as payload slots
+    /// belonging to unselected enum variants.
+    Undefined,
     Literal(LiteralValue),
     Binding(BindingId),
     Function(DefId),

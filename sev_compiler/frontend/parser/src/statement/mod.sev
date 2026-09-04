@@ -350,112 +350,136 @@ class Parser:
         return universal.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end))
 
     def expression(minimum: int) -> universal.Expression | diagnostics.Diagnostic:
-        left = unary()
-        while true:
-            if not is_binary_operator(peek().kind):
-                break
-            operator = binary_operator(peek().kind)
-            operator_precedence = precedence(operator)
-            if operator_precedence < minimum:
-                break
-            token = next()
-            next_minimum := operator_precedence
-            if operator.associativity != universal.Associativity.Right:
-                next_minimum += 1
-            right = expression(next_minimum)
-            left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
-        return left
+        return parse_expression(self, minimum)
 
     def unary() -> universal.Expression | diagnostics.Diagnostic:
-        token = peek()
-        operator: universal.UnaryOperator | None = None
-        if token.kind == Plus:
-            operator = universal.Positive
-        elif token.kind == Minus:
-            operator = universal.Negative
-        elif at_identifier("not"):
-            operator = universal.Not
-        elif at_identifier("move"):
-            operator = universal.Move
-        if operator != None:
-            next()
-            operand = unary()
-            return universal.Expression(universal.Unary(operator, operand), source.Span(token.span.source, token.span.start, operand.span.end))
-        return postfix()
+        return parse_unary(self)
 
     def postfix() -> universal.Expression | diagnostics.Diagnostic:
-        value = primary()
-        while true:
-            if take(LeftParen) != None:
-                arguments: list[universal.CallArgument] = []
-                while not at_simple(RightParen):
-                    start = peek().span
-                    argument_name: string | absent = absent
-                    if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Equal:
-                        argument_name = identifier("expected argument name")[0]
-                        expect(Equal, "expected = after argument name")
-                    argument = expression(0)
-                    arguments.append(universal.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end)))
-                    if take(Comma) == None:
-                        break
-                end = expect(RightParen, "expected closing parenthesis").span.end
-                value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
-            elif take(Dot) != None:
-                member = identifier("expected member name")
-                value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
-            else:
-                break
-        return value
+        return parse_postfix(self)
 
     def primary() -> universal.Expression | diagnostics.Diagnostic:
-        token = next()
-        match token.kind:
-            case Identifier:
-                if value == "true":
-                    return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
-                if value == "false":
-                    return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
-                if value == "None":
-                    return universal.Expression(universal.LiteralValue(universal.NoneValue), token.span)
-                return universal.Expression(universal.Name(value), token.span)
-            case Integer:
-                return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span)
-            case Float:
-                return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
-            case Character:
-                return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
-            case String:
-                return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
-            case FormattedString:
-                return formatted_string_expression(value, token.span)
-            case LeftParen:
-                value = expression(0)
-                expect(RightParen, "expected closing parenthesis")
-                return value
-        return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
+        return parse_primary(self)
 
     def type_annotation() -> universal.TypeAnnotation | diagnostics.Diagnostic:
-        first = type_primary()
-        if take(Pipe) == None:
-            return first
-        members: list[universal.TypeAnnotation] = [first]
-        while true:
-            members.append(type_primary())
-            if take(Pipe) == None:
-                break
-        return universal.TypeAnnotation(universal.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
+        return parse_type_annotation(self)
 
     def type_primary() -> universal.TypeAnnotation | diagnostics.Diagnostic:
-        name = identifier("expected a type name")
-        arguments: list[universal.TypeAnnotation] = []
-        end = name[1].end
-        if take(LeftBracket) != None:
-            while not at_simple(RightBracket):
-                arguments.append(type_annotation())
-                if take(Comma) == None:
+        return parse_type_primary(self)
+
+
+def parse_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
+    left := parser.unary()
+    while true:
+        if not is_binary_operator(parser.peek().kind):
+            break
+        operator = binary_operator(parser.peek().kind)
+        operator_precedence = precedence(operator)
+        if operator_precedence < minimum:
+            break
+        token = parser.next()
+        next_minimum := operator_precedence
+        if operator.associativity != universal.Associativity.Right:
+            next_minimum += 1
+        right = parse_expression(parser, next_minimum)
+        left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
+    return left
+
+
+def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+    token = parser.peek()
+    operator: universal.UnaryOperator | None := None
+    if token.kind == Plus:
+        operator = universal.Positive
+    elif token.kind == Minus:
+        operator = universal.Negative
+    elif parser.at_identifier("not"):
+        operator = universal.Not
+    elif parser.at_identifier("move"):
+        operator = universal.Move
+    if operator != None:
+        parser.next()
+        operand = parse_unary(parser)
+        return universal.Expression(universal.Unary(operator, operand), source.Span(token.span.source, token.span.start, operand.span.end))
+    return parser.postfix()
+
+
+def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+    value := parser.primary()
+    while true:
+        if parser.take(LeftParen) != None:
+            arguments: list[universal.CallArgument] = []
+            while not parser.at_simple(RightParen):
+                start = parser.peek().span
+                argument_name: string | absent = absent
+                if parser.cursor + 1 < len(parser.tokens) and parser.tokens[parser.cursor + 1].kind == Equal:
+                    argument_name = parser.identifier("expected argument name")[0]
+                    parser.expect(Equal, "expected = after argument name")
+                argument = parse_expression(parser, 0)
+                arguments.append(universal.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end)))
+                if parser.take(Comma) == None:
                     break
-            end = expect(RightBracket, "expected closing type bracket").span.end
-        return universal.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
+            end = parser.expect(RightParen, "expected closing parenthesis").span.end
+            value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
+        elif parser.take(Dot) != None:
+            member = parser.identifier("expected member name")
+            value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
+        else:
+            break
+    return value
+
+
+def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+    token = parser.next()
+    match token.kind:
+        case Identifier:
+            if value == "true":
+                return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
+            if value == "false":
+                return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
+            if value == "None":
+                return universal.Expression(universal.LiteralValue(universal.NoneValue), token.span)
+            return universal.Expression(universal.Name(value), token.span)
+        case Integer:
+            return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span)
+        case Float:
+            return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
+        case Character:
+            return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
+        case String:
+            return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
+        case FormattedString:
+            return formatted_string_expression(value, token.span)
+        case LeftParen:
+            value = parse_expression(parser, 0)
+            parser.expect(RightParen, "expected closing parenthesis")
+            return value
+    return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
+
+
+def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    first = parser.type_primary()
+    if parser.take(Pipe) == None:
+        return first
+    members: list[universal.TypeAnnotation] = [first]
+    while true:
+        members.append(parser.type_primary())
+        if parser.take(Pipe) == None:
+            break
+    return universal.TypeAnnotation(universal.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
+
+
+def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    name = parser.identifier("expected a type name")
+    arguments: list[universal.TypeAnnotation] = []
+    end := name[1].end
+    if parser.take(LeftBracket) != None:
+        while not parser.at_simple(RightBracket):
+            arguments.append(parse_type_annotation(parser))
+            if parser.take(Comma) == None:
+                break
+        end = parser.expect(RightBracket, "expected closing type bracket").span.end
+    return universal.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
 
 
 def is_binary_operator(kind: lexer.TokenKind) -> bool:

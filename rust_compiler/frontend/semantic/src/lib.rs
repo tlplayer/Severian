@@ -289,6 +289,8 @@ pub(crate) fn analyze_with_package_functions(
         enum_binding_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
+        class_defining_modules: BTreeMap::new(),
+        module_class_scopes: BTreeMap::new(),
         generic_class_constructors: local_class_constructors,
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
@@ -312,6 +314,7 @@ pub(crate) fn analyze_with_package_functions(
         union_types: BTreeMap::new(),
         fallible_types: BTreeMap::new(),
         optional_types: BTreeSet::new(),
+        default_type_stack: Vec::new(),
         callable_bindings: BTreeMap::new(),
         binding_values: BTreeMap::new(),
         callable_substitutions: BTreeMap::new(),
@@ -1510,6 +1513,9 @@ struct Analyzer<'a> {
     enum_binding_variants: BTreeMap<severian_hir::VariableId, (String, String)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
+    class_defining_modules: BTreeMap<TypeId, severian_modules::ModuleId>,
+    module_class_scopes:
+        BTreeMap<severian_modules::ModuleId, BTreeMap<(String, Vec<TypeId>), ClassInstance>>,
     generic_class_constructors: BTreeMap<String, TypeId>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
@@ -1533,6 +1539,7 @@ struct Analyzer<'a> {
     union_types: BTreeMap<TypeId, Vec<TypeId>>,
     fallible_types: BTreeMap<TypeId, FallibleType>,
     optional_types: BTreeSet<TypeId>,
+    default_type_stack: Vec<TypeId>,
     callable_bindings: BTreeMap<severian_hir::VariableId, CallableValue>,
     binding_values: BTreeMap<BindingId, Expression>,
     callable_substitutions: BTreeMap<String, ResolvedCallable>,
@@ -1619,6 +1626,19 @@ fn enum_payload_index(
         .map(|variant| variant.fields.len())
         .sum::<usize>()
         + payload
+}
+
+fn enum_variant_path_matches(path: &str, enum_name: &str, variant_name: &str) -> bool {
+    if path == variant_name || path == format!("{enum_name}.{variant_name}") {
+        return true;
+    }
+    let Some((path_namespace, path_member)) = path.rsplit_once('.') else {
+        return false;
+    };
+    let Some((enum_namespace, _)) = enum_name.rsplit_once('.') else {
+        return false;
+    };
+    path_namespace == enum_namespace && path_member == variant_name
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2008,6 +2028,8 @@ impl Analyzer<'_> {
         // annotations may refer forward and through an imported namespace.
         let mut resolved_visible_instances = self.class_instances.clone();
         for package_class in classes {
+            self.class_defining_modules
+                .insert(package_class.ty, package_class.module);
             if !package_class.declaration.type_parameters.is_empty() {
                 for lookup in package_class
                     .lookups
@@ -2191,6 +2213,22 @@ impl Analyzer<'_> {
                 .next_class_type
                 .min(package_class.ty.0.saturating_sub(1));
         }
+        let modules = classes
+            .iter()
+            .flat_map(|class| class.lookups.keys().copied())
+            .collect::<BTreeSet<_>>();
+        for module in modules {
+            let mut scope = BTreeMap::new();
+            for class in classes {
+                let Some(instance) = self.class_instances_by_type.get(&class.ty).cloned() else {
+                    continue;
+                };
+                for lookup in class.lookups.get(&module).into_iter().flatten() {
+                    scope.insert((lookup.clone(), Vec::new()), instance.clone());
+                }
+            }
+            self.module_class_scopes.insert(module, scope);
+        }
         Ok(())
     }
 
@@ -2243,6 +2281,12 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let Some(ty) = annotation
+            .simple_name()
+            .and_then(|name| self.active_type_aliases.get(name))
+        {
+            return Ok(*ty);
+        }
         if let Some((
             "borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable",
             [inner],
@@ -5635,7 +5679,8 @@ impl Analyzer<'_> {
         parameter: BindingId,
     ) -> ParameterEffect {
         match &expression.kind {
-            ExpressionKind::Literal(_)
+            ExpressionKind::Undefined
+            | ExpressionKind::Literal(_)
             | ExpressionKind::Binding(_)
             | ExpressionKind::Function(_) => ParameterEffect::Shared,
             ExpressionKind::AddressOf(binding) => {
@@ -7040,7 +7085,7 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Call { callee, arguments } => {
                 if let Some(path) = callable_path(callee) {
-                    if self.enum_variants.contains_key(&path) {
+                    if self.enum_constructor_candidate(&path, expected) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
                     }
                 }
@@ -8220,7 +8265,7 @@ impl Analyzer<'_> {
                     return Ok(tensor);
                 }
                 if let Some(path) = callable_path(callee) {
-                    if self.enum_variants.contains_key(&path) {
+                    if self.enum_constructor_candidate(&path, expected) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
                     }
                     if self.enums.get(&path).is_some_and(|instance| {
@@ -10891,6 +10936,13 @@ impl Analyzer<'_> {
         }
         let key = (name.to_owned(), concrete.to_vec());
         if let Some(instance) = self.class_instances.get(&key) {
+            // An alias may have been cached while this nominal specialization
+            // was being resolved. Read its completed definition by identity.
+            if self.types.primitive(instance.ty).is_none() {
+                if let Some(resolved) = self.class_instances_by_type.get(&instance.ty) {
+                    return Ok(resolved.clone());
+                }
+            }
             return Ok(instance.clone());
         }
         let substitution = declaration
@@ -10899,18 +10951,6 @@ impl Analyzer<'_> {
             .cloned()
             .zip(concrete.iter().copied())
             .collect::<BTreeMap<_, _>>();
-        let mut fields = Vec::with_capacity(declaration.fields.len());
-        let structural_primitive =
-            declaration.primitive && name.rsplit('.').next() == Some("slice");
-        if !declaration.primitive || structural_primitive {
-            for field in &declaration.fields {
-                let ty = self.resolve_instantiated_type(&field.annotation, &substitution)?;
-                fields.push(HirClassFieldDeclaration {
-                    name: field.name.clone(),
-                    ty,
-                });
-            }
-        }
         let constructor = self
             .generic_class_constructors
             .get(name)
@@ -10938,6 +10978,51 @@ impl Analyzer<'_> {
             self.types
                 .instantiate_applied(constructor, concrete.to_vec())
                 .map_err(|error| Diagnostic::new("E000204", error.to_string(), Some(span)))?
+        };
+        // Nominal identity exists before its definition is traversed. Recursive
+        // fields refer to this specialization instead of specializing it again.
+        if let Some(instance) = self.class_instances_by_type.get(&ty)
+            .filter(|_| self.types.primitive(ty).is_none())
+        {
+            if instance.arguments == concrete {
+                let instance = instance.clone();
+                self.class_instances.insert(key, instance.clone());
+                return Ok(instance);
+            }
+        }
+        let placeholder = ClassInstance {
+            ty,
+            name: name.to_owned(),
+            arguments: concrete.to_vec(),
+            fields: Vec::new(),
+            source_fields: declaration.fields.clone(),
+            constructors: Vec::new(),
+            methods: Vec::new(),
+            operators: Vec::new(),
+        };
+        self.class_instances.insert(key.clone(), placeholder.clone());
+        self.class_instances_by_type.insert(ty, placeholder);
+        let structural_primitive =
+            declaration.primitive && name.rsplit('.').next() == Some("slice");
+        let fields = (|| {
+            let mut fields = Vec::with_capacity(declaration.fields.len());
+            if !declaration.primitive || structural_primitive {
+                for field in &declaration.fields {
+                    fields.push(HirClassFieldDeclaration {
+                        name: field.name.clone(),
+                        ty: self.resolve_instantiated_type(&field.annotation, &substitution)?,
+                    });
+                }
+            }
+            Ok::<_, Diagnostic>(fields)
+        })();
+        let fields = match fields {
+            Ok(fields) => fields,
+            Err(error) => {
+                self.class_instances.remove(&key);
+                self.class_instances_by_type.remove(&ty);
+                return Err(error);
+            }
         };
         let substitution = declaration
             .type_parameters
@@ -11013,46 +11098,11 @@ impl Analyzer<'_> {
         annotation: &TypeAnnotation,
         substitution: &BTreeMap<String, TypeId>,
     ) -> Result<TypeId, Diagnostic> {
-        let Some((name, arguments)) = annotation.named_parts() else {
-            return Err(Diagnostic::new(
-                "E000204",
-                "union class fields are not yet supported",
-                Some(annotation.span),
-            ));
-        };
-        if arguments.is_empty() {
-            if let Some(ty) = substitution.get(name) {
-                return Ok(*ty);
-            }
-            return self.resolve_source_type(annotation);
-        }
-        if name == "list" && arguments.len() == 1 {
-            let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
-            return Ok(self.instantiate_list_type(element));
-        }
-        if name == "pointer" && arguments.len() == 1 {
-            let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
-            return Ok(self.instantiate_pointer_type(element));
-        }
-        if name == "map" && arguments.len() == 2 {
-            let key = self.resolve_instantiated_type(&arguments[0], substitution)?;
-            let value = self.resolve_instantiated_type(&arguments[1], substitution)?;
-            return Ok(self.instantiate_map_type(key, value));
-        }
-        if self.classes.contains_key(name) {
-            let concrete = arguments
-                .iter()
-                .map(|argument| self.resolve_instantiated_type(argument, substitution))
-                .collect::<Result<Vec<_>, _>>()?;
-            return self
-                .instantiate_class_types(name, &concrete, annotation.span)
-                .map(|class| class.ty);
-        }
-        Err(Diagnostic::new(
-            "E000204",
-            format!("generic field type `{name}` is not yet supported"),
-            Some(annotation.span),
-        ))
+        let previous = self.active_type_aliases.clone();
+        self.active_type_aliases.extend(substitution.clone());
+        let resolved = self.resolve_source_type(annotation);
+        self.active_type_aliases = previous;
+        resolved
     }
 
     fn instantiate_list_type(&mut self, element: TypeId) -> TypeId {
@@ -11638,9 +11688,7 @@ impl Analyzer<'_> {
                 instance
                     .variants
                     .iter()
-                    .position(|variant| {
-                        path == variant.name || path == format!("{enum_name}.{}", variant.name)
-                    })
+                    .position(|variant| enum_variant_path_matches(path, enum_name, &variant.name))
                     .map(|ordinal| (enum_name.clone(), ordinal))
             })
         });
@@ -11685,7 +11733,7 @@ impl Analyzer<'_> {
                         .expect("enum arity was checked before payload lowering");
                     values.push(self.expression(&argument.value, Some(field.ty))?);
                 } else {
-                    values.push(self.default_expression(field.ty, span)?);
+                    values.push(self.undefined_expression(field.ty, span));
                 }
             }
         }
@@ -11698,6 +11746,18 @@ impl Analyzer<'_> {
             },
             span,
         })
+    }
+
+    fn enum_constructor_candidate(&self, path: &str, expected: Option<TypeId>) -> bool {
+        self.enum_variants.contains_key(path)
+            || expected.is_some_and(|expected| {
+                self.enums.iter().any(|(enum_name, instance)| {
+                    instance.ty == expected
+                        && instance.variants.iter().any(|variant| {
+                            enum_variant_path_matches(path, enum_name, &variant.name)
+                        })
+                })
+            })
     }
 
     fn enum_value_constructor(
@@ -11991,10 +12051,20 @@ impl Analyzer<'_> {
             });
         }
         if let Some(elements) = self.tuple_elements.get(&type_id).cloned() {
+            if self.default_type_stack.contains(&type_id) {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    "recursive default construction requires an explicit initializer",
+                    Some(span),
+                ));
+            }
+            self.default_type_stack.push(type_id);
             let fields = elements
                 .into_iter()
                 .map(|element| self.default_expression(element, span))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>();
+            self.default_type_stack.pop();
+            let fields = fields?;
             return Ok(Expression {
                 id: self.next_id(),
                 type_id,
@@ -12005,12 +12075,26 @@ impl Analyzer<'_> {
                 span,
             });
         }
-        if let Some(instance) = self.class_instances_by_type.get(&type_id).cloned() {
+        // Source-defined methods do not turn a scalar primitive into a record.
+        // Only types with a structural representation use field-wise defaults.
+        if let Some(instance) = self.class_instances_by_type.get(&type_id).cloned()
+            .filter(|_| self.types.primitive(type_id).is_none())
+        {
+            if self.default_type_stack.contains(&type_id) {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    format!("recursive default construction of `{}` requires an explicit initializer", instance.name),
+                    Some(span),
+                ));
+            }
+            self.default_type_stack.push(type_id);
             let fields = instance
                 .fields
                 .iter()
                 .map(|field| self.default_expression(field.ty, span))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>();
+            self.default_type_stack.pop();
+            let fields = fields?;
             return Ok(Expression {
                 id: self.next_id(),
                 type_id,
@@ -12060,6 +12144,19 @@ impl Analyzer<'_> {
         })
     }
 
+    fn undefined_expression(
+        &mut self,
+        type_id: TypeId,
+        span: severian_source::Span,
+    ) -> Expression {
+        Expression {
+            id: self.next_id(),
+            type_id,
+            kind: ExpressionKind::Undefined,
+            span,
+        }
+    }
+
     fn fallible_success_expression(
         &mut self,
         result_type: TypeId,
@@ -12077,7 +12174,7 @@ impl Analyzer<'_> {
             kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
             span,
         };
-        let error = self.default_expression(fallible.error, span)?;
+        let error = self.undefined_expression(fallible.error, span);
         Ok(Expression {
             id: self.next_id(),
             type_id: result_type,
@@ -12106,7 +12203,7 @@ impl Analyzer<'_> {
             kind: ExpressionKind::Literal(LiteralValue::Boolean(false)),
             span,
         };
-        let value = self.default_expression(fallible.success, span)?;
+        let value = self.undefined_expression(fallible.success, span);
         Ok(Expression {
             id: self.next_id(),
             type_id: result_type,
@@ -21274,7 +21371,7 @@ fn expression_contains_binding(expression: &Expression, binding: BindingId) -> b
         ExpressionKind::Binding(candidate) | ExpressionKind::AddressOf(candidate) => {
             *candidate == binding
         }
-        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => false,
+        ExpressionKind::Undefined | ExpressionKind::Literal(_) | ExpressionKind::Function(_) => false,
         ExpressionKind::Aggregate { fields, .. } => fields
             .iter()
             .any(|field| expression_contains_binding(field, binding)),

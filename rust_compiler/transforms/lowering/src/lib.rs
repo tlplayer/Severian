@@ -442,6 +442,11 @@ impl CfgLowering<'_> {
         operations: &mut Vec<LirOperation>,
     ) -> Result<ValueId, LoweringError> {
         match rvalue {
+            severian_mir::Rvalue::Undefined(type_id) => {
+                let result = self.new_value(self.lower_mir_type(*type_id)?);
+                operations.push(LirOperation::Undefined { result });
+                Ok(result)
+            }
             severian_mir::Rvalue::Use(operand) => self.lower_operand(body, operand, operations),
             severian_mir::Rvalue::Convert {
                 operand,
@@ -2102,7 +2107,8 @@ mod legacy_structured_lowering {
             LirOperation::ArtifactCall {
                 inputs, outputs, ..
             } => inputs.contains(&value) || outputs.contains(&value),
-            LirOperation::Coverage { .. }
+            LirOperation::Undefined { .. }
+            | LirOperation::Coverage { .. }
             | LirOperation::Constant { .. }
             | LirOperation::Break
             | LirOperation::Continue => false,

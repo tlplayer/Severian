@@ -609,7 +609,10 @@ fn collect_rvalue_moves(edges: &mut Vec<Value>, owner: &str, rvalue: &Rvalue) {
         Rvalue::Unary { operand, .. } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
         Rvalue::Aggregate { fields, .. } => fields.iter().collect(),
-        Rvalue::BorrowShared(_) | Rvalue::BorrowExclusive(_) | Rvalue::AddressOf(_) => Vec::new(),
+        Rvalue::Undefined(_)
+        | Rvalue::BorrowShared(_)
+        | Rvalue::BorrowExclusive(_)
+        | Rvalue::AddressOf(_) => Vec::new(),
     };
     for operand in operands {
         if let Operand::Move(place) = operand {

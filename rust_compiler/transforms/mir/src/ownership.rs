@@ -464,6 +464,7 @@ fn inspect_rvalue(
     errors: &mut BTreeSet<OwnershipError>,
 ) {
     match value {
+        Rvalue::Undefined(_) => {}
         Rvalue::Use(operand) => {
             let propagated = if let (Some(source), Some(holder)) =
                 (operand_local(operand), destination.local_id())
@@ -715,6 +716,7 @@ fn apply_terminator_liveness(terminator: &Terminator, live: &mut BTreeSet<LocalI
 
 fn use_rvalue(value: &Rvalue, live: &mut BTreeSet<LocalId>) {
     match value {
+        Rvalue::Undefined(_) => {}
         Rvalue::Use(operand)
         | Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }

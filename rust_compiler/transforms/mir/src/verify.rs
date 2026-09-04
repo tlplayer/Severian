@@ -479,6 +479,7 @@ fn verify_rvalue(
     state: &mut BTreeSet<LocalId>,
 ) -> Result<(), VerifyError> {
     let operands = match value {
+        Rvalue::Undefined(_) => Vec::new(),
         Rvalue::Use(value) => vec![value],
         Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }

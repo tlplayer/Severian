@@ -106,6 +106,7 @@ pub enum Callee {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rvalue {
+    Undefined(TypeId),
     Use(Operand),
     Unary {
         operator: UnaryOperator,
@@ -945,6 +946,12 @@ impl BodyBuilder {
                 .expect("expression results are local places"),
         ));
         match &expression.kind {
+            severian_hir::ExpressionKind::Undefined => {
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Undefined(expression.type_id),
+                ));
+            }
             severian_hir::ExpressionKind::Aggregate { class, fields } => {
                 let fields = fields
                     .iter()

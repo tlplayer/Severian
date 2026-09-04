@@ -2492,7 +2492,8 @@ fn collect_rvalue_functions(
                 collect_operand_function(field, definitions);
             }
         }
-        severian_mir::Rvalue::BorrowShared(_)
+        severian_mir::Rvalue::Undefined(_)
+        | severian_mir::Rvalue::BorrowShared(_)
         | severian_mir::Rvalue::BorrowExclusive(_)
         | severian_mir::Rvalue::AddressOf(_) => {}
     }

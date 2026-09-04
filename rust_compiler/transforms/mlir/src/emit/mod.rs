@@ -1169,6 +1169,13 @@ fn render_cfg_operation(
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
     match operation {
+        Operation::Undefined { result } => {
+            let ty = mlir_type(&value_type(module, *result)?)?;
+            output.push_str(&format!(
+                "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
+                result.0
+            ));
+        }
         Operation::Coverage { key } => {
             let symbol = coverage_symbol(key);
             let value = format!("{symbol}_bb{}_op{operation_index}", block.0);
@@ -2539,6 +2546,13 @@ fn render_block(
     let indentation = " ".repeat(indent);
     for operation in &block.operations {
         match operation {
+            Operation::Undefined { result } => {
+                let ty = mlir_type(&value_type(module, *result)?)?;
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
+                    result.0
+                ));
+            }
             Operation::Coverage { key } => {
                 let symbol = coverage_symbol(key);
                 let value = format!("{symbol}_{}", *coverage_ordinal);

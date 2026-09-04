@@ -2458,6 +2458,6 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
             remap_expression_bindings(left, offset);
             remap_expression_bindings(right, offset);
         }
-        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
+        ExpressionKind::Undefined | ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
     }
 }

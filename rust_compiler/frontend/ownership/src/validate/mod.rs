@@ -441,7 +441,8 @@ fn validate_slice_expression(
                 regions,
             )?;
         }
-        ExpressionKind::Literal(_)
+        ExpressionKind::Undefined
+        | ExpressionKind::Literal(_)
         | ExpressionKind::Binding(_)
         | ExpressionKind::AddressOf(_)
         | ExpressionKind::Function(_) => {}
@@ -749,7 +750,7 @@ fn validate_expression(
             Ok(())
         }
         ExpressionKind::Field { object, .. } => validate_expression(object, declared),
-        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
+        ExpressionKind::Undefined | ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
         ExpressionKind::Binding(id) if declared.contains(id) => Ok(()),
         ExpressionKind::Binding(_) => Err(Diagnostic::new(
             "E000301",
