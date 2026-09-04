@@ -544,6 +544,7 @@ impl Compiler {
                             name: Some("compiler case".into()),
                             parameters: Vec::new(),
                             cases: Vec::new(),
+                            matrix: false,
                             modes: Vec::new(),
                             contracts: Vec::new(),
                             body,

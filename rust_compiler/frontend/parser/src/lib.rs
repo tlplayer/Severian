@@ -886,6 +886,23 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_cartesian_test_case_matrices() {
+        let source = SourceFile::virtual_source(
+            "matrix.sev",
+            "test with cases \"numeric matrix\" with\n{\n    float_type in {f16, f32},\n    int_type in {i8, i16, i32}\n}:\n    assert(float_type(1.0) == int_type(1))\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected a test")
+        };
+        assert_eq!(test.name.as_deref(), Some("numeric matrix"));
+        assert!(test.matrix);
+        assert_eq!(test.parameters, ["float_type", "int_type"]);
+        assert_eq!(test.cases.len(), 6);
+        assert!(test.cases.iter().all(|case| case.len() == 2));
+    }
+
+    #[test]
     fn parses_configured_and_marker_test_modes() {
         let source = SourceFile::virtual_source(
             "configured-modes.sev",

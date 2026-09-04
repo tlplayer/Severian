@@ -112,6 +112,7 @@ pub struct TestDeclaration {
     pub name: Option<String>,
     pub parameters: Vec<String>,
     pub cases: Vec<Vec<crate::Expression>>,
+    pub matrix: bool,
     pub modes: Vec<String>,
     pub contracts: Vec<FunctionContract>,
     pub body: Vec<crate::Statement>,

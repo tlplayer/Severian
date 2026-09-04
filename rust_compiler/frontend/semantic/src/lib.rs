@@ -956,8 +956,19 @@ pub(crate) fn analyze_with_package_functions(
                         Some(test.span),
                     ));
                 }
+                let previous_names = analyzer.names.clone();
+                let previous_declarations = analyzer.declarations.clone();
                 let previous_substitutions = analyzer.value_substitutions.clone();
+                let previous_type_aliases = analyzer.active_type_aliases.clone();
                 for (parameter, value) in test.parameters.iter().zip(&values) {
+                    if test.matrix {
+                        if let AstExpressionKind::Name(name) = &value.kind {
+                            if let Some(ty) = analyzer.types.resolve_name(name) {
+                                analyzer.active_type_aliases.insert(parameter.clone(), ty);
+                                continue;
+                            }
+                        }
+                    }
                     let value = analyzer.expression(value, None)?;
                     analyzer
                         .value_substitutions
@@ -997,7 +1008,10 @@ pub(crate) fn analyze_with_package_functions(
                         unit,
                     )?);
                 }
+                analyzer.names = previous_names;
+                analyzer.declarations = previous_declarations;
                 analyzer.value_substitutions = previous_substitutions;
+                analyzer.active_type_aliases = previous_type_aliases;
             }
             module.functions[source_function_count + offset].body = Some(body);
         }
@@ -8956,41 +8970,35 @@ impl Analyzer<'_> {
                 let operator = universal_binary(*operator);
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
-                let left = self.prepare(left)?;
-                let right = self.prepare(right)?;
+                let mut left = self.prepare(left)?;
+                let mut right = self.prepare(right)?;
+                let mixed_float = match (left.constraint(), right.constraint()) {
+                    (TypeConstraint::Known(left), TypeConstraint::Known(right))
+                        if self.integer_primitive(left)
+                            && self.types.primitive(right).is_some_and(|primitive| {
+                                primitive.category == severian_universal::PrimitiveCategory::Float
+                            }) =>
+                    {
+                        Some((right, true))
+                    }
+                    (TypeConstraint::Known(left), TypeConstraint::Known(right))
+                        if self.types.primitive(left).is_some_and(|primitive| {
+                            primitive.category == severian_universal::PrimitiveCategory::Float
+                        }) && self.integer_primitive(right) =>
+                    {
+                        Some((left, false))
+                    }
+                    _ => None,
+                };
+                if let Some((float_type, integer_on_left)) = mixed_float {
+                    if integer_on_left {
+                        left = Prepared::Resolved(self.finish(left, float_type)?);
+                    } else {
+                        right = Prepared::Resolved(self.finish(right, float_type)?);
+                    }
+                }
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
-                let fixed_width_float = |constraint| match constraint {
-                    TypeConstraint::Known(ty) => {
-                        self.types.primitive(ty).is_some_and(|primitive| {
-                            matches!(
-                                primitive.representation,
-                                severian_universal::PrimitiveRepresentation::Float {
-                                    format: severian_universal::FloatFormat::Ieee(_)
-                                        | severian_universal::FloatFormat::BrainFloat16
-                                        | severian_universal::FloatFormat::Float8E4M3Fn
-                                        | severian_universal::FloatFormat::Float8E5M2
-                                }
-                            )
-                        })
-                    }
-                    TypeConstraint::Literal(_) => false,
-                };
-                let known_integer = |constraint| match constraint {
-                    TypeConstraint::Known(ty) => self.integer_primitive(ty),
-                    TypeConstraint::Literal(_) => false,
-                };
-                if (known_integer(left_constraint) && fixed_width_float(right_constraint))
-                    || (fixed_width_float(left_constraint) && known_integer(right_constraint))
-                {
-                    return Err(self.binary_operator_error(
-                        TypeError::NoMatchingOperator(operator),
-                        operator,
-                        left_constraint,
-                        right_constraint,
-                        ast.span,
-                    ));
-                }
                 let resolved = self
                     .types
                     .resolve_binary(operator, left_constraint, right_constraint, expected)
@@ -19767,6 +19775,27 @@ mod tests {
             assert_eq!(operator.parameters[0].annotation.simple_name(), Some(member));
             assert_eq!(operator.result.simple_name(), Some(member));
         }
+    }
+
+    #[test]
+    fn cartesian_type_cases_isolate_bindings_and_promote_integers_to_each_float() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "numeric-matrix.sev",
+            "test with cases \"numeric matrix\" with\n{\n    float_type in {f32, f64},\n    int_type in {i8, u16}\n}:\n    left: float_type = float_type(6.0)\n    right: int_type = int_type(2)\n    assert(left + right == float_type(8.0))\n    assert(right < left)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "numeric_matrix",
+            },
+        )
+        .unwrap();
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

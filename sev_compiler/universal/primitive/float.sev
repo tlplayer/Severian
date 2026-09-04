@@ -757,10 +757,12 @@ test with compiler "float does not define bitwise operators":
 test with compiler "unsupported float conversion has no graph edge":
     reject:
         value := f32([1, 2, 3])
-test[
+
+test with cases "float x int" with
+{
     float_type in {f16, bf16, f32, f64, f128},
     int_type in {i8, i16, i32, i64, i128, u8, u16, u32, u64, u128}
-] "float x int":
+}:
     a: float_type = float_type(6.0)
     b: int_type = int_type(2)
 

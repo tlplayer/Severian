@@ -651,7 +651,14 @@ impl Parser<'_> {
             name = Some(quoted);
         }
         let mut cases = Vec::new();
+        let mut matrix = false;
         if modes.iter().any(|mode| mode == "cases") {
+            matrix = if self.at_identifier("with") {
+                self.next();
+                true
+            } else {
+                false
+            };
             self.line_breaks();
             self.expect(&TokenKind::LeftBrace, "expected `{` after `with cases`")?;
             let multiline = self.take(&TokenKind::Newline).is_some();
@@ -660,19 +667,49 @@ impl Parser<'_> {
                 self.expect(&TokenKind::Indent, "expected indented test cases")?;
             }
             self.separators();
+            let mut axes = Vec::new();
             while !self.at(&TokenKind::RightBrace)
                 && !self.at(&TokenKind::Dedent)
                 && !self.at(&TokenKind::Eof)
             {
-                let value = self.expression(0)?;
-                let ExpressionKind::Tuple(values) = value.kind else {
-                    return Err(Diagnostic::new(
-                        "E000112",
-                        "each parameterized test case must be a tuple",
-                        Some(value.span),
-                    ));
-                };
-                cases.push(values);
+                if matrix {
+                    let (parameter, parameter_span) =
+                        self.identifier("expected a matrix parameter")?;
+                    if !self.at_identifier("in") {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "expected `in` after matrix parameter",
+                            Some(parameter_span),
+                        ));
+                    }
+                    self.next();
+                    let values = self.expression(0)?;
+                    let ExpressionKind::Set(values) = values.kind else {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "a test matrix axis requires a set of values",
+                            Some(values.span),
+                        ));
+                    };
+                    if values.is_empty() {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "a test matrix axis cannot be empty",
+                            Some(parameter_span),
+                        ));
+                    }
+                    axes.push((parameter, values));
+                } else {
+                    let value = self.expression(0)?;
+                    let ExpressionKind::Tuple(values) = value.kind else {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "each parameterized test case must be a tuple",
+                            Some(value.span),
+                        ));
+                    };
+                    cases.push(values);
+                }
                 self.take(&TokenKind::Comma);
                 self.separators();
             }
@@ -680,6 +717,29 @@ impl Parser<'_> {
                 self.expect(&TokenKind::Dedent, "expected end of test cases")?;
             }
             self.expect(&TokenKind::RightBrace, "expected `}` after test cases")?;
+            if matrix {
+                if !parameters.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000112",
+                        "a test matrix declares its parameters inside the case block",
+                        Some(self.peek().span),
+                    ));
+                }
+                cases.push(Vec::new());
+                for (parameter, values) in axes {
+                    parameters.push(parameter);
+                    cases = cases
+                        .iter()
+                        .flat_map(|case| {
+                            values.iter().cloned().map(|value| {
+                                let mut expanded = case.clone();
+                                expanded.push(value);
+                                expanded
+                            })
+                        })
+                        .collect();
+                }
+            }
         }
         if modes.iter().any(|mode| mode == "differential") {
             self.line_breaks();
@@ -725,6 +785,7 @@ impl Parser<'_> {
             name,
             parameters,
             cases,
+            matrix,
             modes,
             contracts,
             body,
