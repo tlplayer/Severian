@@ -1,0 +1,262 @@
+import "btree.sev"
+
+
+"""
+# `set[T]`
+
+A collection of unique values.
+
+`set[T]` is ordered by default. Its default storage is a B-tree, so iteration
+is deterministic and sorted by `T`.
+
+The storage implementation is selected through the constructor instead of
+creating public types such as `hash_set[T]` or `ordered_set[T]`.
+
+```sev
+a = set[int](8, 2, 5)
+b = set[int]( 8, 2, 5, BTree)
+c = set[int]( 8, 2, 5, Hash)
+```
+
+`a` and `b` use the default ordered B-tree representation.
+
+A specialization may change storage behavior, but the value remains a
+`set[int]`; callers do not need a second collection type.
+
+## Default behavior
+
+```sev
+values = set[int](8, 2, 5)
+
+for value in values:
+    print(value)
+
+# 2
+# 5
+# 8
+```
+
+## Complexity: default B-tree specialization
+
+| operation       | complexity |
+|----------------|------------|
+| add            | O(log n)   |
+| get            | O(log n)   |
+| remove         | O(log n)   |
+| first / last   | O(log n)   |
+| lower_bound    | O(log n)   |
+| upper_bound    | O(log n)   |
+| iteration      | O(n)       |
+
+Use `size(values)` for element count. `values.size()` remains the byte-size of
+the collection object.
+"""
+
+
+enum set_storage:
+    BTree
+    Hash
+
+
+class set[T]:
+    storage: set_storage
+    tree: btree[T, T]
+    count: usize
+
+    def set() -> set[T]:
+        return set[T](BTree)
+
+    def set(values: T...,storage: set_storage) -> set[T]:
+        result = set[T](BTree)
+        for value in values:
+            result.add(value)
+        return result
+
+    def set( values: T...,storage: set_storage) -> set[T]:
+        result: set[T]
+        result.storage = storage
+
+        for value in values:
+            result.add(value)
+
+        return result
+
+    def add(self, value: T) -> tuple[T, bool]:
+        """
+        Add `value`.
+
+        Returns `(value, true)` when inserted and `(existing, false)` when the
+        set already contained an equivalent value.
+        """
+        previous = tree.insert(value, value)
+
+        match previous:
+            None:
+                count += 1
+                return (value, true)
+            existing:
+                return (existing, false)
+
+    def get(self, value: T) -> tuple[T, bool]:
+        """
+        Return the stored value and whether it exists.
+
+        This keeps lookup useful for canonicalized/interned values instead of
+        exposing a separate `is_*` operation.
+        """
+        found = tree.get(value)
+
+        match found:
+            None:
+                return (value, false)
+            existing:
+                return (existing, true)
+
+    def remove(self, value: T) -> tuple[T, bool]:
+        removed = tree.remove(value)
+
+        match removed:
+            None:
+                return (value, false)
+            existing:
+                count -= 1
+                return (existing, true)
+
+    def first(self) -> T | None:
+        item = tree.first()
+
+        match item:
+            None:
+                return None
+            pair:
+                return pair[0]
+
+    def last(self) -> T | None:
+        item = tree.last()
+
+        match item:
+            None:
+                return None
+            pair:
+                return pair[0]
+
+    def lower_bound(self, value: T) -> T | None:
+        item = tree.lower_bound(value)
+
+        match item:
+            None:
+                return None
+            pair:
+                return pair[0]
+
+    def upper_bound(self, value: T) -> T | None:
+        item = tree.upper_bound(value)
+
+        match item:
+            None:
+                return None
+            pair:
+                return pair[0]
+
+    def pop_first(self) -> T | None:
+        value = self.first()
+
+        match value:
+            None:
+                return None
+            existing:
+                self.remove(existing)
+                return existing
+
+    def pop_last(self) -> T | None:
+        value = self.last()
+
+        match value:
+            None:
+                return None
+            existing:
+                self.remove(existing)
+                return existing
+
+    def range(self, start: T, stop: T) -> iterator[T]:
+        for key, value in tree.range(start, stop):
+            yield value
+
+    def clear(self):
+        tree.clear()
+        count = 0
+
+    def empty(self) -> bool:
+        return count == 0
+
+
+def size[T](values: view set[T]) -> usize:
+    return values.count
+
+
+"""
+## Set algebra
+"""
+
+
+def union[T](left: view set[T], right: view set[T]) -> set[T]:
+    result = set[T]()
+
+    for value in left:
+        result.add(value)
+
+    for value in right:
+        result.add(value)
+
+    return result
+
+
+def intersection[T](left: view set[T], right: view set[T]) -> set[T]:
+    result = set[T]()
+
+    for value in left:
+        _, exists = right.get(value)
+        if exists:
+            result.add(value)
+
+    return result
+
+
+def difference[T](left: view set[T], right: view set[T]) -> set[T]:
+    result = set[T]()
+
+    for value in left:
+        _, exists = right.get(value)
+        if not exists:
+            result.add(value)
+
+    return result
+
+
+def symmetric_difference[T](left: view set[T], right: view set[T]) -> set[T]:
+    return union(
+        difference(left, right),
+        difference(right, left),
+    )
+
+
+def subset[T](left: view set[T], right: view set[T]) -> bool:
+    for value in left:
+        _, exists = right.get(value)
+        if not exists:
+            return false
+
+    return true
+
+
+def superset[T](left: view set[T], right: view set[T]) -> bool:
+    return subset(right, left)
+
+
+def disjoint[T](left: view set[T], right: view set[T]) -> bool:
+    for value in left:
+        _, exists = right.get(value)
+        if exists:
+            return false
+
+    return true

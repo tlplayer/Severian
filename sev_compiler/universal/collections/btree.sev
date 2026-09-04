@@ -1,0 +1,123 @@
+"""
+# `btree[K, V]`
+
+Shared ordered storage for `map[K, V]` and `set[T]`.
+
+A B-tree stores multiple keys per node so lookup, insertion, removal, and
+ordered traversal require fewer allocations and less pointer chasing than a
+node-per-element balanced tree.
+
+This is an implementation type. Public collection APIs should normally expose
+`map[K, V](...)` or `set[T](...)` rather than require callers to manipulate
+B-tree nodes.
+
+## Complexity
+
+| operation       | complexity |
+|----------------|------------|
+| search         | O(log n)   |
+| insert         | O(log n)   |
+| remove         | O(log n)   |
+| first / last   | O(log n)   |
+| lower_bound    | O(log n)   |
+| upper_bound    | O(log n)   |
+| ordered walk   | O(n)       |
+
+The node width is an implementation parameter and does not change collection
+semantics.
+"""
+
+
+class btree_node[K, V, N]:
+    keys: array[K, N]
+    values: array[V, N]
+    children: array[ptr[btree_node[K, V, N]], N + 1]
+    count: usize
+    leaf: bool
+
+
+class btree[K, V]:
+    root: ptr[btree_node[K, V]]
+    count: usize
+
+    def btree() -> btree[K, V]:
+        ...
+
+    def get(self, key: K) -> V | None:
+        ...
+
+    def insert(self, key: K, value: V) -> V | None:
+        """
+        Insert `key -> value`.
+
+        Returns the previous value when `key` already existed, otherwise None.
+        """
+        ...
+
+    def remove(self, key: K) -> V | None:
+        ...
+
+    def first(self) -> tuple[K, V] | None:
+        ...
+
+    def last(self) -> tuple[K, V] | None:
+        ...
+
+    def lower_bound(self, key: K) -> tuple[K, V] | None:
+        ...
+
+    def upper_bound(self, key: K) -> tuple[K, V] | None:
+        ...
+
+    def range(self, start: K, stop: K) -> iterator[tuple[K, V]]:
+        ...
+
+    def clear(self):
+        ...
+
+    def empty(self) -> bool:
+        return count == 0
+
+
+"""
+## Internal operations
+
+These operations are part of the bootstrap surface for the B-tree
+implementation. They are not public collection operations.
+"""
+
+
+def search[K, V](tree: borrow btree[K, V], key: K) -> tuple[V, bool]:
+    ...
+
+
+def split_child[K, V](
+    tree: borrow btree[K, V],
+    parent: borrow btree_node[K, V],
+    index: usize,
+):
+    ...
+
+
+def insert_non_full[K, V](
+    tree: borrow btree[K, V],
+    node: borrow btree_node[K, V],
+    key: K,
+    value: V,
+) -> V | None:
+    ...
+
+
+def merge_children[K, V](
+    tree: borrow btree[K, V],
+    parent: borrow btree_node[K, V],
+    index: usize,
+):
+    ...
+
+
+def rebalance[K, V](
+    tree: borrow btree[K, V],
+    node: borrow btree_node[K, V],
+):
+    ...
