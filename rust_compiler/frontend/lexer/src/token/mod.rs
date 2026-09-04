@@ -5,7 +5,10 @@ pub enum TokenKind {
     Identifier(String),
     Integer(String),
     Float(String),
-    MeasuredNumber { magnitude: String, suffix: String },
+    MeasuredNumber {
+        magnitude: String,
+        suffix: String,
+    },
     Character(char),
     String(String),
     FormattedString(String),

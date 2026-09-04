@@ -1080,14 +1080,17 @@ pub(crate) fn normalize_extensions(
             extension.target.simple_name(),
         ) {
             if target == parameter {
-                let bound = extension.constraints.iter().find_map(|constraint| match constraint {
-                    severian_ast::GenericConstraint::Parameter {
-                        parameter: constrained,
-                        bound,
-                        ..
-                    } if constrained == parameter => bound.simple_name(),
-                    _ => None,
-                });
+                let bound = extension
+                    .constraints
+                    .iter()
+                    .find_map(|constraint| match constraint {
+                        severian_ast::GenericConstraint::Parameter {
+                            parameter: constrained,
+                            bound,
+                            ..
+                        } if constrained == parameter => bound.simple_name(),
+                        _ => None,
+                    });
                 let Some(bound) = bound else {
                     return Err(Diagnostic::new(
                         "E000204",
@@ -1117,16 +1120,16 @@ pub(crate) fn normalize_extensions(
                             Some(extension.span),
                         ));
                     };
-                    let substitution = package::generic::Substitution::from_iter([(
-                        parameter.clone(),
-                        member,
-                    )]);
+                    let substitution =
+                        package::generic::Substitution::from_iter([(parameter.clone(), member)]);
                     class.methods.extend(extension.methods.iter().map(|method| {
                         package::generic::specialize_function(method, &substitution)
                     }));
-                    class.operators.extend(extension.operators.iter().map(|operator| {
-                        package::generic::specialize_operator(operator, &substitution)
-                    }));
+                    class
+                        .operators
+                        .extend(extension.operators.iter().map(|operator| {
+                            package::generic::specialize_operator(operator, &substitution)
+                        }));
                 }
                 continue;
             }
@@ -1323,9 +1326,12 @@ fn collapse_zipped_type_families(
                     .iter()
                     .map(|method| package::generic::specialize_function(method, &substitution)),
             );
-            class.operators.extend(template.operators.iter().map(|operator| {
-                package::generic::specialize_operator(operator, &substitution)
-            }));
+            class.operators.extend(
+                template
+                    .operators
+                    .iter()
+                    .map(|operator| package::generic::specialize_operator(operator, &substitution)),
+            );
         }
     }
 
@@ -1367,9 +1373,7 @@ fn collect_closed_union_members(
     }
 }
 
-fn closed_type_families(
-    ast: &severian_ast::Module,
-) -> BTreeMap<String, BTreeSet<String>> {
+fn closed_type_families(ast: &severian_ast::Module) -> BTreeMap<String, BTreeSet<String>> {
     let unions = ast
         .items
         .iter()
@@ -1404,10 +1408,15 @@ fn closed_type_families(
 
 fn compiler_lossless_conversion(ast: &severian_ast::Module) -> bool {
     let mut enabled = false;
-    for statement in ast.items.iter().filter_map(|item| match item {
-        severian_ast::Item::Test(test) => Some(test.body.as_slice()),
-        _ => None,
-    }).flatten() {
+    for statement in ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Test(test) => Some(test.body.as_slice()),
+            _ => None,
+        })
+        .flatten()
+    {
         let severian_ast::Statement::Expression(expression) = statement else {
             continue;
         };
@@ -2232,8 +2241,12 @@ impl Analyzer<'_> {
             return Ok(self.instantiate_fallible_type(success, error));
         }
         if let Some((element, [length])) = annotation.named_parts() {
-            if matches!(length.kind, severian_ast::TypeAnnotationKind::DimensionConstant(_)) {
-                let element_annotation = TypeAnnotation::named(element, Vec::new(), annotation.span);
+            if matches!(
+                length.kind,
+                severian_ast::TypeAnnotationKind::DimensionConstant(_)
+            ) {
+                let element_annotation =
+                    TypeAnnotation::named(element, Vec::new(), annotation.span);
                 let element = self.resolve_source_type(&element_annotation)?;
                 return Ok(self.instantiate_list_type(element));
             }
@@ -2364,15 +2377,17 @@ impl Analyzer<'_> {
                 return Ok(*ty);
             }
             if name == "char"
-                && self
-                    .classes
-                    .get("char")
-                    .is_some_and(|declaration| declaration.primitive && !declaration.type_parameters.is_empty())
+                && self.classes.get("char").is_some_and(|declaration| {
+                    declaration.primitive && !declaration.type_parameters.is_empty()
+                })
             {
-                return self
-                    .types
-                    .resolve_name("u32")
-                    .ok_or_else(|| Diagnostic::new("E000204", "char storage type `u32` is unavailable", Some(annotation.span)));
+                return self.types.resolve_name("u32").ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000204",
+                        "char storage type `u32` is unavailable",
+                        Some(annotation.span),
+                    )
+                });
             }
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
                 return Ok(instance.ty);
@@ -2395,7 +2410,9 @@ impl Analyzer<'_> {
                 .map(|instance| instance.ty)
                 .collect::<BTreeSet<_>>();
             if matching.len() == 1 {
-                return Ok(matching.pop_first().expect("one matching source class type"));
+                return Ok(matching
+                    .pop_first()
+                    .expect("one matching source class type"));
             }
         }
         resolve_type_annotation(self.types, annotation)
@@ -3184,10 +3201,7 @@ impl Analyzer<'_> {
                     }
                     return Ok(Statement::Sequence(sequence));
                 }
-                let slice_element = self
-                    .slice_elements
-                    .get(&iterable_value.type_id)
-                    .copied();
+                let slice_element = self.slice_elements.get(&iterable_value.type_id).copied();
                 let item_bindings = if let Some(element_type) = slice_element {
                     if second_binding.is_some() {
                         return Err(Diagnostic::new(
@@ -3616,7 +3630,10 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("unit")
                     .expect("bootstrap defines unit");
-                if self.class_instances_by_type.contains_key(&collection.type_id) {
+                if self
+                    .class_instances_by_type
+                    .contains_key(&collection.type_id)
+                {
                     if let Some(update) = self.class_index_update(
                         collection.clone(),
                         index,
@@ -5047,7 +5064,8 @@ impl Analyzer<'_> {
             .cloned()
         {
             let [AstStatement::Return {
-                value: Some(result), ..
+                value: Some(result),
+                ..
             }] = operator.body.as_slice()
             else {
                 return Err(Diagnostic::new(
@@ -5635,7 +5653,8 @@ impl Analyzer<'_> {
             } if matches!(
                 operand.kind,
                 AstExpressionKind::Literal(AstLiteral::Integer(_) | AstLiteral::Float(_))
-            ) => {
+            ) =>
+            {
                 let AstExpressionKind::Literal(value) = &operand.kind else {
                     unreachable!()
                 };
@@ -6095,11 +6114,9 @@ impl Analyzer<'_> {
                     });
                 }
                 let value = if let AstLiteral::Character(character) = value {
-                    if self
-                        .classes
-                        .get("char")
-                        .is_some_and(|declaration| declaration.primitive && !declaration.type_parameters.is_empty())
-                    {
+                    if self.classes.get("char").is_some_and(|declaration| {
+                        declaration.primitive && !declaration.type_parameters.is_empty()
+                    }) {
                         LiteralValue::Integer(u32::from(*character).to_string())
                     } else {
                         universal_literal(value)
@@ -6109,7 +6126,8 @@ impl Analyzer<'_> {
                         self.types
                             .definition(expected)
                             .is_some_and(|definition| definition.name == "string")
-                    }) {
+                    })
+                {
                     LiteralValue::String(String::new())
                 } else {
                     universal_literal(value)
@@ -6287,7 +6305,9 @@ impl Analyzer<'_> {
                             class
                                 .primitive
                                 .then_some(class)
-                                .and_then(|class| class.fields.iter().find(|field| field.name == *name))
+                                .and_then(|class| {
+                                    class.fields.iter().find(|field| field.name == *name)
+                                })
                                 .and_then(|field| {
                                     Some((field.annotation.clone(), field.default.clone()?))
                                 })
@@ -6643,7 +6663,10 @@ impl Analyzer<'_> {
                 if let Some((element, length)) =
                     self.array_elements.get(&object_value.type_id).copied()
                 {
-                    if step.as_deref().is_some_and(|step| static_integer(step) != Some(1)) {
+                    if step
+                        .as_deref()
+                        .is_some_and(|step| static_integer(step) != Some(1))
+                    {
                         return Err(Diagnostic::new(
                             "E000211",
                             "array-backed slices currently require a step of one",
@@ -6931,23 +6954,16 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Call { callee, arguments } => {
                 if let AstExpressionKind::Name(name) = &callee.kind {
-                    if let Some(ty) = self
-                        .active_type_aliases
-                        .get(name)
-                        .copied()
-                        .or_else(|| {
-                            (name == "self")
-                                .then(|| {
-                                    self.value_substitutions
-                                        .get("self")
-                                        .map(|value| value.type_id)
-                                        .or_else(|| {
-                                            self.names.get("self").map(|(_, _, ty)| *ty)
-                                        })
-                                })
-                                .flatten()
-                        })
-                    {
+                    if let Some(ty) = self.active_type_aliases.get(name).copied().or_else(|| {
+                        (name == "self")
+                            .then(|| {
+                                self.value_substitutions
+                                    .get("self")
+                                    .map(|value| value.type_id)
+                                    .or_else(|| self.names.get("self").map(|(_, _, ty)| *ty))
+                            })
+                            .flatten()
+                    }) {
                         let [argument] = arguments.as_slice() else {
                             return Err(Diagnostic::new(
                                 "E000206",
@@ -6981,13 +6997,14 @@ impl Analyzer<'_> {
                             Some(ast.span),
                         ));
                     };
-                    let operation_name = callable_path(&operation_argument.value).ok_or_else(|| {
-                        Diagnostic::new(
-                            "E000206",
-                            "the first mlir(...) argument must be a dialect.operation name",
-                            Some(operation_argument.span),
-                        )
-                    })?;
+                    let operation_name =
+                        callable_path(&operation_argument.value).ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000206",
+                                "the first mlir(...) argument must be a dialect.operation name",
+                                Some(operation_argument.span),
+                            )
+                        })?;
                     let Some((dialect, operation)) = operation_name.split_once('.') else {
                         return Err(Diagnostic::new(
                             "E000206",
@@ -7006,7 +7023,8 @@ impl Analyzer<'_> {
                                 continue;
                             }
                         }
-                        let operand_expected = operands.first().map(|operand: &Expression| operand.type_id);
+                        let operand_expected =
+                            operands.first().map(|operand: &Expression| operand.type_id);
                         operands.push(self.expression(&argument.value, operand_expected)?);
                     }
                     let result = expected
@@ -8154,7 +8172,13 @@ impl Analyzer<'_> {
                                     .iter()
                                     .all(Option::is_some)
                         }) {
-                            return self.class_constructor(class, &[], arguments, expected, ast.span);
+                            return self.class_constructor(
+                                class,
+                                &[],
+                                arguments,
+                                expected,
+                                ast.span,
+                            );
                         }
                         return self
                             .inferred_class_constructor(class, arguments, expected, ast.span);
@@ -8585,7 +8609,10 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
-                if matches!(*operator, AstBinaryOperator::Equal | AstBinaryOperator::NotEqual) {
+                if matches!(
+                    *operator,
+                    AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
+                ) {
                     let comparison = type_query_operand(left)
                         .and_then(|operand| match &right.kind {
                             AstExpressionKind::Name(name) => Some((operand, name.as_str())),
@@ -8612,22 +8639,20 @@ impl Analyzer<'_> {
                         return Ok(Expression {
                             id: self.next_id(),
                             type_id: boolean,
-                            kind: ExpressionKind::Literal(LiteralValue::Boolean(if *operator
-                                == AstBinaryOperator::Equal
-                            {
-                                equal
-                            } else {
-                                !equal
-                            })),
+                            kind: ExpressionKind::Literal(LiteralValue::Boolean(
+                                if *operator == AstBinaryOperator::Equal {
+                                    equal
+                                } else {
+                                    !equal
+                                },
+                            )),
                             span: ast.span,
                         });
                     }
                 }
                 if *operator == AstBinaryOperator::Identity {
-                    if let (
-                        AstExpressionKind::Name(member),
-                        AstExpressionKind::Name(family),
-                    ) = (&left.kind, &right.kind)
+                    if let (AstExpressionKind::Name(member), AstExpressionKind::Name(family)) =
+                        (&left.kind, &right.kind)
                     {
                         if !self.names.contains_key(member)
                             && !self.names.contains_key(family)
@@ -8761,10 +8786,7 @@ impl Analyzer<'_> {
                         let result = if left_value.type_id == right_value.type_id {
                             left_value.type_id
                         } else {
-                            self.instantiate_union_type(&[
-                                left_value.type_id,
-                                right_value.type_id,
-                            ])
+                            self.instantiate_union_type(&[left_value.type_id, right_value.type_id])
                         };
                         if expected.is_some_and(|expected| {
                             expected != result && !self.types.assignable(result, expected)
@@ -9820,9 +9842,12 @@ impl Analyzer<'_> {
             span,
         };
         if explicit
-            && self.types.primitive(expression.type_id).is_some_and(|primitive| {
-                primitive.category == severian_universal::PrimitiveCategory::Float
-            })
+            && self
+                .types
+                .primitive(expression.type_id)
+                .is_some_and(|primitive| {
+                    primitive.category == severian_universal::PrimitiveCategory::Float
+                })
             && self.integer_primitive(expected)
         {
             let boolean = self
@@ -9855,11 +9880,8 @@ impl Analyzer<'_> {
                 },
                 span,
             };
-            let failure = self.throw_expression(
-                "non-finite float cannot convert to integer",
-                expected,
-                span,
-            );
+            let failure =
+                self.throw_expression("non-finite float cannot convert to integer", expected, span);
             return Ok(Expression {
                 id: self.next_id(),
                 type_id: expected,
@@ -10113,16 +10135,26 @@ impl Analyzer<'_> {
                     AstExpressionKind::Literal(AstLiteral::Character(value)) => {
                         Some(u64::from(u32::from(*value)))
                     }
-                    _ => static_integer(&argument.value).and_then(|value| u64::try_from(value).ok()),
+                    _ => {
+                        static_integer(&argument.value).and_then(|value| u64::try_from(value).ok())
+                    }
                 };
-                if codepoint.is_some_and(|value| {
-                    value > 0x10ffff || (0xd800..=0xdfff).contains(&value)
-                }) {
-                    let string = self.types.resolve_name("string").expect("bootstrap defines string");
-                    let error_type = self.types.resolve_name("Error").expect("bootstrap defines Error");
+                if codepoint
+                    .is_some_and(|value| value > 0x10ffff || (0xd800..=0xdfff).contains(&value))
+                {
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    let error_type = self
+                        .types
+                        .resolve_name("Error")
+                        .expect("bootstrap defines Error");
                     let message = self.string_expression("invalid Unicode scalar value", span);
                     let function = self.string_expression(
-                        self.active_function_name.clone().unwrap_or_else(|| "<module>".into()),
+                        self.active_function_name
+                            .clone()
+                            .unwrap_or_else(|| "<module>".into()),
                         span,
                     );
                     let error = self.runtime_call(
@@ -10144,13 +10176,8 @@ impl Analyzer<'_> {
             return self.coerce(value, instance.ty, true);
         }
         if let Some((element, length)) = self.array_elements.get(&instance.ty).copied() {
-            let fields = self.array_constructor_fields(
-                &instance,
-                element,
-                length,
-                arguments,
-                span,
-            )?;
+            let fields =
+                self.array_constructor_fields(&instance, element, length, arguments, span)?;
             return Ok(Expression {
                 id: self.next_id(),
                 type_id: instance.ty,
@@ -10261,14 +10288,28 @@ impl Analyzer<'_> {
         if arguments.len() > 1 {
             return Err(Diagnostic::new(
                 "E000221",
-                format!("array constructor expects zero or one initializer, received {}", arguments.len()),
+                format!(
+                    "array constructor expects zero or one initializer, received {}",
+                    arguments.len()
+                ),
                 Some(span),
             ));
         }
-        let pointer = instance.fields.first().ok_or_else(|| {
-            Diagnostic::new("E000204", "array storage layout has no pointer field", Some(span))
-        })?.ty;
-        let usize_type = self.types.resolve_name("usize").expect("bootstrap defines usize");
+        let pointer = instance
+            .fields
+            .first()
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    "array storage layout has no pointer field",
+                    Some(span),
+                )
+            })?
+            .ty;
+        let usize_type = self
+            .types
+            .resolve_name("usize")
+            .expect("bootstrap defines usize");
         let count = self.integer_expression(&length.to_string(), usize_type, span);
         let storage = if let Some(argument) = arguments.first() {
             if let AstExpressionKind::List(values) = &argument.value.kind {
@@ -10488,7 +10529,10 @@ impl Analyzer<'_> {
             let [element, length] = arguments else {
                 return Err(Diagnostic::new(
                     "E000204",
-                    format!("class `{name}` expects 2 type argument(s), received {}", arguments.len()),
+                    format!(
+                        "class `{name}` expects 2 type argument(s), received {}",
+                        arguments.len()
+                    ),
                     Some(span),
                 ));
             };
@@ -10533,16 +10577,27 @@ impl Analyzer<'_> {
                 .class_instances_by_type
                 .get(&ty)
                 .cloned()
-                .ok_or_else(|| Diagnostic::new("E000204", "array instance is incomplete", Some(span)));
+                .ok_or_else(|| {
+                    Diagnostic::new("E000204", "array instance is incomplete", Some(span))
+                });
         }
         let declaration = self.classes.get(name).cloned().ok_or_else(|| {
-            Diagnostic::new("E000204", format!("unknown generic class `{name}`"), Some(span))
+            Diagnostic::new(
+                "E000204",
+                format!("unknown generic class `{name}`"),
+                Some(span),
+            )
         })?;
-        for bound in declaration.constraints.iter().filter_map(|constraint| match constraint {
-            severian_ast::GenericConstraint::Parameter { parameter, bound, .. }
-                if parameter == &declaration.type_parameters[0] => bound.simple_name(),
-            _ => None,
-        }) {
+        for bound in declaration
+            .constraints
+            .iter()
+            .filter_map(|constraint| match constraint {
+                severian_ast::GenericConstraint::Parameter {
+                    parameter, bound, ..
+                } if parameter == &declaration.type_parameters[0] => bound.simple_name(),
+                _ => None,
+            })
+        {
             if !self.source_type_satisfies_trait(element, bound) {
                 return Err(Diagnostic::new(
                     "E000204",
@@ -10601,7 +10656,9 @@ impl Analyzer<'_> {
             constructors: declaration
                 .constructors
                 .iter()
-                .map(|constructor| package::generic::specialize_function(constructor, &substitution))
+                .map(|constructor| {
+                    package::generic::specialize_function(constructor, &substitution)
+                })
                 .collect(),
             methods: declaration
                 .methods
@@ -10629,14 +10686,16 @@ impl Analyzer<'_> {
         if self.types.primitive(ty).is_some() {
             return matches!(required, "Copy" | "Default");
         }
-        self.class_instances_by_type.get(&ty).is_some_and(|instance| {
-            self.classes.get(&instance.name).is_some_and(|declaration| {
-                declaration
-                    .traits
-                    .iter()
-                    .any(|implemented| implemented.simple_name() == Some(required))
+        self.class_instances_by_type
+            .get(&ty)
+            .is_some_and(|instance| {
+                self.classes.get(&instance.name).is_some_and(|declaration| {
+                    declaration
+                        .traits
+                        .iter()
+                        .any(|implemented| implemented.simple_name() == Some(required))
+                })
             })
-        })
     }
 
     fn instantiate_class_types(
@@ -10737,7 +10796,9 @@ impl Analyzer<'_> {
             constructors: declaration
                 .constructors
                 .iter()
-                .map(|constructor| package::generic::specialize_function(constructor, &substitution))
+                .map(|constructor| {
+                    package::generic::specialize_function(constructor, &substitution)
+                })
                 .collect(),
             methods: declaration
                 .methods
@@ -12536,9 +12597,10 @@ impl Analyzer<'_> {
         }
         if callable.as_deref() == Some("bytes") && arguments.len() == 1 && positional {
             if let Some(byte) = expected.and_then(|expected| {
-                self.list_elements.get(&expected).copied().filter(|element| {
-                    self.types.resolve_name("u8") == Some(*element)
-                })
+                self.list_elements
+                    .get(&expected)
+                    .copied()
+                    .filter(|element| self.types.resolve_name("u8") == Some(*element))
             }) {
                 let AstExpressionKind::List(elements) = &arguments[0].value.kind else {
                     return Err(Diagnostic::new(
@@ -13013,15 +13075,8 @@ impl Analyzer<'_> {
             .map(|definition| definition.name.as_str());
         match name {
             _ if self.any_type == Some(element) => Ok("any"),
-            Some("int")
-            | Some("i8")
-            | Some("i16")
-            | Some("i32")
-            | Some("i64")
-            | Some("isize")
-            | Some("u16")
-            | Some("u64")
-            | Some("usize") => Ok("i64"),
+            Some("int") | Some("i8") | Some("i16") | Some("i32") | Some("i64") | Some("isize")
+            | Some("u16") | Some("u64") | Some("usize") => Ok("i64"),
             Some("float") => Ok("float"),
             Some("f64") => Ok("f64"),
             Some("u8") => Ok("u8"),
@@ -13058,15 +13113,8 @@ impl Analyzer<'_> {
             .definition(element)
             .map(|definition| definition.name.as_str());
         match name {
-            Some("int")
-            | Some("i8")
-            | Some("i16")
-            | Some("i32")
-            | Some("i64")
-            | Some("isize")
-            | Some("u16")
-            | Some("u64")
-            | Some("usize") => Ok("i64"),
+            Some("int") | Some("i8") | Some("i16") | Some("i32") | Some("i64") | Some("isize")
+            | Some("u16") | Some("u64") | Some("usize") => Ok("i64"),
             Some("u32") => Ok("u32"),
             Some("u8") => Ok("u8"),
             _ => Err(Diagnostic::new(
@@ -16439,9 +16487,9 @@ impl Analyzer<'_> {
                     let self_substitution = BTreeMap::from([("Self".to_owned(), instance.ty)]);
                     let result_type =
                         self.resolve_instantiated_type(&method.result, &self_substitution)?;
-                    if expected.is_some_and(|expected| {
-                        !self.types.assignable(result_type, expected)
-                    }) {
+                    if expected
+                        .is_some_and(|expected| !self.types.assignable(result_type, expected))
+                    {
                         return Err(semantic_error(
                             "static method result does not satisfy the expected type".into(),
                             span,
@@ -16449,10 +16497,8 @@ impl Analyzer<'_> {
                     }
                     let previous = self.value_substitutions.clone();
                     for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                        let parameter_type = self.resolve_instantiated_type(
-                            &parameter.annotation,
-                            &self_substitution,
-                        )?;
+                        let parameter_type = self
+                            .resolve_instantiated_type(&parameter.annotation, &self_substitution)?;
                         let value = self.expression(&argument.value, Some(parameter_type))?;
                         self.value_substitutions
                             .insert(parameter.name.clone(), value);
@@ -16687,14 +16733,18 @@ impl Analyzer<'_> {
                         Some(Expression {
                             id: self.next_id(),
                             type_id: data_size,
-                            kind: ExpressionKind::Literal(LiteralValue::Float(format!("{value}.0"))),
+                            kind: ExpressionKind::Literal(LiteralValue::Float(format!(
+                                "{value}.0"
+                            ))),
                             span,
                         })
                     }
                     _ => None,
                 };
                 if let Some(result) = result {
-                    if expected.is_some_and(|expected| !self.types.assignable(result.type_id, expected)) {
+                    if expected
+                        .is_some_and(|expected| !self.types.assignable(result.type_id, expected))
+                    {
                         return Err(semantic_error(
                             "array method result does not satisfy the expected type".into(),
                             span,
@@ -17626,11 +17676,8 @@ impl Analyzer<'_> {
             } => {
                 let condition = self.condition_expression(condition)?;
                 let substitutions = self.value_substitutions.clone();
-                let continuation = self.source_return_expression(
-                    remaining,
-                    result_type,
-                    fallthrough,
-                )?;
+                let continuation =
+                    self.source_return_expression(remaining, result_type, fallthrough)?;
                 let Some(continuation) = continuation else {
                     self.value_substitutions = substitutions;
                     return Ok(None);
@@ -17642,11 +17689,8 @@ impl Analyzer<'_> {
                     Some(continuation.clone()),
                 )?;
                 self.value_substitutions = substitutions.clone();
-                let else_value = self.source_return_expression(
-                    else_block,
-                    result_type,
-                    Some(continuation),
-                )?;
+                let else_value =
+                    self.source_return_expression(else_block, result_type, Some(continuation))?;
                 self.value_substitutions = substitutions;
                 match (then_value, else_value) {
                     (Some(value), Some(fallback)) => Ok(Some(Expression {
@@ -17817,10 +17861,7 @@ impl Analyzer<'_> {
                     } else {
                         output
                     };
-                    let shift = integer_literal(
-                        self.next_id(),
-                        &(byte_index * 8).to_string(),
-                    );
+                    let shift = integer_literal(self.next_id(), &(byte_index * 8).to_string());
                     let shifted = Expression {
                         id: self.next_id(),
                         type_id: object.type_id,
@@ -17870,10 +17911,8 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("Error")
                     .expect("bootstrap defines Error");
-                let message = self.string_expression(
-                    format!("array index is outside [0, {length})"),
-                    span,
-                );
+                let message =
+                    self.string_expression(format!("array index is outside [0, {length})"), span);
                 let function = self.string_expression(
                     self.active_function_name
                         .clone()
@@ -17973,14 +18012,14 @@ impl Analyzer<'_> {
         match applicable.len() {
             0 if failures.len() == 1 => Err(failures.remove(0)),
             0 => Err(Diagnostic::new(
-                    "E000211",
-                    format!(
-                        "class `{}` has no `[]` overload matching {} index value(s)",
-                        instance.name,
-                        indices.len()
-                    ),
-                    Some(span),
-                )),
+                "E000211",
+                format!(
+                    "class `{}` has no `[]` overload matching {} index value(s)",
+                    instance.name,
+                    indices.len()
+                ),
+                Some(span),
+            )),
             1 => {
                 let value = applicable.pop().expect("one applicable index operator");
                 if self.slice_elements.contains_key(&object.type_id) {
@@ -18014,10 +18053,8 @@ impl Analyzer<'_> {
                             },
                             span,
                         };
-                        let error = self.core_error_expression(
-                            "slice index is outside its view",
-                            span,
-                        );
+                        let error =
+                            self.core_error_expression("slice index is outside its view", span);
                         let value_type = value.type_id;
                         return Ok(Some(Expression {
                             id: self.next_id(),
@@ -21253,7 +21290,10 @@ mod tests {
             assert_eq!(method.parameters[0].annotation.simple_name(), Some(member));
             assert_eq!(method.result.simple_name(), Some(member));
             let operator = class.operators.first().unwrap();
-            assert_eq!(operator.parameters[0].annotation.simple_name(), Some(member));
+            assert_eq!(
+                operator.parameters[0].annotation.simple_name(),
+                Some(member)
+            );
             assert_eq!(operator.result.simple_name(), Some(member));
         }
     }

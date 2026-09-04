@@ -67,28 +67,51 @@ impl OperatorId {
     }
 
     pub const fn standard_spelling(self) -> Option<&'static str> {
-        if self.0 .0 == Self::BitwiseOr.0 .0 { Some("|") }
-        else if self.0 .0 == Self::BitwiseAnd.0 .0 { Some("&") }
-        else if self.0 .0 == Self::BitwiseXor.0 .0 { Some("^") }
-        else if self.0 .0 == Self::Add.0 .0 { Some("+") }
-        else if self.0 .0 == Self::Subtract.0 .0 { Some("-") }
-        else if self.0 .0 == Self::Multiply.0 .0 { Some("*") }
-        else if self.0 .0 == Self::Divide.0 .0 { Some("/") }
-        else if self.0 .0 == Self::FloorDivide.0 .0 { Some("//") }
-        else if self.0 .0 == Self::Remainder.0 .0 { Some("%") }
-        else if self.0 .0 == Self::Power.0 .0 { Some("**") }
-        else if self.0 .0 == Self::ShiftLeft.0 .0 { Some("<<") }
-        else if self.0 .0 == Self::ShiftRight.0 .0 { Some(">>") }
-        else if self.0 .0 == Self::Equal.0 .0 { Some("==") }
-        else if self.0 .0 == Self::NotEqual.0 .0 { Some("!=") }
-        else if self.0 .0 == Self::Less.0 .0 { Some("<") }
-        else if self.0 .0 == Self::LessEqual.0 .0 { Some("<=") }
-        else if self.0 .0 == Self::Greater.0 .0 { Some(">") }
-        else if self.0 .0 == Self::GreaterEqual.0 .0 { Some(">=") }
-        else if self.0 .0 == Self::Contains.0 .0 { Some("in") }
-        else if self.0 .0 == Self::And.0 .0 { Some("and") }
-        else if self.0 .0 == Self::Or.0 .0 { Some("or") }
-        else { None }
+        if self.0 .0 == Self::BitwiseOr.0 .0 {
+            Some("|")
+        } else if self.0 .0 == Self::BitwiseAnd.0 .0 {
+            Some("&")
+        } else if self.0 .0 == Self::BitwiseXor.0 .0 {
+            Some("^")
+        } else if self.0 .0 == Self::Add.0 .0 {
+            Some("+")
+        } else if self.0 .0 == Self::Subtract.0 .0 {
+            Some("-")
+        } else if self.0 .0 == Self::Multiply.0 .0 {
+            Some("*")
+        } else if self.0 .0 == Self::Divide.0 .0 {
+            Some("/")
+        } else if self.0 .0 == Self::FloorDivide.0 .0 {
+            Some("//")
+        } else if self.0 .0 == Self::Remainder.0 .0 {
+            Some("%")
+        } else if self.0 .0 == Self::Power.0 .0 {
+            Some("**")
+        } else if self.0 .0 == Self::ShiftLeft.0 .0 {
+            Some("<<")
+        } else if self.0 .0 == Self::ShiftRight.0 .0 {
+            Some(">>")
+        } else if self.0 .0 == Self::Equal.0 .0 {
+            Some("==")
+        } else if self.0 .0 == Self::NotEqual.0 .0 {
+            Some("!=")
+        } else if self.0 .0 == Self::Less.0 .0 {
+            Some("<")
+        } else if self.0 .0 == Self::LessEqual.0 .0 {
+            Some("<=")
+        } else if self.0 .0 == Self::Greater.0 .0 {
+            Some(">")
+        } else if self.0 .0 == Self::GreaterEqual.0 .0 {
+            Some(">=")
+        } else if self.0 .0 == Self::Contains.0 .0 {
+            Some("in")
+        } else if self.0 .0 == Self::And.0 .0 {
+            Some("and")
+        } else if self.0 .0 == Self::Or.0 .0 {
+            Some("or")
+        } else {
+            None
+        }
     }
 }
 

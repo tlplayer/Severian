@@ -587,21 +587,25 @@ output = f"""module {{
         let severian_ast::Item::Trait(data) = &module.items[0] else {
             panic!("expected Data trait")
         };
-        assert_eq!(data.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        assert_eq!(
+            data.operators[0].operator,
+            severian_ast::OperatorSyntax::Index
+        );
         assert_eq!(data.operators[0].parameters.len(), 2);
         let severian_ast::Item::Class(buffer) = &module.items[1] else {
             panic!("expected Buffer class")
         };
-        assert_eq!(buffer.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        assert_eq!(
+            buffer.operators[0].operator,
+            severian_ast::OperatorSyntax::Index
+        );
         assert_eq!(buffer.operators[0].parameters.len(), 2);
     }
 
     #[test]
     fn parses_const_generic_class_construction_as_a_type_application() {
-        let source = SourceFile::virtual_source(
-            "const-class.sev",
-            "test:\n    values := array[i32, 4]()\n",
-        );
+        let source =
+            SourceFile::virtual_source("const-class.sev", "test:\n    values := array[i32, 4]()\n");
         let module = parse(&scan(&source).unwrap()).unwrap();
         let severian_ast::Item::Test(test) = &module.items[0] else {
             panic!("expected test")
@@ -1578,9 +1582,7 @@ output = f"""module {{
             panic!("expected return")
         };
         let severian_ast::ExpressionKind::Binary {
-            operator,
-            right,
-            ..
+            operator, right, ..
         } = &expression.kind
         else {
             panic!("expected outer addition")

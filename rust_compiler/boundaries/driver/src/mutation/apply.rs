@@ -150,9 +150,7 @@ fn apply_statement(statement: &mut Statement, edit: MutationEdit) -> bool {
         | Statement::Defer { expression, .. }
         | Statement::Yield {
             value: expression, ..
-        } => {
-            apply_expression(expression, edit)
-        }
+        } => apply_expression(expression, edit),
         Statement::Return { value, .. } => value
             .as_mut()
             .is_some_and(|value| apply_expression(value, edit)),

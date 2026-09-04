@@ -68,4 +68,5 @@ and larger integration examples.
 - [Packages](docs/PACKAGES.md)
 - [Tooling](docs/TOOLING.md)
 - [Compiler architecture](docs/COMPILER_ARCHITECTURE.md)
+- [Agent IR](docs/READMEs/AGENT_IR.md)
 - [Contributing](CONTRIBUTING.md)

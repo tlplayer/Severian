@@ -3,8 +3,9 @@ set -u
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 severian_bin=${SEVERIAN_BIN:-"$repository_root/target/debug/sev"}
-timeout_seconds=${SEVERIAN_TEST_TIMEOUT_SECONDS:-300}
+timeout_seconds=${SEVERIAN_TEST_TIMEOUT_SECONDS:-60}
 parallel_jobs=${SEVERIAN_TEST_JOBS:-4}
+show_output=${SEVERIAN_TEST_OUTPUT:-0}
 
 if [[ ! -x "$severian_bin" ]]; then
     echo "FAILED: Severian compiler is not executable: $severian_bin" >&2
@@ -28,10 +29,27 @@ fi
 temporary_root=$(mktemp -d)
 trap 'rm -rf -- "$temporary_root"' EXIT
 
-mapfile -d '' files < <(find "${roots[@]}" -type f -name '*.sev' -print0 | sort -z)
-total=${#files[@]}
+declare -A selected_targets=()
+for root in "${roots[@]}"; do
+    if [[ -f "$root" ]]; then
+        selected_targets["$root"]=1
+        continue
+    fi
+    if [[ -f "$root/package.toml" ]]; then
+        selected_targets["$root"]=1
+    else
+        while IFS= read -r -d '' manifest; do
+            selected_targets["${manifest%/package.toml}"]=1
+        done < <(find "$root" -type f -name package.toml -print0)
+    fi
+    while IFS= read -r test_source; do
+        selected_targets["$test_source"]=1
+    done < <(rg -l --glob '*.sev' '^[[:space:]]*test([[:space:]]|:)' "$root" || true)
+done
+mapfile -t targets < <(printf '%s\n' "${!selected_targets[@]}" | sort)
+total=${#targets[@]}
 if (( total == 0 )); then
-    echo "FAILED: no .sev files found" >&2
+    echo "FAILED: no Severian packages or test-bearing .sev files found" >&2
     exit 1
 fi
 
@@ -45,12 +63,18 @@ run_one() {
     local log="$temporary_root/$index.log"
     local status_file="$temporary_root/$index.status"
 
-    timeout "${timeout_seconds}s" "$severian_bin" test "$file" >"$log" 2>&1
-    local status=$?
+    local status
+    if (( show_output != 0 )); then
+        timeout --verbose "${timeout_seconds}s" "$severian_bin" test "$file" 2>&1 | tee "$log"
+        status=${PIPESTATUS[0]}
+    else
+        timeout --verbose "${timeout_seconds}s" "$severian_bin" test "$file" >"$log" 2>&1
+        status=$?
+    fi
     printf '%s\n' "$status" >"$status_file"
 }
 
-echo "sev compiler source tests: $total files, $parallel_jobs jobs, ${timeout_seconds}s per file"
+echo "sev compiler source tests: $total package/scenario targets, $parallel_jobs jobs, ${timeout_seconds}s per target"
 
 batch_start=0
 while (( batch_start < total )); do
@@ -61,7 +85,9 @@ while (( batch_start < total )); do
 
     index=$batch_start
     while (( index < batch_end )); do
-        run_one "$index" "${files[$index]}" &
+        relative=${targets[$index]#"$repository_root/"}
+        echo "starting $((index + 1))/$total: $relative"
+        run_one "$index" "${targets[$index]}" &
         index=$((index + 1))
     done
     wait
@@ -90,9 +116,12 @@ if (( failed != 0 )); then
     while (( index < total )); do
         status=$(<"$temporary_root/$index.status")
         if (( status != 0 )); then
-            relative=${files[$index]#"$repository_root/"}
+            relative=${targets[$index]#"$repository_root/"}
             if (( status == 124 )); then
                 echo "FAILED (timeout after ${timeout_seconds}s): $relative"
+                echo "  investigate frontend cost with:"
+                echo "    /usr/bin/time $severian_bin build --emit hir -o /tmp/slow.hir $relative"
+                echo "  narrow imports or split scenarios so each test proves one semantic layer."
             else
                 echo "FAILED (exit $status): $relative"
             fi

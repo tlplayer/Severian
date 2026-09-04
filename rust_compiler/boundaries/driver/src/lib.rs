@@ -3,6 +3,7 @@
 //! In-process Severian compilation driver. Native target services stay behind
 //! compiler-owned boundaries; source transforms exchange typed IR objects.
 
+mod agent_ir;
 mod components;
 pub mod config;
 mod pipeline;

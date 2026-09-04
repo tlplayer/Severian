@@ -184,8 +184,9 @@ fn parse_emit_stage(value: &str) -> Result<EmitStage, String> {
         "mir" => Ok(EmitStage::Mir),
         "lir" => Ok(EmitStage::Lir),
         "mlir" => Ok(EmitStage::Mlir),
+        "agent-ir" => Ok(EmitStage::AgentIr),
         _ => Err(format!(
-            "unknown emit stage `{value}`; expected one of: ast, hir, mir, lir, mlir"
+            "unknown emit stage `{value}`; expected one of: ast, hir, mir, lir, mlir, agent-ir"
         )),
     }
 }
@@ -279,6 +280,21 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     let targets = selected_targets(&input, options.bin.as_deref())?;
     if targets.len() != 1 {
         return Err("`--emit` requires exactly one selected target; pass `--bin NAME`".into());
+    }
+    if stage == EmitStage::AgentIr {
+        let package = match &input {
+            Input::Source { name, .. } => name.as_str(),
+            Input::Package(manifest) => manifest.name.as_str(),
+        };
+        let output = options
+            .output
+            .clone()
+            .unwrap_or_else(|| input_root(&input).join("target").join("agent-ir"));
+        compiler(&config, manifest, false)?
+            .emit_agent_ir(targets[0].path(), input_root(&input), &output, package)
+            .map_err(|error| error.to_string())?;
+        println!("wrote Agent IR to {}", output.display());
+        return Ok(());
     }
     let text = compiler(&config, manifest, false)?
         .emit_file(targets[0].path(), stage)
@@ -1922,7 +1938,7 @@ build options:\n",
         ));
     }
     output.push_str(
-        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir; do not execute.\n  -o PATH     Write the selected artifact or emitted IR to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
+        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir, or write agent-ir; do not execute.\n  -o PATH     Write the selected artifact, emitted IR, or Agent IR directory to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
     );
     output
 }
@@ -1968,6 +1984,9 @@ mod tests {
 
         let equals = parse_common(vec!["hello.sev".into(), "--emit=mlir".into()]).unwrap();
         assert_eq!(equals.emit, Some(EmitStage::Mlir));
+
+        let agent = parse_common(vec!["hello.sev".into(), "--emit=agent-ir".into()]).unwrap();
+        assert_eq!(agent.emit, Some(EmitStage::AgentIr));
     }
 
     #[test]

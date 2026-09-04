@@ -23,6 +23,7 @@ pub enum CompileError {
     Mlir(severian_mlir::MlirError),
     Backend(BackendError),
     Component(String),
+    AgentIr(String),
     NativeLink(String),
 }
 
@@ -35,6 +36,7 @@ pub enum EmitStage {
     Mir,
     Lir,
     Mlir,
+    AgentIr,
 }
 
 impl fmt::Display for CompileError {
@@ -49,6 +51,7 @@ impl fmt::Display for CompileError {
             Self::Mlir(error) => write!(formatter, "MLIR generation failed: {error}"),
             Self::Backend(error) => error.fmt(formatter),
             Self::Component(error) => write!(formatter, "component provisioning failed: {error}"),
+            Self::AgentIr(error) => write!(formatter, "Agent IR emission failed: {error}"),
             Self::NativeLink(error) => formatter.write_str(error),
         }
     }
@@ -308,7 +311,29 @@ impl Compiler {
                 let text = compose_region_artifacts(&ordinary, artifacts, &self.target)?.host_mlir;
                 Ok(format!("{}\n", text.trim_end()))
             }
+            EmitStage::AgentIr => Err(CompileError::AgentIr(
+                "Agent IR is a directory artifact; use `sev build --emit agent-ir`".into(),
+            )),
         }
+    }
+
+    /// Emits the compiler's existing semantic graph without introducing a
+    /// second frontend or re-parsing a lower-level representation.
+    pub fn emit_agent_ir(
+        &self,
+        source: &Path,
+        root: &Path,
+        output: &Path,
+        package: &str,
+    ) -> Result<(), CompileError> {
+        let graph = self.resolve_modules(source)?;
+        // Test mode preserves test declarations in the semantic graph. It uses
+        // the same frontend, HIR, and MIR pipeline as `sev test`; Agent IR only
+        // serializes those existing compiler representations.
+        let (hir, sources, types) = self.check_graph_to_hir(graph.clone(), CompileMode::Test)?;
+        let mir = self.check_hir_to_mir(hir.clone(), sources, types.clone())?;
+        crate::agent_ir::write(output, package, root, &graph, &hir, &mir, &types)
+            .map_err(CompileError::AgentIr)
     }
 
     pub fn check_file(&self, source: &Path) -> Result<(), CompileError> {

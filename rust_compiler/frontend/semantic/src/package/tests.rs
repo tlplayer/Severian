@@ -1525,11 +1525,7 @@ fn source_class_constructors_infer_generic_arguments_and_self_methods() {
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();
-    let typed = analyze_package(
-        &severian_modules::resolve(&source).unwrap(),
-        &universal,
-    )
-    .unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
     severian_mir::build(&typed.hir).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

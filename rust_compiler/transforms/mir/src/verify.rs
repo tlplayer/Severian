@@ -24,7 +24,10 @@ pub enum VerifyError {
     MissingTerminator(u32),
     BlockArgumentArity(u32),
     BlockArgumentType(u32),
-    UseBeforeDefinition { block: u32, local: u32 },
+    UseBeforeDefinition {
+        block: u32,
+        local: u32,
+    },
     CallTarget,
     CallArity,
     CallArgumentType {
@@ -32,7 +35,10 @@ pub enum VerifyError {
         expected: TypeId,
         callee: Option<severian_universal::DefId>,
     },
-    InvalidOwnershipState { block: u32, local: u32 },
+    InvalidOwnershipState {
+        block: u32,
+        local: u32,
+    },
     UnknownOperation(severian_universal::OpId),
     InvalidOperation(String),
 }

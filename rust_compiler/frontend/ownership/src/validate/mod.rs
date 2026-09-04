@@ -89,13 +89,9 @@ fn validate_slice_block(
             Statement::Binding(id) => {
                 let binding = bindings[id];
                 if slice_types.contains(&binding.type_id) {
-                    if let Some(region) = slice_region(
-                        &binding.value,
-                        bindings,
-                        slice_types,
-                        array_types,
-                        regions,
-                    ) {
+                    if let Some(region) =
+                        slice_region(&binding.value, bindings, slice_types, array_types, regions)
+                    {
                         regions.insert(*id, region);
                     }
                 }

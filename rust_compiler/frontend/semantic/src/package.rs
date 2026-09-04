@@ -546,12 +546,13 @@ fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnosti
                     return None;
                 };
                 let (target, _) = extension.target.named_parts()?;
-                let defined_here = module.ast.items.iter().any(|item| {
-                    matches!(item, Item::Class(class) if class.name == target)
-                });
-                (!defined_here && target != "set" && extension.decorators.is_empty()).then(|| {
-                    (module.id, extension.clone(), target.to_owned())
-                })
+                let defined_here = module
+                    .ast
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, Item::Class(class) if class.name == target));
+                (!defined_here && target != "set" && extension.decorators.is_empty())
+                    .then(|| (module.id, extension.clone(), target.to_owned()))
             })
         })
         .collect::<Vec<_>>();
@@ -587,30 +588,24 @@ fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnosti
             }
         }
         for operator in &extension.operators {
-            if class
-                .operators
-                .iter()
-                .any(|known| {
-                    known.operator == operator.operator
-                        && annotations_match(
-                            &known
-                                .parameters
-                                .iter()
-                                .map(|parameter| parameter.annotation.clone())
-                                .collect::<Vec<_>>(),
-                            &operator
-                                .parameters
-                                .iter()
-                                .map(|parameter| parameter.annotation.clone())
-                                .collect::<Vec<_>>(),
-                        )
-                })
-            {
+            if class.operators.iter().any(|known| {
+                known.operator == operator.operator
+                    && annotations_match(
+                        &known
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                        &operator
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                    )
+            }) {
                 return Err(Diagnostic::new(
                     "E000203",
-                    format!(
-                        "extension cannot replace an operator defined directly on `{target}`"
-                    ),
+                    format!("extension cannot replace an operator defined directly on `{target}`"),
                     Some(operator.span),
                 ));
             }
@@ -623,9 +618,9 @@ fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnosti
             let Item::Extension(extension) = item else {
                 return true;
             };
-            !imported_extensions.iter().any(|(source, moved, _)| {
-                *source == module.id && moved.span == extension.span
-            })
+            !imported_extensions
+                .iter()
+                .any(|(source, moved, _)| *source == module.id && moved.span == extension.span)
         });
     }
     for module in &mut lowered.modules {
@@ -826,9 +821,10 @@ fn install_primitive_class_operators(
     types: &mut severian_universal::TypeContext,
     classes: &[PackageClass],
 ) -> Result<(), Diagnostic> {
-    for class in classes.iter().filter(|class| {
-        class.declaration.primitive && class.declaration.type_parameters.is_empty()
-    }) {
+    for class in classes
+        .iter()
+        .filter(|class| class.declaration.primitive && class.declaration.type_parameters.is_empty())
+    {
         for implementation in &class.declaration.operators {
             // Generic source operators are resolved at their concrete use
             // sites; they cannot be installed as an exact universal
@@ -1797,39 +1793,47 @@ fn compatible_trait_redeclaration(left: &TraitDecl, right: &TraitDecl) -> bool {
         && left.properties.len() == right.properties.len()
         && left.methods.len() == right.methods.len()
         && left.operators.len() == right.operators.len()
-        && left.methods.iter().zip(&right.methods).all(|(left, right)| {
-            left.name == right.name
-                && annotations_match(
-                    &left
-                        .parameters
-                        .iter()
-                        .map(|parameter| parameter.annotation.clone())
-                        .collect::<Vec<_>>(),
-                    &right
-                        .parameters
-                        .iter()
-                        .map(|parameter| parameter.annotation.clone())
-                        .collect::<Vec<_>>(),
-                )
-                && annotation_matches(&left.result, &right.result)
-        })
-        && left.operators.iter().zip(&right.operators).all(|(left, right)| {
-            left.operator == right.operator
-                && left.type_parameters == right.type_parameters
-                && annotations_match(
-                    &left
-                        .parameters
-                        .iter()
-                        .map(|parameter| parameter.annotation.clone())
-                        .collect::<Vec<_>>(),
-                    &right
-                        .parameters
-                        .iter()
-                        .map(|parameter| parameter.annotation.clone())
-                        .collect::<Vec<_>>(),
-                )
-                && annotation_matches(&left.result, &right.result)
-        })
+        && left
+            .methods
+            .iter()
+            .zip(&right.methods)
+            .all(|(left, right)| {
+                left.name == right.name
+                    && annotations_match(
+                        &left
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                        &right
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    && annotation_matches(&left.result, &right.result)
+            })
+        && left
+            .operators
+            .iter()
+            .zip(&right.operators)
+            .all(|(left, right)| {
+                left.operator == right.operator
+                    && left.type_parameters == right.type_parameters
+                    && annotations_match(
+                        &left
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                        &right
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.annotation.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    && annotation_matches(&left.result, &right.result)
+            })
 }
 
 fn annotations_match(left: &[TypeAnnotation], right: &[TypeAnnotation]) -> bool {

@@ -1,4 +1,6 @@
-import "../src/ir/lib.sev"
+# This scenario needs the typed model, builder, and validator. The validator's
+# imports provide that slice without also compiling the independent text view.
+import "../src/ir/validate.sev"
 
 
 # This is executable compiler-source corpus, not documentation pseudocode.

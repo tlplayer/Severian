@@ -642,6 +642,7 @@ name = "severian-driver"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "severian-abi",
  "severian-ast",
  "severian-backend",

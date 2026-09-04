@@ -554,13 +554,30 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
 }
 
 fn is_operator_character(byte: u8) -> bool {
-    matches!(byte, b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^'
-        | b'<' | b'>' | b'=' | b'!' | b'~' | b'?')
+    matches!(
+        byte,
+        b'+' | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b'&'
+            | b'|'
+            | b'^'
+            | b'<'
+            | b'>'
+            | b'='
+            | b'!'
+            | b'~'
+            | b'?'
+    )
 }
 
 fn operator_end(bytes: &[u8], start: usize) -> usize {
     let mut end = start;
-    while bytes.get(end).is_some_and(|byte| is_operator_character(*byte)) {
+    while bytes
+        .get(end)
+        .is_some_and(|byte| is_operator_character(*byte))
+    {
         end += 1;
     }
     end
@@ -570,11 +587,40 @@ fn is_custom_operator(bytes: &[u8], start: usize) -> bool {
     let end = operator_end(bytes, start);
     !matches!(
         &bytes[start..end],
-        b"=" | b"&" | b"&=" | b"^" | b"^=" | b"?=" | b"|" | b"|="
-            | b"+" | b"+=" | b"%" | b"%=" | b"*" | b"*=" | b"**"
-            | b"/" | b"/=" | b"//" | b"//=" | b"-" | b"-=" | b"->"
-            | b"~>" | b"==" | b"!=" | b"!" | b"<" | b"<=" | b"<<"
-            | b"<<=" | b"<=>" | b">" | b">=" | b">>" | b">>="
+        b"=" | b"&"
+            | b"&="
+            | b"^"
+            | b"^="
+            | b"?="
+            | b"|"
+            | b"|="
+            | b"+"
+            | b"+="
+            | b"%"
+            | b"%="
+            | b"*"
+            | b"*="
+            | b"**"
+            | b"/"
+            | b"/="
+            | b"//"
+            | b"//="
+            | b"-"
+            | b"-="
+            | b"->"
+            | b"~>"
+            | b"=="
+            | b"!="
+            | b"!"
+            | b"<"
+            | b"<="
+            | b"<<"
+            | b"<<="
+            | b"<=>"
+            | b">"
+            | b">="
+            | b">>"
+            | b">>="
     )
 }
 

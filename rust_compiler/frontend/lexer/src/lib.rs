@@ -83,11 +83,10 @@ mod tests {
 
     #[test]
     fn preserves_measured_number_magnitudes_and_suffixes() {
-        let source =
-            SourceFile::virtual_source(
-                "sizes.sev",
-                "zero = 0B\nbyte = 8B\nbinary = 4KiB\ndecimal = 2MB\n",
-            );
+        let source = SourceFile::virtual_source(
+            "sizes.sev",
+            "zero = 0B\nbyte = 8B\nbinary = 4KiB\ndecimal = 2MB\n",
+        );
         let tokens = scan(&source).unwrap();
         assert!(tokens.iter().any(|token| token.kind
             == TokenKind::MeasuredNumber {

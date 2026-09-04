@@ -626,6 +626,117 @@ fn emit_writes_to_output_when_requested() {
 }
 
 #[test]
+fn agent_ir_emits_a_queryable_semantic_directory() {
+    let root = temporary("agent-ir");
+    let source = root.join("agent.sev");
+    let emitted = root.join("semantic-agent-ir");
+    let repeated = root.join("semantic-agent-ir-repeated");
+    fs::write(
+        &source,
+        "def increment(value: i64) -> i64:\n    return value + 1\n\ndef main():\n    print(increment(41))\n\ntest \"increment\":\n    assert(increment(1) == 2)\n",
+    )
+    .unwrap();
+
+    let output = sev()
+        .args(["build", "--emit", "agent-ir", "-o"])
+        .arg(&emitted)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(emitted.join("package.json").is_file());
+    assert!(emitted.join("symbols.jsonl").is_file());
+    assert!(emitted.join("declarations.jsonl").is_file());
+    assert!(emitted.join("types.jsonl").is_file());
+    assert!(emitted.join("tests.jsonl").is_file());
+    assert!(emitted.join("diagnostics.jsonl").is_file());
+    assert!(emitted.join("source-map.json").is_file());
+    assert!(emitted.join("graphs/calls.json").is_file());
+    assert!(emitted.join("graphs/dependencies.json").is_file());
+    assert!(emitted.join("graphs/ownership.json").is_file());
+    assert!(emitted.join("graphs/types.json").is_file());
+    assert!(emitted.join("graphs/references.json").is_file());
+
+    let package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(emitted.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["agent_ir"], 1);
+    assert_eq!(package["package"], "agent");
+    assert!(package["counts"]["declarations"].as_u64().unwrap() >= 2);
+    assert_eq!(package["counts"]["tests"], 1);
+    assert!(package["public_api"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|id| !id.as_str().unwrap().contains("__")));
+    assert!(package["public_api"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|id| id.as_str().unwrap().contains(".increment@")));
+
+    let declarations = fs::read_to_string(emitted.join("declarations.jsonl")).unwrap();
+    assert!(declarations.contains("increment"), "{declarations}");
+    assert!(declarations.contains("semantic_hash"), "{declarations}");
+    assert!(declarations.contains("interface_hash"), "{declarations}");
+    assert!(declarations.contains("dependency_hash"), "{declarations}");
+    assert!(declarations.contains("start_line"), "{declarations}");
+    assert!(!declarations.contains(&root.to_string_lossy().to_string()));
+    let calls = fs::read_to_string(emitted.join("graphs/calls.json")).unwrap();
+    assert!(calls.contains("increment"), "{calls}");
+    let tests = fs::read_to_string(emitted.join("tests.jsonl")).unwrap();
+    let test: serde_json::Value = serde_json::from_str(tests.lines().next().unwrap()).unwrap();
+    assert_eq!(test["name"], "increment");
+    assert!(
+        test["tests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|target| target.as_str().unwrap().contains("increment")),
+        "{tests}"
+    );
+
+    let repeat_output = sev()
+        .args(["build", "--emit", "agent-ir", "-o"])
+        .arg(&repeated)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        repeat_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&repeat_output.stdout),
+        String::from_utf8_lossy(&repeat_output.stderr)
+    );
+    for artifact in [
+        "package.json",
+        "symbols.jsonl",
+        "declarations.jsonl",
+        "types.jsonl",
+        "tests.jsonl",
+        "diagnostics.jsonl",
+        "source-map.json",
+        "graphs/calls.json",
+        "graphs/dependencies.json",
+        "graphs/ownership.json",
+        "graphs/types.json",
+        "graphs/references.json",
+    ] {
+        assert_eq!(
+            fs::read(emitted.join(artifact)).unwrap(),
+            fs::read(repeated.join(artifact)).unwrap(),
+            "Agent IR artifact {artifact} was not deterministic"
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn package_default_run_and_dependency_initialization_are_deterministic() {
     let root = temporary("package");
     fs::create_dir(root.join("src")).unwrap();

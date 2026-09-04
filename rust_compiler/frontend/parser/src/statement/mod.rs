@@ -1908,9 +1908,7 @@ impl Parser<'_> {
         if !self.at(&TokenKind::Newline) {
             loop {
                 traits.push(self.type_annotation()?);
-                if self.take(&TokenKind::Plus).is_none()
-                    && self.take(&TokenKind::Comma).is_none()
-                {
+                if self.take(&TokenKind::Plus).is_none() && self.take(&TokenKind::Comma).is_none() {
                     break;
                 }
             }
@@ -1965,10 +1963,9 @@ impl Parser<'_> {
                 self.next();
                 traits.push(self.type_annotation()?);
             } else if self.at_identifier("self")
-                && self
-                    .tokens
-                    .get(self.cursor + 1)
-                    .is_some_and(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == "as"))
+                && self.tokens.get(self.cursor + 1).is_some_and(
+                    |token| matches!(&token.kind, TokenKind::Identifier(name) if name == "as"),
+                )
             {
                 self.next();
                 self.next();
@@ -2703,7 +2700,15 @@ impl Parser<'_> {
         let close = self
             .expect(&TokenKind::RightParen, "expected `)` after parameters")?
             .span;
-        Ok((start, operator, tag, type_parameters, constraints, parameters, close))
+        Ok((
+            start,
+            operator,
+            tag,
+            type_parameters,
+            constraints,
+            parameters,
+            close,
+        ))
     }
 
     fn opaque_indented_block(&mut self, owner: &str) -> Result<u32, Diagnostic> {
@@ -3143,7 +3148,11 @@ impl Parser<'_> {
                 }
                 self.next();
                 let target = self.type_annotation()?;
-                let span = Span::new(expression.span.source, expression.span.start, target.span.end);
+                let span = Span::new(
+                    expression.span.source,
+                    expression.span.start,
+                    target.span.end,
+                );
                 expression = Expression {
                     kind: ExpressionKind::Call {
                         callee: Box::new(Expression {
@@ -3789,9 +3798,7 @@ impl Parser<'_> {
                     }
                 }
                 TokenKind::Colon if depth == 1 => return false,
-                TokenKind::Float(_)
-                | TokenKind::MeasuredNumber { .. }
-                | TokenKind::String(_)
+                TokenKind::Float(_) | TokenKind::MeasuredNumber { .. } | TokenKind::String(_)
                     if depth == 1 =>
                 {
                     return false;
@@ -3897,8 +3904,7 @@ impl Parser<'_> {
                 ExpressionKind::Literal(Literal::None)
             }
             TokenKind::Colon => {
-                let (symbol, symbol_span) =
-                    self.identifier("expected a symbol name after `:`")?;
+                let (symbol, symbol_span) = self.identifier("expected a symbol name after `:`")?;
                 return Ok(Expression {
                     kind: ExpressionKind::Symbol(symbol),
                     span: Span::new(token.span.source, token.span.start, symbol_span.end),
@@ -4372,7 +4378,11 @@ impl Parser<'_> {
             } else {
                 "__dimension_multiply"
             };
-            let span = Span::new(annotation.span.source, annotation.span.start, right.span.end);
+            let span = Span::new(
+                annotation.span.source,
+                annotation.span.start,
+                right.span.end,
+            );
             annotation = TypeAnnotation::named(name, vec![annotation, right], span);
         }
         Ok(annotation)
@@ -4746,9 +4756,15 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
         return Some(BinaryOperator::Identity);
     }
     let operator = operator_syntax(kind)?;
-    (!matches!(operator, OperatorSyntax::Index | OperatorSyntax::If | OperatorSyntax::Else
-        | OperatorSyntax::Conversion | OperatorSyntax::Not))
-        .then_some(operator)
+    (!matches!(
+        operator,
+        OperatorSyntax::Index
+            | OperatorSyntax::If
+            | OperatorSyntax::Else
+            | OperatorSyntax::Conversion
+            | OperatorSyntax::Not
+    ))
+    .then_some(operator)
 }
 
 fn is_comparison(operator: BinaryOperator) -> bool {

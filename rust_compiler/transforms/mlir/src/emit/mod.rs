@@ -2461,19 +2461,9 @@ fn binary_mnemonic(operator: BinaryOperation, ty: &LoweredType) -> Result<String
             "arith.remui"
         }
         .into(),
-        BinaryOperation::Power => if floating {
-            "math.powf"
-        } else {
-            "math.ipowi"
-        }
-        .into(),
+        BinaryOperation::Power => if floating { "math.powf" } else { "math.ipowi" }.into(),
         BinaryOperation::ShiftLeft => "arith.shli".into(),
-        BinaryOperation::ShiftRight => if signed {
-            "arith.shrsi"
-        } else {
-            "arith.shrui"
-        }
-        .into(),
+        BinaryOperation::ShiftRight => if signed { "arith.shrsi" } else { "arith.shrui" }.into(),
         BinaryOperation::Equal => if floating {
             "arith.cmpf oeq,"
         } else if matches!(ty, LoweredType::String | LoweredType::Bytes) {

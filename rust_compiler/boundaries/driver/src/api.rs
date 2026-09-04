@@ -192,7 +192,9 @@ fn discover_root() -> Result<PathBuf, String> {
 
 fn repository_root(root: &Path) -> Result<&Path, String> {
     root.ancestors()
-        .find(|candidate| candidate.join("Cargo.toml").is_file() && candidate.join("compiler").is_dir())
+        .find(|candidate| {
+            candidate.join("Cargo.toml").is_file() && candidate.join("compiler").is_dir()
+        })
         .ok_or_else(|| format!("{} is not inside a Severian repository", root.display()))
 }
 

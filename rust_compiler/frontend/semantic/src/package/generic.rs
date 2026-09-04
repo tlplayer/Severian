@@ -1183,10 +1183,8 @@ fn trait_is_structurally_satisfied(
             (Syntax::Plus, true) => types.supports_unary(Unary::Positive, actual),
             (Syntax::Minus, true) => types.supports_unary(Unary::Negative, actual),
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
-            (syntax, _) => {
-                ast_binary_syntax(syntax)
-                    .is_some_and(|operator| types.supports_binary(operator, actual))
-            }
+            (syntax, _) => ast_binary_syntax(syntax)
+                .is_some_and(|operator| types.supports_binary(operator, actual)),
         }
     });
     operators_satisfied
@@ -2512,12 +2510,12 @@ fn expression_type_name(
                     DefKind::Class(class) => {
                         let name = &index.definitions[&definition].name;
                         let explicit = match &callee.kind {
-                            severian_ast::ExpressionKind::TypeApplication {
-                                arguments, ..
-                            } => arguments
-                                .iter()
-                                .map(type_annotation_name)
-                                .collect::<Option<Vec<_>>>()?,
+                            severian_ast::ExpressionKind::TypeApplication { arguments, .. } => {
+                                arguments
+                                    .iter()
+                                    .map(type_annotation_name)
+                                    .collect::<Option<Vec<_>>>()?
+                            }
                             _ => Vec::new(),
                         };
                         if explicit.is_empty() {
@@ -2973,12 +2971,10 @@ fn specialize_expression(expression: &mut severian_ast::Expression, substitution
     use severian_ast::ExpressionKind;
     match &mut expression.kind {
         ExpressionKind::Name(name) => {
-            if let Some(severian_universal::DimExpr::Constant(value)) =
-                substitution.dimension(name)
+            if let Some(severian_universal::DimExpr::Constant(value)) = substitution.dimension(name)
             {
-                expression.kind = ExpressionKind::Literal(severian_ast::Literal::Integer(
-                    value.to_string(),
-                ));
+                expression.kind =
+                    ExpressionKind::Literal(severian_ast::Literal::Integer(value.to_string()));
             } else if let Some(replacement) = substitution.get(name) {
                 name.clone_from(replacement);
             }
