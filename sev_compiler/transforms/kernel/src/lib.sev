@@ -136,31 +136,48 @@ def buffer_by_id(kernel: LogicalKernel, id: int) -> KernelBuffer | None:
 
 def opcode_arity(opcode: ScalarOpcode) -> int:
     match opcode:
-        case Relu: return 1
-        case Add: return 2
-        case Subtract: return 2
-        case Multiply: return 2
-        case Divide: return 2
+        case Relu:
+            return 1
+        case Add:
+            return 2
+        case Subtract:
+            return 2
+        case Multiply:
+            return 2
+        case Divide:
+            return 2
 
 
 def scalar_opcode_name(opcode: ScalarOpcode) -> string:
     match opcode:
-        case Add: return "add"
-        case Subtract: return "subtract"
-        case Multiply: return "multiply"
-        case Divide: return "divide"
-        case Relu: return "relu"
+        case Add:
+            return "add"
+        case Subtract:
+            return "subtract"
+        case Multiply:
+            return "multiply"
+        case Divide:
+            return "divide"
+        case Relu:
+            return "relu"
 
 
 def element_name(element: KernelElementKind) -> string:
     match element:
-        case SignedInteger: return "signed_integer"
-        case UnsignedInteger: return "unsigned_integer"
-        case IeeeFloat: return "ieee_float"
-        case BrainFloat: return "brain_float"
-        case Float8E4M3Fn: return "float8_e4m3fn"
-        case Float8E5M2: return "float8_e5m2"
-        case BooleanElement: return "boolean"
+        case SignedInteger:
+            return "signed_integer"
+        case UnsignedInteger:
+            return "unsigned_integer"
+        case IeeeFloat:
+            return "ieee_float"
+        case BrainFloat:
+            return "brain_float"
+        case Float8E4M3Fn:
+            return "float8_e4m3fn"
+        case Float8E5M2:
+            return "float8_e5m2"
+        case BooleanElement:
+            return "boolean"
 
 
 def element_is_floating(element: KernelElementKind) -> bool:
@@ -170,37 +187,55 @@ def element_is_floating(element: KernelElementKind) -> bool:
 
 def buffer_access_name(access: BufferAccess) -> string:
     match access:
-        case ReadOnly: return "read_only"
-        case WriteOnly: return "write_only"
-        case ReadWrite: return "read_write"
+        case ReadOnly:
+            return "read_only"
+        case WriteOnly:
+            return "write_only"
+        case ReadWrite:
+            return "read_write"
 
 
 def dimension_record(dimension: KernelDimension) -> KernelDimensionRecord:
     match dimension:
-        case KnownDimension: return KernelDimensionRecord(false, value)
-        case DynamicDimension: return KernelDimensionRecord(true, 0)
+        case KnownDimension:
+            return KernelDimensionRecord(false, value)
+        case DynamicDimension:
+            return KernelDimensionRecord(true, 0)
 
 
 def operation_record(operation: KernelOperation) -> KernelOperationRecord:
     match operation:
-        case ScalarLoad: return KernelOperationRecord("load", result, buffer, 0, "", [])
-        case ScalarApply: return KernelOperationRecord("apply", result, 0, 0, scalar_opcode_name(opcode), operands)
-        case ScalarStore: return KernelOperationRecord("store", 0, buffer, value, "", [])
+        case ScalarLoad:
+            return KernelOperationRecord("load", result, buffer, 0, "", [])
+        case ScalarApply:
+            return KernelOperationRecord("apply", result, 0, 0, scalar_opcode_name(opcode), operands)
+        case ScalarStore:
+            return KernelOperationRecord("store", 0, buffer, value, "", [])
 
 
 def index_operation_record(operation: IndexOperation) -> IndexOperationRecord:
     empty = IndexValue(0)
     match operation:
-        case IndexConstant: return IndexOperationRecord("constant", result, value, 0, 0, empty, empty)
-        case TensorDimension: return IndexOperationRecord("tensor_dimension", result, 0, buffer, axis, empty, empty)
-        case GpuBlockX: return IndexOperationRecord("gpu_block_x", result, 0, 0, 0, empty, empty)
-        case GpuThreadX: return IndexOperationRecord("gpu_thread_x", result, 0, 0, 0, empty, empty)
-        case GpuBlockSizeX: return IndexOperationRecord("gpu_block_size_x", result, 0, 0, 0, empty, empty)
-        case IndexAdd: return IndexOperationRecord("add", result, 0, 0, 0, left, right)
-        case IndexMultiply: return IndexOperationRecord("multiply", result, 0, 0, 0, left, right)
-        case IndexDivideUnsigned: return IndexOperationRecord("divide_unsigned", result, 0, 0, 0, left, right)
-        case IndexRemainderUnsigned: return IndexOperationRecord("remainder_unsigned", result, 0, 0, 0, left, right)
-        case IndexCeilDivideUnsigned: return IndexOperationRecord("ceil_divide_unsigned", result, 0, 0, 0, left, right)
+        case IndexConstant:
+            return IndexOperationRecord("constant", result, value, 0, 0, empty, empty)
+        case TensorDimension:
+            return IndexOperationRecord("tensor_dimension", result, 0, buffer, axis, empty, empty)
+        case GpuBlockX:
+            return IndexOperationRecord("gpu_block_x", result, 0, 0, 0, empty, empty)
+        case GpuThreadX:
+            return IndexOperationRecord("gpu_thread_x", result, 0, 0, 0, empty, empty)
+        case GpuBlockSizeX:
+            return IndexOperationRecord("gpu_block_size_x", result, 0, 0, 0, empty, empty)
+        case IndexAdd:
+            return IndexOperationRecord("add", result, 0, 0, 0, left, right)
+        case IndexMultiply:
+            return IndexOperationRecord("multiply", result, 0, 0, 0, left, right)
+        case IndexDivideUnsigned:
+            return IndexOperationRecord("divide_unsigned", result, 0, 0, 0, left, right)
+        case IndexRemainderUnsigned:
+            return IndexOperationRecord("remainder_unsigned", result, 0, 0, 0, left, right)
+        case IndexCeilDivideUnsigned:
+            return IndexOperationRecord("ceil_divide_unsigned", result, 0, 0, 0, left, right)
 
 
 def validate(kernel: LogicalKernel) -> bool | KernelTransformError:

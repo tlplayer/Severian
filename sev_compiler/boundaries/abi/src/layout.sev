@@ -35,28 +35,37 @@ enum LayoutError:
 def align_to(value: u64, alignment: u32) -> u64 | LayoutError:
     if alignment == 0 or alignment & (alignment - 1) != 0:
         return error(InvalidAlignment(alignment))
-    mask = u64(alignment - 1)
-    return (value + mask) & ~mask
+    alignment_value = u64(alignment)
+    mask = alignment_value - 1
+    return ((value + mask) / alignment_value) * alignment_value
 
 
 def layout_of(type_id: AbiType, target: TargetDataLayout) -> Layout | LayoutError:
     match type_id:
-        case Void: return Layout(0, 1, Scalar)
+        case Void:
+            return Layout(0, 1, Scalar)
         case Scalar:
             match type_id:
-                case Boolean: return scalar_layout(1, false, target)
-                case Integer: return scalar_layout(bits, false, target)
+                case Boolean:
+                    return scalar_layout(1, false, target)
+                case Integer:
+                    return scalar_layout(bits, false, target)
                 case Float:
                     match format:
-                        case Ieee: return scalar_layout(bits, true, target)
-                        case BrainFloat16: return scalar_layout(16, true, target)
-        case Pointer: return Layout(target.pointer.size, target.pointer.alignment, Pointer)
-        case Function: return Layout(target.pointer.size, target.pointer.alignment, LayoutKind.Function)
+                        case Ieee:
+                            return scalar_layout(bits, true, target)
+                        case BrainFloat16:
+                            return scalar_layout(16, true, target)
+        case Pointer:
+            return Layout(target.pointer.size, target.pointer.alignment, Pointer)
+        case Function:
+            return Layout(target.pointer.size, target.pointer.alignment, LayoutKind.Function)
         case Array:
             element_layout = layout_of(element, target)
             stride = align_to(element_layout.size, element_layout.alignment)
             return Layout(stride * length, element_layout.alignment, LayoutKind.Array(stride, length))
-        case Record: return record_layout(record, target)
+        case Record:
+            return record_layout(record, target)
         case Union:
             size: u64 = 0
             alignment: u32 = 1
@@ -67,12 +76,14 @@ def layout_of(type_id: AbiType, target: TargetDataLayout) -> Layout | LayoutErro
                 alignment = max(alignment, field_layout.alignment)
                 fields.append(FieldLayout(field.name, 0, field_layout))
             return Layout(align_to(size, alignment), alignment, LayoutKind.Union(fields))
-        case Opaque: return error(UnsizedOpaque(name))
+        case Opaque:
+            return error(UnsizedOpaque(name))
     return error(InvalidEnumRepresentation)
 
 
 def scalar_layout(bits: u16, floating: bool, target: TargetDataLayout) -> Layout | LayoutError:
-    if bits == 0: return error(ZeroWidthScalar)
+    if bits == 0:
+        return error(ZeroWidthScalar)
     scalar = target.scalar(bits, floating)
     return Layout(scalar.size, scalar.alignment, Scalar)
 
@@ -88,4 +99,3 @@ def record_layout(record: RecordType, target: TargetDataLayout) -> Layout | Layo
         offset += field_layout.size
         alignment = max(alignment, field_layout.alignment)
     return Layout(align_to(offset, alignment), alignment, Record(fields))
-

@@ -265,24 +265,38 @@ def index_name(value: kernel.IndexValue) -> string:
 
 def scalar_binary_name(opcode: MlirScalarBinaryOpcode) -> string:
     match opcode:
-        case AddFloat: return "arith.addf"
-        case AddInteger: return "arith.addi"
-        case SubtractFloat: return "arith.subf"
-        case SubtractInteger: return "arith.subi"
-        case MultiplyFloat: return "arith.mulf"
-        case MultiplyInteger: return "arith.muli"
-        case DivideFloat: return "arith.divf"
-        case DivideSigned: return "arith.divsi"
-        case DivideUnsigned: return "arith.divui"
+        case AddFloat:
+            return "arith.addf"
+        case AddInteger:
+            return "arith.addi"
+        case SubtractFloat:
+            return "arith.subf"
+        case SubtractInteger:
+            return "arith.subi"
+        case MultiplyFloat:
+            return "arith.mulf"
+        case MultiplyInteger:
+            return "arith.muli"
+        case DivideFloat:
+            return "arith.divf"
+        case DivideSigned:
+            return "arith.divsi"
+        case DivideUnsigned:
+            return "arith.divui"
 
 
 def index_binary_name(opcode: MlirIndexBinaryOpcode) -> string:
     match opcode:
-        case IndexAdd: return "arith.addi"
-        case IndexMultiply: return "arith.muli"
-        case IndexDivideUnsigned: return "arith.divui"
-        case IndexRemainderUnsigned: return "arith.remui"
-        case IndexCeilDivideUnsigned: return "arith.ceildivui"
+        case IndexAdd:
+            return "arith.addi"
+        case IndexMultiply:
+            return "arith.muli"
+        case IndexDivideUnsigned:
+            return "arith.divui"
+        case IndexRemainderUnsigned:
+            return "arith.remui"
+        case IndexCeilDivideUnsigned:
+            return "arith.ceildivui"
 
 
 def render_indices(indices: list[kernel.IndexValue]) -> string:

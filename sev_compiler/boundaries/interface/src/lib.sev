@@ -58,12 +58,16 @@ class PrimitiveRecord:
         output: list[u8] = [83, 69, 86, 80, 75, 71, 73, 0]
         output.append(u8(version >> 8))
         output.append(u8(version))
-        for byte in u128_bytes(declaration_id): output.append(byte)
+        for byte in u128_bytes(declaration_id):
+            output.append(byte)
         path_bytes = path.utf8()
-        for byte in u32_bytes(u32(len(path_bytes))): output.append(byte)
-        for byte in path_bytes: output.append(byte)
+        for byte in u32_bytes(u32(len(path_bytes))):
+            output.append(byte)
+        for byte in path_bytes:
+            output.append(byte)
         output.append(category_tag(category))
-        for byte in encode_representation(representation): output.append(byte)
+        for byte in encode_representation(representation):
+            output.append(byte)
         output.append(1 if default_literal else 0)
         return output
 
@@ -79,14 +83,22 @@ enum InterfaceError:
 
 
 def category_tag(category: CategoryRecord) -> u8:
-    if category == Boolean: return 0
-    if category == Integer: return 1
-    if category == Float: return 2
-    if category == Text: return 3
-    if category == Bytes: return 4
-    if category == Absence: return 5
-    if category == Unit: return 6
-    if category == Arguments: return 7
+    if category == Boolean:
+        return 0
+    if category == Integer:
+        return 1
+    if category == Float:
+        return 2
+    if category == Text:
+        return 3
+    if category == Bytes:
+        return 4
+    if category == Absence:
+        return 5
+    if category == Unit:
+        return 6
+    if category == Arguments:
+        return 7
     return 8
 
 
@@ -95,21 +107,34 @@ def encode_representation(representation: RepresentationRecord) -> list[u8]:
         case Integer:
             output: list[u8] = [0]
             match bits:
-                case Fixed: output += [0, u8(bits >> 8), u8(bits)]
-                case Machine: output.append(1)
+                case Fixed:
+                    output += [0, u8(bits >> 8), u8(bits)]
+                case Machine:
+                    output.append(1)
             output.append(1 if signed else 0)
             return output
         case Float:
             match format:
-                case Ieee: return [1, 0, u8(bits >> 8), u8(bits)]
-                case BrainFloat16: return [1, 1]
-                case Machine: return [1, 2]
-        case PointerInteger: return [2, 1 if signed else 0]
-        case Boolean: return [3]
-        case String: return [4]
-        case Bytes: return [5]
-        case NoneValue: return [6]
-        case Unit: return [7]
-        case Arguments: return [8]
-        case Character: return [9]
+                case Ieee:
+                    return [1, 0, u8(bits >> 8), u8(bits)]
+                case BrainFloat16:
+                    return [1, 1]
+                case Machine:
+                    return [1, 2]
+        case PointerInteger:
+            return [2, 1 if signed else 0]
+        case Boolean:
+            return [3]
+        case String:
+            return [4]
+        case Bytes:
+            return [5]
+        case NoneValue:
+            return [6]
+        case Unit:
+            return [7]
+        case Arguments:
+            return [8]
+        case Character:
+            return [9]
 

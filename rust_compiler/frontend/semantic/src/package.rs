@@ -1,6 +1,6 @@
 use crate::{
     analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageClass, PackageConstant,
-    PackageFunction, PackageList,
+    PackageEnum, PackageFunction, PackageList,
 };
 use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
@@ -227,10 +227,17 @@ pub fn analyze_package_with_context(
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
     let package_classes = collect_package_classes(module_graph, &index, &mut types)?;
-    install_primitive_class_operators(&mut types, &package_classes)?;
+    let package_enums = collect_package_enums(module_graph, &package_classes);
+    install_primitive_class_operators(&mut types, &package_classes, &index)?;
     validate_generic_bodies(module_graph, &index, &types)?;
     let specializations = collect_generic_specializations(module_graph, &index, &types)?;
     let package_lists = collect_package_lists(module_graph, &types);
+    let package_trait_names = index
+        .modules
+        .keys()
+        .copied()
+        .map(|module| (module, visible_trait_names(module, &index)))
+        .collect::<BTreeMap<_, _>>();
     let registry_traits = module_graph
         .modules
         .iter()
@@ -429,6 +436,7 @@ pub fn analyze_package_with_context(
                                 definition.module,
                                 &package_classes,
                                 &package_lists,
+                                &index,
                             )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
@@ -443,6 +451,7 @@ pub fn analyze_package_with_context(
                                 definition.module,
                                 &package_classes,
                                 &package_lists,
+                                &index,
                             )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
@@ -452,6 +461,7 @@ pub fn analyze_package_with_context(
                         definition.module,
                         &package_classes,
                         &package_lists,
+                        &index,
                     )?,
                     result_union: resolve_package_union_members(
                         &mut types,
@@ -459,6 +469,7 @@ pub fn analyze_package_with_context(
                         definition.module,
                         &package_classes,
                         &package_lists,
+                        &index,
                     )?,
                     specificity: if original.type_parameters.is_empty() {
                         0
@@ -506,6 +517,8 @@ pub fn analyze_package_with_context(
             &own_function_ids,
             &test_function_ids,
             &package_classes,
+            &package_enums,
+            &package_trait_names,
             &package_lists,
             &package_constants,
             Some(source_module.id),
@@ -705,11 +718,11 @@ fn collect_package_classes(
                         constraints: Vec::new(),
                         span: declaration.span,
                     }];
-                    for variant in &declaration.variants {
+                    for (ordinal, variant) in declaration.variants.iter().enumerate() {
                         for field in &variant.fields {
-                            if !fields.iter().any(|known| known.name == field.name) {
-                                fields.push(field.clone());
-                            }
+                            let mut field = field.clone();
+                            field.name = format!("__variant_{ordinal}_{}", field.name);
+                            fields.push(field);
                         }
                     }
                     Some((
@@ -817,9 +830,36 @@ fn collect_package_classes(
     Ok(classes)
 }
 
+fn collect_package_enums(module_graph: &ModuleGraph, classes: &[PackageClass]) -> Vec<PackageEnum> {
+    module_graph
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module.ast.items.iter().filter_map(move |item| {
+                let Item::Enum(declaration) = item else {
+                    return None;
+                };
+                let lookups = classes
+                    .iter()
+                    .find(|class| {
+                        class.module == module.id && class.declaration.name == declaration.name
+                    })
+                    .map(|class| class.lookups.clone())
+                    .unwrap_or_default();
+                Some(PackageEnum {
+                    module: module.id,
+                    declaration: declaration.clone(),
+                    lookups,
+                })
+            })
+        })
+        .collect()
+}
+
 fn install_primitive_class_operators(
     types: &mut severian_universal::TypeContext,
     classes: &[PackageClass],
+    index: &ProgramIndex,
 ) -> Result<(), Diagnostic> {
     for class in classes
         .iter()
@@ -832,8 +872,14 @@ fn install_primitive_class_operators(
             if !implementation.type_parameters.is_empty() {
                 continue;
             }
-            let result =
-                resolve_package_type(types, &implementation.result, class.module, classes, &[])?;
+            let result = resolve_package_type(
+                types,
+                &implementation.result,
+                class.module,
+                classes,
+                &[],
+                index,
+            )?;
             // Compound-assignment declarations use the base operator syntax
             // in the current AST but return `unit`; they describe mutation,
             // not an additional value-producing binary overload.
@@ -851,8 +897,14 @@ fn install_primitive_class_operators(
                     else {
                         continue;
                     };
-                    let right =
-                        resolve_package_type(types, &right.annotation, class.module, classes, &[])?;
+                    let right = resolve_package_type(
+                        types,
+                        &right.annotation,
+                        class.module,
+                        classes,
+                        &[],
+                        index,
+                    )?;
                     types.add_source_binary(OperatorSignature {
                         operator,
                         left: TypePattern::Exact(class.ty),
@@ -892,7 +944,7 @@ fn visible_class_names(
     let mut names = Vec::new();
     for (binding, resolution) in &scope.scope.bindings {
         match resolution {
-            Resolution::Module(target) if *target == class.module => {
+            Resolution::Module(target) => {
                 if index
                     .exports
                     .get(target)
@@ -965,11 +1017,12 @@ fn resolve_package_type(
     module: ModuleId,
     classes: &[PackageClass],
     lists: &[PackageList],
+    index: &ProgramIndex,
 ) -> Result<TypeId, Diagnostic> {
     if let Some(("borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable", [inner])) =
         annotation.named_parts()
     {
-        return resolve_package_type(types, inner, module, classes, lists);
+        return resolve_package_type(types, inner, module, classes, lists, index);
     }
     if annotation.simple_name() == Some("Any") {
         return Ok(crate::any_type_id());
@@ -977,9 +1030,9 @@ fn resolve_package_type(
     if let TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
         let parameters = parameters
             .iter()
-            .map(|parameter| resolve_package_type(types, parameter, module, classes, lists))
+            .map(|parameter| resolve_package_type(types, parameter, module, classes, lists, index))
             .collect::<Result<Vec<_>, _>>()?;
-        let result = resolve_package_type(types, result, module, classes, lists)?;
+        let result = resolve_package_type(types, result, module, classes, lists, index)?;
         return Ok(crate::function_type_id(&parameters, result));
     }
     if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
@@ -989,7 +1042,7 @@ fn resolve_package_type(
             if matches!(member.simple_name(), Some("None" | "absent")) {
                 continue;
             }
-            let ty = resolve_package_type(types, member, module, classes, lists)?;
+            let ty = resolve_package_type(types, member, module, classes, lists, index)?;
             let source_error = member.simple_name().is_some_and(|name| {
                 name.ends_with("Error")
                     || package_class_for_lookup(classes, module, name).is_some_and(|class| {
@@ -1031,8 +1084,8 @@ fn resolve_package_type(
         ));
     }
     if let Some(("Result", [success, error])) = annotation.named_parts() {
-        let success = resolve_package_type(types, success, module, classes, lists)?;
-        let error_ty = resolve_package_type(types, error, module, classes, lists)?;
+        let success = resolve_package_type(types, success, module, classes, lists, index)?;
+        let error_ty = resolve_package_type(types, error, module, classes, lists, index)?;
         let source_error = error.simple_name().is_some_and(|name| {
             name.ends_with("Error")
                 || package_class_for_lookup(classes, module, name).is_some_and(|class| {
@@ -1055,12 +1108,12 @@ fn resolve_package_type(
     if let Some(("tuple", elements)) = annotation.named_parts() {
         let elements = elements
             .iter()
-            .map(|element| resolve_package_type(types, element, module, classes, lists))
+            .map(|element| resolve_package_type(types, element, module, classes, lists, index))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(crate::tuple_type_id(&elements));
     }
     if let Some(("list", [element])) = annotation.named_parts() {
-        let element = resolve_package_type(types, element, module, classes, lists)?;
+        let element = resolve_package_type(types, element, module, classes, lists, index)?;
         if let Some(list) = lists.iter().find(|list| list.element == element) {
             return Ok(list.ty);
         }
@@ -1069,12 +1122,12 @@ fn resolve_package_type(
     if let Some(("set", [element])) = annotation.named_parts() {
         // Resolve the argument here so unknown element types still fail at the
         // package boundary. Sets currently share one representation identity.
-        resolve_package_type(types, element, module, classes, lists)?;
+        resolve_package_type(types, element, module, classes, lists, index)?;
         return Ok(crate::set_type_id());
     }
     if let Some(("map", [key, value])) = annotation.named_parts() {
-        let key = resolve_package_type(types, key, module, classes, lists)?;
-        let value = resolve_package_type(types, value, module, classes, lists)?;
+        let key = resolve_package_type(types, key, module, classes, lists, index)?;
+        let value = resolve_package_type(types, value, module, classes, lists, index)?;
         return Ok(crate::map_type_id(key, value));
     }
     if let Some((name, arguments)) = annotation.named_parts() {
@@ -1082,7 +1135,7 @@ fn resolve_package_type(
             if let Some(class) = package_class_for_lookup(classes, module, name) {
                 if class.declaration.name == "Tensor" {
                     let element =
-                        resolve_package_type(types, &arguments[0], module, classes, lists)?;
+                        resolve_package_type(types, &arguments[0], module, classes, lists, index)?;
                     if arguments.len() == 1 {
                         return types
                             .instantiate_tensor(
@@ -1150,7 +1203,9 @@ fn resolve_package_type(
                 }
                 let arguments = arguments
                     .iter()
-                    .map(|argument| resolve_package_type(types, argument, module, classes, lists))
+                    .map(|argument| {
+                        resolve_package_type(types, argument, module, classes, lists, index)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 return types
                     .instantiate_applied(class.ty, arguments)
@@ -1164,6 +1219,9 @@ fn resolve_package_type(
         if let Some(class) = package_class_for_lookup(classes, module, name) {
             return Ok(class.ty);
         }
+        if package_trait_for_lookup(index, module, name) {
+            return Ok(crate::any_type_id());
+        }
     }
     crate::resolve_type_annotation(types, annotation)
 }
@@ -1174,6 +1232,7 @@ fn resolve_package_union_members(
     module: ModuleId,
     classes: &[PackageClass],
     lists: &[PackageList],
+    index: &ProgramIndex,
 ) -> Result<Option<Vec<TypeId>>, Diagnostic> {
     let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind else {
         return Ok(None);
@@ -1183,7 +1242,7 @@ fn resolve_package_union_members(
         if matches!(member.simple_name(), Some("None" | "absent")) {
             continue;
         }
-        let ty = resolve_package_type(types, member, module, classes, lists)?;
+        let ty = resolve_package_type(types, member, module, classes, lists, index)?;
         let source_error = member.simple_name().is_some_and(|name| {
             name.ends_with("Error")
                 || package_class_for_lookup(classes, module, name).is_some_and(|class| {
@@ -1215,6 +1274,66 @@ fn package_class_for_lookup<'a>(
             .get(&module)
             .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
     })
+}
+
+fn package_trait_for_lookup(index: &ProgramIndex, module: ModuleId, name: &str) -> bool {
+    let Some(scope) = index.modules.get(&module) else {
+        return false;
+    };
+    let resolution = if let Some((namespace, member)) = name.split_once('.') {
+        let Some(Resolution::Module(target)) = scope.scope.bindings.get(namespace) else {
+            return false;
+        };
+        index
+            .exports
+            .get(target)
+            .and_then(|exports| exports.get(member))
+    } else {
+        scope.scope.bindings.get(name)
+    };
+    resolution.is_some_and(|resolution| {
+        resolution_definitions(resolution)
+            .into_iter()
+            .any(|definition| {
+                index
+                    .definitions
+                    .get(&definition)
+                    .is_some_and(|definition| matches!(definition.kind, DefKind::Trait(_)))
+            })
+    })
+}
+
+fn visible_trait_names(module: ModuleId, index: &ProgramIndex) -> Vec<String> {
+    let Some(scope) = index.modules.get(&module) else {
+        return Vec::new();
+    };
+    let is_trait = |resolution: &Resolution| {
+        resolution_definitions(resolution)
+            .into_iter()
+            .any(|definition| {
+                index
+                    .definitions
+                    .get(&definition)
+                    .is_some_and(|definition| matches!(definition.kind, DefKind::Trait(_)))
+            })
+    };
+    let mut names = Vec::new();
+    for (binding, resolution) in &scope.scope.bindings {
+        match resolution {
+            Resolution::Module(target) => {
+                if let Some(exports) = index.exports.get(target) {
+                    names.extend(exports.iter().filter_map(|(name, resolution)| {
+                        is_trait(resolution).then(|| format!("{binding}.{name}"))
+                    }));
+                }
+            }
+            resolution if is_trait(resolution) => names.push(binding.clone()),
+            _ => {}
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn collect_package_lists(
@@ -1879,82 +1998,91 @@ fn annotation_matches(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
 }
 
 fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
-    for module in &module_graph.modules {
-        for import in module.ast.items.iter().filter_map(|item| match item {
-            Item::Import(import) => Some(import),
-            _ => None,
-        }) {
-            let Some(edge) = module.imports.iter().find(|edge| edge.span == import.span) else {
-                continue;
-            };
-            if matches!(import.subject, ImportSubject::Locator(_)) && import.alias.is_none() {
-                let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
-                for (name, resolution) in members {
-                    insert_binding(
-                        &mut index
-                            .modules
-                            .get_mut(&module.id)
-                            .expect("every graph module has a scope")
-                            .scope
-                            .bindings,
-                        name.clone(),
-                        resolution.clone(),
-                        &index.definitions,
-                    );
-                    insert_binding(
-                        index
-                            .exports
-                            .get_mut(&module.id)
-                            .expect("every graph module has exports"),
-                        name,
-                        resolution,
-                        &index.definitions,
-                    );
+    // Source modules may form declaration-only import cycles and package
+    // facades commonly re-export declarations from files that appear later in
+    // graph order. Resolve exports to a fixed point so visibility never
+    // depends on filesystem traversal order.
+    for _ in 0..=module_graph.modules.len() {
+        let previous_exports = index.exports.clone();
+        for module in &module_graph.modules {
+            for import in module.ast.items.iter().filter_map(|item| match item {
+                Item::Import(import) => Some(import),
+                _ => None,
+            }) {
+                let Some(edge) = module.imports.iter().find(|edge| edge.span == import.span) else {
+                    continue;
+                };
+                if matches!(import.subject, ImportSubject::Locator(_)) && import.alias.is_none() {
+                    let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
+                    for (name, resolution) in members {
+                        insert_binding(
+                            &mut index
+                                .modules
+                                .get_mut(&module.id)
+                                .expect("every graph module has a scope")
+                                .scope
+                                .bindings,
+                            name.clone(),
+                            resolution.clone(),
+                            &index.definitions,
+                        );
+                        insert_binding(
+                            index
+                                .exports
+                                .get_mut(&module.id)
+                                .expect("every graph module has exports"),
+                            name,
+                            resolution,
+                            &index.definitions,
+                        );
+                    }
+                    continue;
                 }
-                continue;
-            }
-            let (name, resolution) = if import.source.is_some() {
-                let imported_name = match &import.subject {
-                    ImportSubject::Name(name) | ImportSubject::Locator(name) => name,
+                let (name, resolution) = if import.source.is_some() {
+                    let imported_name = match &import.subject {
+                        ImportSubject::Name(name) | ImportSubject::Locator(name) => name,
+                    };
+                    let resolution = index
+                        .exports
+                        .get(&edge.module)
+                        .and_then(|exports| exports.get(imported_name))
+                        .cloned()
+                        .unwrap_or_else(|| Resolution::Ambiguous(Vec::new()));
+                    (
+                        import
+                            .alias
+                            .clone()
+                            .unwrap_or_else(|| imported_name.clone()),
+                        resolution,
+                    )
+                } else {
+                    let default = match &import.subject {
+                        ImportSubject::Name(name) => name.clone(),
+                        ImportSubject::Locator(locator) => std::path::Path::new(locator)
+                            .file_stem()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or(locator)
+                            .to_owned(),
+                    };
+                    (
+                        import.alias.clone().unwrap_or(default),
+                        Resolution::Module(edge.module),
+                    )
                 };
-                let resolution = index
-                    .exports
-                    .get(&edge.module)
-                    .and_then(|exports| exports.get(imported_name))
-                    .cloned()
-                    .unwrap_or_else(|| Resolution::Ambiguous(Vec::new()));
-                (
-                    import
-                        .alias
-                        .clone()
-                        .unwrap_or_else(|| imported_name.clone()),
-                    resolution,
-                )
-            } else {
-                let default = match &import.subject {
-                    ImportSubject::Name(name) => name.clone(),
-                    ImportSubject::Locator(locator) => std::path::Path::new(locator)
-                        .file_stem()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or(locator)
-                        .to_owned(),
-                };
-                (
-                    import.alias.clone().unwrap_or(default),
-                    Resolution::Module(edge.module),
-                )
-            };
-            insert_binding(
-                &mut index
+                let scope = &mut index
                     .modules
                     .get_mut(&module.id)
                     .expect("every graph module has a scope")
                     .scope
-                    .bindings,
-                name,
-                resolution,
-                &index.definitions,
-            );
+                    .bindings;
+                if scope.get(&name) == Some(&resolution) {
+                    continue;
+                }
+                insert_binding(scope, name, resolution, &index.definitions);
+            }
+        }
+        if index.exports == previous_exports {
+            break;
         }
     }
 }

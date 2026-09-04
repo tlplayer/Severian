@@ -12,37 +12,61 @@ enum LoweringError:
 
 def lower_constant(value: universal.LiteralValue) -> universal.Constant:
     match value:
-        case IntegerValue: return universal.IntegerValue(spelling)
-        case FloatValue: return universal.FloatValue(spelling)
-        case BooleanValue: return universal.BooleanValue(value)
-        case CharacterValue: return universal.IntegerValue(string(int(value)))
-        case StringValue: return universal.StringValue(value)
-        case BytesValue: return universal.BytesValue(value)
-        case NoneValue: return universal.NoneValue
-        case UnitValue: return universal.Unit
+        case IntegerValue:
+            return universal.IntegerValue(spelling)
+        case FloatValue:
+            return universal.FloatValue(spelling)
+        case BooleanValue:
+            return universal.BooleanValue(value)
+        case CharacterValue:
+            return universal.IntegerValue(string(int(value)))
+        case StringValue:
+            return universal.StringValue(value)
+        case BytesValue:
+            return universal.BytesValue(value)
+        case NoneValue:
+            return universal.NoneValue
+        case UnitValue:
+            return universal.Unit
 
 
 def lower_unary(operator: universal.UnaryOperator) -> universal.UnaryOperation:
-    if operator == universal.Positive: return universal.Positive
-    if operator == universal.Negative: return universal.Negative
+    if operator == universal.Positive:
+        return universal.Positive
+    if operator == universal.Negative:
+        return universal.Negative
     return universal.Not
 
 
 def lower_binary(operator: universal.BinaryOperator) -> universal.BinaryOperation:
-    if operator == universal.Add: return universal.Add
-    if operator == universal.Subtract: return universal.Subtract
-    if operator == universal.Multiply: return universal.Multiply
-    if operator == universal.Divide: return universal.Divide
-    if operator == universal.Remainder: return universal.Remainder
-    if operator == universal.Power: return universal.Power
-    if operator == universal.Equal: return universal.Equal
-    if operator == universal.NotEqual: return universal.NotEqual
-    if operator == universal.Less: return universal.Less
-    if operator == universal.LessEqual: return universal.LessEqual
-    if operator == universal.Greater: return universal.Greater
-    if operator == universal.GreaterEqual: return universal.GreaterEqual
-    if operator == universal.Contains: return universal.Contains
-    if operator == universal.And: return universal.And
+    if operator == universal.Add:
+        return universal.Add
+    if operator == universal.Subtract:
+        return universal.Subtract
+    if operator == universal.Multiply:
+        return universal.Multiply
+    if operator == universal.Divide:
+        return universal.Divide
+    if operator == universal.Remainder:
+        return universal.Remainder
+    if operator == universal.Power:
+        return universal.Power
+    if operator == universal.Equal:
+        return universal.Equal
+    if operator == universal.NotEqual:
+        return universal.NotEqual
+    if operator == universal.Less:
+        return universal.Less
+    if operator == universal.LessEqual:
+        return universal.LessEqual
+    if operator == universal.Greater:
+        return universal.Greater
+    if operator == universal.GreaterEqual:
+        return universal.GreaterEqual
+    if operator == universal.Contains:
+        return universal.Contains
+    if operator == universal.And:
+        return universal.And
     return universal.Or
 
 
@@ -55,21 +79,34 @@ def lower_type(id: universal.TypeId, types: universal.TypeContext, target_spec: 
             match definition.representation:
                 case Integer:
                     match bits:
-                        case Fixed: return universal.Integer(bits, signed)
-                        case Machine: return universal.Integer(target_spec.machine_integer_bits(), signed)
-                case PointerInteger: return universal.Integer(target_spec.pointer_bits(), signed)
+                        case Fixed:
+                            return universal.Integer(bits, signed)
+                        case Machine:
+                            return universal.Integer(target_spec.machine_integer_bits(), signed)
+                case PointerInteger:
+                    return universal.Integer(target_spec.pointer_bits(), signed)
                 case Float:
                     match format:
-                        case Ieee: return universal.Float(universal.Ieee(bits))
-                        case BrainFloat16: return universal.Float(universal.BrainFloat16)
-                        case Machine: return universal.Float(universal.Ieee(target_spec.machine_float_bits()))
-                case Boolean: return universal.Boolean
-                case Character: return universal.Integer(32, false)
-                case String: return universal.String
-                case Bytes: return universal.Bytes
-                case NoneValue: return universal.NoneValue
-                case Unit: return universal.Unit
-                case Arguments: return universal.Arguments
+                        case Ieee:
+                            return universal.Float(universal.Ieee(bits))
+                        case BrainFloat16:
+                            return universal.Float(universal.BrainFloat16)
+                        case Machine:
+                            return universal.Float(universal.Ieee(target_spec.machine_float_bits()))
+                case Boolean:
+                    return universal.Boolean
+                case Character:
+                    return universal.Integer(32, false)
+                case String:
+                    return universal.String
+                case Bytes:
+                    return universal.Bytes
+                case NoneValue:
+                    return universal.NoneValue
+                case Unit:
+                    return universal.Unit
+                case Arguments:
+                    return universal.Arguments
     return error(NotPrimitive(id))
 
 
@@ -87,7 +124,8 @@ def lower_block(block: universal.Block, module: universal.Module, types: univers
                 operations.append(universal.LoweredBinary(lower_binary(operator), universal.ValueId(left.index), universal.ValueId(right.index), universal.ValueId(result.index)))
             case Call:
                 arguments_lir: list[universal.ValueId] = []
-                for argument in arguments: arguments_lir.append(universal.ValueId(argument.index))
+                for argument in arguments:
+                    arguments_lir.append(universal.ValueId(argument.index))
                 operations.append(universal.LoweredCall(universal.FunctionId(function.value), arguments_lir, universal.ValueId(result.index)))
             case Return:
                 operations.append(universal.LoweredReturn(universal.ValueId(value.index) if value != None else None))
@@ -108,12 +146,15 @@ def lower_block(block: universal.Block, module: universal.Module, types: univers
                 if selected == None:
                     return error(NonExhaustiveMatch(subject_type))
                 nested = lower_block(selected.body, module, types, target_spec)
-                for nested_operation in nested.lowered_operations: operations.append(nested_operation)
+                for nested_operation in nested.lowered_operations:
+                    operations.append(nested_operation)
             case CompiledRegionCall:
                 inputs_lir: list[universal.ValueId] = []
                 outputs_lir: list[universal.ValueId] = []
-                for input in inputs: inputs_lir.append(universal.ValueId(input.index))
-                for output in outputs: outputs_lir.append(universal.ValueId(output.index))
+                for input in inputs:
+                    inputs_lir.append(universal.ValueId(input.index))
+                for output in outputs:
+                    outputs_lir.append(universal.ValueId(output.index))
                 operations.append(universal.ArtifactCall(artifact_id, inputs_lir, outputs_lir))
     block.lowered_operations = operations
     return block
@@ -129,5 +170,6 @@ def lower(module: universal.Module, types: universal.TypeContext, target_spec: t
         function.lowered_result = lower_type(function.result_type, types, target_spec)
         function.linkage = universal.Internal
         match function.call_type:
-            case External: function.linkage = universal.External(call.symbol.value)
+            case External:
+                function.linkage = universal.External(call.symbol.value)
     return module

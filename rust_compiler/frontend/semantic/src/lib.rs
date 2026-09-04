@@ -66,6 +66,7 @@ pub fn analyze_with_context_and_types(
     context: AnalysisContext<'_>,
 ) -> Result<(Program, TypeContext), Diagnostic> {
     let mut types = types.clone();
+    let package_trait_names = BTreeMap::new();
     let program = analyze_with_package_functions(
         ast,
         &mut types,
@@ -74,6 +75,8 @@ pub fn analyze_with_context_and_types(
         &[],
         &[],
         &[],
+        &[],
+        &package_trait_names,
         &[],
         &[],
         None,
@@ -108,6 +111,13 @@ pub(crate) struct PackageClass {
     pub lookups: BTreeMap<severian_modules::ModuleId, Vec<String>>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PackageEnum {
+    pub module: severian_modules::ModuleId,
+    pub declaration: severian_ast::EnumDeclaration,
+    pub lookups: BTreeMap<severian_modules::ModuleId, Vec<String>>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PackageList {
     pub module: severian_modules::ModuleId,
@@ -130,6 +140,8 @@ pub(crate) fn analyze_with_package_functions(
     own_function_ids: &[FunctionId],
     test_function_ids: &[FunctionId],
     package_classes: &[PackageClass],
+    package_enums: &[PackageEnum],
+    package_trait_names: &BTreeMap<severian_modules::ModuleId, Vec<String>>,
     package_lists: &[PackageList],
     package_constants: &[PackageConstant],
     source_module: Option<severian_modules::ModuleId>,
@@ -247,13 +259,20 @@ pub(crate) fn analyze_with_package_functions(
         allow_qualified_function_suffix: false,
         active_function_name: None,
         signatures: BTreeMap::new(),
-        trait_names: registry_ast
+        trait_names: ast
             .items
             .iter()
             .filter_map(|item| match item {
                 severian_ast::Item::Trait(declaration) => Some(declaration.name.clone()),
                 _ => None,
             })
+            .chain(
+                source_module
+                    .and_then(|module| package_trait_names.get(&module))
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            )
             .collect(),
         classes: ast
             .items
@@ -310,8 +329,14 @@ pub(crate) fn analyze_with_package_functions(
         execution_placement: None,
         next_class_type: u32::MAX,
     };
-    analyzer.install_package_types(package_classes, package_lists, source_module)?;
-    analyzer.install_enums(ast)?;
+    analyzer.install_package_types(
+        package_classes,
+        package_lists,
+        source_module,
+        package_trait_names,
+    )?;
+    analyzer.install_package_enums(package_enums, source_module);
+    analyzer.install_enums(ast, true)?;
     for constant in package_constants {
         let value = analyzer.expression(&constant.value, None)?;
         analyzer
@@ -1732,7 +1757,11 @@ impl Analyzer<'_> {
         })
     }
 
-    fn install_enums(&mut self, ast: &severian_ast::Module) -> Result<(), Diagnostic> {
+    fn install_enums(
+        &mut self,
+        ast: &severian_ast::Module,
+        lower_declarations: bool,
+    ) -> Result<(), Diagnostic> {
         let declarations = ast
             .items
             .iter()
@@ -1874,12 +1903,14 @@ impl Analyzer<'_> {
                     operators: Vec::new(),
                 },
             );
-            self.lowered_classes.retain(|class| class.id != ty);
-            self.lowered_classes.push(HirClassDeclaration {
-                id: ty,
-                name: declaration.name,
-                fields,
-            });
+            if lower_declarations {
+                self.lowered_classes.retain(|class| class.id != ty);
+                self.lowered_classes.push(HirClassDeclaration {
+                    id: ty,
+                    name: declaration.name,
+                    fields,
+                });
+            }
         }
         Ok(())
     }
@@ -1952,6 +1983,7 @@ impl Analyzer<'_> {
         classes: &[PackageClass],
         lists: &[PackageList],
         source_module: Option<severian_modules::ModuleId>,
+        package_trait_names: &BTreeMap<severian_modules::ModuleId, Vec<String>>,
     ) -> Result<(), Diagnostic> {
         let storage = self
             .types
@@ -2082,9 +2114,14 @@ impl Analyzer<'_> {
                 .iter()
                 .any(|implemented| implemented.simple_name() == Some("Error"))
                 || package_class.declaration.name.ends_with("Error");
-            let mut fields = if package_class.declaration.primitive {
-                Vec::new()
-            } else {
+            let previous_trait_names = self.trait_names.clone();
+            if let Some(names) = package_trait_names.get(&package_class.module) {
+                self.trait_names = names.iter().cloned().collect();
+            }
+            let resolved_fields = (|| {
+                if package_class.declaration.primitive {
+                    return Ok(Vec::new());
+                }
                 package_class
                     .declaration
                     .fields
@@ -2095,8 +2132,10 @@ impl Analyzer<'_> {
                             ty: self.resolve_source_type(&field.annotation)?,
                         })
                     })
-                    .collect::<Result<Vec<_>, Diagnostic>>()?
-            };
+                    .collect::<Result<Vec<_>, Diagnostic>>()
+            })();
+            self.trait_names = previous_trait_names;
+            let mut fields = resolved_fields?;
             if is_error && fields.is_empty() {
                 fields.push(HirClassFieldDeclaration {
                     name: "__error".into(),
@@ -2155,6 +2194,54 @@ impl Analyzer<'_> {
         Ok(())
     }
 
+    fn install_package_enums(
+        &mut self,
+        enumerations: &[PackageEnum],
+        source_module: Option<severian_modules::ModuleId>,
+    ) {
+        let Some(source_module) = source_module else {
+            return;
+        };
+        for enumeration in enumerations
+            .iter()
+            .filter(|enumeration| enumeration.module != source_module)
+        {
+            for lookup in enumeration
+                .lookups
+                .get(&source_module)
+                .into_iter()
+                .flatten()
+            {
+                let Some(instance) = self
+                    .class_instances
+                    .get(&(lookup.clone(), Vec::new()))
+                    .cloned()
+                else {
+                    continue;
+                };
+                self.enums.insert(
+                    lookup.clone(),
+                    EnumInstance {
+                        ty: instance.ty,
+                        name: lookup.clone(),
+                        fields: instance.fields,
+                        variants: enumeration.declaration.variants.clone(),
+                    },
+                );
+                for (ordinal, variant) in enumeration.declaration.variants.iter().enumerate() {
+                    if !lookup.contains('.') {
+                        self.enum_variants
+                            .insert(variant.name.clone(), (lookup.clone(), ordinal));
+                    }
+                    self.enum_variants.insert(
+                        format!("{lookup}.{}", variant.name),
+                        (lookup.clone(), ordinal),
+                    );
+                }
+            }
+        }
+    }
+
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
         if let Some((
             "borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable",
@@ -2166,11 +2253,10 @@ impl Analyzer<'_> {
         if annotation.simple_name() == Some("Any") {
             return Ok(self.ensure_any_type());
         }
-        if annotation.simple_name().is_some_and(|name| {
-            self.trait_names
-                .iter()
-                .any(|known| known.rsplit('.').next() == Some(name))
-        }) {
+        if annotation
+            .simple_name()
+            .is_some_and(|name| self.trait_names.contains(name))
+        {
             return Ok(self.ensure_any_type());
         }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
@@ -6953,6 +7039,11 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(path) = callable_path(callee) {
+                    if self.enum_variants.contains_key(&path) {
+                        return self.enum_constructor(&path, arguments, expected, ast.span);
+                    }
+                }
                 if let AstExpressionKind::Name(name) = &callee.kind {
                     if let Some(ty) = self.active_type_aliases.get(name).copied().or_else(|| {
                         (name == "self")
@@ -10234,12 +10325,10 @@ impl Analyzer<'_> {
                 ),
                 Some(span),
             ));
-        } else if arguments.is_empty() && !instance.fields.is_empty() {
-            instance
-                .fields
-                .iter()
-                .map(|field| self.default_expression(field.ty, span))
-                .collect::<Result<Vec<_>, _>>()?
+        } else if instance.source_fields.len() == instance.fields.len()
+            && arguments.len() <= instance.fields.len()
+        {
+            self.class_implicit_constructor_values(&instance, arguments, span)?
         } else if arguments.len() != instance.fields.len() {
             return Err(Diagnostic::new(
                 "E000221",
@@ -10275,6 +10364,83 @@ impl Analyzer<'_> {
             },
             span,
         })
+    }
+
+    fn class_implicit_constructor_values(
+        &mut self,
+        instance: &ClassInstance,
+        arguments: &[severian_ast::CallArgument],
+        span: severian_source::Span,
+    ) -> Result<Vec<Expression>, Diagnostic> {
+        let mut supplied = vec![None; instance.fields.len()];
+        let mut positional = 0usize;
+        let mut named_started = false;
+        for argument in arguments {
+            if argument.spread {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    "class field construction does not accept spread arguments",
+                    Some(argument.span),
+                ));
+            }
+            let field = if let Some(name) = &argument.name {
+                named_started = true;
+                instance
+                    .source_fields
+                    .iter()
+                    .position(|field| field.name == *name)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000221",
+                            format!("class `{}` has no field `{name}`", instance.name),
+                            Some(argument.span),
+                        )
+                    })?
+            } else {
+                if named_started {
+                    return Err(Diagnostic::new(
+                        "E000221",
+                        "positional class fields cannot follow named fields",
+                        Some(argument.span),
+                    ));
+                }
+                let field = positional;
+                positional += 1;
+                field
+            };
+            if field >= supplied.len() || supplied[field].is_some() {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    format!("class `{}` receives a field more than once", instance.name),
+                    Some(argument.span),
+                ));
+            }
+            supplied[field] = Some(argument.value.clone());
+        }
+
+        let allow_implicit_zero = arguments.is_empty();
+        instance
+            .fields
+            .iter()
+            .zip(&instance.source_fields)
+            .zip(supplied)
+            .map(|((field, source), supplied)| {
+                if let Some(value) = supplied.or_else(|| source.default.clone()) {
+                    self.expression(&value, Some(field.ty))
+                } else if allow_implicit_zero {
+                    self.default_expression(field.ty, span)
+                } else {
+                    Err(Diagnostic::new(
+                        "E000221",
+                        format!(
+                            "constructor `{}` is missing required field `{}`",
+                            instance.name, source.name
+                        ),
+                        Some(span),
+                    ))
+                }
+            })
+            .collect()
     }
 
     fn array_constructor_fields(
@@ -11464,7 +11630,23 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let (enum_name, ordinal) = self.enum_variants[path].clone();
+        let selected = expected.and_then(|expected| {
+            self.enums.iter().find_map(|(enum_name, instance)| {
+                if instance.ty != expected {
+                    return None;
+                }
+                instance
+                    .variants
+                    .iter()
+                    .position(|variant| {
+                        path == variant.name || path == format!("{enum_name}.{}", variant.name)
+                    })
+                    .map(|ordinal| (enum_name.clone(), ordinal))
+            })
+        });
+        let (enum_name, ordinal) = selected
+            .or_else(|| self.enum_variants.get(path).cloned())
+            .expect("caller checked that the enum variant is visible");
         let instance = self.enums[&enum_name].clone();
         let variant = &instance.variants[ordinal];
         if arguments.len() != variant.fields.len() {
@@ -14062,8 +14244,16 @@ impl Analyzer<'_> {
                         .keys()
                         .any(|function| function.starts_with(&format!("{namespace}.")))
             });
+            let class_namespace = object_path.as_ref().is_some_and(|namespace| {
+                self.classes.contains_key(namespace)
+                    || self
+                        .class_instances
+                        .contains_key(&(namespace.clone(), Vec::new()))
+                    || self.generic_class_constructors.contains_key(namespace)
+            });
             if !matches!(&object.kind, AstExpressionKind::Name(package) if package == "tensor")
                 && !package_namespace
+                && !class_namespace
             {
                 let receiver = self.expression(object, None)?;
                 if self
@@ -16462,11 +16652,17 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         if let AstExpressionKind::Name(class_name) = &object.kind {
-            if let Some(instance) = self
+            let instance = self
                 .class_instances
                 .get(&(class_name.clone(), Vec::new()))
                 .cloned()
-            {
+                .or_else(|| {
+                    self.generic_class_constructors
+                        .get(class_name)
+                        .and_then(|ty| self.class_instances_by_type.get(ty))
+                        .cloned()
+                });
+            if let Some(instance) = instance {
                 if let Some(method) = instance
                     .methods
                     .iter()
@@ -19245,11 +19441,12 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                 .zip(trait_arguments.iter().cloned())
                 .collect::<BTreeMap<_, _>>();
             for required in &contract.methods {
-                let Some(provided) = class
+                let named = class
                     .methods
                     .iter()
-                    .find(|method| method.name == required.name)
-                else {
+                    .filter(|method| method.name == required.name)
+                    .collect::<Vec<_>>();
+                if named.is_empty() {
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -19258,7 +19455,7 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         ),
                         Some(class.span),
                     ));
-                };
+                }
                 let required_parameters = required
                     .parameters
                     .iter()
@@ -19268,19 +19465,24 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     .collect::<Vec<_>>();
                 let required_result =
                     substitute_type_annotation(&required.result, &trait_substitution);
-                let same_parameters = required_parameters.len() == provided.parameters.len()
-                    && required_parameters.iter().zip(&provided.parameters).all(
-                        |(required, provided)| same_type_annotation(required, &provided.annotation),
-                    );
-                if !same_parameters
-                    || !(implementation_result_satisfies(&required_result, &provided.result)
-                        || implementation_result_implements_trait(
-                            &required_result,
-                            &provided.result,
-                            &traits,
-                            ast,
-                        ))
-                {
+                let provided = named.iter().copied().find(|provided| {
+                    required_parameters.len() == provided.parameters.len()
+                        && required_parameters.iter().zip(&provided.parameters).all(
+                            |(required, provided)| {
+                                same_type_annotation(required, &provided.annotation)
+                            },
+                        )
+                        && (implementation_result_satisfies(&required_result, &provided.result)
+                            || implementation_result_implements_trait(
+                                &required_result,
+                                &provided.result,
+                                &traits,
+                                ast,
+                            ))
+                        && required.hook.is_some() == provided.hook.is_some()
+                });
+                if provided.is_none() {
+                    let provided = named[0];
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -19290,23 +19492,14 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         Some(provided.span),
                     ));
                 }
-                if required.hook.is_some() != provided.hook.is_some() {
-                    return Err(Diagnostic::new(
-                        "E000218",
-                        format!(
-                            "method `{}.{}` does not match hook requirement from trait `{}`",
-                            class.name, provided.name, trait_name
-                        ),
-                        Some(provided.span),
-                    ));
-                }
             }
             for required in &contract.operators {
-                let Some(provided) = class
+                let named = class
                     .operators
                     .iter()
-                    .find(|operator| operator.operator == required.operator)
-                else {
+                    .filter(|operator| operator.operator == required.operator)
+                    .collect::<Vec<_>>();
+                if named.is_empty() {
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -19317,7 +19510,7 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         ),
                         Some(class.span),
                     ));
-                };
+                }
                 if required.operator == severian_ast::OperatorSyntax::Index {
                     continue;
                 }
@@ -19330,11 +19523,17 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     .collect::<Vec<_>>();
                 let required_result =
                     substitute_type_annotation(&required.result, &trait_substitution);
-                let same_parameters = required_parameters.len() == provided.parameters.len()
-                    && required_parameters.iter().zip(&provided.parameters).all(
-                        |(required, provided)| same_type_annotation(required, &provided.annotation),
-                    );
-                if !same_parameters || !same_type_annotation(&required_result, &provided.result) {
+                let provided = named.iter().copied().find(|provided| {
+                    required_parameters.len() == provided.parameters.len()
+                        && required_parameters.iter().zip(&provided.parameters).all(
+                            |(required, provided)| {
+                                same_type_annotation(required, &provided.annotation)
+                            },
+                        )
+                        && same_type_annotation(&required_result, &provided.result)
+                });
+                if provided.is_none() {
+                    let provided = named[0];
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(

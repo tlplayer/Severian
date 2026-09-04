@@ -222,9 +222,11 @@ def generic_binary_result(
     left_generic = false
     right_generic = false
     match types.kind(left):
-        case Parameter: left_generic = true
+        case Parameter:
+            left_generic = true
     match types.kind(right):
-        case Parameter: right_generic = true
+        case Parameter:
+            right_generic = true
     if not left_generic and not right_generic:
         return None
     if left != right:
@@ -288,7 +290,8 @@ def declaration_capability_requirements(
 
 def type_annotation_head(annotation: universal.TypeAnnotation) -> string | None:
     match annotation.kind:
-        case Named: return name
+        case Named:
+            return name
     return None
 
 
@@ -346,7 +349,8 @@ def generic_parameter_id(parameters: list[string], name: string) -> universal.Ge
 
 def ast_callable_name(expression: universal.Expression) -> string | None:
     match expression.kind:
-        case Name: return name
+        case Name:
+            return name
         case Member:
             prefix = ast_callable_name(object)
             if prefix != None:

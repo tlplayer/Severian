@@ -34,21 +34,28 @@ enum XxiError:
 
 
 def language_from_name(name: string) -> ExternalLanguage | XxiError:
-    if name == "c": return C
-    if name == "rust": return Rust
-    if name == "system": return System
-    if len(name) > 0: return Custom(name)
+    if name == "c":
+        return C
+    if name == "rust":
+        return Rust
+    if name == "system":
+        return System
+    if len(name) > 0:
+        return Custom(name)
     return error(UnknownLanguage(name))
 
 
 def language_abi(language: ExternalLanguage) -> ffi.AbiSelection:
-    if language == C: return ffi.C
-    if language == Rust: return ffi.Rust
+    if language == C:
+        return ffi.C
+    if language == Rust:
+        return ffi.Rust
     return ffi.System
 
 
 def external_import(locator: string, alias: string) -> ExternalImport | None | XxiError:
-    if not locator.contains(":"): return None
+    if not locator.contains(":"):
+        return None
     parts = locator.split(":", 1)
     return ExternalImport(language_from_name(parts[0]), parts[1], alias)
 
@@ -61,24 +68,31 @@ def resolve_contract(annotation: universal.TypeAnnotation, foreign: ffi.ForeignM
     while true:
         match current.kind:
             case Named:
-                if len(arguments) != 1: break
+                if len(arguments) != 1:
+                    break
                 if name == "borrowed":
                     ownership = ffi.Borrowed(ffi.Return if result else ffi.Call)
-                elif name == "owned": ownership = ffi.Owned
-                elif name == "transferred": ownership = ffi.Transferred
+                elif name == "owned":
+                    ownership = ffi.Owned
+                elif name == "transferred":
+                    ownership = ffi.Transferred
                 elif name == "out":
                     ownership = ffi.Owned
                     mode = ffi.Out
                 elif name == "inout":
                     ownership = ffi.Owned
                     mode = ffi.InOut
-                elif name == "nullable": nullable = true
-                else: break
+                elif name == "nullable":
+                    nullable = true
+                else:
+                    break
                 current = arguments[0]
-            else: break
+            else:
+                break
     match current.kind:
         case Named:
-            if len(arguments) != 0: return error(UnknownType(name))
+            if len(arguments) != 0:
+                return error(UnknownType(name))
             semantic_type = types.resolve_name(name)
             if semantic_type != None:
                 return (ffi.ValueContract(ffi.Severian(semantic_type), ownership, nullable), mode)
@@ -97,10 +111,12 @@ def resolve(module: universal.Module, types: universal.TypeContext, target: abi.
                     case Locator:
                         if declaration.alias != None:
                             resolved = external_import(locator, declaration.alias)
-                            if resolved != None: imports.append(resolved)
+                            if resolved != None:
+                                imports.append(resolved)
             case Type:
                 if len(declaration.decorators) > 0:
-                    if len(declaration.type_parameters) > 0: return error(GenericExternalType(declaration.name))
+                    if len(declaration.type_parameters) > 0:
+                        return error(GenericExternalType(declaration.name))
                     foreign.types.append(ffi.ForeignTypeDeclaration(declaration.name, abi.Opaque(declaration.name)))
             case Function:
                 if len(declaration.decorators) > 0:

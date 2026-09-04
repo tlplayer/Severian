@@ -6,42 +6,63 @@ import "model.sev"
 
 def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
-        case Unary: return [operand]
-        case Binary: return [left, right]
-        case Call: return arguments
-        case Return: return [value] if value != None else []
+        case Unary:
+            return [operand]
+        case Binary:
+            return [left, right]
+        case Call:
+            return arguments
+        case Return:
+            return [value] if value != None else []
         case Assert:
             return [condition, message] if message != None else [condition]
         case If:
             result: list[universal.ValueId] = [condition]
             for nested in then_block.operations:
-                for value in operation_inputs(nested): result.append(value)
+                for value in operation_inputs(nested):
+                    result.append(value)
             for nested in else_block.operations:
-                for value in operation_inputs(nested): result.append(value)
+                for value in operation_inputs(nested):
+                    result.append(value)
             return result
-        case Match: return [subject]
-        case CompiledRegionCall: return inputs
-        else: return []
+        case Match:
+            return [subject]
+        case CompiledRegionCall:
+            return inputs
+        else:
+            return []
 
 
 def operation_outputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
-        case Constant: return [result]
-        case Unary: return [result]
-        case Binary: return [result]
-        case Call: return [result]
-        case CompiledRegionCall: return outputs
-        else: return []
+        case Constant:
+            return [result]
+        case Unary:
+            return [result]
+        case Binary:
+            return [result]
+        case Call:
+            return [result]
+        case CompiledRegionCall:
+            return outputs
+        else:
+            return []
 
 
 def operation_route(operation: universal.Operation, values: map[universal.ValueId, universal.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
     match operation:
-        case CompiledRegionCall: return error(PlannerGeneratedOperation(index))
-        case Coverage: return universal.Standard
-        case Return: return universal.Standard
-        case Assert: return universal.Standard
-        case If: return universal.Standard
-        case Match: return universal.Standard
+        case CompiledRegionCall:
+            return error(PlannerGeneratedOperation(index))
+        case Coverage:
+            return universal.Standard
+        case Return:
+            return universal.Standard
+        case Assert:
+            return universal.Standard
+        case If:
+            return universal.Standard
+        case Match:
+            return universal.Standard
     compilers: set[universal.CompilerId] = set()
     all_values = operation_inputs(operation) + operation_outputs(operation)
     for value_id in all_values:
@@ -50,23 +71,28 @@ def operation_route(operation: universal.Operation, values: map[universal.ValueI
             return error(MissingValue(value_id.index))
         route = types.compile_route(value.type_id)
         match route:
-            case Compiler: compilers.add(compiler)
-    if len(compilers) == 0: return universal.Standard
-    if len(compilers) == 1: return universal.Compiler(compilers.values()[0])
+            case Compiler:
+                compilers.add(compiler)
+    if len(compilers) == 0:
+        return universal.Standard
+    if len(compilers) == 1:
+        return universal.Compiler(compilers.values()[0])
     return error(ConflictingCompilers(index, compilers.values()))
 
 
 def build_region(id: universal.CompiledRegionId, compiler: universal.CompilerId, operations: list[universal.Operation], values: map[universal.ValueId, universal.Value]) -> CompileRegion | CompileError:
     produced: set[universal.ValueId] = set()
     for operation in operations:
-        for output in operation_outputs(operation): produced.add(output)
+        for output in operation_outputs(operation):
+            produced.add(output)
     inputs: list[universal.Value] = []
     for operation in operations:
         for input in operation_inputs(operation):
             if input not in produced and not inputs.contains(values[input]):
                 inputs.append(values[input])
     outputs: list[universal.Value] = []
-    for output in produced: outputs.append(values[output])
+    for output in produced:
+        outputs.append(values[output])
     effects = EffectSet(false, false, false)
     for operation in operations:
         match operation:
@@ -104,7 +130,8 @@ def plan_block(block: universal.Block, values: map[universal.ValueId, universal.
                 current_compiler = compiler
                 current_custom.append(operation)
 
-    if len(current_standard) > 0: segments.append(Standard(StandardRegion(current_standard)))
+    if len(current_standard) > 0:
+        segments.append(Standard(StandardRegion(current_standard)))
     if len(current_custom) > 0:
         segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
         next_region += 1
@@ -113,7 +140,8 @@ def plan_block(block: universal.Block, values: map[universal.ValueId, universal.
 
 def plan(module: universal.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
     values: map[universal.ValueId, universal.Value] = {}
-    for value in module.values: values[value.id] = value
+    for value in module.values:
+        values[value.id] = value
     next_region: u32 = 0
     initializer_result = plan_block(module.initializer, values, types, next_region)
     next_region = initializer_result[1]

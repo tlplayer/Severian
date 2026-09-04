@@ -48,12 +48,14 @@ class CompilePlan:
             return true
         for segment in initializer.segments:
             match segment:
-                case Compiler: return true
+                case Compiler:
+                    return true
         for function in functions:
             if function.body != None:
                 for segment in function.body.segments:
                     match segment:
-                        case Compiler: return true
+                        case Compiler:
+                            return true
         return false
 
     def resumed_mir() -> universal.Module:
@@ -78,12 +80,15 @@ def resume_block(block: PlannedBlock) -> universal.Block:
     for segment in block.segments:
         match segment:
             case Standard:
-                for operation in region.operations: operations.append(operation)
+                for operation in region.operations:
+                    operations.append(operation)
             case Compiler:
                 inputs: list[universal.ValueId] = []
                 outputs: list[universal.ValueId] = []
-                for value in region.inputs: inputs.append(value.id)
-                for value in region.outputs: outputs.append(value.id)
+                for value in region.inputs:
+                    inputs.append(value.id)
+                for value in region.outputs:
+                    outputs.append(value.id)
                 operations.append(universal.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
     block.source.operations = operations
     return block.source

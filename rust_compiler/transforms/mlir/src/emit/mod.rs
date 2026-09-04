@@ -4371,11 +4371,32 @@ fn render_class_aliases(output: &mut String, module: &Module) -> Result<(), Mlir
             emitted.insert(declaration.id);
         }
         if emitted.len() == before {
-            let cyclic = declared
-                .difference(&emitted)
-                .map(u32::to_string)
+            let cyclic = module
+                .classes
+                .iter()
+                .filter(|declaration| !emitted.contains(&declaration.id))
+                .map(|declaration| {
+                    let dependencies = declaration
+                        .fields
+                        .iter()
+                        .filter_map(|field| match field.ty {
+                            LoweredType::Aggregate(dependency)
+                                if declared.contains(&dependency)
+                                    && !emitted.contains(&dependency) =>
+                            {
+                                Some(dependency.to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!(
+                        "{}#{} -> [{dependencies}]",
+                        declaration.name, declaration.id
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("; ");
             return Err(MlirError::UnsupportedOperation(format!(
                 "aggregate layout contains an inline cycle among class IDs {cyclic}"
             )));

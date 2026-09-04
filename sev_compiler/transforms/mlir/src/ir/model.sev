@@ -136,14 +136,22 @@ enum MlirAffineExpressionKind:
 
 def affine_expression_kind_name(kind: MlirAffineExpressionKind) -> string:
     match kind:
-        case AffineDimension: return "dimension"
-        case AffineSymbol: return "symbol"
-        case AffineConstant: return "constant"
-        case AffineAdd: return "add"
-        case AffineMultiply: return "multiply"
-        case AffineModulo: return "modulo"
-        case AffineFloorDivide: return "floor_divide"
-        case AffineCeilDivide: return "ceil_divide"
+        case AffineDimension:
+            return "dimension"
+        case AffineSymbol:
+            return "symbol"
+        case AffineConstant:
+            return "constant"
+        case AffineAdd:
+            return "add"
+        case AffineMultiply:
+            return "multiply"
+        case AffineModulo:
+            return "modulo"
+        case AffineFloorDivide:
+            return "floor_divide"
+        case AffineCeilDivide:
+            return "ceil_divide"
 
 
 class MlirAffineExpression:
@@ -247,15 +255,24 @@ def affine_map_attribute(value: MlirAffineMap) -> MlirAttributeValue:
 
 def attribute_kind_name(kind: MlirAttributeKind) -> string:
     match kind:
-        case IntegerAttributeKind: return "integer"
-        case FloatAttributeKind: return "float"
-        case StringAttributeKind: return "string"
-        case BooleanAttributeKind: return "boolean"
-        case TypeAttributeKind: return "type"
-        case StringArrayAttributeKind: return "string_array"
-        case ArrayAttributeKind: return "array"
-        case SymbolAttributeKind: return "symbol"
-        case AffineMapAttributeKind: return "affine_map"
+        case IntegerAttributeKind:
+            return "integer"
+        case FloatAttributeKind:
+            return "float"
+        case StringAttributeKind:
+            return "string"
+        case BooleanAttributeKind:
+            return "boolean"
+        case TypeAttributeKind:
+            return "type"
+        case StringArrayAttributeKind:
+            return "string_array"
+        case ArrayAttributeKind:
+            return "array"
+        case SymbolAttributeKind:
+            return "symbol"
+        case AffineMapAttributeKind:
+            return "affine_map"
 
 
 class MlirNamedAttribute:
@@ -420,20 +437,30 @@ def empty_program(first_generated_value: int = 0) -> MlirProgram:
 
 def scalar_kind_name(kind: MlirScalarKind) -> string:
     match kind:
-        case IntegerScalar: return "integer"
-        case IeeeFloatScalar: return "ieee_float"
-        case BrainFloatScalar: return "brain_float"
-        case IndexScalar: return "index"
-        case PointerScalar: return "pointer"
+        case IntegerScalar:
+            return "integer"
+        case IeeeFloatScalar:
+            return "ieee_float"
+        case BrainFloatScalar:
+            return "brain_float"
+        case IndexScalar:
+            return "index"
+        case PointerScalar:
+            return "pointer"
 
 
 def type_kind_name(kind: MlirTypeKind) -> string:
     match kind:
-        case ScalarType: return "scalar"
-        case TensorType: return "tensor"
-        case UnrankedTensorType: return "unranked_tensor"
-        case MemRefType: return "memref"
-        case UnrankedMemRefType: return "unranked_memref"
+        case ScalarType:
+            return "scalar"
+        case TensorType:
+            return "tensor"
+        case UnrankedTensorType:
+            return "unranked_tensor"
+        case MemRefType:
+            return "memref"
+        case UnrankedMemRefType:
+            return "unranked_memref"
 
 
 def dimension_text(dimension: int) -> string:
@@ -444,8 +471,10 @@ def dimension_text(dimension: int) -> string:
 
 def visibility_name(visibility: MlirVisibility) -> string:
     match visibility:
-        case PublicVisibility: return "public"
-        case PrivateVisibility: return "private"
+        case PublicVisibility:
+            return "public"
+        case PrivateVisibility:
+            return "private"
 
 
 def same_scalar_type(left: MlirScalarType, right: MlirScalarType) -> bool:

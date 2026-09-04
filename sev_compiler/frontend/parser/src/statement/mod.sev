@@ -30,9 +30,12 @@ def formatted_string_expression(value: string, span: source.Span) -> universal.E
         cursor = expression_start
         nesting = 0
         while cursor < len(characters):
-            if characters[cursor] == "(" or characters[cursor] == "[": nesting += 1
-            elif characters[cursor] == ")" or characters[cursor] == "]": nesting -= 1
-            elif characters[cursor] == "}" and nesting == 0: break
+            if characters[cursor] == "(" or characters[cursor] == "[":
+                nesting += 1
+            elif characters[cursor] == ")" or characters[cursor] == "]":
+                nesting -= 1
+            elif characters[cursor] == "}" and nesting == 0:
+                break
             cursor += 1
         if cursor >= len(characters):
             return error(diagnostics.Diagnostic("E000113", "formatted string interpolation is missing }", span))
@@ -349,11 +352,16 @@ class Parser:
     def expression(minimum: int) -> universal.Expression | diagnostics.Diagnostic:
         left = unary()
         while true:
+            if not is_binary_operator(peek().kind):
+                break
             operator = binary_operator(peek().kind)
-            if operator == None or precedence(operator) < minimum:
+            operator_precedence = precedence(operator)
+            if operator_precedence < minimum:
                 break
             token = next()
-            next_minimum = precedence(operator) if operator == universal.Power else precedence(operator) + 1
+            next_minimum := operator_precedence
+            if operator.associativity != universal.Associativity.Right:
+                next_minimum += 1
             right = expression(next_minimum)
             left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
         return left
@@ -361,10 +369,14 @@ class Parser:
     def unary() -> universal.Expression | diagnostics.Diagnostic:
         token = peek()
         operator: universal.UnaryOperator | None = None
-        if token.kind == Plus: operator = universal.Positive
-        elif token.kind == Minus: operator = universal.Negative
-        elif at_identifier("not"): operator = universal.Not
-        elif at_identifier("move"): operator = universal.Move
+        if token.kind == Plus:
+            operator = universal.Positive
+        elif token.kind == Minus:
+            operator = universal.Negative
+        elif at_identifier("not"):
+            operator = universal.Not
+        elif at_identifier("move"):
+            operator = universal.Move
         if operator != None:
             next()
             operand = unary()
@@ -399,15 +411,23 @@ class Parser:
         token = next()
         match token.kind:
             case Identifier:
-                if value == "true": return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
-                if value == "false": return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
-                if value == "None": return universal.Expression(universal.LiteralValue(universal.NoneValue), token.span)
+                if value == "true":
+                    return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
+                if value == "false":
+                    return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
+                if value == "None":
+                    return universal.Expression(universal.LiteralValue(universal.NoneValue), token.span)
                 return universal.Expression(universal.Name(value), token.span)
-            case Integer: return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span)
-            case Float: return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
-            case Character: return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
-            case String: return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
-            case FormattedString: return formatted_string_expression(value, token.span)
+            case Integer:
+                return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span)
+            case Float:
+                return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
+            case Character:
+                return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
+            case String:
+                return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
+            case FormattedString:
+                return formatted_string_expression(value, token.span)
             case LeftParen:
                 value = expression(0)
                 expect(RightParen, "expected closing parenthesis")
@@ -438,30 +458,41 @@ class Parser:
         return universal.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
 
 
-def binary_operator(kind: lexer.TokenKind) -> universal.BinaryOperator | None:
-    if kind == Plus: return universal.Add
-    if kind == Minus: return universal.Subtract
-    if kind == Star: return universal.Multiply
-    if kind == Slash: return universal.Divide
-    if kind == Percent: return universal.Remainder
-    if kind == Power: return universal.Power
-    if kind == EqualEqual: return universal.Equal
-    if kind == NotEqual: return universal.NotEqual
-    if kind == Less: return universal.Less
-    if kind == LessEqual: return universal.LessEqual
-    if kind == Greater: return universal.Greater
-    if kind == GreaterEqual: return universal.GreaterEqual
-    return None
+def is_binary_operator(kind: lexer.TokenKind) -> bool:
+    return kind == Plus or kind == Minus or kind == Star or kind == Slash or kind == Percent or kind == Power or kind == EqualEqual or kind == NotEqual or kind == Less or kind == LessEqual or kind == Greater or kind == GreaterEqual
+
+
+def binary_operator(kind: lexer.TokenKind) -> universal.BinaryOperator:
+    if kind == Plus:
+        return universal.Add
+    if kind == Minus:
+        return universal.Subtract
+    if kind == Star:
+        return universal.Multiply
+    if kind == Slash:
+        return universal.Divide
+    if kind == Percent:
+        return universal.Remainder
+    if kind == Power:
+        return universal.Power
+    if kind == EqualEqual:
+        return universal.Equal
+    if kind == NotEqual:
+        return universal.NotEqual
+    if kind == Less:
+        return universal.Less
+    if kind == LessEqual:
+        return universal.LessEqual
+    if kind == Greater:
+        return universal.Greater
+    if kind == GreaterEqual:
+        return universal.GreaterEqual
+    # Callers prove the token is binary with `is_binary_operator` first.
+    return universal.Add
 
 
 def precedence(operator: universal.BinaryOperator) -> int:
-    if operator == universal.Or: return 1
-    if operator == universal.And: return 2
-    if operator == universal.Equal or operator == universal.NotEqual: return 3
-    if operator == universal.Less or operator == universal.LessEqual or operator == universal.Greater or operator == universal.GreaterEqual or operator == universal.Contains: return 4
-    if operator == universal.Add or operator == universal.Subtract: return 5
-    if operator == universal.Multiply or operator == universal.Divide or operator == universal.Remainder: return 6
-    return 7
+    return int(operator.precedence)
 
 
 def parse(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:

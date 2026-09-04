@@ -45,8 +45,10 @@ class AbiTarget:
 
 def derive(specification: target.TargetSpec) -> AbiTarget:
     convention = SysV64
-    if specification.operating_system == target.Windows: convention = Win64
-    elif specification.architecture == target.Aarch64: convention = Aapcs64
+    if specification.operating_system == target.Windows:
+        convention = Win64
+    elif specification.architecture == target.Aarch64:
+        convention = Aapcs64
     pointer = ScalarLayout(u64(specification.pointer_bits() / 8), u32(specification.pointer_bits() / 8))
     layout = TargetDataLayout(Little, pointer, [(8,1),(16,2),(32,4),(64,8)], [(16,2),(32,4),(64,8)], 1, 16, specification.machine_integer_bits(), specification.machine_float_bits())
     return AbiTarget(specification.triple, specification.architecture, specification.operating_system, layout, convention)

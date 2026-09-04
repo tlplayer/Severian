@@ -36,17 +36,22 @@ def use_operand(body: universal.CfgBody, block: universal.BlockId, operand: univ
 
 def successors(terminator: universal.Terminator) -> list[universal.BlockId]:
     match terminator:
-        case Goto: return [target]
-        case Branch: return [then_block, else_block]
+        case Goto:
+            return [target]
+        case Branch:
+            return [then_block, else_block]
         case Switch:
             result: list[universal.BlockId] = [fallback]
-            for target in targets: result.append(target[1])
+            for target in targets:
+                result.append(target[1])
             return result
         case Call:
             result: list[universal.BlockId] = [target]
-            if unwind != None: result.append(unwind)
+            if unwind != None:
+                result.append(unwind)
             return result
-        else: return []
+        else:
+            return []
 
 
 def verify_body(body: universal.CfgBody) -> unit | VerifyError:
@@ -74,16 +79,22 @@ def verify_body(body: universal.CfgBody) -> unit | VerifyError:
 
     for block in body.blocks:
         state = incoming.get(block.id)
-        if state == None: state = set()
+        if state == None:
+            state = set()
         for statement in block.statements:
             match statement:
-                case StorageLive: state.add(local)
-                case StorageDead: state.discard(local)
+                case StorageLive:
+                    state.add(local)
+                case StorageDead:
+                    state.discard(local)
                 case Assign:
                     match value:
-                        case Use: use_operand(body, block.id, operand, state)
-                        case Unary: use_operand(body, block.id, operand, state)
-                        case Convert: use_operand(body, block.id, operand, state)
+                        case Use:
+                            use_operand(body, block.id, operand, state)
+                        case Unary:
+                            use_operand(body, block.id, operand, state)
+                        case Convert:
+                            use_operand(body, block.id, operand, state)
                         case Binary:
                             use_operand(body, block.id, left, state)
                             use_operand(body, block.id, right, state)
@@ -96,9 +107,11 @@ def verify_body(body: universal.CfgBody) -> unit | VerifyError:
                     state.remove(place.local)
                 case Assert:
                     use_operand(body, block.id, condition, state)
-                    if message != None: use_operand(body, block.id, message, state)
+                    if message != None:
+                        use_operand(body, block.id, message, state)
                 case Operation:
-                    for operand in operands: use_operand(body, block.id, operand, state)
+                    for operand in operands:
+                        use_operand(body, block.id, operand, state)
                     for result in results:
                         verify_place(body, result)
                         state.add(result.local)

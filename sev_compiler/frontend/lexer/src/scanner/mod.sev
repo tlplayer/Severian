@@ -7,7 +7,7 @@ def make_token(file: source.SourceFile, kind: TokenKind, start: int, end: int) -
 
 
 def indentation_width(line: string) -> int:
-    width = 0
+    width := 0
     for character in line.characters():
         if character == " ":
             width += 1
@@ -19,8 +19,8 @@ def indentation_width(line: string) -> int:
 
 
 def strip_indentation(line: string, width: int) -> string:
-    consumed = 0
-    offset = 0
+    consumed := 0
+    offset := 0
     characters = line.characters()
     while offset < len(characters) and consumed < width:
         if characters[offset] == " ":
@@ -33,14 +33,33 @@ def strip_indentation(line: string, width: int) -> string:
     return characters[offset:].join("")
 
 
+def contains_non_whitespace(line: string) -> bool:
+    for character in line.characters():
+        if character != " " and character != "\t" and character != "\r":
+            return true
+    return false
+
+
+def is_digit(character: string) -> bool:
+    return character >= "0" and character <= "9"
+
+
+def is_alphabetic(character: string) -> bool:
+    return (character >= "a" and character <= "z") or (character >= "A" and character <= "Z")
+
+
+def is_alphanumeric(character: string) -> bool:
+    return is_alphabetic(character) or is_digit(character)
+
+
 def block_string(raw: string) -> string:
-    content = raw
+    content := raw
     if content.starts_with("\n"):
         content = content[1:]
     lines = content.split("\n")
-    common = -1
+    common := -1
     for line in lines:
-        if len(line.trim()) > 0:
+        if contains_non_whitespace(line):
             width = indentation_width(line)
             if common < 0 or width < common:
                 common = width
@@ -52,46 +71,78 @@ def block_string(raw: string) -> string:
     return result.join("\n")
 
 
-def punctuation(character: char, following: char | None) -> tuple[TokenKind, int] | None:
-    if character == "@": return (At, 1)
-    if character == ",": return (Comma, 1)
-    if character == ".": return (Dot, 1)
-    if character == "(": return (LeftParen, 1)
-    if character == ")": return (RightParen, 1)
-    if character == "[": return (LeftBracket, 1)
-    if character == "]": return (RightBracket, 1)
-    if character == "{": return (LeftBrace, 1)
-    if character == "}": return (RightBrace, 1)
-    if character == "|": return (Pipe, 1)
-    if character == ":" and following == "=": return (ColonEqual, 2)
-    if character == ":": return (Colon, 1)
-    if character == "?" and following == "=": return (QuestionEqual, 2)
-    if character == "+" and following == "=": return (PlusEqual, 2)
-    if character == "+": return (Plus, 1)
-    if character == "-" and following == ">": return (Arrow, 2)
-    if character == "-" and following == "=": return (MinusEqual, 2)
-    if character == "-": return (Minus, 1)
-    if character == "*" and following == "*": return (Power, 2)
-    if character == "*" and following == "=": return (StarEqual, 2)
-    if character == "*": return (Star, 1)
-    if character == "/" and following == "=": return (SlashEqual, 2)
-    if character == "/": return (Slash, 1)
-    if character == "%" and following == "=": return (PercentEqual, 2)
-    if character == "%": return (Percent, 1)
-    if character == "=" and following == "=": return (EqualEqual, 2)
-    if character == "=": return (Equal, 1)
-    if character == "!" and following == "=": return (NotEqual, 2)
-    if character == "<" and following == "=": return (LessEqual, 2)
-    if character == "<": return (Less, 1)
-    if character == ">" and following == "=": return (GreaterEqual, 2)
-    if character == ">": return (Greater, 1)
+def punctuation(character: string, following: string | None) -> tuple[TokenKind, int] | None:
+    if character == "@":
+        return (TokenKind.At, 1)
+    if character == ",":
+        return (TokenKind.Comma, 1)
+    if character == ".":
+        return (TokenKind.Dot, 1)
+    if character == "(":
+        return (TokenKind.LeftParen, 1)
+    if character == ")":
+        return (TokenKind.RightParen, 1)
+    if character == "[":
+        return (TokenKind.LeftBracket, 1)
+    if character == "]":
+        return (TokenKind.RightBracket, 1)
+    if character == "{":
+        return (TokenKind.LeftBrace, 1)
+    if character == "}":
+        return (TokenKind.RightBrace, 1)
+    if character == "|":
+        return (TokenKind.Pipe, 1)
+    if character == ":" and following == "=":
+        return (TokenKind.ColonEqual, 2)
+    if character == ":":
+        return (TokenKind.Colon, 1)
+    if character == "?" and following == "=":
+        return (TokenKind.QuestionEqual, 2)
+    if character == "+" and following == "=":
+        return (TokenKind.PlusEqual, 2)
+    if character == "+":
+        return (TokenKind.Plus, 1)
+    if character == "-" and following == ">":
+        return (TokenKind.Arrow, 2)
+    if character == "-" and following == "=":
+        return (TokenKind.MinusEqual, 2)
+    if character == "-":
+        return (TokenKind.Minus, 1)
+    if character == "*" and following == "*":
+        return (TokenKind.Power, 2)
+    if character == "*" and following == "=":
+        return (TokenKind.StarEqual, 2)
+    if character == "*":
+        return (TokenKind.Star, 1)
+    if character == "/" and following == "=":
+        return (TokenKind.SlashEqual, 2)
+    if character == "/":
+        return (TokenKind.Slash, 1)
+    if character == "%" and following == "=":
+        return (TokenKind.PercentEqual, 2)
+    if character == "%":
+        return (TokenKind.Percent, 1)
+    if character == "=" and following == "=":
+        return (TokenKind.EqualEqual, 2)
+    if character == "=":
+        return (TokenKind.Equal, 1)
+    if character == "!" and following == "=":
+        return (TokenKind.NotEqual, 2)
+    if character == "<" and following == "=":
+        return (TokenKind.LessEqual, 2)
+    if character == "<":
+        return (TokenKind.Less, 1)
+    if character == ">" and following == "=":
+        return (TokenKind.GreaterEqual, 2)
+    if character == ">":
+        return (TokenKind.Greater, 1)
     return None
 
 
 def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
     characters = file.text.characters()
-    cursor = 0
-    line_start = true
+    cursor := 0
+    line_start := true
     indents: list[int] = [0]
     tokens: list[Token] = []
 
@@ -106,17 +157,17 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 while cursor < len(characters) and characters[cursor] != "\n":
                     cursor += 1
                 if cursor < len(characters):
-                    tokens.append(make_token(file, Newline, cursor, cursor + 1))
+                    tokens.append(make_token(file, TokenKind.Newline, cursor, cursor + 1))
                     cursor += 1
                 continue
             width = indentation_width(characters[start:cursor].join(""))
             if width > indents[-1]:
                 indents.append(width)
-                tokens.append(make_token(file, Indent, start, cursor))
+                tokens.append(make_token(file, TokenKind.Indent, start, cursor))
             elif width < indents[-1]:
                 while width < indents[-1]:
                     indents.pop()
-                    tokens.append(make_token(file, Dedent, start, cursor))
+                    tokens.append(make_token(file, TokenKind.Dedent, start, cursor))
                 if width != indents[-1]:
                     return error(diagnostics.Diagnostic("E000102", "inconsistent indentation", source.Span(file.id, u32(start), u32(cursor))))
             line_start = false
@@ -127,7 +178,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             cursor += 1
             continue
         if character == "\n" or character == ";":
-            tokens.append(make_token(file, Newline, cursor, cursor + 1))
+            tokens.append(make_token(file, TokenKind.Newline, cursor, cursor + 1))
             cursor += 1
             line_start = character == "\n"
             continue
@@ -136,7 +187,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 cursor += 1
             continue
 
-        following: char | None = None
+        following: string | None := None
         if cursor + 1 < len(characters):
             following = characters[cursor + 1]
         symbol = punctuation(character, following)
@@ -152,6 +203,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             block = cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
             cursor += 3 if block else 1
             content_start = cursor
+            value := ""
             if block:
                 while cursor + 2 < len(characters) and not (characters[cursor] == "\"" and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""):
                     cursor += 1
@@ -168,33 +220,41 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                     return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
                 value = characters[content_start:cursor].join("")
                 cursor += 1
-            tokens.append(make_token(file, FormattedString(value) if formatted else String(value), start, cursor))
+            if formatted:
+                kind: TokenKind = TokenKind.FormattedString(value)
+                tokens.append(make_token(file, kind, start, cursor))
+            else:
+                kind: TokenKind = TokenKind.String(value)
+                tokens.append(make_token(file, kind, start, cursor))
             continue
 
-        if character.is_digit():
+        if is_digit(character):
             cursor += 1
-            while cursor < len(characters) and (characters[cursor].is_digit() or characters[cursor] == "_"):
+            while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
                 cursor += 1
-            floating = cursor + 1 < len(characters) and characters[cursor] == "." and characters[cursor + 1].is_digit()
+            floating = cursor + 1 < len(characters) and characters[cursor] == "." and is_digit(characters[cursor + 1])
             if floating:
                 cursor += 1
-                while cursor < len(characters) and (characters[cursor].is_digit() or characters[cursor] == "_"):
+                while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
                     cursor += 1
             spelling = characters[start:cursor].join("").replace("_", "")
-            tokens.append(make_token(file, Float(spelling) if floating else Integer(spelling), start, cursor))
+            if floating:
+                tokens.append(make_token(file, TokenKind.Float(spelling), start, cursor))
+            else:
+                tokens.append(make_token(file, TokenKind.Integer(spelling), start, cursor))
             continue
 
-        if character.is_alphabetic() or character == "_":
+        if is_alphabetic(character) or character == "_":
             cursor += 1
-            while cursor < len(characters) and (characters[cursor].is_alphanumeric() or characters[cursor] == "_"):
+            while cursor < len(characters) and (is_alphanumeric(characters[cursor]) or characters[cursor] == "_"):
                 cursor += 1
-            tokens.append(make_token(file, Identifier(characters[start:cursor].join("")), start, cursor))
+            tokens.append(make_token(file, TokenKind.Identifier(characters[start:cursor].join("")), start, cursor))
             continue
 
         return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), source.Span(file.id, u32(start), u32(start + 1))))
 
     while len(indents) > 1:
         indents.pop()
-        tokens.append(make_token(file, Dedent, cursor, cursor))
-    tokens.append(make_token(file, Eof, cursor, cursor))
+        tokens.append(make_token(file, TokenKind.Dedent, cursor, cursor))
+    tokens.append(make_token(file, TokenKind.Eof, cursor, cursor))
     return tokens

@@ -37,31 +37,45 @@ def lower_semantic(type_id: universal.TypeId, types: universal.TypeContext, targ
             match representation:
                 case Integer:
                     match bits:
-                        case Fixed: return (abi.integer(bits, signed), Direct)
-                        case Machine: return (abi.integer(target.data_layout.machine_integer_bits, signed), Direct)
-                case PointerInteger: return (abi.integer(u16(target.data_layout.pointer.size * 8), signed), Direct)
+                        case Fixed:
+                            return (abi.integer(bits, signed), Direct)
+                        case Machine:
+                            return (abi.integer(target.data_layout.machine_integer_bits, signed), Direct)
+                case PointerInteger:
+                    return (abi.integer(u16(target.data_layout.pointer.size * 8), signed), Direct)
                 case Float:
                     match format:
-                        case Ieee: return (abi.float_type(bits), Direct)
-                        case BrainFloat16: return (abi.Scalar(abi.Float(abi.BrainFloat16)), Direct)
-                        case Machine: return (abi.float_type(target.data_layout.machine_float_bits), Direct)
-                case Boolean: return (abi.Scalar(abi.Boolean), Conversion.Boolean)
-                case Character: return (abi.integer(32, false), Direct)
-                case String: return (abi.pointer_to(abi.integer(8, false), false), Utf8View)
-                case Bytes: return (abi.pointer_to(abi.integer(8, false), false), BytesView)
+                        case Ieee:
+                            return (abi.float_type(bits), Direct)
+                        case BrainFloat16:
+                            return (abi.Scalar(abi.Float(abi.BrainFloat16)), Direct)
+                        case Machine:
+                            return (abi.float_type(target.data_layout.machine_float_bits), Direct)
+                case Boolean:
+                    return (abi.Scalar(abi.Boolean), Conversion.Boolean)
+                case Character:
+                    return (abi.integer(32, false), Direct)
+                case String:
+                    return (abi.pointer_to(abi.integer(8, false), false), Utf8View)
+                case Bytes:
+                    return (abi.pointer_to(abi.integer(8, false), false), BytesView)
                 case NoneValue:
-                    if result: return (abi.Void, Direct)
+                    if result:
+                        return (abi.Void, Direct)
                 case Unit:
-                    if result: return (abi.Void, Direct)
+                    if result:
+                        return (abi.Void, Direct)
     return error(UnsupportedRepresentation("type cannot cross the foreign boundary"))
 
 
 def lower_type_ref(type_ref: ForeignTypeRef, module: ForeignModule, types: universal.TypeContext, target: abi.AbiTarget, result: bool) -> tuple[abi.AbiType, Conversion] | FfiError:
     match type_ref:
-        case Severian: return lower_semantic(type_id, types, target, result)
+        case Severian:
+            return lower_semantic(type_id, types, target, result)
         case External:
             declaration = module.type_declaration(name)
-            if declaration == None: return error(UnknownExternalType(name))
+            if declaration == None:
+                return error(UnknownExternalType(name))
             return (declaration.representation, Direct)
         case Pointer:
             lowered = lower_type_ref(pointee, module, types, target, false)

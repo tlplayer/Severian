@@ -1,7 +1,6 @@
 import "../primitive/primitive.sev"
 import "../primitive/array.sev"
 import "../primitive/slice.sev"
-import "../../memory/memory.sev"
 
 
 '''
@@ -113,7 +112,7 @@ trait List[T]:
 class list[T: Copy + Default]:
     trait List[T]
 
-    __memory: Memory[T]
+    __memory: *[T]
     length: usize
     capacity: usize
 

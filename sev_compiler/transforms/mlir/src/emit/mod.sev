@@ -6,17 +6,26 @@ import "../ir/lib.sev"
 
 def lowered_type(type_id: universal.LoweredType) -> MlirType | MlirError:
     match type_id:
-        case Integer: return integer_type(bits, signed)
+        case Integer:
+            return integer_type(bits, signed)
         case Float:
             match format:
-                case Ieee: return float_type(bits)
-                case BrainFloat16: return bf16_type()
-        case Boolean: return integer_type(1, false)
-        case String: return pointer_type()
-        case Bytes: return pointer_type()
-        case NoneValue: return integer_type(1, false)
-        case Unit: return error(UnsupportedType(type_id))
-        case Arguments: return pointer_type()
+                case Ieee:
+                    return float_type(bits)
+                case BrainFloat16:
+                    return bf16_type()
+        case Boolean:
+            return integer_type(1, false)
+        case String:
+            return pointer_type()
+        case Bytes:
+            return pointer_type()
+        case NoneValue:
+            return integer_type(1, false)
+        case Unit:
+            return error(UnsupportedType(type_id))
+        case Arguments:
+            return pointer_type()
 
 
 def value_type(module: universal.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
@@ -45,24 +54,34 @@ def function_identity(module: universal.Module, function: universal.FunctionDecl
 
 def function_symbol(module: universal.Module, function: universal.FunctionDeclaration) -> string:
     match function.linkage:
-        case External: return symbol
-        case Internal: return generated_mlir_function_name(function_identity(module, function)).value
+        case External:
+            return symbol
+        case Internal:
+            return generated_mlir_function_name(function_identity(module, function)).value
 
 
 def function_results(result: universal.LoweredType) -> list[MlirType] | MlirError:
     match result:
-        case Unit: return []
-        case _: return [lowered_type(result)]
+        case Unit:
+            return []
+        case _:
+            return [lowered_type(result)]
 
 
 def constant_attribute(value: universal.Constant, type_id: universal.LoweredType, lowered: MlirType) -> MlirAttributeValue | MlirError:
     match value:
-        case Integer: return integer_attribute(int(value), lowered)
-        case Float: return float_attribute(f64(value), lowered)
-        case Boolean: return boolean_attribute(value)
-        case NoneValue: return boolean_attribute(false)
-        case Unit: return error(UnsupportedType(type_id))
-        case _: return error(UnsupportedOperation("aggregate constants require typed global operations"))
+        case Integer:
+            return integer_attribute(int(value), lowered)
+        case Float:
+            return float_attribute(f64(value), lowered)
+        case Boolean:
+            return boolean_attribute(value)
+        case NoneValue:
+            return boolean_attribute(false)
+        case Unit:
+            return error(UnsupportedType(type_id))
+        case _:
+            return error(UnsupportedOperation("aggregate constants require typed global operations"))
 
 
 def function_index(program: MlirProgram, name: string) -> int | None:
@@ -87,37 +106,58 @@ def ensure_declaration(builder: MlirOpBuilder, name: string, arguments: list[Mli
 
 def comparison_predicate(operator: universal.BinaryOperation, signed: bool, floating: bool = false) -> string | MlirError:
     match operator:
-        case Equal: return "oeq" if floating else "eq"
-        case NotEqual: return "une" if floating else "ne"
-        case Less: return "olt" if floating else ("slt" if signed else "ult")
-        case LessEqual: return "ole" if floating else ("sle" if signed else "ule")
-        case Greater: return "ogt" if floating else ("sgt" if signed else "ugt")
-        case GreaterEqual: return "oge" if floating else ("sge" if signed else "uge")
-        case _: return error(UnsupportedOperation("operator is not a comparison"))
+        case Equal:
+            return "oeq" if floating else "eq"
+        case NotEqual:
+            return "une" if floating else "ne"
+        case Less:
+            return "olt" if floating else ("slt" if signed else "ult")
+        case LessEqual:
+            return "ole" if floating else ("sle" if signed else "ule")
+        case Greater:
+            return "ogt" if floating else ("sgt" if signed else "ugt")
+        case GreaterEqual:
+            return "oge" if floating else ("sge" if signed else "uge")
+        case _:
+            return error(UnsupportedOperation("operator is not a comparison"))
 
 
 def binary_operation_name(operator: universal.BinaryOperation, type_id: MlirType) -> MlirOperationName | MlirError:
     floating = is_float(type_id)
     signed = type_id.scalar.signed
     match operator:
-        case Add: return operation_name("arith", "addf" if floating else "addi")
-        case Subtract: return operation_name("arith", "subf" if floating else "subi")
-        case Multiply: return operation_name("arith", "mulf" if floating else "muli")
+        case Add:
+            return operation_name("arith", "addf" if floating else "addi")
+        case Subtract:
+            return operation_name("arith", "subf" if floating else "subi")
+        case Multiply:
+            return operation_name("arith", "mulf" if floating else "muli")
         case Divide:
             if floating:
                 return operation_name("arith", "divf")
             return operation_name("arith", "divsi" if signed else "divui")
-        case Remainder: return operation_name("arith", "remsi" if signed else "remui")
-        case And: return operation_name("arith", "andi")
-        case Or: return operation_name("arith", "ori")
-        case Equal: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case NotEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case Less: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case LessEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case Greater: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case GreaterEqual: return operation_name("arith", "cmpf" if floating else "cmpi")
-        case Power: return error(UnsupportedOperation("power requires math.pow lowering"))
-        case Contains: return error(UnsupportedOperation("containment requires a collection operation"))
+        case Remainder:
+            return operation_name("arith", "remsi" if signed else "remui")
+        case And:
+            return operation_name("arith", "andi")
+        case Or:
+            return operation_name("arith", "ori")
+        case Equal:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case NotEqual:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Less:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case LessEqual:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Greater:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case GreaterEqual:
+            return operation_name("arith", "cmpf" if floating else "cmpi")
+        case Power:
+            return error(UnsupportedOperation("power requires math.pow lowering"))
+        case Contains:
+            return error(UnsupportedOperation("containment requires a collection operation"))
 
 
 def binary_attributes(operator: universal.BinaryOperation, type_id: MlirType) -> list[MlirNamedAttribute] | MlirError:

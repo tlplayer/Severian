@@ -1,5 +1,4 @@
 import "../primitive/primitive.sev"
-import "../../memory/memory.sev"
 
 
 '''
@@ -74,7 +73,7 @@ trait Deque[T]:
 class deque[T: Copy + Default]:
     trait Deque[T]
 
-    __memory: Memory[T]
+    __memory: *[T]
     __head: usize
     length: usize
     capacity: usize

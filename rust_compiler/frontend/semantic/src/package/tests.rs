@@ -50,7 +50,7 @@ fn temporary() -> PathBuf {
 fn primitive_class_collapses_to_the_universal_identity_and_installs_operators() {
     let source = severian_source::SourceFile::virtual_source(
         "bool.sev",
-        "class bool: Primitive :\n    default_literal: bool = true\n    operator &(right: bool) -> bool:\n        return right\n",
+        "class bool: Primitive :\n    default_literal: bool = true\n    def default() -> bool:\n        return false\n    operator &(right: bool) -> bool:\n        return right\ndef selected() -> bool:\n    return bool.default()\n",
     );
     let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
     let graph = severian_modules::ModuleGraph {
@@ -86,6 +86,112 @@ fn primitive_class_collapses_to_the_universal_identity_and_installs_operators() 
         .iter()
         .flat_map(|module| &module.classes)
         .all(|class| class.id != universal_bool));
+}
+
+#[test]
+fn overloaded_trait_members_are_matched_by_complete_signature() {
+    let root = temporary();
+    let source = root.join("overloaded-trait.sev");
+    std::fs::write(
+        &source,
+        "trait Decoder:\n    def decode(value: i32) -> i32\n    def decode(value: string) -> string\n    operator +(right: i32) -> i32\n    operator +(right: string) -> string\nclass Both: Decoder\n    def decode(value: string) -> string:\n        return value\n    def decode(value: i32) -> i32:\n        return value\n    operator +(right: string) -> string:\n        return right\n    operator +(right: i32) -> i32:\n        return right\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_reexports_reach_the_same_fixed_point_in_reverse_graph_order() {
+    let root = temporary();
+    std::fs::write(
+        root.join("leaf.sev"),
+        "class Leaf:\n    value: i32\ndef make_leaf(value: i32) -> Leaf:\n    return Leaf(value)\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("middle.sev"), "import \"leaf.sev\"\n").unwrap();
+    std::fs::write(
+        root.join("entry.sev"),
+        "import \"middle.sev\"\ndef selected() -> Leaf:\n    return make_leaf(7)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("entry.sev")).unwrap();
+    let mut forward = collect_declarations(&graph).unwrap();
+    resolve_imports(&graph, &mut forward);
+    let mut reversed_graph = graph.clone();
+    reversed_graph.modules.reverse();
+    let mut reversed = collect_declarations(&reversed_graph).unwrap();
+    resolve_imports(&reversed_graph, &mut reversed);
+    assert_eq!(forward.exports, reversed.exports);
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(&reversed_graph, &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn imported_enums_keep_their_identity_and_defining_module_payload_types() {
+    let root = temporary();
+    std::fs::write(
+        root.join("tokens.sev"),
+        "class Span:\n    start: u64\nenum Token:\n    Name(span: Span)\n    Text(value: string)\ndef name(start: u64) -> Token:\n    return Name(Span(start))\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("facade.sev"), "import \"tokens.sev\"\n").unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"facade.sev\" as syntax\ndef retain(token: syntax.Token) -> syntax.Token:\n    return token\ndef selected() -> syntax.Token:\n    return retain(syntax.Token.Name(syntax.Span(3)))\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    let token_types = typed
+        .hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .filter(|function| matches!(function.name.as_str(), "name" | "retain" | "selected"))
+        .map(|function| function.result.ty)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(token_types.len(), 1);
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn imported_declarations_resolve_nested_traits_in_their_defining_module() {
+    let root = temporary();
+    std::fs::write(
+        root.join("model.sev"),
+        "trait Tag:\n    def id() -> u64\nclass Envelope:\n    tags: list[Tag]\ndef retain(tags: list[Tag]) -> list[Tag]:\n    return tags\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("facade.sev"), "import \"model.sev\"\n").unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"facade.sev\" as model\ndef forward(tags: list[model.Tag]) -> list[model.Tag]:\n    return model.retain(tags)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn trait_typed_values_satisfy_the_same_trait_constraint() {
+    let root = temporary();
+    let source = root.join("trait-value.sev");
+    std::fs::write(
+        &source,
+        "trait BinaryOperator:\n    def precedence() -> int\ndef precedence(operator: BinaryOperator) -> int:\n    return operator.precedence()\ndef forward(operator: BinaryOperator) -> int:\n    return precedence(operator)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

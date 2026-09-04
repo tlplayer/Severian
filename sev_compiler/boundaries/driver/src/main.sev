@@ -68,8 +68,10 @@ def discover_source(path: string | None, selected: string | None) -> tuple[strin
         if target == None:
             return error("unknown binary target " + selected)
         match target:
-            case Binary: return (target.path, target.name)
-            case Library: return (target.path, target.name)
+            case Binary:
+                return (target.path, target.name)
+            case Library:
+                return (target.path, target.name)
     if len(manifest.binaries) > 0:
         return (manifest.binaries[0].path, manifest.binaries[0].name)
     if len(manifest.libraries) > 0:

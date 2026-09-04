@@ -108,8 +108,10 @@ def source_import(importer: string, package: universal.PackageId, declaration: u
 def has_runtime_initializer(module: universal.Module) -> bool:
     for item in module.items:
         match item:
-            case BindingItem: return true
-            case ExpressionItem: return true
+            case BindingItem:
+                return true
+            case ExpressionItem:
+                return true
     return false
 
 

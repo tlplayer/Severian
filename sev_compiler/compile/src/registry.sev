@@ -25,12 +25,14 @@ class CompilerRegistry:
         regions: list[CompileRegion] = plan.nested_regions.copy()
         for segment in plan.initializer.segments:
             match segment:
-                case Compiler: regions.append(region)
+                case Compiler:
+                    regions.append(region)
         for function in plan.functions:
             if function.body != None:
                 for segment in function.body.segments:
                     match segment:
-                        case Compiler: regions.append(region)
+                        case Compiler:
+                            regions.append(region)
         for region in regions:
             handler = handlers.get(region.compiler)
             if handler == None:

@@ -53,14 +53,19 @@ def add_loan(place: universal.Place, kind: LoanKind, block: universal.BlockId, r
 
 def inspect_rvalue(value: universal.Rvalue, block: universal.BlockId, report: OwnershipReport, errors: list[OwnershipError]):
     match value:
-        case Use: inspect_operand(operand, report, errors)
-        case Unary: inspect_operand(operand, report, errors)
-        case Convert: inspect_operand(operand, report, errors)
+        case Use:
+            inspect_operand(operand, report, errors)
+        case Unary:
+            inspect_operand(operand, report, errors)
+        case Convert:
+            inspect_operand(operand, report, errors)
         case Binary:
             inspect_operand(left, report, errors)
             inspect_operand(right, report, errors)
-        case BorrowShared: add_loan(place, Shared, block, report, errors)
-        case BorrowExclusive: add_loan(place, Exclusive, block, report, errors)
+        case BorrowShared:
+            add_loan(place, Shared, block, report, errors)
+        case BorrowExclusive:
+            add_loan(place, Exclusive, block, report, errors)
         case Aggregate:
             for field in fields:
                 inspect_operand(field, report, errors)
@@ -88,10 +93,13 @@ def analyze_ownership(body: universal.CfgBody, types: universal.TypeContext) -> 
                     report.initialized.discard(local)
                 case Assert:
                     inspect_operand(condition, report, errors)
-                    if message != None: inspect_operand(message, report, errors)
+                    if message != None:
+                        inspect_operand(message, report, errors)
                 case Operation:
-                    for operand in operands: inspect_operand(operand, report, errors)
-                    for result in results: report.initialized.add(result.local)
+                    for operand in operands:
+                        inspect_operand(operand, report, errors)
+                    for result in results:
+                        report.initialized.add(result.local)
     if len(errors) > 0:
         return error(errors)
     return report
@@ -101,7 +109,8 @@ def elaborate_drops(body: universal.CfgBody, types: universal.TypeContext):
     resources: list[universal.LocalId] = []
     for local in body.locals:
         match types.kind(local.type_id):
-            case Resource: resources.append(local.id)
+            case Resource:
+                resources.append(local.id)
     for block in body.blocks:
         match block.terminator:
             case Return:

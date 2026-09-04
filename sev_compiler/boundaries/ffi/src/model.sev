@@ -47,11 +47,15 @@ enum AbiSelection:
 
 
 def convention(selection: AbiSelection) -> abi.CallingConvention:
-    if selection == C: return abi.C
-    if selection == System: return abi.System
-    if selection == Rust: return abi.Rust
+    if selection == C:
+        return abi.C
+    if selection == System:
+        return abi.System
+    if selection == Rust:
+        return abi.Rust
     match selection:
-        case Explicit: return convention
+        case Explicit:
+            return convention
 
 
 class ForeignFunction:
@@ -75,5 +79,6 @@ class ForeignModule:
 
     def type_declaration(name: string) -> ForeignTypeDeclaration | None:
         for declaration in types:
-            if declaration.name == name: return declaration
+            if declaration.name == name:
+                return declaration
         return None

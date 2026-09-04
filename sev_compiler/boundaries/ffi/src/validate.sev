@@ -15,7 +15,8 @@ enum FfiError:
 
 def validate_type_ref(type_ref: ForeignTypeRef, module: ForeignModule) -> unit | FfiError:
     match type_ref:
-        case Severian: return unit
+        case Severian:
+            return unit
         case External:
             if module.type_declaration(name) == None:
                 return error(UnknownExternalType(name))

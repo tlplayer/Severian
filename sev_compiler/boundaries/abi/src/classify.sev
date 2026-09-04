@@ -40,10 +40,13 @@ def classify(type_id: AbiType, convention: CallingConvention, target: AbiTarget,
     match type_id:
         case Scalar:
             match type_id:
-                case Float: return ClassifiedValue(type_id, Direct([RegisterClass.Float]))
+                case Float:
+                    return ClassifiedValue(type_id, Direct([RegisterClass.Float]))
             return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
-        case Pointer: return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
-        case Function: return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
+        case Pointer:
+            return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
+        case Function:
+            return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
     limit: u64 = 16
     if convention == Win64 or convention == C or convention == System:
         limit = 8

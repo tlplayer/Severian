@@ -27,17 +27,22 @@ class SemanticQueries:
         if resolution == None:
             return error(UnknownName(scope, name))
         match resolution:
-            case Def: return definition
-            case OverloadSet: return error(Ambiguous(definitions))
-            case Ambiguous: return error(Ambiguous(definitions))
-            case Module: return error(UnknownName(scope, name))
+            case Def:
+                return definition
+            case OverloadSet:
+                return error(Ambiguous(definitions))
+            case Ambiguous:
+                return error(Ambiguous(definitions))
+            case Module:
+                return error(UnknownName(scope, name))
 
     def signature_of(definition: universal.DefId) -> universal.FunctionDeclaration | QueryError:
         item = program.index.definitions.get(definition)
         if item == None:
             return error(NotFunction(definition))
         match item.kind:
-            case Function: return signature
+            case Function:
+                return signature
         return error(NotFunction(definition))
 
     def type_check(definition: universal.DefId) -> universal.FunctionDeclaration | QueryError:

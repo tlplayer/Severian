@@ -963,7 +963,8 @@ fn validate_specializations(
                 let satisfied = types
                     .resolve_name(actual_name)
                     .is_some_and(|actual| satisfies_bound(actual, bound_name, index, types))
-                    || source_class_satisfies_bound(actual_name, bound_name, module_graph, index);
+                    || source_class_satisfies_bound(actual_name, bound_name, module_graph, index)
+                    || source_trait_satisfies_bound(actual_name, bound_name, index);
                 if satisfied {
                     continue;
                 }
@@ -1127,6 +1128,8 @@ fn source_trait_extends(
     index: &ProgramIndex,
     visiting: &mut BTreeSet<String>,
 ) -> bool {
+    let trait_name = trait_name.rsplit('.').next().unwrap_or(trait_name);
+    let bound_name = bound_name.rsplit('.').next().unwrap_or(bound_name);
     if trait_name == bound_name {
         return true;
     }
@@ -1141,6 +1144,15 @@ fn source_trait_extends(
                 })
             }))
     })
+}
+
+fn source_trait_satisfies_bound(actual_name: &str, bound_name: &str, index: &ProgramIndex) -> bool {
+    let actual_name = actual_name.rsplit('.').next().unwrap_or(actual_name);
+    let is_trait = index.definitions.values().any(|definition| {
+        definition.name.rsplit('.').next() == Some(actual_name)
+            && matches!(definition.kind, DefKind::Trait(_))
+    });
+    is_trait && source_trait_extends(actual_name, bound_name, index, &mut BTreeSet::new())
 }
 
 fn satisfies_bound(

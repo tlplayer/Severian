@@ -1,6 +1,6 @@
 import source
 
-class Diagnostic:
+class Diagnostic: Error
     code: string
     message: string
     span: source.Span | None
@@ -15,4 +15,3 @@ def diagnostic(code: string, message: string) -> Diagnostic:
 
 def diagnostic_at(code: string, message: string, span: source.Span) -> Diagnostic:
     return Diagnostic(code, message, span)
-

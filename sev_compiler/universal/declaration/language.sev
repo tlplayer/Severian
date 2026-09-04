@@ -129,9 +129,15 @@ class TestDeclaration:
 
 def test_mode_name(mode: TestMode) -> string:
     match mode:
-        case Property: return "property"
-        case Benchmark: return "bench"
-        case Chaos: return "chaos"
-        case Profile: return "profile"
-        case Compiler: return "compiler"
-        case Integration: return "integ"
+        case Property:
+            return "property"
+        case Benchmark:
+            return "bench"
+        case Chaos:
+            return "chaos"
+        case Profile:
+            return "profile"
+        case Compiler:
+            return "compiler"
+        case Integration:
+            return "integ"

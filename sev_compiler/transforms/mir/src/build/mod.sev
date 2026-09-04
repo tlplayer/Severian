@@ -59,27 +59,32 @@ class Builder:
                 self.expression(expression, block)
             case Return:
                 result: universal.ValueId | None = None
-                if value != None: result = self.expression(value, block)
+                if value != None:
+                    result = self.expression(value, block)
                 block.operations.append(Return(result))
             case Assert:
                 condition_value = self.expression(condition, block)
                 message_value: universal.ValueId | None = None
-                if message != None: message_value = self.expression(message, block)
+                if message != None:
+                    message_value = self.expression(message, block)
                 origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
                 block.operations.append(Assert(condition_value, message_value, origin))
             case If:
                 condition_value = self.expression(condition, block)
                 then_mir = universal.empty_block()
                 else_mir = universal.empty_block()
-                for nested in then_block.statements: statement(nested, hir_module, then_mir)
-                for nested in else_block.statements: statement(nested, hir_module, else_mir)
+                for nested in then_block.statements:
+                    statement(nested, hir_module, then_mir)
+                for nested in else_block.statements:
+                    statement(nested, hir_module, else_mir)
                 block.operations.append(If(condition_value, then_mir, else_mir))
             case Match:
                 subject_value = self.expression(subject, block)
                 mir_arms: list[universal.MatchArm] = []
                 for arm in arms:
                     arm_body = universal.empty_block()
-                    for nested in arm.body.statements: statement(nested, hir_module, arm_body)
+                    for nested in arm.body.statements:
+                        statement(nested, hir_module, arm_body)
                     mir_arms.append(universal.MatchArm(arm_body, type_id = arm.type_id))
                 block.operations.append(Match(subject_value, mir_arms))
 
