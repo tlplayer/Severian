@@ -43,7 +43,7 @@ impl Decorator {
     pub fn is_compile_policy(&self) -> bool {
         matches!(
             self.name.as_str(),
-            "compile" | "mlir" | "stablehlo" | "xla" | "triton"
+            "compile" | "mlir" | "stablehlo" | "xla" | "triton" | "unsafe"
         )
     }
 }
@@ -425,8 +425,13 @@ pub struct ClassDeclaration {
     /// second nominal type.
     pub primitive: bool,
     pub type_parameters: Vec<String>,
+    pub type_parameter_defaults: Vec<Option<TypeAnnotation>>,
     pub constraints: Vec<GenericConstraint>,
     pub traits: Vec<TypeAnnotation>,
+    /// Alternate source spellings that resolve to this class identity. The
+    /// primitive pointer declaration uses this to connect `pointer[T]` with
+    /// the structural `*[T]` spelling without introducing another type.
+    pub aliases: Vec<TypeAnnotation>,
     pub fields: Vec<PropertyDeclaration>,
     pub constructors: Vec<FunctionDeclaration>,
     pub methods: Vec<FunctionDeclaration>,

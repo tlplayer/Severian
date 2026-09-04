@@ -1,7 +1,4 @@
 import "../primitive/primitive.sev"
-import "../../memory/memory.sev"
-
-
 '''
 # `array[T, N]`
 
@@ -85,8 +82,8 @@ trait FixedContainer[T, N]:
     property length: usize
 
     def len(self) -> usize
-    def size(self) -> byte
-    def alignment(self) -> byte
+    def size(self) -> data_size
+    def alignment(self) -> data_size
 
 
 trait Array[T, N]:
@@ -94,8 +91,8 @@ trait Array[T, N]:
     Truth
     Copy
 
-    operator [](index: usize) -> T
-    operator []=(index: usize, value: T)
+    operator [](index: int) -> T
+    operator []=(index: int, value: T)
 
 
 '''
@@ -108,7 +105,7 @@ ownership, and lifetime checks.
 '''
 class array[T: Copy + Default, N: usize]: Array[T, N]:
 
-    __memory
+    __memory: *[T]
     length: usize = N
 
 
@@ -154,8 +151,8 @@ class array[T: Copy + Default, N: usize]: Array[T, N]:
 
     Bounds are checked before entering the raw memory operation.
     '''
-    operator [](index: usize) -> T:
-        if index >= N:
+    operator [](index: int) -> T:
+        if index < 0 or index >= N:
             throw IndexError(
                 f"array index {index} outside [0, {N})"
             )
@@ -164,8 +161,8 @@ class array[T: Copy + Default, N: usize]: Array[T, N]:
             return __memory[index]
 
 
-    operator []=(index: usize, value: T):
-        if index >= N:
+    operator []=(index: int, value: T):
+        if index < 0 or index >= N:
             throw IndexError(
                 f"array index {index} outside [0, {N})"
             )
@@ -181,13 +178,13 @@ class array[T: Copy + Default, N: usize]: Array[T, N]:
         return N
 
 
-    def size(self) -> usize:
-        return N
+    def size(self) -> data_size:
+        return N * bytes[T]()
 
-    def bytes(self) -> bytes:
-        return N *bytes(T)
+    def bytes(self) -> data_size:
+        return self.size()
 
-    def alignment(self) -> byte:
+    def alignment(self) -> data_size:
         return alignment[T]()
 
 
@@ -311,7 +308,8 @@ test "array bounds are checked":
     values := array[i32, 4]()
 
     throws(values[4])
-    throws(values[4] = 10)
+    throws:
+        values[4] = 10
 
 
 test "empty array rejects first and last":
@@ -345,7 +343,7 @@ test "array copy owns separate storage":
 
 test "array iteration follows index order":
     values := array[i32, 4]([10, 20, 30, 40])
-    total := 0
+    total: i32 := 0
 
     for value in values:
         total += value
@@ -376,7 +374,7 @@ test with compiler "array initializer length must match type":
 test with compiler "array requires copy default element contract":
     reject:
         class OwnedResource:
-            handle
+            handle: usize
 
             def drop():
                 release(handle)

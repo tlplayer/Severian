@@ -213,6 +213,40 @@ uintptr_t __sev_string_length(const char *value) {
     return sev_utf8_length(value);
 }
 
+uintptr_t __sev_string_byte_length(const char *value) {
+    return value == NULL ? 0 : strlen(value);
+}
+
+const unsigned char *__sev_string_data(const char *value) {
+    return (const unsigned char *)(value == NULL ? "" : value);
+}
+
+uint8_t __sev_string_byte(const char *value, uintptr_t index) {
+    size_t length = value == NULL ? 0 : strlen(value);
+    if (index >= length) return 0;
+    return (uint8_t)value[index];
+}
+
+uint32_t __sev_string_codepoint(const char *value, int64_t index) {
+    int64_t length = (int64_t)sev_utf8_length(value);
+    if (index < 0) index += length;
+    if (index < 0 || index >= length) return 0;
+    size_t offset = sev_utf8_offset(value, (size_t)index);
+    const unsigned char *bytes = (const unsigned char *)value + offset;
+    size_t width = sev_utf8_width(bytes[0]);
+    if (width == 1) return bytes[0];
+    if (width == 2) return ((uint32_t)(bytes[0] & 0x1f) << 6) | (bytes[1] & 0x3f);
+    if (width == 3) {
+        return ((uint32_t)(bytes[0] & 0x0f) << 12)
+            | ((uint32_t)(bytes[1] & 0x3f) << 6)
+            | (bytes[2] & 0x3f);
+    }
+    return ((uint32_t)(bytes[0] & 0x07) << 18)
+        | ((uint32_t)(bytes[1] & 0x3f) << 12)
+        | ((uint32_t)(bytes[2] & 0x3f) << 6)
+        | (bytes[3] & 0x3f);
+}
+
 const char *__sev_string_index(const char *value, int64_t index) {
     int64_t length = (int64_t)sev_utf8_length(value);
     if (index < 0) index += length;

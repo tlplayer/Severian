@@ -1,0 +1,21 @@
+# R - Result
+# Use R when a generic parameter represents an operation or callable result.
+
+trait ResultTerm:
+    def name() -> string
+
+
+class NamedResult: ResultTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def result_name[R: ResultTerm](result: R) -> string:
+    return result.name()
+
+
+test:
+    result := NamedResult("output")
+    assert(result_name(result) == "output")

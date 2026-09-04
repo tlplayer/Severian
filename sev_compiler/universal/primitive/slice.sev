@@ -96,23 +96,23 @@ borrow is shared or exclusive.
 '''
 class slice[T]: Slice[T]:
 
-    __memory: borrow Memory[T]
+    __memory: *[T]
     __offset: usize
     length: usize
 
     def slice(
-        memory: borrow Memory[T],
+        memory: *[T],
         offset: usize,
-        length: usize,
+        view_length: usize,
     ):
-        if offset + length > memory.len():
+        if offset + view_length > memory.len():
             throw IndexError(
-                f"slice [{offset}, {offset + length}) exceeds memory length {memory.len()}"
+                f"slice [{offset}, {offset + view_length}) exceeds memory length {memory.len()}"
             )
 
         __memory = memory
         __offset = offset
-        self.length = length
+        self.length = view_length
 
     operator if(self) -> self.length != 0
     operator else(self) -> self.length == 0
@@ -325,7 +325,7 @@ test "slice iteration preserves order":
     values := array[i32, 5]([10, 20, 30, 40, 50])
     middle := values[1:4]
 
-    total := 0
+    total: i32 := 0
 
     for value in middle:
         total += value

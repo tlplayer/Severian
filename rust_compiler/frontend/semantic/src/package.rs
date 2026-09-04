@@ -537,6 +537,97 @@ pub fn analyze_package_with_context(
 
 fn lower_extensions(module_graph: &ModuleGraph) -> Result<ModuleGraph, Diagnostic> {
     let mut lowered = module_graph.clone();
+    let imported_extensions = lowered
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module.ast.items.iter().filter_map(move |item| {
+                let Item::Extension(extension) = item else {
+                    return None;
+                };
+                let (target, _) = extension.target.named_parts()?;
+                let defined_here = module.ast.items.iter().any(|item| {
+                    matches!(item, Item::Class(class) if class.name == target)
+                });
+                (!defined_here && target != "set" && extension.decorators.is_empty()).then(|| {
+                    (module.id, extension.clone(), target.to_owned())
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    for (_, extension, target) in &imported_extensions {
+        let Some(class) = lowered.modules.iter_mut().find_map(|module| {
+            module.ast.items.iter_mut().find_map(|item| match item {
+                Item::Class(class) if class.name == *target => Some(class),
+                _ => None,
+            })
+        }) else {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("cannot extend unknown type `{target}`"),
+                Some(extension.target.span),
+            ));
+        };
+        for method in &extension.methods {
+            if class.fields.iter().any(|known| known.name == method.name)
+                || class.methods.iter().any(|known| known.name == method.name)
+                || class
+                    .constructors
+                    .iter()
+                    .any(|known| known.name == method.name)
+            {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!(
+                        "extension cannot replace behavior `{target}.{}` defined directly on `{target}`",
+                        method.name
+                    ),
+                    Some(method.span),
+                ));
+            }
+        }
+        for operator in &extension.operators {
+            if class
+                .operators
+                .iter()
+                .any(|known| {
+                    known.operator == operator.operator
+                        && annotations_match(
+                            &known
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.annotation.clone())
+                                .collect::<Vec<_>>(),
+                            &operator
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.annotation.clone())
+                                .collect::<Vec<_>>(),
+                        )
+                })
+            {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!(
+                        "extension cannot replace an operator defined directly on `{target}`"
+                    ),
+                    Some(operator.span),
+                ));
+            }
+        }
+        class.methods.extend(extension.methods.clone());
+        class.operators.extend(extension.operators.clone());
+    }
+    for module in &mut lowered.modules {
+        module.ast.items.retain(|item| {
+            let Item::Extension(extension) = item else {
+                return true;
+            };
+            !imported_extensions.iter().any(|(source, moved, _)| {
+                *source == module.id && moved.span == extension.span
+            })
+        });
+    }
     for module in &mut lowered.modules {
         module.ast = crate::normalize_extensions(&module.ast)?;
     }
@@ -633,8 +724,10 @@ fn collect_package_classes(
                             name: declaration.name.clone(),
                             primitive: false,
                             type_parameters: Vec::new(),
+                            type_parameter_defaults: Vec::new(),
                             constraints: Vec::new(),
                             traits: Vec::new(),
+                            aliases: Vec::new(),
                             fields,
                             constructors: Vec::new(),
                             methods: Vec::new(),
@@ -650,30 +743,49 @@ fn collect_package_classes(
         .map(|(module, declaration)| {
             let ty = if declaration.primitive {
                 if !declaration.type_parameters.is_empty() {
-                    return Err(Diagnostic::new(
-                        "E000204",
-                        "a primitive declaration cannot have type parameters",
-                        Some(declaration.span),
-                    ));
+                    let supported = matches!(
+                        declaration.name.as_str(),
+                        "pointer" | "array" | "char" | "slice"
+                    );
+                    if !supported
+                        || (declaration.name == "pointer" && declaration.aliases.is_empty())
+                    {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            "a generic primitive declaration must complete a compiler-owned structural type and declare its source alias",
+                            Some(declaration.span),
+                        ));
+                    }
+                    let path = format!("source.{:032x}.{}", module.0, declaration.name);
+                    types
+                        .register_source_declaration(
+                            path,
+                            declaration.name.clone(),
+                            declaration.type_parameters.len(),
+                        )
+                        .map_err(|error| {
+                            Diagnostic::new("E000204", error.to_string(), Some(declaration.span))
+                        })?
+                } else {
+                    let ty = types.resolve_name(&declaration.name).ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            format!(
+                                "primitive declaration `{}` has no compiler-owned type to complete",
+                                declaration.name
+                            ),
+                            Some(declaration.span),
+                        )
+                    })?;
+                    if types.primitive(ty).is_none() {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            format!("`{}` is not a compiler-owned primitive", declaration.name),
+                            Some(declaration.span),
+                        ));
+                    }
+                    ty
                 }
-                let ty = types.resolve_name(&declaration.name).ok_or_else(|| {
-                    Diagnostic::new(
-                        "E000204",
-                        format!(
-                            "primitive declaration `{}` has no compiler-owned type to complete",
-                            declaration.name
-                        ),
-                        Some(declaration.span),
-                    )
-                })?;
-                if types.primitive(ty).is_none() {
-                    return Err(Diagnostic::new(
-                        "E000204",
-                        format!("`{}` is not a compiler-owned primitive", declaration.name),
-                        Some(declaration.span),
-                    ));
-                }
-                ty
             } else {
                 let path = format!("source.{:032x}.{}", module.0, declaration.name);
                 types
@@ -714,7 +826,9 @@ fn install_primitive_class_operators(
     types: &mut severian_universal::TypeContext,
     classes: &[PackageClass],
 ) -> Result<(), Diagnostic> {
-    for class in classes.iter().filter(|class| class.declaration.primitive) {
+    for class in classes.iter().filter(|class| {
+        class.declaration.primitive && class.declaration.type_parameters.is_empty()
+    }) {
         for implementation in &class.declaration.operators {
             // Generic source operators are resolved at their concrete use
             // sites; they cannot be installed as an exact universal

@@ -1,0 +1,21 @@
+# P - Pattern
+# Use P when a generic parameter represents a match or destructuring pattern.
+
+trait PatternTerm:
+    def binding() -> string
+
+
+class BindingPattern: PatternTerm
+    text: string
+
+    def binding() -> string:
+        return text
+
+
+def pattern_binding[P: PatternTerm](pattern: P) -> string:
+    return pattern.binding()
+
+
+test:
+    pattern := BindingPattern("value")
+    assert(pattern_binding(pattern) == "value")

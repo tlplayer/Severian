@@ -551,7 +551,14 @@ impl Compiler {
                             compiler_cases: Vec::new(),
                             span: case.span,
                         }));
-                    let result = self.check_ast_to_mir(&ast, CompileMode::Test, "compiler_case");
+                    let mut case_graph = graph.clone();
+                    let case_module = case_graph
+                        .modules
+                        .iter_mut()
+                        .find(|candidate| candidate.id == module.id)
+                        .expect("compiler test module remains in its resolved graph");
+                    case_module.ast = ast;
+                    let result = self.check_graph_to_mir(case_graph, CompileMode::Test);
                     let matched = match case.expectation {
                         severian_ast::CompilerExpectation::Accept => result.is_ok(),
                         severian_ast::CompilerExpectation::Reject => result.is_err(),

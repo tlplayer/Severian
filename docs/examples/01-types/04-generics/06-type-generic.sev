@@ -1,0 +1,21 @@
+# T - Type
+# Use T when the generic parameter represents a compiler type.
+
+trait TypeTerm:
+    def name() -> string
+
+
+class NamedType: TypeTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def type_name[T: TypeTerm](type_term: T) -> string:
+    return type_term.name()
+
+
+test:
+    integer := NamedType("i64")
+    assert(type_name(integer) == "i64")

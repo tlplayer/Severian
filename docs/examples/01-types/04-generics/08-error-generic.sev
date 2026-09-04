@@ -1,0 +1,21 @@
+# E - Error
+# E is reserved for errors. Expression uses Ex.
+
+trait ErrorTerm:
+    def message() -> string
+
+
+class ParseFailure: ErrorTerm
+    text: string
+
+    def message() -> string:
+        return text
+
+
+def error_message[E: ErrorTerm](error_term: E) -> string:
+    return error_term.message()
+
+
+test:
+    failure := ParseFailure("unexpected token")
+    assert(error_message(failure) == "unexpected token")

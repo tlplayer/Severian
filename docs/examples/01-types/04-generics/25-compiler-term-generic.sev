@@ -1,0 +1,32 @@
+# X - Any compiler term
+# X is the umbrella generic for T, V, E, Ex, M, S, D, P, L, O, I,
+# B, A, R, F, C, K, Y, N, and future compiler-term categories.
+
+trait CompilerTerm:
+    def category() -> string
+
+
+class TypeCompilerTerm: CompilerTerm
+    name: string
+
+    def category() -> string:
+        return name
+
+
+class StatementCompilerTerm: CompilerTerm
+    name: string
+
+    def category() -> string:
+        return name
+
+
+def term_category[X: CompilerTerm](term: X) -> string:
+    return term.category()
+
+
+test:
+    type_term := TypeCompilerTerm("type")
+    statement_term := StatementCompilerTerm("statement")
+
+    assert(term_category(type_term) == "type")
+    assert(term_category(statement_term) == "statement")

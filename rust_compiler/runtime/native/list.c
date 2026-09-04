@@ -824,6 +824,63 @@ _Bool __sev_pointer_equal(void *left, void *right) {
     return left == right;
 }
 
+void *__sev_array_from_list_i64(void *storage, int64_t count) {
+    sev_list *list = storage;
+    if (count < 0 || (size_t)count != list->length) abort();
+    int64_t *values = calloc((size_t)count, sizeof(int64_t));
+    if (values == NULL && count != 0) abort();
+    for (int64_t index = 0; index < count; ++index) {
+        values[index] = (int64_t)list->values[index];
+    }
+    return values;
+}
+
+void *__sev_array_from_list_u32(void *storage, int64_t count) {
+    sev_list *list = storage;
+    if (count < 0 || (size_t)count != list->length) abort();
+    uint32_t *values = calloc((size_t)count, sizeof(uint32_t));
+    if (values == NULL && count != 0) abort();
+    for (int64_t index = 0; index < count; ++index) {
+        values[index] = (uint32_t)list->values[index];
+    }
+    return values;
+}
+
+void *__sev_array_from_list_u8(void *storage, int64_t count) {
+    sev_list *list = storage;
+    if (count < 0 || (size_t)count != list->length) abort();
+    uint8_t *values = calloc((size_t)count, sizeof(uint8_t));
+    if (values == NULL && count != 0) abort();
+    for (int64_t index = 0; index < count; ++index) {
+        values[index] = (uint8_t)list->values[index];
+    }
+    return values;
+}
+
+void *__sev_array_clone_i64(void *pointer, int64_t count) {
+    if (count < 0) abort();
+    int64_t *copy = calloc((size_t)count, sizeof(int64_t));
+    if (copy == NULL && count != 0) abort();
+    memcpy(copy, pointer, (size_t)count * sizeof(int64_t));
+    return copy;
+}
+
+void *__sev_array_clone_u32(void *pointer, int64_t count) {
+    if (count < 0) abort();
+    uint32_t *copy = calloc((size_t)count, sizeof(uint32_t));
+    if (copy == NULL && count != 0) abort();
+    memcpy(copy, pointer, (size_t)count * sizeof(uint32_t));
+    return copy;
+}
+
+void *__sev_array_clone_u8(void *pointer, int64_t count) {
+    if (count < 0) abort();
+    uint8_t *copy = calloc((size_t)count, sizeof(uint8_t));
+    if (copy == NULL && count != 0) abort();
+    memcpy(copy, pointer, (size_t)count * sizeof(uint8_t));
+    return copy;
+}
+
 void *__sev_allocate(int64_t count) {
     if (count < 0 || (uint64_t)count > SIZE_MAX / sizeof(uintptr_t)) abort();
     void *allocation = calloc((size_t)count, sizeof(uintptr_t));

@@ -21,3 +21,34 @@ trait Primitive: Type
     property category: PrimitiveCategory
     property representation: PrimitiveRepresentation
     property default_literal: bool = false
+
+
+trait PrimitiveAlias[T]: Primitive
+
+
+class IndexError: Error
+    message: string
+
+    def IndexError(value: string):
+        message = value
+
+
+class UnicodeError: Error
+    message: string
+
+    def UnicodeError(value: string):
+        message = value
+
+
+class TypeConversionError: Error
+    message: string
+
+    def TypeConversionError(value: string):
+        message = value
+
+
+class ValueError: Error
+    message: string
+
+    def ValueError(value: string):
+        message = value

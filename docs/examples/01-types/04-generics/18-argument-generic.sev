@@ -1,0 +1,21 @@
+# A - Argument
+# Use A when a generic parameter represents a call or declaration argument.
+
+trait ArgumentTerm:
+    def name() -> string
+
+
+class NamedArgument: ArgumentTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def argument_name[A: ArgumentTerm](argument: A) -> string:
+    return argument.name()
+
+
+test:
+    argument := NamedArgument("input")
+    assert(argument_name(argument) == "input")

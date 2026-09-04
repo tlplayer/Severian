@@ -1,0 +1,21 @@
+# F - Callable
+# Use F for functions, methods, constructors, and other callable terms.
+
+trait CallableTerm:
+    def name() -> string
+
+
+class FunctionCallable: CallableTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def callable_name[F: CallableTerm](callable_term: F) -> string:
+    return callable_term.name()
+
+
+test:
+    callable_term := FunctionCallable("lower")
+    assert(callable_name(callable_term) == "lower")

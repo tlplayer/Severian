@@ -1,0 +1,21 @@
+# V - Value
+# Use V when the generic parameter represents a compiler value.
+
+trait ValueTerm:
+    def render() -> string
+
+
+class ConstantValue: ValueTerm
+    text: string
+
+    def render() -> string:
+        return text
+
+
+def value_text[V: ValueTerm](value_term: V) -> string:
+    return value_term.render()
+
+
+test:
+    value := ConstantValue("42")
+    assert(value_text(value) == "42")

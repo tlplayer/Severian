@@ -77,6 +77,10 @@ pub enum Statement {
         value: Option<Expression>,
         span: Span,
     },
+    Yield {
+        value: Expression,
+        span: Span,
+    },
     Assert {
         condition: Expression,
         message: Option<Expression>,

@@ -1,0 +1,21 @@
+# C - Constraint
+# Use C when a generic parameter represents a semantic requirement.
+
+trait ConstraintTerm:
+    def description() -> string
+
+
+class TraitConstraint: ConstraintTerm
+    text: string
+
+    def description() -> string:
+        return text
+
+
+def constraint_description[C: ConstraintTerm](constraint: C) -> string:
+    return constraint.description()
+
+
+test:
+    constraint := TraitConstraint("T: Numeric")
+    assert(constraint_description(constraint) == "T: Numeric")

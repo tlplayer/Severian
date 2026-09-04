@@ -775,6 +775,7 @@ version = "0.1.0"
 dependencies = [
  "severian-diagnostics",
  "severian-hir",
+ "severian-universal",
 ]
 
 [[package]]

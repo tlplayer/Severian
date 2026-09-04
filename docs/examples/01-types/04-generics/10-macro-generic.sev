@@ -1,0 +1,21 @@
+# M - Macro
+# Use M when a generic parameter represents a macro definition or expansion.
+
+trait MacroTerm:
+    def expansion() -> string
+
+
+class TraceMacro: MacroTerm
+    text: string
+
+    def expansion() -> string:
+        return text
+
+
+def macro_expansion[M: MacroTerm](macro_term: M) -> string:
+    return macro_term.expansion()
+
+
+test:
+    macro_term := TraceMacro("print(value)")
+    assert(macro_expansion(macro_term) == "print(value)")

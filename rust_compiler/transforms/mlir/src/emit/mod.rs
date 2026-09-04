@@ -2476,12 +2476,16 @@ fn binary_mnemonic(operator: BinaryOperation, ty: &LoweredType) -> Result<String
         .into(),
         BinaryOperation::Equal => if floating {
             "arith.cmpf oeq,"
+        } else if matches!(ty, LoweredType::String | LoweredType::Bytes) {
+            "llvm.icmp \"eq\""
         } else {
             "arith.cmpi eq,"
         }
         .into(),
         BinaryOperation::NotEqual => if floating {
             "arith.cmpf une,"
+        } else if matches!(ty, LoweredType::String | LoweredType::Bytes) {
+            "llvm.icmp \"ne\""
         } else {
             "arith.cmpi ne,"
         }

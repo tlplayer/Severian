@@ -1,0 +1,21 @@
+# D - Declaration
+# Use D when a generic parameter represents a declaration.
+
+trait DeclarationTerm:
+    def name() -> string
+
+
+class FunctionDeclaration: DeclarationTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def declaration_name[D: DeclarationTerm](declaration: D) -> string:
+    return declaration.name()
+
+
+test:
+    declaration := FunctionDeclaration("compile")
+    assert(declaration_name(declaration) == "compile")

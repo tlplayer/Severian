@@ -514,6 +514,49 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_index_assignment_operator_declarations_and_implementations() {
+        let source = SourceFile::virtual_source(
+            "index-assignment.sev",
+            "trait Data[T]:\n    operator []=(index: usize, value: T)\nclass Buffer[T]: Data[T]\n    operator []=(index: usize, value: T):\n        pass\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(data) = &module.items[0] else {
+            panic!("expected Data trait")
+        };
+        assert_eq!(data.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        assert_eq!(data.operators[0].parameters.len(), 2);
+        let severian_ast::Item::Class(buffer) = &module.items[1] else {
+            panic!("expected Buffer class")
+        };
+        assert_eq!(buffer.operators[0].operator, severian_ast::OperatorSyntax::Index);
+        assert_eq!(buffer.operators[0].parameters.len(), 2);
+    }
+
+    #[test]
+    fn parses_const_generic_class_construction_as_a_type_application() {
+        let source = SourceFile::virtual_source(
+            "const-class.sev",
+            "test:\n    values := array[i32, 4]()\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Binding(values) = &test.body[0] else {
+            panic!("expected binding")
+        };
+        assert!(matches!(
+            &values.value.kind,
+            severian_ast::ExpressionKind::Call { callee, .. }
+                if matches!(
+                    &callee.kind,
+                    severian_ast::ExpressionKind::TypeApplication { arguments, .. }
+                        if matches!(arguments.get(1).map(|argument| &argument.kind), Some(severian_ast::TypeAnnotationKind::DimensionConstant(4)))
+                )
+        ));
+    }
+
+    #[test]
     fn parses_canonical_trait_methods_and_composed_traits() {
         let source = SourceFile::virtual_source(
             "drawable.sev",

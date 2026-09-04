@@ -1,0 +1,21 @@
+# N - Node
+# Use N when a generic parameter represents a syntax or IR node.
+
+trait NodeTerm:
+    def kind() -> string
+
+
+class SyntaxNode: NodeTerm
+    text: string
+
+    def kind() -> string:
+        return text
+
+
+def node_kind[N: NodeTerm](node: N) -> string:
+    return node.kind()
+
+
+test:
+    node := SyntaxNode("binary_expression")
+    assert(node_kind(node) == "binary_expression")

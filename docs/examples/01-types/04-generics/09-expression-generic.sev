@@ -1,0 +1,21 @@
+# Ex - Expression
+# Use Ex instead of E so Error and Expression remain distinct.
+
+trait ExpressionTerm:
+    def source() -> string
+
+
+class NameExpression: ExpressionTerm
+    text: string
+
+    def source() -> string:
+        return text
+
+
+def expression_source[Ex: ExpressionTerm](expression: Ex) -> string:
+    return expression.source()
+
+
+test:
+    expression := NameExpression("value + 1")
+    assert(expression_source(expression) == "value + 1")

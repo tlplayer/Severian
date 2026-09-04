@@ -1,0 +1,21 @@
+# Y - Symbol
+# Y is the symbol or resolved identity. O is the operation it denotes.
+
+trait SymbolTerm:
+    def spelling() -> string
+
+
+class OperatorSymbol: SymbolTerm
+    text: string
+
+    def spelling() -> string:
+        return text
+
+
+def symbol_spelling[Y: SymbolTerm](symbol: Y) -> string:
+    return symbol.spelling()
+
+
+test:
+    symbol := OperatorSymbol("+")
+    assert(symbol_spelling(symbol) == "+")

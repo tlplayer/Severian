@@ -169,7 +169,11 @@ impl Collector<'_> {
                 self.expression(index);
                 self.expression(value);
             }
-            Statement::Expression(expression) | Statement::Defer { expression, .. } => {
+            Statement::Expression(expression)
+            | Statement::Defer { expression, .. }
+            | Statement::Yield {
+                value: expression, ..
+            } => {
                 self.expression(expression);
             }
             Statement::Return { value, .. } => {

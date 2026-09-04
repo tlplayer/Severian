@@ -1,0 +1,21 @@
+# B - Block
+# Use B when a generic parameter represents a control-flow block.
+
+trait BlockTerm:
+    def label() -> string
+
+
+class EntryBlock: BlockTerm
+    text: string
+
+    def label() -> string:
+        return text
+
+
+def block_label[B: BlockTerm](block: B) -> string:
+    return block.label()
+
+
+test:
+    block := EntryBlock("entry")
+    assert(block_label(block) == "entry")

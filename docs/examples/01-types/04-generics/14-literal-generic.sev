@@ -1,0 +1,21 @@
+# L - Literal
+# Use L when a generic parameter represents literal source data.
+
+trait LiteralTerm:
+    def source() -> string
+
+
+class IntegerLiteral: LiteralTerm
+    text: string
+
+    def source() -> string:
+        return text
+
+
+def literal_source[L: LiteralTerm](literal: L) -> string:
+    return literal.source()
+
+
+test:
+    literal := IntegerLiteral("42")
+    assert(literal_source(literal) == "42")

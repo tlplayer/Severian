@@ -76,7 +76,7 @@ pub fn compose(
     let module = Module::parse(&context, normal, "ordinary module").map_err(|error| {
         MlirError::ParseFailed(format!(
             "{error}; generated ordinary module:\n{}",
-            numbered_excerpt(normal, 800)
+            numbered_excerpt(normal, 900)
         ))
     })?;
     module.verify("ordinary module")?;

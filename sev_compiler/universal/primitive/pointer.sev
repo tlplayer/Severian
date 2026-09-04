@@ -88,7 +88,7 @@ enum AddressSpace:
 
 #Pointers are rife with exceptions/errors so they are unsafe by default
 @unsafe
-class pointer[T](Primitive):
+class pointer[T]: Primitive:
     _address: usize
     _address_space: AddressSpace = AddressSpace.generic
 
@@ -123,7 +123,8 @@ carry lifetime or provenance information.
 '''
 
 
-unsafe def pointer_from_address[T](
+@unsafe
+def pointer_from_address[T](
     address: usize,
     address_space: AddressSpace = AddressSpace.generic,
 ) -> pointer[T]:
@@ -138,15 +139,18 @@ unsafe def pointer_from_address[T](
 '''
 
 
-unsafe def load[T](value: pointer[T]) -> T:
+@unsafe
+def load[T](value: pointer[T]) -> T:
     intrinsic
 
 
-unsafe def store[T](value: pointer[T], item: T):
+@unsafe
+def store[T](value: pointer[T], item: T):
     intrinsic
 
 
-unsafe def offset[T](value: pointer[T], elements: isize) -> pointer[T]:
+@unsafe
+def offset[T](value: pointer[T], elements: isize) -> pointer[T]:
     intrinsic
 
 
@@ -167,12 +171,13 @@ API.
 '''
 
 
-def ==[T](lhs: pointer[T], rhs: pointer[T]) -> bool:
-    intrinsic
+extend [T] pointer[T]:
 
+    operator ==(right: pointer[T]) -> bool:
+        intrinsic
 
-def !=[T](lhs: pointer[T], rhs: pointer[T]) -> bool:
-    return not lhs == rhs
+    operator !=(right: pointer[T]) -> bool:
+        return not self == right
 
 
 '''

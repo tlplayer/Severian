@@ -1,0 +1,21 @@
+# K - Kind
+# Use K when a generic parameter represents a compiler classification.
+
+trait KindTerm:
+    def name() -> string
+
+
+class BinaryKind: KindTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def kind_name[K: KindTerm](kind_term: K) -> string:
+    return kind_term.name()
+
+
+test:
+    kind_term := BinaryKind("binary")
+    assert(kind_name(kind_term) == "binary")

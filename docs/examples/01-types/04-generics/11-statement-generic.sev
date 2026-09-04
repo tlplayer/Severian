@@ -1,0 +1,21 @@
+# S - Statement
+# Use S when a generic parameter represents a statement.
+
+trait StatementTerm:
+    def source() -> string
+
+
+class ReturnStatement: StatementTerm
+    text: string
+
+    def source() -> string:
+        return text
+
+
+def statement_source[S: StatementTerm](statement: S) -> string:
+    return statement.source()
+
+
+test:
+    statement := ReturnStatement("return value")
+    assert(statement_source(statement) == "return value")

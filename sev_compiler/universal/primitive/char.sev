@@ -68,14 +68,14 @@ trait Character:
     def ascii(self) -> bool
     def digit(self) -> bool
     def whitespace(self) -> bool
-    def len(self) -> usize
+    def utf8_len(self) -> usize
 
 
 class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
 
     storage: Type = T
 
-    def char(value: T) -> char[char_storage]:
+    def char(value: T) -> char[T]:
         if T is u32:
             if value > 0x10ffff:
                 throw TypeConversionError(
@@ -114,24 +114,17 @@ class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
     def hash(self) -> u64:
         return u64(self)
 
-    def ascii(self) -> (u8,bool):
-        return self.codepoint(),self.codepoint() <= 0x7f
+    def ascii(self) -> bool:
+        return self.codepoint() <= 0x7f
 
-    def digit(self) -> (u8,bool):
+    def digit(self) -> bool:
         value := self.codepoint()
         return value >= u32('0') and value <= u32('9')
 
     def whitespace(self) -> bool:
         value := self.codepoint()
 
-        return (
-            value == 0x09
-            or value == 0x0a
-            or value == 0x0b
-            or value == 0x0c
-            or value == 0x0d
-            or value == 0x20
-        )
+        return value == 0x09 or value == 0x0a or value == 0x0b or value == 0x0c or value == 0x0d or value == 0x20
 
     def utf8_len(self) -> usize:
         value := self.codepoint()

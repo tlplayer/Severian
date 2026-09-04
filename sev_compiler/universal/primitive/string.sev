@@ -119,7 +119,7 @@ trait String:
     def len(self) -> usize
     def bytes(self) -> usize
     def empty(self) -> bool
-    def raw(self) -> slice[char]
+    def raw(self) -> slice[u8]
     #starts/ends with the index is where is starts searching from
     def starts_with(prefix: string) -> bool
     def ends_with(prefix: string) -> bool
@@ -130,7 +130,7 @@ trait String:
     def join(self,conjunction: string) -> string
     def find(self,substring: string) -> int
     #Regex match "foo".match(".*") -> ("foo" | ["foo",""foo2"],true)
-    def match(self, expression: string) -> tuple(string,bool)
+    def match(self, expression: string) -> (string, bool)
     #Return sed like object for complex string operations
     def sed(self) -> Sed
 
@@ -164,7 +164,7 @@ def __utf8_width(first: u8) -> usize | UnicodeError:
 
 
 def __utf8_decode(
-    memory: borrow Memory[u8],
+    memory: *[u8],
     offset: usize,
     end: usize,
 ) -> (char, usize) | UnicodeError:
@@ -190,9 +190,7 @@ def __utf8_decode(
         throw UnicodeError("invalid UTF-8 continuation byte")
 
     if width == 2:
-        codepoint :=
-            (u32(first & 0x1f) << 6)
-            | u32(second & 0x3f)
+        codepoint := (u32(first & 0x1f) << 6) | u32(second & 0x3f)
 
         return (char(codepoint), 2)
 
@@ -209,10 +207,7 @@ def __utf8_decode(
         throw UnicodeError("UTF-8 surrogate code point")
 
     if width == 3:
-        codepoint :=
-            (u32(first & 0x0f) << 12)
-            | (u32(second & 0x3f) << 6)
-            | u32(third & 0x3f)
+        codepoint := (u32(first & 0x0f) << 12) | (u32(second & 0x3f) << 6) | u32(third & 0x3f)
 
         return (char(codepoint), 3)
 
@@ -228,17 +223,13 @@ def __utf8_decode(
     if first == 0xf4 and second > 0x8f:
         throw UnicodeError("UTF-8 code point exceeds U+10FFFF")
 
-    codepoint :=
-        (u32(first & 0x07) << 18)
-        | (u32(second & 0x3f) << 12)
-        | (u32(third & 0x3f) << 6)
-        | u32(fourth & 0x3f)
+    codepoint := (u32(first & 0x07) << 18) | (u32(second & 0x3f) << 12) | (u32(third & 0x3f) << 6) | u32(fourth & 0x3f)
 
     return (char(codepoint), 4)
 
 
 def __utf8_validate(
-    memory: borrow Memory[u8],
+    memory: *[u8],
     byte_length: usize,
 ) -> usize | UnicodeError:
 
@@ -246,11 +237,12 @@ def __utf8_validate(
     characters := 0
 
     while offset < byte_length:
-        (_, width) ?= __utf8_decode(
+        decoded ?= __utf8_decode(
             memory,
             offset,
             byte_length,
         )
+        _, width = decoded
 
         offset += width
         characters += 1
@@ -259,7 +251,7 @@ def __utf8_validate(
 
 
 def __utf8_byte_offset(
-    memory: borrow Memory[u8],
+    memory: *[u8],
     byte_length: usize,
     character_index: usize,
 ) -> usize | IndexError | UnicodeError:
@@ -273,11 +265,12 @@ def __utf8_byte_offset(
                 f"string index {character_index} outside character length {current}"
             )
 
-        (_, width) ?= __utf8_decode(
+        decoded ?= __utf8_decode(
             memory,
             offset,
             byte_length,
         )
+        _, width = decoded
 
         offset += width
         current += 1
@@ -293,7 +286,7 @@ immutability.
 '''
 class string: String:
 
-    __memory: Memory[u8]
+    __memory: *[u8]
     byte_length: usize
     length: usize
 
@@ -358,7 +351,7 @@ class string: String:
     Internal operations use this after creating bytes on known UTF-8 boundaries.
     '''
     def __from_valid_utf8(
-        memory: move Memory[u8],
+        memory: *[u8],
         byte_length: usize,
         length: usize,
     ) -> string:
@@ -393,11 +386,12 @@ class string: String:
             index,
         )
 
-        (value, _) ?= __utf8_decode(
+        decoded ?= __utf8_decode(
             borrow __memory,
             offset,
             byte_length,
         )
+        value, _ = decoded
 
         return value
 
@@ -448,6 +442,24 @@ class string: String:
 
     def len(self) -> usize:
         return length
+
+
+    def bytes(self) -> usize:
+        return byte_length
+
+
+    def raw(self) -> slice[u8]:
+        return slice[u8](__memory, 0, byte_length)
+
+
+    def byte(self, index: usize) -> u8:
+        if index >= byte_length:
+            throw IndexError(
+                f"string byte index {index} outside [0, {byte_length})"
+            )
+
+        unsafe:
+            return __memory[index]
 
 
     def empty(self) -> bool:
@@ -609,11 +621,12 @@ class string: String:
         offset := 0
 
         while offset < byte_length:
-            (value, width) ?= __utf8_decode(
+            decoded ?= __utf8_decode(
                 borrow __memory,
                 offset,
                 byte_length,
             )
+            value, width = decoded
 
             yield value
             offset += width
@@ -656,7 +669,7 @@ class string: String:
     This is the implementation used by integer `print()` and the `int -> string`
     conversion relation.
     '''
-    def from_integer[integer: int](value: Integer, base: u8 = 10) -> string:
+    def from_integer[integer_type: int](value: integer_type, base: u8 = 10) -> string:
         if base < 2 or base > 36:
             throw ValueError(
                 f"integer base {base} outside [2, 36]"
@@ -665,7 +678,7 @@ class string: String:
         if value == 0:
             return "0"
 
-        negative := I.signed and value < 0
+        negative := integer_type.signed and value < 0
 
         magnitude: u128
         if negative:
@@ -712,10 +725,10 @@ class string: String:
     '''
     ## Integer parsing
     '''
-    def parse_integer[I: int](
+    def parse_integer[integer_type: int](
         self,
         base: u8 = 10,
-    ) -> I | TypeConversionError:
+    ) -> integer_type | TypeConversionError:
 
         if base < 2 or base > 36:
             throw TypeConversionError(
@@ -729,15 +742,15 @@ class string: String:
         negative := false
 
         if self[0] == '-':
-            if not I.signed:
+            if not integer_type.signed:
                 throw TypeConversionError(
-                    f"negative value cannot convert to {I}"
+                    f"negative value cannot convert to {integer_type}"
                 )
 
             negative = true
             index = 1
 
-        else if self[0] == '+':
+        elif self[0] == '+':
             index = 1
 
         if index == length:
@@ -752,10 +765,10 @@ class string: String:
             if current >= '0' and current <= '9':
                 digit = u8(current) - u8('0')
 
-            else if current >= 'a' and current <= 'z':
+            elif current >= 'a' and current <= 'z':
                 digit = u8(current) - u8('a') + 10
 
-            else if current >= 'A' and current <= 'Z':
+            elif current >= 'A' and current <= 'Z':
                 digit = u8(current) - u8('A') + 10
 
             else:
@@ -774,19 +787,19 @@ class string: String:
         if negative:
             signed_value := -(i128(value))
 
-            if signed_value < i128(I.min) or signed_value > i128(I.max):
+            if signed_value < i128(integer_type.min) or signed_value > i128(integer_type.max):
                 throw TypeConversionError(
-                    f"'{self}' is outside {I}[{I.min}, {I.max}]"
+                    f"'{self}' is outside {integer_type}[{integer_type.min}, {integer_type.max}]"
                 )
 
-            return signed_value as I
+            return signed_value as integer_type
 
-        if value > u128(I.max):
+        if value > u128(integer_type.max):
             throw TypeConversionError(
-                f"'{self}' is outside {I}[{I.min}, {I.max}]"
+                f"'{self}' is outside {integer_type}[{integer_type.min}, {integer_type.max}]"
             )
 
-        return value as I
+        return value as integer_type
 
 
     '''
@@ -795,8 +808,8 @@ class string: String:
     Shortest-round-trip decimal formatting is a library algorithm rather than an
     MLIR primitive operation.
     '''
-    def from_float[F: float](value: F) -> string:
-        return decimal.format_float[F](value)
+    def from_float[float_type: float](value: float_type) -> string:
+        return decimal.format_float[float_type](value)
 
 
     '''
@@ -804,25 +817,25 @@ class string: String:
 
     Parsing handles signs, fractions, decimal exponents, NaN, and infinity.
     '''
-    def parse_float[F: float](self) -> F | TypeConversionError:
+    def parse_float[float_type: float](self) -> float_type | TypeConversionError:
         if self == "nan":
-            return mlir(arith.constant, "nan", to=F)
+            return mlir(arith.constant, "nan", to=float_type)
 
         if self == "inf" or self == "+inf":
-            if not F.supports_infinity:
+            if not float_type.supports_infinity:
                 throw TypeConversionError(
-                    f"{F} does not represent infinity"
+                    f"{float_type} does not represent infinity"
                 )
 
-            return mlir(arith.constant, "inf", to=F)
+            return mlir(arith.constant, "inf", to=float_type)
 
         if self == "-inf":
-            if not F.supports_infinity:
+            if not float_type.supports_infinity:
                 throw TypeConversionError(
-                    f"{F} does not represent infinity"
+                    f"{float_type} does not represent infinity"
                 )
 
-            return mlir(arith.constant, "-inf", to=F)
+            return mlir(arith.constant, "-inf", to=float_type)
 
         if length == 0:
             throw TypeConversionError("empty string is not a float")
@@ -834,28 +847,28 @@ class string: String:
             negative = true
             index = 1
 
-        else if self[0] == '+':
+        elif self[0] == '+':
             index = 1
 
         if index == length:
             throw TypeConversionError("sign without float digits")
 
-        value := F(0.0)
+        value := float_type(0.0)
         saw_digit := false
 
         while index < length and self[index] >= '0' and self[index] <= '9':
-            value *= F(10.0)
-            value += F(u8(self[index]) - u8('0'))
+            value *= float_type(10.0)
+            value += float_type(u8(self[index]) - u8('0'))
             index += 1
             saw_digit = true
 
         if index < length and self[index] == '.':
             index += 1
-            place := F(0.1)
+            place := float_type(0.1)
 
             while index < length and self[index] >= '0' and self[index] <= '9':
-                value += F(u8(self[index]) - u8('0')) * place
-                place *= F(0.1)
+                value += float_type(u8(self[index]) - u8('0')) * place
+                place *= float_type(0.1)
                 index += 1
                 saw_digit = true
 
@@ -875,7 +888,7 @@ class string: String:
                 exponent_negative = true
                 index += 1
 
-            else if index < length and self[index] == '+':
+            elif index < length and self[index] == '+':
                 index += 1
 
             if index == length:
@@ -895,11 +908,11 @@ class string: String:
 
         if exponent > 0:
             for _ in range(usize(exponent)):
-                value *= F(10.0)
+                value *= float_type(10.0)
 
-        else if exponent < 0:
+        elif exponent < 0:
             for _ in range(usize(-exponent)):
-                value /= F(10.0)
+                value /= float_type(10.0)
 
         if negative:
             value = -value
@@ -1086,7 +1099,7 @@ test "string clone owns independent storage":
 
 test "string bytes borrow does not own allocation":
     value := "hello"
-    raw := value.bytes()
+    raw := value.raw()
 
     assert(raw.len() == 5)
     assert(raw[0] == u8('h'))

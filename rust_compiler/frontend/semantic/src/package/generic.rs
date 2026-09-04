@@ -10,7 +10,7 @@ pub(crate) struct Substitution {
 }
 
 impl Substitution {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -47,7 +47,7 @@ impl Substitution {
         self.types.is_empty() && self.dimensions.is_empty() && self.shapes.is_empty()
     }
 
-    fn insert_type(&mut self, parameter: String, value: String) -> Option<String> {
+    pub(crate) fn insert_type(&mut self, parameter: String, value: String) -> Option<String> {
         self.types.insert(parameter, value)
     }
 
@@ -92,6 +92,14 @@ impl Substitution {
         }
         self.dimensions.insert(parameter.to_owned(), dimension);
         Ok(())
+    }
+
+    pub(crate) fn insert_dimension(
+        &mut self,
+        parameter: String,
+        dimension: severian_universal::DimExpr,
+    ) {
+        self.dimensions.insert(parameter, dimension);
     }
 
     fn bind_shape(
@@ -260,6 +268,9 @@ fn validate_generic_statements(
             }
             severian_ast::Statement::Expression(expression)
             | severian_ast::Statement::Defer { expression, .. }
+            | severian_ast::Statement::Yield {
+                value: expression, ..
+            }
             | severian_ast::Statement::Return {
                 value: Some(expression),
                 ..
@@ -1286,7 +1297,10 @@ fn visit_statements_for_specializations(
                 }
             }
             severian_ast::Statement::Expression(expression)
-            | severian_ast::Statement::Defer { expression, .. } => {
+            | severian_ast::Statement::Defer { expression, .. }
+            | severian_ast::Statement::Yield {
+                value: expression, ..
+            } => {
                 visit_expression_for_specializations(
                     module,
                     expression,
@@ -2826,6 +2840,7 @@ fn specialize_statement(statement: &mut severian_ast::Statement, substitution: &
         | Statement::Return {
             value: Some(value), ..
         }
+        | Statement::Yield { value, .. }
         | Statement::FallibleElse { value, .. } => {
             specialize_expression(value, substitution);
         }
@@ -2939,7 +2954,13 @@ fn specialize_expression(expression: &mut severian_ast::Expression, substitution
     use severian_ast::ExpressionKind;
     match &mut expression.kind {
         ExpressionKind::Name(name) => {
-            if let Some(replacement) = substitution.get(name) {
+            if let Some(severian_universal::DimExpr::Constant(value)) =
+                substitution.dimension(name)
+            {
+                expression.kind = ExpressionKind::Literal(severian_ast::Literal::Integer(
+                    value.to_string(),
+                ));
+            } else if let Some(replacement) = substitution.get(name) {
                 name.clone_from(replacement);
             }
         }
@@ -3040,6 +3061,18 @@ fn specialize_expression(expression: &mut severian_ast::Expression, substitution
     }
 }
 
+pub(crate) fn specialize_property(
+    property: &severian_ast::PropertyDeclaration,
+    substitution: &Substitution,
+) -> severian_ast::PropertyDeclaration {
+    let mut property = property.clone();
+    property.annotation = specialize_annotation(&property.annotation, substitution);
+    if let Some(default) = &mut property.default {
+        specialize_expression(default, substitution);
+    }
+    property
+}
+
 fn specialize_comprehension_clauses(
     clauses: &mut [severian_ast::ComprehensionClause],
     substitution: &Substitution,
@@ -3074,7 +3107,10 @@ fn specialize_annotation(
                 }
             } else {
                 TypeAnnotationKind::Named {
-                    name: name.clone(),
+                    name: substitution
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| name.clone()),
                     arguments: arguments
                         .iter()
                         .flat_map(|argument| {

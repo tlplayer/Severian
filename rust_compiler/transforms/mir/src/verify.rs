@@ -27,7 +27,11 @@ pub enum VerifyError {
     UseBeforeDefinition { block: u32, local: u32 },
     CallTarget,
     CallArity,
-    CallArgumentType { actual: TypeId, expected: TypeId },
+    CallArgumentType {
+        actual: TypeId,
+        expected: TypeId,
+        callee: Option<severian_universal::DefId>,
+    },
     InvalidOwnershipState { block: u32, local: u32 },
     UnknownOperation(severian_universal::OpId),
     InvalidOperation(String),
@@ -68,11 +72,21 @@ impl fmt::Display for VerifyError {
             }
             Self::CallTarget => formatter.write_str("call refers to an unknown definition"),
             Self::CallArity => formatter.write_str("call has the wrong argument count"),
-            Self::CallArgumentType { actual, expected } => write!(
-                formatter,
-                "call argument type mismatch: {:?} is not assignable to {:?}",
-                actual, expected
-            ),
+            Self::CallArgumentType {
+                actual,
+                expected,
+                callee,
+            } => {
+                write!(
+                    formatter,
+                    "call argument type mismatch: {:?} is not assignable to {:?}",
+                    actual, expected
+                )?;
+                if let Some(callee) = callee {
+                    write!(formatter, " for {callee:?}")?;
+                }
+                Ok(())
+            }
             Self::InvalidOwnershipState { block, local } => write!(
                 formatter,
                 "local {local} has an invalid ownership state in block {block}"
@@ -420,6 +434,7 @@ fn transfer(
                         return Err(VerifyError::CallArgumentType {
                             actual: operand_type(body, globals, argument)?,
                             expected: *parameter,
+                            callee: Some(*function),
                         });
                     }
                 }
@@ -541,6 +556,7 @@ fn operand_type(
         Operand::Function(_) => Err(VerifyError::CallArgumentType {
             actual: TypeId(u32::MAX),
             expected: TypeId(u32::MAX),
+            callee: None,
         }),
     }
 }

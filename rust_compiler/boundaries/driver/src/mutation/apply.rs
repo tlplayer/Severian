@@ -146,7 +146,11 @@ fn apply_statement(statement: &mut Statement, edit: MutationEdit) -> bool {
                 || apply_expression(index, edit)
                 || apply_expression(value, edit)
         }
-        Statement::Expression(expression) | Statement::Defer { expression, .. } => {
+        Statement::Expression(expression)
+        | Statement::Defer { expression, .. }
+        | Statement::Yield {
+            value: expression, ..
+        } => {
             apply_expression(expression, edit)
         }
         Statement::Return { value, .. } => value

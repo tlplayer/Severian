@@ -454,7 +454,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 })?;
                 TokenKind::Integer(value.to_string())
             }
-            b'0' if matches!(bytes.get(cursor + 1), Some(b'b' | b'B')) => {
+            b'0' if bytes.get(cursor + 1) == Some(&b'b')
+                || (bytes.get(cursor + 1) == Some(&b'B')
+                    && matches!(bytes.get(cursor + 2), Some(b'0' | b'1' | b'_'))) =>
+            {
                 cursor += 2;
                 let digits_start = cursor;
                 while cursor < bytes.len() && matches!(bytes[cursor], b'0' | b'1' | b'_') {

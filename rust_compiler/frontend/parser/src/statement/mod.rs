@@ -198,6 +198,7 @@ impl Parser<'_> {
                         module.items.push(Item::Expression(expression))
                     }
                     Statement::Return { .. }
+                    | Statement::Yield { .. }
                     | Statement::Destructure { .. }
                     | Statement::Defer { .. }
                     | Statement::FieldAssignment { .. }
@@ -317,7 +318,7 @@ impl Parser<'_> {
         let compile_time = introducer.kind == TokenKind::Arrow;
         let start = introducer.span;
         let (name, _) = self.identifier("expected a function name")?;
-        let (mut type_parameters, mut constraints) = self.type_parameters()?;
+        let (mut type_parameters, mut constraints, _) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
         self.line_breaks();
         let mut parameters = Vec::new();
@@ -469,6 +470,13 @@ impl Parser<'_> {
         else {
             return Ok(None);
         };
+        if !self
+            .tokens
+            .get(self.cursor + 2)
+            .is_some_and(|token| token.kind == TokenKind::Colon)
+        {
+            return Ok(None);
+        }
         let start = self.next().span;
         let (context, context_span) = self.identifier("expected a hook context after `with`")?;
         Ok(Some((
@@ -1127,6 +1135,45 @@ impl Parser<'_> {
     }
 
     fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.at_identifier("yield") {
+            let start = self.next().span;
+            let value = self.expression(0)?;
+            return Ok(Statement::Yield {
+                span: Span::new(start.source, start.start, value.span.end),
+                value,
+            });
+        }
+        if self.at_identifier("throws")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Colon)
+        {
+            let start = self.next().span;
+            self.next();
+            let (mut body, end) = self.indented_block("throws")?;
+            let span = Span::new(start.source, start.start, end);
+            body.push(Statement::Assert {
+                condition: Expression {
+                    kind: ExpressionKind::Literal(Literal::Boolean(false)),
+                    span,
+                },
+                message: Some(Expression {
+                    kind: ExpressionKind::Literal(Literal::String(
+                        "expected statement block to throw".into(),
+                    )),
+                    span,
+                }),
+                span,
+            });
+            return Ok(Statement::Try {
+                body,
+                catch_binding: format!("__throws_error_{}", start.start),
+                catch_annotation: None,
+                catch_body: Vec::new(),
+                span,
+            });
+        }
         if self.at_identifier("try") {
             let start = self.next().span;
             self.expect(&TokenKind::Colon, "expected `:` after `try`")?;
@@ -1267,7 +1314,7 @@ impl Parser<'_> {
             let condition = self.expression(0)?;
             self.expect(&TokenKind::Colon, "expected `:` after condition")?;
             let (then_block, mut end) = self.indented_block("if")?;
-            let else_block = if self.at_identifier("else") {
+            let else_block = if self.at_identifier("else") || self.at_identifier("elif") {
                 let (body, block_end) = self.else_clause()?;
                 end = block_end;
                 body
@@ -1446,13 +1493,17 @@ impl Parser<'_> {
 
     fn else_clause(&mut self) -> Result<(Vec<Statement>, u32), Diagnostic> {
         let start = self.next().span;
-        if self.take(&TokenKind::Colon).is_some() {
+        let conditional = matches!(
+            self.tokens.get(self.cursor.saturating_sub(1)).map(|token| &token.kind),
+            Some(TokenKind::Identifier(name)) if name == "elif"
+        );
+        if !conditional && self.take(&TokenKind::Colon).is_some() {
             return self.indented_block("else");
         }
         let condition = self.expression(0)?;
         self.expect(&TokenKind::Colon, "expected `:` after else condition")?;
         let (then_block, mut end) = self.indented_block("else condition")?;
-        let else_block = if self.at_identifier("else") {
+        let else_block = if self.at_identifier("else") || self.at_identifier("elif") {
             let (body, block_end) = self.else_clause()?;
             end = block_end;
             body
@@ -1616,7 +1667,7 @@ impl Parser<'_> {
     ) -> Result<TypeDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, name_span) = self.identifier("expected a type name")?;
-        let (type_parameters, mut constraints) = self.type_parameters()?;
+        let (type_parameters, mut constraints, _) = self.type_parameters()?;
         let definition = if self.take(&TokenKind::Equal).is_some() {
             Some(self.type_annotation()?)
         } else {
@@ -1756,7 +1807,7 @@ impl Parser<'_> {
     ) -> Result<TraitDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a trait name")?;
-        let (type_parameters, mut constraints) = self.type_parameters()?;
+        let (type_parameters, mut constraints, _) = self.type_parameters()?;
         constraints.extend(self.declaration_constraints()?);
         self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
         let mut bases = Vec::new();
@@ -1849,7 +1900,7 @@ impl Parser<'_> {
     ) -> Result<ClassDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a class name")?;
-        let (type_parameters, mut constraints) = self.type_parameters()?;
+        let (type_parameters, mut constraints, type_parameter_defaults) = self.type_parameters()?;
         constraints.extend(self.declaration_constraints()?);
         self.expect(&TokenKind::Colon, "expected `:` after class name")?;
 
@@ -1857,7 +1908,9 @@ impl Parser<'_> {
         if !self.at(&TokenKind::Newline) {
             loop {
                 traits.push(self.type_annotation()?);
-                if self.take(&TokenKind::Plus).is_none() {
+                if self.take(&TokenKind::Plus).is_none()
+                    && self.take(&TokenKind::Comma).is_none()
+                {
                     break;
                 }
             }
@@ -1869,6 +1922,7 @@ impl Parser<'_> {
         self.expect(&TokenKind::Indent, "expected an indented class body")?;
 
         let mut fields = Vec::new();
+        let mut aliases = Vec::new();
         let mut constructors = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
@@ -1910,6 +1964,15 @@ impl Parser<'_> {
             } else if self.at_identifier("trait") {
                 self.next();
                 traits.push(self.type_annotation()?);
+            } else if self.at_identifier("self")
+                && self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == "as"))
+            {
+                self.next();
+                self.next();
+                aliases.push(self.type_annotation()?);
             } else if self.at_identifier("pass") {
                 self.next();
             } else if self.looks_like_member_property() {
@@ -1932,8 +1995,10 @@ impl Parser<'_> {
             name,
             primitive,
             type_parameters,
+            type_parameter_defaults,
             constraints,
             traits,
+            aliases,
             fields,
             constructors,
             methods,
@@ -1948,7 +2013,7 @@ impl Parser<'_> {
         decorators: Vec<Decorator>,
     ) -> Result<ExtensionDeclaration, Diagnostic> {
         let start = self.next().span;
-        let (type_parameters, mut constraints) = self.type_parameters()?;
+        let (type_parameters, mut constraints, _) = self.type_parameters()?;
         constraints.extend(self.declaration_constraints()?);
         let target = self.type_annotation()?;
         self.expect(&TokenKind::Colon, "expected `:` after extension target")?;
@@ -2112,9 +2177,19 @@ impl Parser<'_> {
         })
     }
 
-    fn type_parameters(&mut self) -> Result<(Vec<String>, Vec<GenericConstraint>), Diagnostic> {
+    fn type_parameters(
+        &mut self,
+    ) -> Result<
+        (
+            Vec<String>,
+            Vec<GenericConstraint>,
+            Vec<Option<TypeAnnotation>>,
+        ),
+        Diagnostic,
+    > {
         let mut type_parameters = Vec::new();
         let mut constraints = Vec::new();
+        let mut defaults = Vec::new();
         if self.take(&TokenKind::LeftBracket).is_some() {
             loop {
                 let variadic = self.take(&TokenKind::Star).is_some();
@@ -2144,6 +2219,11 @@ impl Parser<'_> {
                         }
                     }
                 }
+                defaults.push(if self.take(&TokenKind::Equal).is_some() {
+                    Some(self.type_annotation()?)
+                } else {
+                    None
+                });
                 if self.take(&TokenKind::Comma).is_none() {
                     break;
                 }
@@ -2153,7 +2233,7 @@ impl Parser<'_> {
                 "expected `]` after type parameters",
             )?;
         }
-        Ok((type_parameters, constraints))
+        Ok((type_parameters, constraints, defaults))
     }
 
     fn declaration_constraints(&mut self) -> Result<Vec<GenericConstraint>, Diagnostic> {
@@ -2227,6 +2307,12 @@ impl Parser<'_> {
             return Ok((Vec::new(), Vec::new()));
         }
         self.next();
+        if !self.at(&TokenKind::LeftBrace) {
+            return Ok((
+                vec![GenericConstraint::Predicate(self.expression(0)?)],
+                Vec::new(),
+            ));
+        }
         while self.take(&TokenKind::Newline).is_some() {}
         self.expect(&TokenKind::LeftBrace, "expected `{` after function `with`")?;
         let multiline = self.take(&TokenKind::Newline).is_some();
@@ -2553,6 +2639,11 @@ impl Parser<'_> {
         let operator_token = self.next();
         let operator = if operator_token.kind == TokenKind::LeftBracket {
             self.expect(&TokenKind::RightBracket, "expected `]` after `operator [`")?;
+            // Indexed assignment uses the same semantic operator identity as
+            // indexed access. Its unit result and second value parameter carry
+            // the mutation contract, just as compound-assignment operators use
+            // their underlying source operator identity.
+            self.take(&TokenKind::Equal);
             OperatorSyntax::Index
         } else {
             operator_syntax(&operator_token.kind).ok_or_else(|| {
@@ -2563,7 +2654,7 @@ impl Parser<'_> {
                 )
             })?
         };
-        let (mut type_parameters, mut constraints) = self.type_parameters()?;
+        let (mut type_parameters, mut constraints, _) = self.type_parameters()?;
         let tag = constraints.iter().find_map(|constraint| match constraint {
             GenericConstraint::Parameter {
                 parameter, bound, ..
@@ -3698,8 +3789,7 @@ impl Parser<'_> {
                     }
                 }
                 TokenKind::Colon if depth == 1 => return false,
-                TokenKind::Integer(_)
-                | TokenKind::Float(_)
+                TokenKind::Float(_)
                 | TokenKind::MeasuredNumber { .. }
                 | TokenKind::String(_)
                     if depth == 1 =>
@@ -4491,6 +4581,18 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
     let tokens = scan(&file)?;
     let mut parser = Parser::new(&tokens);
     let expression = parser.expression(0)?;
+    if parser.take(&TokenKind::Colon).is_some() {
+        if parser.at(&TokenKind::Eof) {
+            return Err(Diagnostic::new(
+                "E000113",
+                "expected a format specifier after `:`",
+                Some(outer_span),
+            ));
+        }
+        while !parser.at(&TokenKind::Eof) {
+            parser.next();
+        }
+    }
     if !parser.at(&TokenKind::Eof) {
         return Err(Diagnostic::new(
             "E000113",

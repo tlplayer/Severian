@@ -1,0 +1,21 @@
+# I - Instruction
+# Use I when a generic parameter represents a lowered instruction.
+
+trait InstructionTerm:
+    def opcode() -> string
+
+
+class LoadInstruction: InstructionTerm
+    text: string
+
+    def opcode() -> string:
+        return text
+
+
+def instruction_opcode[I: InstructionTerm](instruction: I) -> string:
+    return instruction.opcode()
+
+
+test:
+    instruction := LoadInstruction("load")
+    assert(instruction_opcode(instruction) == "load")

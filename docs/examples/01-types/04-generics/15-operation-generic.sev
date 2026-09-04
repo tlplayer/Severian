@@ -1,0 +1,21 @@
+# O - Operation
+# O represents the semantic operation, not the source symbol that names it.
+
+trait OperationTerm:
+    def name() -> string
+
+
+class AddOperation: OperationTerm
+    text: string
+
+    def name() -> string:
+        return text
+
+
+def operation_name[O: OperationTerm](operation: O) -> string:
+    return operation.name()
+
+
+test:
+    operation := AddOperation("add")
+    assert(operation_name(operation) == "add")

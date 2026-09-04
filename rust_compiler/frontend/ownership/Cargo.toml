@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 severian-diagnostics = { path = "../../diagnostics" }
 severian-hir = { path = "../hir" }
+severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"
