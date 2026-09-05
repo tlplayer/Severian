@@ -873,6 +873,7 @@ impl CfgLowering<'_> {
             }
             severian_mir::Terminator::Throw(value) => {
                 let error = self.lower_operand(body, value, operations)?;
+                let error = self.runtime_error(error, operations);
                 operations.push(severian_lir::Operation::RuntimeCall {
                     symbol: "__sev_throw".into(),
                     arguments: vec![error],
@@ -1025,6 +1026,47 @@ impl CfgLowering<'_> {
             .resolve_name(name)
             .ok_or_else(|| LoweringError::UnknownTypeName(name.into()))?;
         self.lower_mir_type(ty)
+    }
+
+    // The uncaught-error runtime ABI takes an opaque Error pointer, never a
+    // source record or enum by value. Caught errors retain their typed payload
+    // in MIR; this conversion happens only at the terminal runtime boundary.
+    fn runtime_error(
+        &mut self,
+        error: ValueId,
+        operations: &mut Vec<LirOperation>,
+    ) -> ValueId {
+        let LoweredType::Aggregate(id) = self.value_type(error) else {
+            return error;
+        };
+        let class = self.mir.classes[id as usize].clone();
+        if class.fields.len() == 1 && class.fields[0].name == "__error" {
+            let opaque = self.new_value(LoweredType::String);
+            operations.push(LirOperation::FieldGet { object: error, field: 0, result: opaque });
+            return opaque;
+        }
+        let message_field = class.fields.iter().enumerate()
+            .find(|(_, field)| {
+                field.name == "message" && self.lower_mir_type(field.ty) == Ok(LoweredType::String)
+            })
+            .map(|(index, _)| index as u32);
+        let message = self.new_value(LoweredType::String);
+        if let Some(field) = message_field {
+            operations.push(LirOperation::FieldGet { object: error, field, result: message });
+        } else {
+            operations.push(LirOperation::Constant {
+                value: Constant::String(format!("uncaught {}", class.name)), result: message,
+            });
+        }
+        let origin = self.new_value(LoweredType::String);
+        operations.push(LirOperation::Constant {
+            value: Constant::String(class.name), result: origin,
+        });
+        let opaque = self.new_value(LoweredType::String);
+        operations.push(LirOperation::RuntimeCall {
+            symbol: "__sev_error_create".into(), arguments: vec![message, origin], result: Some(opaque),
+        });
+        opaque
     }
 
     fn new_value(&mut self, ty: LoweredType) -> ValueId {

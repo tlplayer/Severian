@@ -1,0 +1,121 @@
+import diagnostics
+import source
+import universal
+import "../../../universal/type/scalar.sev" as scalar
+
+
+class ScalarAnalysis:
+    names: list[string] = []
+    types: list[universal.TypeId] = []
+    next_id: list[int] = [0]
+
+
+def scalar_diagnostic(message: string, span: source.Span) -> diagnostics.Diagnostic:
+    return diagnostics.Diagnostic("E000200", message, span)
+
+
+def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    result_type := expected
+    kind := expression.kind
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    if result_type.index == 0:
+                        result_type = universal.TypeId(64)
+                    if result_type.index == 1:
+                        return error(scalar_diagnostic("an integer cannot initialize bool", expression.span))
+                    number = int(spelling)
+                    if result_type.index < 64:
+                        limit = 1 << (int(result_type.index) - 1)
+                        if number < 0 - limit or number >= limit:
+                            return error(scalar_diagnostic("integer literal is outside the declared type", expression.span))
+                case BooleanValue:
+                    if expected.index != 0 and expected.index != 1:
+                        return error(scalar_diagnostic("a boolean cannot initialize an integer", expression.span))
+                    result_type = universal.TypeId(1)
+                case _:
+                    return error(scalar_diagnostic("scalar bootstrap supports integer and boolean literals", expression.span))
+        case Name:
+            found := false
+            index := 0
+            for known in state.names:
+                if known == name:
+                    result_type = state.types[index]
+                    kind = universal.BindingReference(universal.BindingId(u32(index)))
+                    found = true
+                index += 1
+            if not found:
+                return error(scalar_diagnostic("unknown name " + name, expression.span))
+        case Unary:
+            if operator.symbol != "+" and operator.symbol != "-":
+                return error(scalar_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
+            resolved = scalar_expression(state, operand, expected)
+            result_type = resolved.type_id
+            if result_type.index == 1:
+                return error(scalar_diagnostic("arithmetic requires integer operands", expression.span))
+            kind = universal.Unary(operator, resolved)
+        case Binary:
+            comparison = operator.symbol == "==" or operator.symbol == "!="
+            operand_type = universal.TypeId(0) if comparison else expected
+            lhs = scalar_expression(state, left, operand_type)
+            rhs = scalar_expression(state, right, lhs.type_id)
+            if operator.symbol != "+" and operator.symbol != "-" and operator.symbol != "*" and not comparison:
+                return error(scalar_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
+            if lhs.type_id.index == 1 and not comparison:
+                return error(scalar_diagnostic("arithmetic requires integer operands", expression.span))
+            result_type = universal.TypeId(1) if comparison else lhs.type_id
+            kind = universal.Binary(operator, lhs, rhs)
+        case _:
+            return error(scalar_diagnostic("expression is outside the scalar bootstrap subset", expression.span))
+    if expected.index != 0 and result_type.index != expected.index:
+        return error(scalar_diagnostic("expression does not match its expected scalar type", expression.span))
+    id = universal.HirId(u32(state.next_id[0]))
+    state.next_id[0] += 1
+    return universal.Expression(kind, expression.span, id, result_type)
+
+
+def analyze_scalar(module: universal.Module) -> universal.Module | diagnostics.Diagnostic:
+    state = ScalarAnalysis()
+    for item in module.items:
+        match item:
+            case BindingItem:
+                if binding.name in state.names:
+                    return error(scalar_diagnostic("duplicate scalar binding " + binding.name, binding.span))
+                expected := universal.TypeId(0)
+                annotation ?= binding.annotation
+                if annotation != None:
+                    match annotation.kind:
+                        case Named:
+                            if len(arguments) != 0:
+                                return error(scalar_diagnostic("generic types are outside the scalar bootstrap subset", annotation.span))
+                            known ?= scalar.scalar_type_name(name)
+                            if known != None:
+                                expected = known
+                            else:
+                                return error(scalar_diagnostic("unknown scalar type " + name, annotation.span))
+                        case _:
+                            return error(scalar_diagnostic("union types are outside the scalar bootstrap subset", annotation.span))
+                value = scalar_expression(state, binding.value, expected)
+                id = universal.BindingId(u32(len(state.names)))
+                resolved = universal.Binding(binding.name, binding.annotation, value, false, false, binding.span, id, value.type_id)
+                state.names.append(binding.name)
+                state.types.append(value.type_id)
+                module.bindings.append(resolved)
+                module.initializer.statements.append(universal.BindingStatement(resolved))
+            case ExpressionItem:
+                match expression.kind:
+                    case Call:
+                        match callee.kind:
+                            case Name:
+                                if name != "assert" or len(arguments) != 1:
+                                    return error(scalar_diagnostic("only assert(condition) is supported at module scope", expression.span))
+                                condition = scalar_expression(state, arguments[0].value, universal.TypeId(1))
+                                module.initializer.statements.append(universal.Assert(condition, None, expression.span, condition.span))
+                            case _:
+                                return error(scalar_diagnostic("unsupported scalar call", expression.span))
+                    case _:
+                        return error(scalar_diagnostic("expected a scalar binding or assertion", expression.span))
+            case _:
+                return error(diagnostics.Diagnostic("E000200", "declaration is outside the scalar bootstrap subset", None))
+    return module

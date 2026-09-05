@@ -1279,19 +1279,8 @@ fn resolve_package_union_members(
             continue;
         }
         let ty = resolve_package_type(types, member, module, classes, lists, index)?;
-        let source_error = member.simple_name().is_some_and(|name| {
-            name.ends_with("Error")
-                || package_class_for_lookup(classes, module, name).is_some_and(|class| {
-                    class
-                        .declaration
-                        .traits
-                        .iter()
-                        .any(|implemented| implemented.simple_name() == Some("Error"))
-                })
-        });
-        if types.resolve_name("Error") == Some(ty) || source_error {
-            return Ok(None);
-        }
+        // Callers need both success and error members to reconstruct the
+        // imported result representation and propagate failures correctly.
         resolved.push(ty);
     }
     resolved.sort();

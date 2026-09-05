@@ -68,7 +68,7 @@ class OperatorParameter:
 
 
 class OperatorDeclaration:
-    syntax: BinaryOperator
+    syntax: OperatorSyntax
     parameters: list[OperatorParameter]
     result: TypeAnnotation
     span: source.Span

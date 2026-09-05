@@ -354,6 +354,24 @@ fn package_signatures_preserve_named_parameters_and_defaults() {
 }
 
 #[test]
+fn imported_fallible_results_keep_success_and_error_representations() {
+    let root = temporary();
+    std::fs::write(
+        root.join("reader.sev"),
+        "class Diagnostic: Error\n    message: string\nclass Token:\n    value: i32\ndef scan(valid: bool) -> list[Token] | Diagnostic:\n    if not valid:\n        return error(Diagnostic(\"invalid\"))\n    return [Token(7)]\n",
+    ).unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"reader.sev\" as reader\ndef selected() -> i32:\n    tokens = reader.scan(true)\n    return tokens[0].value\n",
+    ).unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_class_defaults_resolve_constructors_in_the_defining_module() {
     let root = temporary();
     std::fs::write(root.join("ids.sev"), "class HirId:\n    index: u32\n").unwrap();
@@ -380,6 +398,33 @@ fn imported_class_defaults_resolve_constructors_in_the_defining_module() {
         let mut mir = severian_mir::build(&typed.hir).unwrap();
         severian_mir::run_required_pipeline(&mut mir, &universal).unwrap();
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn imported_field_defaults_keep_their_enum_namespace() {
+    let root = temporary();
+    std::fs::write(root.join("syntax.sev"), "enum Fixity:\n    Prefix\n    Infix\n").unwrap();
+    std::fs::write(root.join("operator.sev"),
+        "import \"syntax.sev\"\nclass Operator:\n    fixity: Fixity = Fixity.Infix\n").unwrap();
+    std::fs::write(root.join("app.sev"),
+        "import \"operator.sev\" as operators\ndef selected():\n    operator = operators.Operator()\n").unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallible_method_results_expose_the_success_type_to_callers() {
+    let root = temporary();
+    std::fs::write(root.join("app.sev"),
+        "def read() -> i32 | Error:\n    return 7\nclass Reader:\n    def read() -> i32 | Error:\n        return read()\ndef selected() -> i32:\n    reader = Reader()\n    return reader.read()\n").unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

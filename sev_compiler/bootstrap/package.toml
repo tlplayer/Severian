@@ -1,0 +1,19 @@
+[package]
+name = "sev-compiler-bootstrap"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[[bin]]
+name = "sev-bootstrap-driver"
+path = "src/main.sev"
+
+[dependencies]
+diagnostics = { path = "../diagnostics" }
+lexer = { path = "../frontend/lexer" }
+parser = { path = "../frontend/parser" }
+source = { path = "../source" }
+universal = { path = "../universal" }

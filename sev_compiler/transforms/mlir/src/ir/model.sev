@@ -417,9 +417,10 @@ def generated_mlir_function_name(identity: MlirFunctionIdentity) -> MlirFunction
 
 
 def select_mlir_function_name(identity: MlirFunctionIdentity, mlir_function_name: MlirFunctionName | None = None) -> MlirFunctionName:
-    if mlir_function_name != None:
-        assert(mlir_function_name.value != "", "an explicit MLIR function name cannot be empty")
-        return mlir_function_name
+    selected ?= mlir_function_name
+    if selected != None:
+        assert(selected.value != "", "an explicit MLIR function name cannot be empty")
+        return selected
     return generated_mlir_function_name(identity)
 
 

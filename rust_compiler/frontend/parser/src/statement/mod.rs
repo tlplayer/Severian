@@ -4752,6 +4752,16 @@ fn operator_spelling(operator: OperatorSyntax) -> &'static str {
 }
 
 fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
+    // Assignment tokens belong to statement parsing. Consuming `+=` here
+    // turns an indexed update into a discarded binary expression.
+    if matches!(kind,
+        TokenKind::PlusEqual | TokenKind::MinusEqual | TokenKind::StarEqual
+        | TokenKind::SlashEqual | TokenKind::PercentEqual | TokenKind::FloorDivideEqual
+        | TokenKind::PipeEqual | TokenKind::AmpersandEqual | TokenKind::CaretEqual
+        | TokenKind::ShiftLeftEqual | TokenKind::ShiftRightEqual
+    ) {
+        return None;
+    }
     if matches!(kind, TokenKind::Identifier(value) if value == "is") {
         return Some(BinaryOperator::Identity);
     }

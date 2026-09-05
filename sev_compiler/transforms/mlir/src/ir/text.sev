@@ -202,7 +202,16 @@ def print_generic_operation(program: MlirProgram, operation: MlirOperation, inde
     for region in operation.regions:
         regions.append(print_region(program, region, indentation + "  "))
     owned_regions = " (" + regions.join(", ") + ")" if len(regions) != 0 else ""
-    return indentation + result_prefix(operation.results) + "\"" + operation_name_text(operation.name) + "\"(" + values_text(operation.operands) + ")" + successors_text(operation.successors) + owned_regions + properties_text(operation.properties) + attributes_text(operation.attributes) + " : (" + types_text(operation.operands) + ") -> " + result_types_from_values(operation.results) + "\n"
+    output := indentation + result_prefix(operation.results)
+    output += "\"" + operation_name_text(operation.name) + "\"("
+    output += values_text(operation.operands) + ")"
+    output += successors_text(operation.successors)
+    output += owned_regions
+    output += properties_text(operation.properties)
+    output += attributes_text(operation.attributes)
+    output += " : (" + types_text(operation.operands) + ") -> "
+    output += result_types_from_values(operation.results) + "\n"
+    return output
 
 
 def print_operation(program: MlirProgram, operation: MlirOperation, indentation: string) -> string:
@@ -217,7 +226,9 @@ def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
     if len(function.result_types) != 0:
         result = " -> " + result_types_text(function.result_types)
     visibility = " private" if visibility_name(function.visibility) == "private" else ""
-    output := "  func.func" + visibility + " @\"" + escaped(function.name) + "\"(" + parameters.join(", ") + ")" + result
+    output := "  func.func" + visibility
+    output += " @\"" + escaped(function.name) + "\"("
+    output += parameters.join(", ") + ")" + result
     if function.declaration:
         return output + "\n"
     output += " " + print_region(program, function.body_region, "    ") + "\n"

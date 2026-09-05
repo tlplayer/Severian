@@ -23,6 +23,10 @@ trait BinaryOperator:
     Operator
 
 
+def operator_syntax[T: Operator](operator: T) -> OperatorSyntax:
+    return OperatorSyntax(operator.symbol, operator.fixity, operator.precedence, operator.associativity)
+
+
 class Positive: UnaryOperator
     symbol: string = "+"
     fixity: Fixity = Fixity.Prefix
@@ -39,6 +43,13 @@ class Negative: UnaryOperator
 
 class Not: UnaryOperator
     symbol: string = "not"
+    fixity: Fixity = Fixity.Prefix
+    precedence: u8 = 10
+    associativity: Associativity = Associativity.Right
+
+
+class Move: UnaryOperator
+    symbol: string = "move"
     fixity: Fixity = Fixity.Prefix
     precedence: u8 = 10
     associativity: Associativity = Associativity.Right

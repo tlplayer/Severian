@@ -243,6 +243,24 @@ mod tests {
     }
 
     #[test]
+    fn compound_index_assignment_is_not_a_discarded_expression() {
+        let source = SourceFile::virtual_source(
+            "index-update.sev",
+            "def increment(counter: Counter):\n    counter.values[0] += 1\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function");
+        };
+        let severian_ast::Statement::IndexAssignment { value, .. } = &function.body.as_ref().unwrap()[0] else {
+            panic!("expected indexed assignment");
+        };
+        assert!(matches!(value.kind, severian_ast::ExpressionKind::Binary {
+            operator: severian_ast::BinaryOperator::Add, ..
+        }));
+    }
+
+    #[test]
     fn question_equal_preserves_the_result_union() {
         let source = SourceFile::virtual_source("result.sev", "result ?= read()\n");
         let module = parse(&scan(&source).unwrap()).unwrap();

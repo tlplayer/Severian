@@ -291,6 +291,7 @@ pub(crate) fn analyze_with_package_functions(
         class_instances_by_type: BTreeMap::new(),
         class_defining_modules: BTreeMap::new(),
         module_class_scopes: BTreeMap::new(),
+        module_enum_scopes: BTreeMap::new(),
         generic_class_constructors: local_class_constructors,
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
@@ -356,6 +357,13 @@ pub(crate) fn analyze_with_package_functions(
             .iter()
             .copied()
             .chain(std::iter::once(function.result))
+            .chain(
+                function.parameter_unions.iter()
+                    .chain(std::iter::once(&function.result_union))
+                    .flatten()
+                    .flatten()
+                    .copied(),
+            )
         {
             if let Some(element) = universal_type_ids
                 .iter()
@@ -1505,6 +1513,8 @@ struct Analyzer<'a> {
     class_defining_modules: BTreeMap<TypeId, severian_modules::ModuleId>,
     module_class_scopes:
         BTreeMap<severian_modules::ModuleId, BTreeMap<(String, Vec<TypeId>), ClassInstance>>,
+    module_enum_scopes:
+        BTreeMap<severian_modules::ModuleId, Vec<(String, EnumInstance)>>,
     generic_class_constructors: BTreeMap<String, TypeId>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
@@ -2232,6 +2242,22 @@ impl Analyzer<'_> {
         enumerations: &[PackageEnum],
         source_module: Option<severian_modules::ModuleId>,
     ) {
+        for (module, classes) in &self.module_class_scopes {
+            let mut scope = Vec::new();
+            for enumeration in enumerations {
+                for lookup in enumeration.lookups.get(module).into_iter().flatten() {
+                    if let Some(instance) = classes.get(&(lookup.clone(), Vec::new())) {
+                        scope.push((lookup.clone(), EnumInstance {
+                            ty: instance.ty,
+                            name: lookup.clone(),
+                            fields: instance.fields.clone(),
+                            variants: enumeration.declaration.variants.clone(),
+                        }));
+                    }
+                }
+            }
+            self.module_enum_scopes.insert(*module, scope);
+        }
         let Some(source_module) = source_module else {
             return;
         };
@@ -8378,6 +8404,11 @@ impl Analyzer<'_> {
                 if let Some(method) =
                     self.class_method_call(callee, arguments, expected, ast.span)?
                 {
+                    if self.preserve_error_depth == 0 {
+                        if let Some(fallible) = self.fallible_types.get(&method.type_id).copied() {
+                            return Ok(self.unwrap_fallible_expression(method, fallible, ast.span));
+                        }
+                    }
                     return Ok(method);
                 }
                 if matches!(callee.kind, AstExpressionKind::Member { .. })
@@ -10500,8 +10531,24 @@ impl Analyzer<'_> {
             return self.expression(value, Some(expected));
         };
         let previous = std::mem::replace(&mut self.class_instances, scope);
+        let previous_enums = std::mem::take(&mut self.enums);
+        let previous_variants = std::mem::take(&mut self.enum_variants);
+        if let Some(scope) = self.class_defining_modules.get(&class)
+            .and_then(|module| self.module_enum_scopes.get(module)) {
+            for (lookup, instance) in scope {
+                self.enums.insert(lookup.clone(), instance.clone());
+                for (ordinal, variant) in instance.variants.iter().enumerate() {
+                    if !lookup.contains('.') {
+                        self.enum_variants.insert(variant.name.clone(), (lookup.clone(), ordinal));
+                    }
+                    self.enum_variants.insert(format!("{lookup}.{}", variant.name), (lookup.clone(), ordinal));
+                }
+            }
+        }
         let result = self.expression(value, Some(expected));
         self.class_instances = previous;
+        self.enums = previous_enums;
+        self.enum_variants = previous_variants;
         result
     }
 
@@ -17765,7 +17812,9 @@ impl Analyzer<'_> {
             } else {
                 self.resolve_instantiated_type(&method.result, &method_substitution)?
             };
-            if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+            let exposed_result = self.fallible_types.get(&result_type)
+                .map_or(result_type, |fallible| fallible.success);
+            if expected.is_some_and(|expected| !self.types.assignable(exposed_result, expected)) {
                 return Err(semantic_error(
                     "method result does not satisfy the expected type".into(),
                     span,
@@ -17829,7 +17878,9 @@ impl Analyzer<'_> {
             } else {
                 self.resolve_instantiated_type(&method.result, &method_substitution)?
             };
-            if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+            let exposed_result = self.fallible_types.get(&result_type)
+                .map_or(result_type, |fallible| fallible.success);
+            if expected.is_some_and(|expected| !self.types.assignable(exposed_result, expected)) {
                 return Err(semantic_error(
                     "method result does not satisfy the expected type".into(),
                     span,

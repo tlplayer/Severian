@@ -1,0 +1,64 @@
+import universal
+import "../../../../universal/type/scalar.sev" as scalar
+import "../ir/lib.sev"
+
+
+def scalar_mlir_type(id: universal.TypeId) -> MlirType:
+    known ?= scalar.scalar_type(id)
+    if known != None:
+        return integer_type(known.bits, not known.boolean)
+    throw Error("scalar MIR has an unknown type")
+
+
+def scalar_mlir_value(module: universal.Module, id: universal.ValueId) -> MlirValue:
+    return MlirValue(int(id.index), scalar_mlir_type(module.values[id.index].type_id))
+
+
+def lower_scalar(module: universal.Module) -> MlirProgram:
+    builder = MlirOpBuilder(int(len(module.values)))
+    entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
+    builder_set_insertion_point(builder, entry.entry)
+    for operation in module.initializer.operations:
+        match operation:
+            case Constant:
+                output = scalar_mlir_value(module, result)
+                match value:
+                    case IntegerValue:
+                        builder_constant(builder, output, integer_attribute(int(spelling), output.type_id))
+                    case BooleanValue:
+                        builder_constant(builder, output, boolean_attribute(value))
+                    case _:
+                        throw Error("non-scalar MIR literal")
+            case Unary:
+                input = scalar_mlir_value(module, operand)
+                output = scalar_mlir_value(module, result)
+                zero = builder_new_value(builder, input.type_id)
+                builder_constant(builder, zero, integer_attribute(0, input.type_id))
+                if operator.symbol == "-":
+                    builder_binary(builder, output, operation_name("arith", "subi"), zero, input)
+                else:
+                    builder_binary(builder, output, operation_name("arith", "addi"), zero, input)
+            case Binary:
+                lhs = scalar_mlir_value(module, left)
+                rhs = scalar_mlir_value(module, right)
+                output = scalar_mlir_value(module, result)
+                if operator.symbol == "==" or operator.symbol == "!=":
+                    predicate = 0 if operator.symbol == "==" else 1
+                    attributes = [MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64)))]
+                    builder_binary(builder, output, operation_name("arith", "cmpi"), lhs, rhs, attributes)
+                else:
+                    mnemonic := "addi"
+                    if operator.symbol == "-":
+                        mnemonic = "subi"
+                    elif operator.symbol == "*":
+                        mnemonic = "muli"
+                    builder_binary(builder, output, operation_name("arith", mnemonic), lhs, rhs)
+            case Assert:
+                builder_assert(builder, scalar_mlir_value(module, condition), "assertion failed")
+            case _:
+                throw Error("unsupported scalar MIR operation")
+    status = builder_new_value(builder, integer_type(32))
+    builder_constant(builder, status, integer_attribute(0, status.type_id))
+    builder_return(builder, [status])
+    validate(builder.program)
+    return builder.program

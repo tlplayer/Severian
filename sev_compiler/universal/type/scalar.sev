@@ -1,0 +1,28 @@
+import "../id/compiler.sev"
+
+
+# Stable identities for the first source-compiled scalar pipeline. The table
+# belongs to universal, and both semantic analysis and MLIR lowering consult it.
+class ScalarType:
+    id: TypeId
+    name: string
+    bits: u16
+    boolean: bool
+
+
+def scalar_types() -> list[ScalarType]:
+    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
+
+
+def scalar_type_name(name: string) -> TypeId | None:
+    for scalar in scalar_types():
+        if scalar.name == name or (name == "int" and scalar.name == "i64"):
+            return scalar.id
+    return None
+
+
+def scalar_type(id: TypeId) -> ScalarType | None:
+    for scalar in scalar_types():
+        if scalar.id.index == id.index:
+            return scalar
+    return None

@@ -108,8 +108,9 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
     mnemonic = operation.name.mnemonic
     if dialect == "" or mnemonic == "":
         return error(InvalidOperationName(name))
-    if operation.location != None:
-        validate_location(operation.location)
+    location ?= operation.location
+    if location != None:
+        validate_location(location)
     for operand in operation.operands:
         validate_type(operand.type_id)
     for result in operation.results:
@@ -199,8 +200,9 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
         names.append(function.name)
     owned_regions: list[int] = []
     for function in program.functions:
-        if function.location != None:
-            validate_location(function.location)
+        location ?= function.location
+        if location != None:
+            validate_location(location)
         for argument in function.arguments:
             validate_type(argument.type_id)
         for result in function.result_types:

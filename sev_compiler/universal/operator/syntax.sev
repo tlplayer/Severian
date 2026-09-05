@@ -8,3 +8,12 @@ enum Associativity:
     Left
     Right
     None
+
+
+# Parsed operators carry syntax data. Trait implementations describe source
+# operators; AST storage does not require an erased runtime trait object.
+class OperatorSyntax:
+    symbol: string
+    fixity: Fixity
+    precedence: u8
+    associativity: Associativity

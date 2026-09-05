@@ -1779,6 +1779,10 @@ fn render_cfg_operation(
             location.as_ref(),
             indent,
         )?,
+        Operation::FieldGet { object, field, result } => {
+            render_field_extract(output, module, &value_type(module, *object)?,
+                &format!("%v{}", object.0), *field, &format!("%v{}", result.0), indent)?;
+        }
         unsupported => {
             return Err(MlirError::UnsupportedOperation(format!(
                 "CFG operation {unsupported:?}"

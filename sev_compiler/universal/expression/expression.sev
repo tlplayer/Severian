@@ -35,8 +35,8 @@ enum ExpressionKind:
     FunctionReference(definition: DefId)
     ResolvedCall(callee: ResolvedCallee, arguments: list[CallArgument])
     Convert(operand: Expression, conversion: ExpressionConversion)
-    Unary(operator: UnaryOperator, operand: Expression)
-    Binary(operator: BinaryOperator, left: Expression, right: Expression)
+    Unary(operator: OperatorSyntax, operand: Expression)
+    Binary(operator: OperatorSyntax, left: Expression, right: Expression)
 
 
 def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:

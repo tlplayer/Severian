@@ -44,13 +44,18 @@ binary replaces an older `$HOME/.cargo/bin/sev` instead of being hidden behind
 it on `PATH`. Set `SEV_CARGO_INSTALL_ROOT` to select another Cargo installation
 root. Building the compiler and installing a release remain separate workflows.
 
-## Nightly Bootstrapped compiler
+## Bootstrap compiler checkpoint
 
 ```sh
 sev build \
-    sev_compiler/boundaries/driver \
+    sev_compiler/bootstrap \
     --bin sev-bootstrap-driver
 ```
+
+The source-written bootstrap compiler currently emits MLIR for a scalar
+subset. See [the bootstrap instructions](sev_compiler/bootstrap/README.md)
+for source-to-MLIR execution and verification. Full self-hosting remains in
+progress.
 
 ## Try Severian
 

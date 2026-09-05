@@ -1,0 +1,16 @@
+import lexer
+import parser
+import source
+import "../../frontend/semantic/src/scalar.sev" as semantic
+import "../../transforms/mir/src/scalar.sev" as mir
+import "../../transforms/mlir/src/emit/scalar.sev" as mlir
+import "../../transforms/mlir/src/ir/text.sev" as text
+
+
+def compile_to_mlir(input: source.SourceFile) -> string:
+    tokens = lexer.scan(input)
+    parsed = parser.parse(tokens)
+    typed = semantic.analyze_scalar(parsed)
+    lowered = mir.build_scalar(typed)
+    program = mlir.lower_scalar(lowered)
+    return text.print_program(program)

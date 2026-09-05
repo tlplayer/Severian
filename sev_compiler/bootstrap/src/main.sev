@@ -1,0 +1,12 @@
+import "lib.sev"
+import source
+import process
+
+
+def main():
+    arguments = process.arguments()
+    if len(arguments) != 5 or arguments[1] != "build" or arguments[2] != "--emit" or arguments[3] != "mlir":
+        throw Error("usage: sev-bootstrap-driver build --emit mlir SOURCE.sev")
+    input = source.load(arguments[4])
+    output = compile_to_mlir(input)
+    print(output)
