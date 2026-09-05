@@ -50,7 +50,21 @@ mod cfg_lowering_entry {
                     parameter_types: function
                         .parameters
                         .iter()
-                        .map(|ty| context.lower_mir_type(*ty))
+                        .enumerate()
+                        .map(|(index, ty)| {
+                            if function
+                                .body
+                                .as_ref()
+                                .and_then(|body| {
+                                    body.locals.iter().filter(|local| local.argument).nth(index)
+                                })
+                                .is_some_and(|local| local.borrowed)
+                            {
+                                Ok(LoweredType::Bytes)
+                            } else {
+                                context.lower_mir_type(*ty)
+                            }
+                        })
                         .collect::<Result<Vec<_>, _>>()?,
                     cfg: function
                         .body
@@ -200,6 +214,7 @@ impl CfgLowering<'_> {
                     },
                     mutable: local.mutable,
                     argument: local.argument,
+                    borrowed: local.borrowed,
                     span: local.span,
                 })
             })
@@ -717,12 +732,37 @@ impl CfgLowering<'_> {
                 if let severian_mir::Callee::Method { receiver, .. } = callee {
                     lowered_arguments.push(self.lower_operand(body, receiver, operations)?);
                 }
-                lowered_arguments.extend(
-                    arguments
-                        .iter()
-                        .map(|argument| self.lower_operand(body, argument, operations))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                let references = self
+                    .mir
+                    .functions
+                    .iter()
+                    .find(|candidate| candidate.id.0 == function.0)
+                    .and_then(|candidate| candidate.body.as_ref())
+                    .map(|body| {
+                        body.locals
+                            .iter()
+                            .filter(|local| local.argument)
+                            .map(|local| local.borrowed)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                for (index, argument) in arguments.iter().enumerate() {
+                    if references.get(index) == Some(&true) {
+                        let (severian_mir::Operand::Copy(place)
+                        | severian_mir::Operand::Move(place)) = argument
+                        else {
+                            return Err(LoweringError::InvalidProjection);
+                        };
+                        let result = self.new_value(LoweredType::Bytes);
+                        operations.push(LirOperation::AddressOf {
+                            place: self.lower_place(place),
+                            result,
+                        });
+                        lowered_arguments.push(result);
+                    } else {
+                        lowered_arguments.push(self.lower_operand(body, argument, operations)?);
+                    }
+                }
                 if let Some(external) = self
                     .mir
                     .functions

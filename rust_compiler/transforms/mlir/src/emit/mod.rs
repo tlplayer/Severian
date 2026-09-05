@@ -654,6 +654,9 @@ fn render_cfg_body_function(
                 ));
             }
             for local in &body.locals {
+                if local.borrowed {
+                    output.push_str(&format!("    %local{}_reference = llvm.alloca %sev_one x !llvm.ptr : (i64) -> !llvm.ptr\n", local.id.0));
+                }
                 if is_ssa_local_type(&local.ty) {
                     continue;
                 }
@@ -684,6 +687,10 @@ fn render_cfg_body_function(
                 .filter(|local| local.argument)
                 .enumerate()
             {
+                if local.borrowed {
+                    output.push_str(&format!("    llvm.store %arg{argument}, %local{}_reference : !llvm.ptr, !llvm.ptr\n", local.id.0));
+                    continue;
+                }
                 if is_ssa_local_type(&local.ty) {
                     ssa_locals.insert(local.id, format!("%arg{argument}"));
                     continue;
@@ -1168,9 +1175,39 @@ fn render_cfg_operation(
     ssa_locals: &mut BTreeMap<severian_lir::LocalId, String>,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
+    // A reference parameter initially addresses caller storage. Rebinding the
+    // parameter selects its own value slot; field stores retain the selected
+    // object's identity, including across control-flow joins.
+    let place_address = match operation {
+        Operation::Load { place, .. }
+        | Operation::Store { place, .. }
+        | Operation::AddressOf { place, .. } => {
+            if let severian_lir::PlaceBase::Local(local) = place.base {
+                if body.locals[local.0 as usize].borrowed {
+                    if matches!(operation, Operation::Store { .. }) && place.projection.is_empty() {
+                        output.push_str(&format!("{indentation}llvm.store %local{}, %local{}_reference : !llvm.ptr, !llvm.ptr\n", local.0, local.0));
+                        Some(format!("%local{}", local.0))
+                    } else {
+                        let address = format!("%reference_b{}_o{}", block.0, operation_index);
+                        output.push_str(&format!("{indentation}{address} = llvm.load %local{}_reference : !llvm.ptr -> !llvm.ptr\n", local.0));
+                        Some(address)
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
     match operation {
-        Operation::Variant { class, variant, fields, result } =>
-            render_variant(output, module, *class, *variant, fields, *result, indent)?,
+        Operation::Variant {
+            class,
+            variant,
+            fields,
+            result,
+        } => render_variant(output, module, *class, *variant, fields, *result, indent)?,
         Operation::Coverage { key } => {
             let symbol = coverage_symbol(key);
             let value = format!("{symbol}_bb{}_op{operation_index}", block.0);
@@ -1325,12 +1362,20 @@ fn render_cfg_operation(
                     "{indentation}%load_base_b{}_o{} = llvm.load {} : !llvm.ptr -> {base_type}\n",
                     block.0,
                     operation_index,
-                    cfg_place_base_address(place)
+                    place_address
+                        .clone()
+                        .unwrap_or_else(|| cfg_place_base_address(place))
                 ));
                 if tensor_aggregate_abi_type(&stored_type).is_some() {
-                    render_field_extract(output, module, &object_type,
-                        &format!("%load_base_b{}_o{}", block.0, operation_index), *field,
-                        &format!("%load_tensor_b{}_o{}", block.0, operation_index), indent)?;
+                    render_field_extract(
+                        output,
+                        module,
+                        &object_type,
+                        &format!("%load_base_b{}_o{}", block.0, operation_index),
+                        *field,
+                        &format!("%load_tensor_b{}_o{}", block.0, operation_index),
+                        indent,
+                    )?;
                     render_tensor_aggregate_unbox(
                         output,
                         &format!("%load_tensor_b{}_o{}", block.0, operation_index),
@@ -1366,17 +1411,74 @@ fn render_cfg_operation(
                 output.push_str(&format!(
                     "{indentation}%v{} = llvm.load {} : !llvm.ptr -> {}\n",
                     result.0,
-                    cfg_place_address(place)?,
+                    match &place_address {
+                        Some(address) => address.clone(),
+                        None => cfg_place_address(place)?,
+                    },
                     mlir_type(&ty)?
                 ));
             }
         }
         Operation::AddressOf { place, result } => {
-            output.push_str(&format!(
-                "{indentation}%v{} = builtin.unrealized_conversion_cast {} : !llvm.ptr to !llvm.ptr\n",
-                result.0,
-                cfg_place_address(place)?
-            ));
+            let mut address = place_address
+                .clone()
+                .unwrap_or_else(|| cfg_place_base_address(place));
+            let mut ty = cfg_place_base_type(module, body, place)?;
+            for (depth, projection) in place.projection.iter().enumerate() {
+                let severian_lir::Projection::Field(field) = projection else {
+                    return Err(MlirError::UnsupportedOperation(format!(
+                        "address projection {projection:?}"
+                    )));
+                };
+                let LoweredType::Aggregate(class) = &ty else {
+                    return Err(MlirError::UnsupportedOperation(
+                        "reference field requires a record".into(),
+                    ));
+                };
+                let next = module
+                    .classes
+                    .iter()
+                    .find(|known| known.id == *class)
+                    .and_then(|class| class.fields.get(*field as usize))
+                    .ok_or_else(|| {
+                        MlirError::UnsupportedOperation("invalid reference field".into())
+                    })?
+                    .ty
+                    .clone();
+                let name = format!("%reference{}_field{depth}", result.0);
+                let declaration = module
+                    .classes
+                    .iter()
+                    .find(|known| known.id == *class)
+                    .expect("field type was resolved above");
+                if !declaration.variants.is_empty() && *field != 0 {
+                    let (variant, index) = declaration
+                        .variants
+                        .iter()
+                        .enumerate()
+                        .find_map(|(variant, fields)| {
+                            fields
+                                .iter()
+                                .position(|logical| logical == field)
+                                .map(|index| (variant, index))
+                        })
+                        .ok_or_else(|| {
+                            MlirError::UnsupportedOperation(
+                                "invalid sum reference projection".into(),
+                            )
+                        })?;
+                    let header_type = mlir_type(&ty)?;
+                    let payload_type = sum_payload_type(declaration, variant as u32)?;
+                    output.push_str(&format!("{indentation}{name}_header = llvm.load {address} : !llvm.ptr -> {header_type}\n"));
+                    output.push_str(&format!("{indentation}{name}_payload = llvm.extractvalue {name}_header[1] : {header_type}\n"));
+                    output.push_str(&format!("{indentation}{name} = llvm.getelementptr {name}_payload[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
+                } else {
+                    output.push_str(&format!("{indentation}{name} = llvm.getelementptr {address}[0, {field}] : (!llvm.ptr) -> !llvm.ptr, {}\n", mlir_type(&ty)?));
+                }
+                address = name;
+                ty = next;
+            }
+            output.push_str(&format!("{indentation}%v{} = builtin.unrealized_conversion_cast {address} : !llvm.ptr to !llvm.ptr\n", result.0));
         }
         Operation::Store { place, value } => {
             let ty = value_type(module, *value)?;
@@ -1446,7 +1548,9 @@ fn render_cfg_operation(
                 let object_type = cfg_place_base_type(module, body, place)?;
                 verify_record_update(module, &object_type)?;
                 let base_type = mlir_type(&object_type)?;
-                let address = cfg_place_base_address(place);
+                let address = place_address
+                    .clone()
+                    .unwrap_or_else(|| cfg_place_base_address(place));
                 let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
                 output.push_str(&format!(
                     "{indentation}%store_base_b{}_o{} = llvm.load {address} : !llvm.ptr -> {base_type}\n",
@@ -1485,7 +1589,10 @@ fn render_cfg_operation(
                 output.push_str(&format!(
                     "{indentation}llvm.store %v{}, {} : {}, !llvm.ptr\n",
                     value.0,
-                    cfg_place_address(place)?,
+                    match &place_address {
+                        Some(address) => address.clone(),
+                        None => cfg_place_address(place)?,
+                    },
                     mlir_type(&ty)?
                 ));
             }
@@ -1703,7 +1810,9 @@ fn render_cfg_operation(
             let base_type = mlir_type(&cfg_place_base_type(module, body, place)?)?;
             let field_type = value_type(module, *value)?;
             let field_spelling = mlir_type(&field_type)?;
-            let address = cfg_place_base_address(place);
+            let address = place_address
+                .clone()
+                .unwrap_or_else(|| cfg_place_base_address(place));
             output.push_str(&format!(
                 "{indentation}%v{} = async.execute {attributes} {{\n",
                 result.0

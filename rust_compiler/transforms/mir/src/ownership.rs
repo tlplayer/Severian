@@ -833,6 +833,7 @@ mod tests {
             ty: TypeId(0),
             mutable: true,
             argument,
+            borrowed: false,
             span: None,
         }
     }

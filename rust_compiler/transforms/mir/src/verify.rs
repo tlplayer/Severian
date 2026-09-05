@@ -12,6 +12,7 @@ type InstanceSignatures = BTreeMap<crate::FunctionId, (Vec<TypeId>, TypeId)>;
 struct CallSignatures {
     definitions: DefinitionSignatures,
     instances: InstanceSignatures,
+    fields: BTreeMap<TypeId, Vec<TypeId>>,
 }
 type CallContext<'a> = (&'a TypeContext, &'a CallSignatures);
 
@@ -138,6 +139,16 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
     let signatures = CallSignatures {
         definitions,
         instances,
+        fields: module
+            .classes
+            .iter()
+            .map(|class| {
+                (
+                    class.id,
+                    class.fields.iter().map(|field| field.ty).collect(),
+                )
+            })
+            .collect(),
     };
     verify_body(
         &module.initializer,
@@ -436,9 +447,34 @@ fn transfer(
                     return Err(VerifyError::CallArity);
                 }
                 for (argument, parameter) in arguments.iter().zip(parameters) {
-                    if !types.assignable(operand_type(body, globals, argument)?, *parameter) {
+                    let mut actual = operand_type(body, globals, argument)?;
+                    if let Operand::Copy(place) | Operand::Move(place) = argument {
+                        for projection in &place.projection {
+                            match projection {
+                                crate::Projection::Field(field) => {
+                                    actual = signatures
+                                        .fields
+                                        .get(&actual)
+                                        .and_then(|fields| fields.get(*field as usize))
+                                        .copied()
+                                        .ok_or_else(|| {
+                                            VerifyError::InvalidOperation(
+                                                "invalid call argument field projection".into(),
+                                            )
+                                        })?;
+                                }
+                                crate::Projection::Downcast(_) => {}
+                                _ => {
+                                    return Err(VerifyError::InvalidOperation(
+                                        "unsupported call argument projection".into(),
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                    if !types.assignable(actual, *parameter) {
                         return Err(VerifyError::CallArgumentType {
-                            actual: operand_type(body, globals, argument)?,
+                            actual,
                             expected: *parameter,
                             callee: Some(*function),
                         });

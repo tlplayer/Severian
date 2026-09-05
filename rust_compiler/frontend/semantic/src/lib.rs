@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod callable;
 mod package;
 mod queries;
 
@@ -258,6 +259,9 @@ pub(crate) fn analyze_with_package_functions(
         active_operator_namespaces: BTreeMap::new(),
         allow_qualified_function_suffix: false,
         active_function_name: None,
+        active_receiver: None,
+        method_instances: BTreeMap::new(),
+        pending_methods: Vec::new(),
         signatures: BTreeMap::new(),
         trait_names: ast
             .items
@@ -717,12 +721,13 @@ pub(crate) fn analyze_with_package_functions(
     }
 
     let globals = analyzer.names.clone();
+    let global_values = analyzer.value_substitutions.clone();
     let ast_functions = ast.items.iter().filter_map(|item| match item {
         severian_ast::Item::Function(function) => Some(function),
         _ => None,
     });
     for (ast_function, function) in ast_functions.zip(module.functions.iter_mut()) {
-        let Some(ast_body) = &ast_function.body else {
+        let Some(_) = &ast_function.body else {
             continue;
         };
         if function
@@ -734,166 +739,14 @@ pub(crate) fn analyze_with_package_functions(
             // Their unspecialized body has no concrete callable implementation.
             continue;
         }
-        analyzer.names = globals.clone();
-        analyzer.active_function_name = Some(ast_function.name.clone());
-        analyzer.declarations.clear();
-        analyzer.active_type_aliases.clear();
-        for (index, name) in ast_function.type_parameters.iter().enumerate() {
-            if let Some(ty) = function
-                .substitution
-                .get(severian_universal::GenericParamId(index as u32))
-            {
-                analyzer.active_type_aliases.insert(name.clone(), ty);
-            }
-        }
-        analyzer.mocks.clear();
-        analyzer.callable_substitutions.clear();
-        analyzer.active_operator_namespaces = operator_namespaces(&ast_function.decorators);
-        for parameter in &function.parameters {
-            let type_id = parameter.contract.ty;
-            if !analyzer.declarations.insert(parameter.name.clone()) {
-                return Err(Diagnostic::new(
-                    "E000203",
-                    format!("parameter `{}` is declared more than once", parameter.name),
-                    Some(ast_function.span),
-                ));
-            }
-            let variable = severian_hir::VariableId(parameter.binding.0);
-            analyzer.mutable_variables.insert(variable);
-            analyzer.names.insert(
-                parameter.name.clone(),
-                (parameter.binding, variable, type_id),
-            );
-        }
-        let result_type = function.result.ty;
-        let (mut body, hooks) =
-            analyzer.lower_function_hooks(ast_function, &mut module.bindings, result_type)?;
-        for contract in ast_function
-            .contracts
-            .iter()
-            .filter(|contract| !contract.deferred)
-        {
-            body.statements.push(analyzer.contract_assertion(contract)?);
-        }
-        body.statements.extend(
-            analyzer
-                .block(ast_body, &mut module.bindings, result_type)?
-                .statements,
-        );
-        let deferred = ast_function
-            .contracts
-            .iter()
-            .filter(|contract| contract.deferred)
-            .map(|contract| analyzer.contract_assertion(contract))
-            .collect::<Result<Vec<_>, _>>()?;
-        if !deferred.is_empty() {
-            insert_before_returns(&mut body, &deferred);
-            if block_flow(ast_body) == ControlFlow::FallsThrough {
-                body.statements.extend(deferred);
-            }
-        }
-        if !hooks.is_empty() {
-            insert_hook_exits(&mut body, &hooks);
-            if block_flow(ast_body) == ControlFlow::FallsThrough {
-                for hook in hooks.iter().rev() {
-                    if let Some((field, duration)) = &hook.duration {
-                        body.statements.push(Statement::FieldSet {
-                            binding: hook.context,
-                            field: *field,
-                            value: duration.clone(),
-                        });
-                    }
-                    body.statements
-                        .extend(hook.without_phase.statements.iter().cloned());
-                }
-            }
-        }
-        let allows_fallthrough = result_type
-            == analyzer
-                .types
-                .resolve_name("unit")
-                .expect("bootstrap defines unit")
-            || analyzer
-                .types
-                .definition(result_type)
-                .is_some_and(|definition| definition.name == "None");
-        let falls_through = block_flow(ast_body) == ControlFlow::FallsThrough;
-        if !allows_fallthrough && falls_through {
-            return Err(Diagnostic::new(
-                "E000209",
-                "not every path in this function returns its declared result",
-                Some(ast_function.span),
-            ));
-        }
-        if allows_fallthrough
-            && falls_through
-            && analyzer
-                .types
-                .definition(result_type)
-                .is_some_and(|definition| definition.name == "None")
-        {
-            body.statements.push(Statement::Return(Some(
-                analyzer.default_expression(result_type, ast_function.span)?,
-            )));
-        }
-        if let Some(fallible) = analyzer.fallible_types.get(&result_type).copied() {
-            let catch_binding = analyzer.new_binding_id();
-            let error = Expression {
-                id: analyzer.next_id(),
-                type_id: fallible.error,
-                kind: ExpressionKind::Binding(catch_binding),
-                span: ast_function.span,
-            };
-            let core_error = analyzer
-                .types
-                .resolve_name("Error")
-                .expect("bootstrap defines Error");
-            let error = if fallible.error == core_error {
-                let string = analyzer
-                    .types
-                    .resolve_name("string")
-                    .expect("bootstrap defines string");
-                let frame = Expression {
-                    id: analyzer.next_id(),
-                    type_id: string,
-                    kind: ExpressionKind::Literal(LiteralValue::String(ast_function.name.clone())),
-                    span: ast_function.span,
-                };
-                analyzer.runtime_call(
-                    "__sev_error_propagate",
-                    &[fallible.error, string],
-                    fallible.error,
-                    vec![error, frame],
-                    ast_function.span,
-                )
-            } else {
-                error
-            };
-            let propagated = analyzer.fallible_error_expression(
-                result_type,
-                fallible,
-                error,
-                ast_function.span,
-            )?;
-            body = Block {
-                statements: vec![Statement::Try {
-                    body,
-                    catch_binding,
-                    catch_type: fallible.error,
-                    catch_body: Block {
-                        statements: vec![Statement::Return(Some(propagated))],
-                    },
-                    span: ast_function.span,
-                }],
-            };
-        }
-        let effects = function
-            .parameters
-            .iter()
-            .map(|parameter| analyzer.inferred_parameter_effect(&body, parameter.binding))
-            .collect();
-        analyzer.parameter_effects.insert(function.id, effects);
-        function.body = Some(body);
+        analyzer.lower_callable_body(
+            ast_function,
+            function,
+            &mut module.bindings,
+            &globals,
+            &global_values,
+            BTreeMap::new(),
+        )?;
         if function.name == "main" {
             let arguments_type = analyzer
                 .types
@@ -1056,9 +909,53 @@ pub(crate) fn analyze_with_package_functions(
             module.functions[source_function_count + offset].body = Some(body);
         }
     }
+    let mut next_method = 0;
+    while next_method < analyzer.pending_methods.len() {
+        let (ast_method, mut function, owner, aliases) =
+            analyzer.pending_methods[next_method].clone();
+        next_method += 1;
+        analyzer.active_receiver = Some((function.parameters[0].binding, owner));
+        analyzer.lower_callable_body(
+            &ast_method,
+            &mut function,
+            &mut module.bindings,
+            &globals,
+            &global_values,
+            aliases,
+        )?;
+        analyzer.active_receiver = None;
+        module.functions.push(function);
+    }
     module.bindings.append(&mut analyzer.helper_bindings);
     module.functions.extend(analyzer.runtime_functions.clone());
     module.classes = analyzer.lowered_classes.clone();
+    analyzer.finish_callable_effects(&mut module);
+    for function in &mut module.functions {
+        if function.body.is_none() {
+            continue;
+        }
+        for (index, parameter) in function.parameters.iter_mut().enumerate() {
+            let effect = analyzer
+                .parameter_effects
+                .get(&function.id)
+                .and_then(|effects| effects.get(index))
+                .copied()
+                .unwrap_or(ParameterEffect::Shared);
+            if analyzer
+                .class_instances_by_type
+                .contains_key(&parameter.contract.ty)
+                && effect != ParameterEffect::Move
+            {
+                parameter
+                    .contract
+                    .modifiers
+                    .push(severian_hir::BoundaryModifier {
+                        name: "reference".into(),
+                    });
+            }
+        }
+    }
+
     Ok(Program {
         modules: vec![module],
     })
@@ -1502,6 +1399,14 @@ struct Analyzer<'a> {
     active_operator_namespaces: BTreeMap<String, Vec<String>>,
     allow_qualified_function_suffix: bool,
     active_function_name: Option<String>,
+    active_receiver: Option<(BindingId, ClassInstance)>,
+    method_instances: BTreeMap<(TypeId, String, usize), FunctionId>,
+    pending_methods: Vec<(
+        severian_ast::FunctionDeclaration,
+        FunctionDeclaration,
+        ClassInstance,
+        BTreeMap<String, TypeId>,
+    )>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     trait_names: BTreeSet<String>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
@@ -1701,7 +1606,7 @@ struct SignatureParameter {
     default: Option<AstExpression>,
 }
 
-type ResolvedArguments = (Vec<Expression>, Vec<ConversionRank>);
+type ResolvedArguments = (Vec<Expression>, Vec<ConversionRank>, Vec<usize>);
 
 #[derive(Debug, Clone)]
 struct ActiveMock {
@@ -3643,6 +3548,26 @@ impl Analyzer<'_> {
                 Ok(Statement::Continue { span: *span })
             }
             AstStatement::Binding(binding) => {
+                if !binding.mutable
+                    && binding.annotation.is_none()
+                    && !self.declarations.contains(&binding.name)
+                {
+                    if let Some((receiver, owner)) = self.active_receiver.clone() {
+                        if let Some((index, field)) = owner
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, field)| field.name == binding.name)
+                        {
+                            let value = self.expression(&binding.value, Some(field.ty))?;
+                            return Ok(Statement::FieldSet {
+                                binding: receiver,
+                                field: index as u32,
+                                value,
+                            });
+                        }
+                    }
+                }
                 Ok(Statement::Binding(self.binding(binding, bindings)?))
             }
             AstStatement::Destructure {
@@ -3660,7 +3585,9 @@ impl Analyzer<'_> {
                 value,
                 span,
             } => {
-                if field.starts_with('_') {
+                if field.starts_with('_')
+                    && !matches!((&object.kind, &self.active_receiver), (AstExpressionKind::Name(name), Some(_)) if name == "self")
+                {
                     return Err(Diagnostic::new(
                         "E000211",
                         format!("field `{field}` cannot be written outside its class"),
@@ -4057,17 +3984,7 @@ impl Analyzer<'_> {
                 let dropped = explicit_drop_receiver(expression).map(str::to_owned);
                 let mut lowered = match self.class_method_update(expression)? {
                     Some(update) => update,
-                    None if dropped.is_some() => {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            "`drop` requires a class value with a unit `drop()` method",
-                            Some(expression.span),
-                        ));
-                    }
-                    None => match self.class_method_body_update(expression, bindings)? {
-                        Some(update) => update,
-                        None => Statement::Expression(self.expression(expression, None)?),
-                    },
+                    None => Statement::Expression(self.expression(expression, None)?),
                 };
                 if let Some(receiver) = dropped {
                     if let Some((binding, _, ty)) = self.names.get(&receiver).copied() {
@@ -5721,13 +5638,33 @@ impl Analyzer<'_> {
             | ExpressionKind::Unary {
                 operand: object, ..
             } => self.expression_parameter_effect(object, parameter),
-            ExpressionKind::Call { callee, arguments } => {
+            ExpressionKind::Call {
+                callee, arguments, ..
+            } => {
                 let mut effect =
                     arguments
                         .iter()
                         .fold(ParameterEffect::Shared, |effect, argument| {
                             effect.max(self.expression_parameter_effect(argument, parameter))
                         });
+                if let severian_hir::Callee::Direct {
+                    instance: Some(instance),
+                    ..
+                } = callee
+                {
+                    if let Some(effects) = self.parameter_effects.get(instance) {
+                        for (argument, called_effect) in arguments.iter().zip(effects) {
+                            let affects_parameter = if *called_effect == ParameterEffect::Move {
+                                expression_is_binding(argument, parameter)
+                            } else {
+                                expression_contains_binding(argument, parameter)
+                            };
+                            if affects_parameter {
+                                effect = effect.max(*called_effect);
+                            }
+                        }
+                    }
+                }
                 if self.mutating_runtime_callee(callee)
                     && arguments
                         .iter()
@@ -5766,7 +5703,7 @@ impl Analyzer<'_> {
             }
             ExpressionKind::Move(operand) => {
                 let nested = self.expression_parameter_effect(operand, parameter);
-                if expression_contains_binding(operand, parameter) {
+                if expression_is_binding(operand, parameter) {
                     nested.max(ParameterEffect::Move)
                 } else {
                     nested
@@ -6376,6 +6313,9 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Name(name) => {
+                if let Some(field) = self.receiver_field_expression(name, expected, ast.span)? {
+                    return Ok(field);
+                }
                 if name == "e" {
                     let f64_type = self
                         .types
@@ -6599,7 +6539,12 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
-                if name.starts_with("__") {
+                if name.starts_with("__")
+                    && !self
+                        .active_receiver
+                        .as_ref()
+                        .is_some_and(|(_, owner)| owner.ty == instance.ty)
+                {
                     return Err(Diagnostic::new(
                         "E000211",
                         format!("field `{name}` is private to class `{}`", instance.name),
@@ -7095,6 +7040,12 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(call) =
+                    self.receiver_sibling_call(callee, arguments, expected, ast.span)?
+                {
+                    return Ok(call);
+                }
+
                 if let Some(path) = callable_path(callee) {
                     if self.enum_constructor_candidate(&path, expected) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
@@ -7198,6 +7149,7 @@ impl Analyzer<'_> {
                         id: self.next_id(),
                         type_id: result,
                         kind: ExpressionKind::Call {
+                            evaluation_order: Vec::new(),
                             callee: severian_hir::Callee::Intrinsic {
                                 operation: severian_universal::OpId::named(dialect, operation),
                                 attributes,
@@ -8481,7 +8433,7 @@ impl Analyzer<'_> {
                     {
                         continue;
                     }
-                    if let Some((arguments, conversions)) =
+                    if let Some((arguments, conversions, evaluation_order)) =
                         self.resolve_signature_arguments(&signature, arguments, ast.span)?
                     {
                         matches.push((
@@ -8490,6 +8442,7 @@ impl Analyzer<'_> {
                             function,
                             signature.result,
                             arguments,
+                            evaluation_order,
                         ));
                     }
                 }
@@ -8533,7 +8486,8 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 }
-                let [(_, _, function, result, arguments)] = best.as_slice() else {
+                let [(_, _, function, result, arguments, evaluation_order)] = best.as_slice()
+                else {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("call to `{name}` has no unique compatible declaration"),
@@ -8546,6 +8500,7 @@ impl Analyzer<'_> {
                     id: self.next_id(),
                     type_id: *result,
                     kind: ExpressionKind::Call {
+                        evaluation_order: evaluation_order.clone(),
                         callee: severian_hir::Callee::Direct {
                             instance: Some(*function),
                             function: self.function_definitions[function],
@@ -13468,6 +13423,7 @@ impl Analyzer<'_> {
             ExpressionKind::Call {
                 callee: severian_hir::Callee::Direct { function, .. },
                 arguments,
+                ..
             } => {
                 self.runtime_definitions.iter().any(|(symbol, definition)| {
                     definition == function
@@ -13799,6 +13755,7 @@ impl Analyzer<'_> {
             id: self.next_id(),
             type_id: result_type,
             kind: ExpressionKind::Call {
+                evaluation_order: Vec::new(),
                 callee: severian_hir::Callee::Direct {
                     instance: None,
                     function: definition,
@@ -14004,6 +13961,7 @@ impl Analyzer<'_> {
             id: self.next_id(),
             type_id: result,
             kind: ExpressionKind::Call {
+                evaluation_order: Vec::new(),
                 callee: severian_hir::Callee::Intrinsic {
                     operation,
                     attributes,
@@ -15491,6 +15449,7 @@ impl Analyzer<'_> {
                 id: self.next_id(),
                 type_id: callable.signature.result,
                 kind: ExpressionKind::Call {
+                    evaluation_order: Vec::new(),
                     callee: severian_hir::Callee::Direct {
                         instance: Some(function),
                         function: self.function_definitions[&function],
@@ -15612,6 +15571,24 @@ impl Analyzer<'_> {
             return Ok(None);
         }
 
+        let mut evaluation_order = Vec::new();
+        for argument in arguments {
+            if let Some(index) = ordered
+                .iter()
+                .position(|entry| entry.is_some_and(|entry| std::ptr::eq(entry, argument)))
+            {
+                evaluation_order.push(index);
+            } else if let Some((index, _)) = variadic {
+                if !evaluation_order.contains(&index) {
+                    evaluation_order.push(index);
+                }
+            }
+        }
+        for index in 0..signature.parameters.len() {
+            if !evaluation_order.contains(&index) {
+                evaluation_order.push(index);
+            }
+        }
         let mut resolved = Vec::with_capacity(signature.parameters.len());
         let mut conversions = Vec::with_capacity(arguments.len());
         for (argument, parameter) in ordered.into_iter().zip(&signature.parameters[..fixed]) {
@@ -15683,7 +15660,7 @@ impl Analyzer<'_> {
                 resolved.push(self.resolved_list_expression(element, values, span)?);
             }
         }
-        Ok(Some((resolved, conversions)))
+        Ok(Some((resolved, conversions, evaluation_order)))
     }
 
     fn resolve_parameter_argument(
@@ -16623,6 +16600,7 @@ impl Analyzer<'_> {
             id: self.next_id(),
             type_id: result,
             kind: ExpressionKind::Call {
+                evaluation_order: Vec::new(),
                 callee: severian_hir::Callee::Direct {
                     instance: Some(function_id),
                     function: definition,
@@ -17554,7 +17532,12 @@ impl Analyzer<'_> {
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);
         };
-        if name.starts_with("__") {
+        if name.starts_with("__")
+            && !self
+                .active_receiver
+                .as_ref()
+                .is_some_and(|(_, owner)| owner.ty == instance.ty)
+        {
             return Err(Diagnostic::new(
                 "E000211",
                 format!("method `{name}` is private to class `{}`", instance.name),
@@ -17699,374 +17682,8 @@ impl Analyzer<'_> {
                 return Ok(Some(lowered));
             }
         }
-        let mut method_substitution = self
-            .classes
-            .get(&instance.name)
-            .map(|declaration| {
-                declaration
-                    .type_parameters
-                    .iter()
-                    .cloned()
-                    .zip(instance.arguments.iter().copied())
-                    .collect::<BTreeMap<_, _>>()
-            })
-            .unwrap_or_default();
-        method_substitution.insert("Self".to_owned(), object.type_id);
-        let required_parameters = method
-            .parameters
-            .iter()
-            .filter(|parameter| parameter.default.is_none())
-            .count();
-        if arguments.len() < required_parameters || arguments.len() > method.parameters.len() {
-            return Err(Diagnostic::new(
-                "E000206",
-                format!(
-                    "method `{name}` expects {required_parameters} to {} argument(s), received {}",
-                    method.parameters.len(),
-                    arguments.len()
-                ),
-                Some(span),
-            ));
-        }
-        let Some(body) = &method.body else {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` has no implementation"),
-                Some(method.span),
-            ));
-        };
-        if let Some(field_name) = body.iter().find_map(|statement| {
-            let AstStatement::Return {
-                value: Some(value), ..
-            } = statement
-            else {
-                return None;
-            };
-            let AstExpressionKind::Call { callee, arguments } = &value.kind else {
-                return None;
-            };
-            let AstExpressionKind::Member {
-                object: field,
-                name: operation,
-            } = &callee.kind
-            else {
-                return None;
-            };
-            let AstExpressionKind::Name(field) = &field.kind else {
-                return None;
-            };
-            (operation == "pop" && arguments.is_empty()).then_some(field.as_str())
-        }) {
-            let Some((field, declaration)) = instance
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == field_name)
-            else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("class `{}` has no field `{field_name}`", instance.name),
-                    Some(method.span),
-                ));
-            };
-            let Some(element) = self.list_elements.get(&declaration.ty).copied() else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("field `{field_name}` is not a list"),
-                    Some(method.span),
-                ));
-            };
-            if expected.is_some_and(|expected| !self.types.assignable(element, expected)) {
-                return Err(semantic_error(
-                    "method result does not satisfy the expected type".into(),
-                    span,
-                ));
-            }
-            let list = Expression {
-                id: self.next_id(),
-                type_id: declaration.ty,
-                kind: ExpressionKind::Field {
-                    object: Box::new(object),
-                    index: field as u32,
-                },
-                span,
-            };
-            let storage = self.list_storage_expression(list, span);
-            let storage_type = storage.type_id;
-            let suffix = self.list_runtime_suffix(element, span)?;
-            let symbol = format!("__sev_list_pop_{suffix}");
-            return Ok(Some(self.runtime_call(
-                &symbol,
-                &[storage_type],
-                element,
-                vec![storage],
-                span,
-            )));
-        }
-        if body
-            .iter()
-            .any(|statement| matches!(statement, AstStatement::If { .. }))
-        {
-            let result_type = if method_substitution.is_empty() {
-                self.resolve_source_type(&method.result)?
-            } else {
-                self.resolve_instantiated_type(&method.result, &method_substitution)?
-            };
-            let exposed_result = self.fallible_types.get(&result_type)
-                .map_or(result_type, |fallible| fallible.success);
-            if expected.is_some_and(|expected| !self.types.assignable(exposed_result, expected)) {
-                return Err(semantic_error(
-                    "method result does not satisfy the expected type".into(),
-                    span,
-                ));
-            }
-            let previous = self.value_substitutions.clone();
-            let resolved = (|| {
-                self.value_substitutions
-                    .insert("self".into(), object.clone());
-                for (field, declaration) in instance.fields.iter().enumerate() {
-                    let id = self.next_id();
-                    self.value_substitutions.insert(
-                        declaration.name.clone(),
-                        Expression {
-                            id,
-                            type_id: declaration.ty,
-                            kind: ExpressionKind::Field {
-                                object: Box::new(object.clone()),
-                                index: field as u32,
-                            },
-                            span,
-                        },
-                    );
-                }
-                for (index, parameter) in method.parameters.iter().enumerate() {
-                    let argument = arguments
-                        .get(index)
-                        .map(|argument| &argument.value)
-                        .or(parameter.default.as_ref())
-                        .expect("method arity validation requires a value or default");
-                    let parameter_type = if method_substitution.is_empty() {
-                        self.resolve_source_type(&parameter.annotation)?
-                    } else {
-                        self.resolve_instantiated_type(&parameter.annotation, &method_substitution)?
-                    };
-                    let method_environment = self.value_substitutions.clone();
-                    self.value_substitutions = previous.clone();
-                    let value = self.expression(argument, Some(parameter_type));
-                    self.value_substitutions = method_environment;
-                    let value = value?;
-                    self.value_substitutions
-                        .insert(parameter.name.clone(), value);
-                }
-                self.source_return_expression(body, result_type, None)
-            })();
-            self.value_substitutions = previous;
-            if let Some(resolved) = resolved? {
-                return Ok(Some(resolved));
-            }
-        }
-        if let Some(return_value) = body.iter().find_map(|statement| match statement {
-            AstStatement::Return {
-                value: Some(value), ..
-            } if !matches!(&value.kind, AstExpressionKind::Name(name) if name != "self") => {
-                Some(value)
-            }
-            _ => None,
-        }) {
-            let result_type = if method_substitution.is_empty() {
-                self.resolve_source_type(&method.result)?
-            } else {
-                self.resolve_instantiated_type(&method.result, &method_substitution)?
-            };
-            let exposed_result = self.fallible_types.get(&result_type)
-                .map_or(result_type, |fallible| fallible.success);
-            if expected.is_some_and(|expected| !self.types.assignable(exposed_result, expected)) {
-                return Err(semantic_error(
-                    "method result does not satisfy the expected type".into(),
-                    span,
-                ));
-            }
-            let previous = self.value_substitutions.clone();
-            let previous_callables = self.callable_substitutions.clone();
-            let previous_suffix_resolution = self.allow_qualified_function_suffix;
-            self.allow_qualified_function_suffix = true;
-            self.value_substitutions
-                .insert("self".into(), object.clone());
-            for (field, declaration) in instance.fields.iter().enumerate() {
-                let id = self.next_id();
-                self.value_substitutions.insert(
-                    declaration.name.clone(),
-                    Expression {
-                        id,
-                        type_id: declaration.ty,
-                        kind: ExpressionKind::Field {
-                            object: Box::new(object.clone()),
-                            index: field as u32,
-                        },
-                        span,
-                    },
-                );
-            }
-            let resolved = (|| {
-                for (index, parameter) in method.parameters.iter().enumerate() {
-                    let argument = arguments
-                        .get(index)
-                        .map(|argument| &argument.value)
-                        .or(parameter.default.as_ref())
-                        .expect("method arity validation requires a value or default");
-                    if let Some(signature) = self.function_annotation(&parameter.annotation)? {
-                        let method_environment = self.value_substitutions.clone();
-                        self.value_substitutions = previous.clone();
-                        let callable = self.resolve_callable_value(argument, &signature);
-                        self.value_substitutions = method_environment;
-                        let callable = callable?;
-                        self.callable_substitutions
-                            .insert(parameter.name.clone(), callable);
-                    } else {
-                        let parameter_type = if method_substitution.is_empty() {
-                            self.resolve_source_type(&parameter.annotation)?
-                        } else {
-                            self.resolve_instantiated_type(
-                                &parameter.annotation,
-                                &method_substitution,
-                            )?
-                        };
-                        let method_environment = self.value_substitutions.clone();
-                        self.value_substitutions = previous.clone();
-                        let value = self.expression(argument, Some(parameter_type));
-                        self.value_substitutions = method_environment;
-                        let value = value?;
-                        self.value_substitutions
-                            .insert(parameter.name.clone(), value);
-                    }
-                }
-                if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
-                    let value = self.expression(return_value, Some(fallible.success))?;
-                    self.fallible_success_expression(
-                        result_type,
-                        fallible,
-                        value,
-                        return_value.span,
-                    )
-                } else {
-                    self.expression(return_value, Some(result_type))
-                }
-            })();
-            self.value_substitutions = previous;
-            self.callable_substitutions = previous_callables;
-            self.allow_qualified_function_suffix = previous_suffix_resolution;
-            return resolved.map(Some);
-        }
-        let field_name = body.iter().find_map(|statement| {
-            let AstStatement::Return {
-                value: Some(value), ..
-            } = statement
-            else {
-                return None;
-            };
-            let AstExpressionKind::Name(field) = &value.kind else {
-                return None;
-            };
-            Some(field.as_str())
-        });
-        let Some((field, declaration)) = field_name.and_then(|field_name| {
-            instance
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == field_name)
-        }) else {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` is not a field-returning method"),
-                Some(method.span),
-            ));
-        };
-        if expected.is_some_and(|expected| !self.types.assignable(declaration.ty, expected)) {
-            return Err(semantic_error(
-                "method result does not satisfy the expected type".into(),
-                span,
-            ));
-        }
-        Ok(Some(Expression {
-            id: self.next_id(),
-            type_id: declaration.ty,
-            kind: ExpressionKind::Field {
-                object: Box::new(object),
-                index: field as u32,
-            },
-            span,
-        }))
-    }
-
-    fn source_return_expression(
-        &mut self,
-        statements: &[AstStatement],
-        result_type: TypeId,
-        fallthrough: Option<Expression>,
-    ) -> Result<Option<Expression>, Diagnostic> {
-        let Some((statement, remaining)) = statements.split_first() else {
-            return Ok(fallthrough);
-        };
-        match statement {
-            AstStatement::Return {
-                value: Some(value), ..
-            } => self.expression(value, Some(result_type)).map(Some),
-            AstStatement::Expression(expression)
-                if matches!(expression.kind, AstExpressionKind::Throw { .. }) =>
-            {
-                self.expression(expression, Some(result_type)).map(Some)
-            }
-            AstStatement::Binding(binding) if !binding.update && !binding.preserve_error => {
-                let expected = binding
-                    .annotation
-                    .as_ref()
-                    .map(|annotation| self.resolve_source_type(annotation))
-                    .transpose()?;
-                let value = self.expression(&binding.value, expected)?;
-                self.value_substitutions.insert(binding.name.clone(), value);
-                self.source_return_expression(remaining, result_type, fallthrough)
-            }
-            AstStatement::If {
-                condition,
-                then_block,
-                else_block,
-                span,
-            } => {
-                let condition = self.condition_expression(condition)?;
-                let substitutions = self.value_substitutions.clone();
-                let continuation =
-                    self.source_return_expression(remaining, result_type, fallthrough)?;
-                let Some(continuation) = continuation else {
-                    self.value_substitutions = substitutions;
-                    return Ok(None);
-                };
-                self.value_substitutions = substitutions.clone();
-                let then_value = self.source_return_expression(
-                    then_block,
-                    result_type,
-                    Some(continuation.clone()),
-                )?;
-                self.value_substitutions = substitutions.clone();
-                let else_value =
-                    self.source_return_expression(else_block, result_type, Some(continuation))?;
-                self.value_substitutions = substitutions;
-                match (then_value, else_value) {
-                    (Some(value), Some(fallback)) => Ok(Some(Expression {
-                        id: self.next_id(),
-                        type_id: result_type,
-                        kind: ExpressionKind::Fallback {
-                            condition: Box::new(condition),
-                            value: Box::new(value),
-                            fallback: Box::new(fallback),
-                        },
-                        span: *span,
-                    })),
-                    _ => Ok(None),
-                }
-            }
-            _ => Ok(None),
-        }
+        self.lower_method_callable(&instance, &method, object, arguments, expected, span)
+            .map(Some)
     }
 
     fn primitive_integer_method(
@@ -18521,418 +18138,14 @@ impl Analyzer<'_> {
         let Some(instance) = self.class_instances_by_type.get(&ty).cloned() else {
             return Ok(None);
         };
-        if name.starts_with("__") {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` is private to class `{}`", instance.name),
-                Some(callee.span),
-            )
-            .with_help("call a public class method instead"));
-        }
-        if name == "set" {
+        // Dynamic field selection is a storage operation. Source method bodies
+        // always use ordinary expression calls, including discarded results.
+        if name == "set" && !instance.methods.iter().any(|method| method.name == *name) {
             return self
                 .object_set(binding, &instance, arguments, expression.span)
                 .map(Some);
         }
-        if name == "get" && !instance.methods.iter().any(|method| method.name == *name) {
-            return Ok(None);
-        }
-        let Some(mut method) = instance
-            .methods
-            .iter()
-            .find(|method| method.name == *name)
-            .cloned()
-        else {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("class `{}` has no method `{name}`", instance.name),
-                Some(callee.span),
-            ));
-        };
-        if method.parameters.len() != arguments.len() {
-            return Err(Diagnostic::new(
-                "E000206",
-                format!(
-                    "method `{name}` expects {} argument(s), received {}",
-                    method.parameters.len(),
-                    arguments.len()
-                ),
-                Some(expression.span),
-            ));
-        }
-        let mut delegated = BTreeSet::from([method.name.clone()]);
-        loop {
-            let Some(body) = &method.body else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("method `{}` has no implementation", method.name),
-                    Some(method.span),
-                ));
-            };
-            let delegate = match body.as_slice() {
-                [AstStatement::Expression(AstExpression {
-                    kind: AstExpressionKind::Call { callee, arguments },
-                    ..
-                })] if arguments.is_empty() => match &callee.kind {
-                    AstExpressionKind::Name(delegate) => Some(delegate.as_str()),
-                    _ => None,
-                },
-                _ => None,
-            };
-            let Some(delegate) = delegate else {
-                break;
-            };
-            if !delegated.insert(delegate.to_owned()) {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("method delegation through `{delegate}` is recursive"),
-                    Some(method.span),
-                ));
-            }
-            let Some(next) = instance
-                .methods
-                .iter()
-                .find(|candidate| candidate.name == delegate && candidate.parameters.is_empty())
-                .cloned()
-            else {
-                break;
-            };
-            method = next;
-        }
-        let body = method
-            .body
-            .as_ref()
-            .expect("delegated methods retain bodies");
-        if !body.is_empty()
-            && body.iter().all(|statement| {
-                matches!(statement, AstStatement::Binding(assignment)
-                    if !assignment.update
-                        && instance.fields.iter().any(|field| field.name == assignment.name))
-            })
-        {
-            let previous = self.value_substitutions.clone();
-            let resolved = (|| {
-                for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                    let value = self.expression(&argument.value, Some(parameter_type))?;
-                    self.value_substitutions
-                        .insert(parameter.name.clone(), value);
-                }
-                body.iter()
-                    .map(|statement| {
-                        let AstStatement::Binding(assignment) = statement else {
-                            unreachable!("direct field assignment body was checked above")
-                        };
-                        let (field, declaration) = instance
-                            .fields
-                            .iter()
-                            .enumerate()
-                            .find(|(_, field)| field.name == assignment.name)
-                            .expect("direct field assignment target was checked above");
-                        Ok(Statement::FieldSet {
-                            binding,
-                            field: field as u32,
-                            value: self.expression(&assignment.value, Some(declaration.ty))?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, Diagnostic>>()
-            })();
-            self.value_substitutions = previous;
-            return resolved.map(|statements| Some(Statement::Sequence(Block { statements })));
-        }
-        if let Some(field_name) = body.iter().find_map(|statement| {
-            let AstStatement::Expression(expression) = statement else {
-                return None;
-            };
-            let AstExpressionKind::Call {
-                callee,
-                arguments: method_arguments,
-            } = &expression.kind
-            else {
-                return None;
-            };
-            let AstExpressionKind::Member {
-                object: field,
-                name: operation,
-            } = &callee.kind
-            else {
-                return None;
-            };
-            let AstExpressionKind::Name(field) = &field.kind else {
-                return None;
-            };
-            let [argument] = method_arguments.as_slice() else {
-                return None;
-            };
-            let AstExpressionKind::Name(argument_name) = &argument.value.kind else {
-                return None;
-            };
-            (operation == "append"
-                && method
-                    .parameters
-                    .first()
-                    .is_some_and(|parameter| argument_name == &parameter.name))
-            .then_some(field.as_str())
-        }) {
-            let Some((field, declaration)) = instance
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == field_name)
-            else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("class `{}` has no field `{field_name}`", instance.name),
-                    Some(method.span),
-                ));
-            };
-            let Some(element) = self.list_elements.get(&declaration.ty).copied() else {
-                return Err(Diagnostic::new(
-                    "E000211",
-                    format!("field `{field_name}` is not a list"),
-                    Some(method.span),
-                ));
-            };
-            let receiver = Expression {
-                id: self.next_id(),
-                type_id: ty,
-                kind: ExpressionKind::Binding(binding),
-                span: object.span,
-            };
-            let list = Expression {
-                id: self.next_id(),
-                type_id: declaration.ty,
-                kind: ExpressionKind::Field {
-                    object: Box::new(receiver),
-                    index: field as u32,
-                },
-                span: object.span,
-            };
-            let storage = self.list_storage_expression(list, expression.span);
-            let storage_type = storage.type_id;
-            let value = self.expression(&arguments[0].value, Some(element))?;
-            let suffix = self.list_runtime_suffix(element, expression.span)?;
-            let symbol = format!("__sev_list_push_{suffix}");
-            let unit = self
-                .types
-                .resolve_name("unit")
-                .expect("bootstrap defines unit");
-            return Ok(Some(Statement::Expression(self.runtime_call(
-                &symbol,
-                &[storage_type, element],
-                unit,
-                vec![storage, value],
-                expression.span,
-            ))));
-        }
-        let update = body.iter().find_map(|statement| {
-            let severian_ast::Statement::Binding(update) = statement else {
-                return None;
-            };
-            if !update.update {
-                return None;
-            }
-            let AstExpressionKind::Binary {
-                operator,
-                left,
-                right,
-            } = &update.value.kind
-            else {
-                return None;
-            };
-            let AstExpressionKind::Name(left) = &left.kind else {
-                return None;
-            };
-            (left == &update.name).then(|| (update.name.as_str(), *operator, right.as_ref()))
-        });
-        let Some((field_name, operator, update_value)) = update else {
-            let unit = self
-                .types
-                .resolve_name("unit")
-                .expect("bootstrap defines unit");
-            let none = self
-                .types
-                .resolve_name("None")
-                .expect("bootstrap defines None");
-            let result = self.resolve_source_type(&method.result)?;
-            if result != unit && result != none {
-                // A value-returning method used as a statement is still an
-                // ordinary expression call. Let `class_method_call` lower it.
-                return Ok(None);
-            }
-            if body
-                .iter()
-                .all(|statement| matches!(statement, AstStatement::Expression(_)))
-            {
-                let previous = self.value_substitutions.clone();
-                let receiver = Expression {
-                    id: self.next_id(),
-                    type_id: ty,
-                    kind: ExpressionKind::Binding(binding),
-                    span: object.span,
-                };
-                for (field, declaration) in instance.fields.iter().enumerate() {
-                    let id = self.next_id();
-                    self.value_substitutions.insert(
-                        declaration.name.clone(),
-                        Expression {
-                            id,
-                            type_id: declaration.ty,
-                            kind: ExpressionKind::Field {
-                                object: Box::new(receiver.clone()),
-                                index: field as u32,
-                            },
-                            span: object.span,
-                        },
-                    );
-                }
-                let resolved = (|| {
-                    for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                        let value = self.expression(&argument.value, Some(parameter_type))?;
-                        self.value_substitutions
-                            .insert(parameter.name.clone(), value);
-                    }
-                    body.iter()
-                        .map(|statement| {
-                            let AstStatement::Expression(expression) = statement else {
-                                unreachable!("expression-only method body was checked above")
-                            };
-                            Ok(Statement::Expression(self.expression(expression, None)?))
-                        })
-                        .collect::<Result<Vec<_>, Diagnostic>>()
-                })();
-                self.value_substitutions = previous;
-                return resolved.map(|statements| Some(Statement::Sequence(Block { statements })));
-            }
-            return Ok(None);
-        };
-        let Some((field, declaration)) = instance
-            .fields
-            .iter()
-            .enumerate()
-            .find(|(_, field)| field.name == field_name)
-        else {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("class `{}` has no field `{field_name}`", instance.name),
-                Some(method.span),
-            ));
-        };
-        let previous = self.value_substitutions.clone();
-        for (parameter, argument) in method.parameters.iter().zip(arguments) {
-            let value = self.expression(&argument.value, Some(declaration.ty))?;
-            self.value_substitutions
-                .insert(parameter.name.clone(), value);
-        }
-        let value = self.expression(update_value, Some(declaration.ty));
-        self.value_substitutions = previous;
-        let value = value?;
-        let operator = universal_binary(operator);
-        if !self.types.supports_binary(operator, declaration.ty) {
-            return Err(Diagnostic::new(
-                "E000202",
-                format!("field `{field_name}` does not support this update operator"),
-                Some(method.span),
-            ));
-        }
-        Ok(Some(Statement::FieldUpdate {
-            binding,
-            field: field as u32,
-            operator,
-            value,
-        }))
-    }
-
-    fn class_method_body_update(
-        &mut self,
-        expression: &AstExpression,
-        bindings: &mut Vec<Binding>,
-    ) -> Result<Option<Statement>, Diagnostic> {
-        let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
-            return Ok(None);
-        };
-        let AstExpressionKind::Member { object, name } = &callee.kind else {
-            return Ok(None);
-        };
-        let AstExpressionKind::Name(receiver) = &object.kind else {
-            return Ok(None);
-        };
-        let Some((binding, _, ty)) = self.names.get(receiver).copied() else {
-            return Ok(None);
-        };
-        let Some(instance) = self.class_instances_by_type.get(&ty).cloned() else {
-            return Ok(None);
-        };
-        let Some(method) = instance
-            .methods
-            .iter()
-            .find(|method| method.name == *name)
-            .cloned()
-        else {
-            return Ok(None);
-        };
-        let unit = self
-            .types
-            .resolve_name("unit")
-            .expect("bootstrap defines unit");
-        if self.resolve_source_type(&method.result)? != unit {
-            return Ok(None);
-        }
-        if method.parameters.len() != arguments.len() {
-            return Err(Diagnostic::new(
-                "E000206",
-                format!(
-                    "method `{name}` expects {} argument(s), received {}",
-                    method.parameters.len(),
-                    arguments.len()
-                ),
-                Some(expression.span),
-            ));
-        }
-        let receiver = Expression {
-            id: self.next_id(),
-            type_id: ty,
-            kind: ExpressionKind::Binding(binding),
-            span: object.span,
-        };
-        let previous = self.value_substitutions.clone();
-        let resolved = (|| {
-            self.value_substitutions
-                .insert("self".into(), receiver.clone());
-            for (field, declaration) in instance.fields.iter().enumerate() {
-                let id = self.next_id();
-                self.value_substitutions.insert(
-                    declaration.name.clone(),
-                    Expression {
-                        id,
-                        type_id: declaration.ty,
-                        kind: ExpressionKind::Field {
-                            object: Box::new(receiver.clone()),
-                            index: field as u32,
-                        },
-                        span: object.span,
-                    },
-                );
-            }
-            for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                let value = self.expression(&argument.value, Some(parameter_type))?;
-                self.value_substitutions
-                    .insert(parameter.name.clone(), value);
-            }
-            let body = method.body.as_deref().ok_or_else(|| {
-                Diagnostic::new(
-                    "E000211",
-                    format!("method `{name}` has no implementation"),
-                    Some(method.span),
-                )
-            })?;
-            self.block(body, bindings, unit)
-                .map(|body| Statement::Sequence(body))
-        })();
-        self.value_substitutions = previous;
-        resolved.map(Some)
+        Ok(None)
     }
 }
 
@@ -21417,7 +20630,13 @@ fn explicit_drop_receiver(expression: &AstExpression) -> Option<&str> {
 }
 
 fn expression_is_binding(expression: &Expression, binding: BindingId) -> bool {
-    matches!(expression.kind, ExpressionKind::Binding(candidate) if candidate == binding)
+    match &expression.kind {
+        ExpressionKind::Binding(candidate) => *candidate == binding,
+        ExpressionKind::Borrow { operand, .. } | ExpressionKind::Move(operand) => {
+            expression_is_binding(operand, binding)
+        }
+        _ => false,
+    }
 }
 
 fn expression_contains_binding(expression: &Expression, binding: BindingId) -> bool {
@@ -21613,6 +20832,43 @@ mod tests {
     }
 
     #[test]
+    fn method_effects_propagate_through_forward_callables() {
+        let (program, _) = analyze_source("class Counter:\n    value: int\n    def bump():\n        value += 1\n    def forward():\n        bump()\ndef main():\n    counter := Counter(0)\n    counter.forward()\n");
+        let module = &program.modules[0];
+        for name in ["main", "Counter.forward"] {
+            let function = module
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap();
+            let call = function
+                .body
+                .as_ref()
+                .unwrap()
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Expression(Expression {
+                        kind: ExpressionKind::Call { arguments, .. },
+                        ..
+                    }) => Some(arguments),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                matches!(
+                    &call[0].kind,
+                    ExpressionKind::Borrow {
+                        exclusive: true,
+                        ..
+                    }
+                ),
+                "{name} must expose the receiver's exclusive effect"
+            );
+        }
+    }
+
+    #[test]
     fn zip_collapses_a_same_named_union_behavior_class_into_its_members() {
         let source = SourceFile::virtual_source(
             "zip-family.sev",
@@ -21738,6 +20994,7 @@ mod tests {
                             attributes,
                         },
                     arguments,
+                    ..
                 } if *operation == severian_universal::tensor::REDUCE => {
                     Some((binding.type_id, attributes, arguments))
                 }
@@ -21877,7 +21134,7 @@ mod tests {
             .collect::<Vec<_>>();
         let argument = |target| {
             expressions.iter().find_map(|expression| {
-                let ExpressionKind::Call { callee, arguments } = &expression.kind else {
+                let ExpressionKind::Call { callee, arguments, .. } = &expression.kind else {
                     return None;
                 };
                 matches!(callee, severian_hir::Callee::Direct { function, .. } if *function == target)
@@ -22306,10 +21563,29 @@ mod tests {
                 .unwrap()
                 .statements
                 .iter()
-                .filter(|statement| matches!(statement, Statement::FieldUpdate { .. }))
+                .filter(|statement| matches!(
+                    statement,
+                    Statement::Expression(Expression {
+                        kind: ExpressionKind::Call { .. },
+                        ..
+                    })
+                ))
                 .count(),
             2
         );
+        let methods = module
+            .functions
+            .iter()
+            .filter(|function| function.name == "Box.addition")
+            .collect::<Vec<_>>();
+        assert_eq!(methods.len(), 2);
+        assert_ne!(methods[0].id, methods[1].id);
+        for method in methods {
+            assert!(
+                matches!(method.body.as_ref().unwrap().statements.as_slice(), [Statement::FieldSet { binding, .. }] if *binding == method.parameters[0].binding)
+            );
+        }
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]
@@ -22323,8 +21599,22 @@ mod tests {
             .unwrap();
         assert!(matches!(
             main.body.as_ref().unwrap().statements.as_slice(),
-            [Statement::Binding(_), Statement::Sequence(Block { statements })]
-                if matches!(statements.as_slice(), [Statement::Expression(_)])
+            [
+                Statement::Binding(_),
+                Statement::Expression(Expression {
+                    kind: ExpressionKind::Call { .. },
+                    ..
+                })
+            ]
+        ));
+        let method = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "Point.draw")
+            .unwrap();
+        assert!(matches!(
+            method.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Expression(_), Statement::Return(Some(_))]
         ));
         severian_mir::build(&program).unwrap();
     }
@@ -22577,7 +21867,7 @@ mod tests {
             .find(|binding| {
                 matches!(
                     binding.value.kind,
-                    ExpressionKind::AsyncFieldUpdate { locked: true, .. }
+                    ExpressionKind::Async { locked: true, .. }
                 )
             })
             .expect("async method produces a task binding");
@@ -22590,7 +21880,7 @@ mod tests {
         assert!(main.body.as_ref().unwrap().blocks.iter().any(|block| {
             matches!(
                 block.terminator,
-                severian_mir::Terminator::SpawnFieldUpdate { locked: true, .. }
+                severian_mir::Terminator::Spawn { locked: true, .. }
             )
         }));
     }

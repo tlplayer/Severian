@@ -39,6 +39,8 @@ pub enum ExpressionKind {
     Call {
         callee: Callee,
         arguments: Vec<Expression>,
+        /// Parameter indices in source evaluation order. Empty means identity.
+        evaluation_order: Vec<usize>,
     },
     Async {
         expression: Box<Expression>,

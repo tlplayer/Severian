@@ -310,6 +310,7 @@ fn validate_slice_expression(
     if let ExpressionKind::Call {
         callee: severian_hir::Callee::Direct { function, .. },
         arguments,
+        ..
     } = &expression.kind
     {
         if call_names

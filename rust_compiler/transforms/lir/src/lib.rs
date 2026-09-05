@@ -160,6 +160,8 @@ pub struct LocalDecl {
     pub ty: LoweredType,
     pub mutable: bool,
     pub argument: bool,
+    /// This argument aliases the caller's storage instead of owning a value slot.
+    pub borrowed: bool,
     pub span: Option<Span>,
 }
 

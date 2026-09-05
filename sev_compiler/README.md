@@ -287,9 +287,13 @@ Artifacts are retained in `target/acceptance` beneath this package.
 The shared structural type/interner/inference port lives in
 `universal/type/system.sev`, following Rust's `universal/src/type_system.rs`.
 Substitution bindings now carry `GenericParamId` and `TypeId` explicitly.
-The structural port is not connected to the compiler entry yet: the seed's
-method resolution and value-returning method-body lowering need investigation
-before its interner can execute correctly. Its adjacent tests currently fail.
+The structural port is not connected to the compiler entry yet. The seed now
+lowers instance method bodies through ordinary callable/HIR bodies, with
+receiver storage preserved across calls. Executable regressions live in
+[`method_bodies.rs`](../rust_compiler/boundaries/driver/tests/method_bodies.rs).
+The adjacent structural type tests reach ownership checking but still fail
+on a moved value. Full bootstrap acceptance is not green: numeric macro
+conversion tests still report an expected scalar type mismatch.
 The existing scalar/macro path remains present during migration and is not a
 completed generic compiler implementation. Numeric-only macro enumeration is
 not the final family/constraint design.

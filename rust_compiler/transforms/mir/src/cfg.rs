@@ -30,6 +30,8 @@ pub struct LocalDecl {
     pub ty: TypeId,
     pub mutable: bool,
     pub argument: bool,
+    /// This argument aliases the caller's storage instead of owning a value slot.
+    pub borrowed: bool,
     pub span: Option<Span>,
 }
 
@@ -285,7 +287,30 @@ pub(crate) fn lower_program(
             }
         }
     }
+    let reference_parameters = program
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .filter(|function| function.body.is_some())
+        .map(|function| {
+            (
+                function.id,
+                function
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        parameter
+                            .contract
+                            .modifiers
+                            .iter()
+                            .any(|modifier| modifier.name == "reference")
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut initializer = BodyBuilder::new(unit, global_bindings.clone(), global_variables.clone());
+    initializer.reference_parameters = reference_parameters.clone();
     for module in &program.modules {
         initializer.expressions.clear();
         initializer.lower_statements(&module.initializer.statements, module);
@@ -303,8 +328,14 @@ pub(crate) fn lower_program(
                 global_bindings.clone(),
                 global_variables.clone(),
             );
-            for parameter in &function.parameters {
+            builder.reference_parameters = reference_parameters.clone();
+            for (index, parameter) in function.parameters.iter().enumerate() {
                 let local = builder.local(parameter.contract.ty, true, true);
+                builder.body.locals[local.0 as usize].borrowed = reference_parameters
+                    .get(&function.id)
+                    .and_then(|parameters| parameters.get(index))
+                    .copied()
+                    .unwrap_or(false);
                 let place = Place::local(local);
                 builder.bindings.insert(parameter.binding, place.clone());
                 builder
@@ -366,6 +397,7 @@ struct BodyBuilder {
     variables: BTreeMap<severian_hir::VariableId, Place>,
     expressions: BTreeMap<(BlockId, severian_hir::HirId), Place>,
     entry_parameters: Vec<LocalId>,
+    reference_parameters: BTreeMap<FunctionId, Vec<bool>>,
     loops: Vec<LoopTargets>,
     catch_targets: Vec<CatchTarget>,
     terminated: BTreeSet<BlockId>,
@@ -411,6 +443,7 @@ impl BodyBuilder {
             variables,
             expressions: BTreeMap::new(),
             entry_parameters: Vec::new(),
+            reference_parameters: BTreeMap::new(),
             loops: Vec::new(),
             catch_targets: Vec::new(),
             terminated: BTreeSet::new(),
@@ -449,6 +482,7 @@ impl BodyBuilder {
             ty,
             mutable,
             argument,
+            borrowed: false,
             span: self.current_span,
         });
         id
@@ -889,13 +923,15 @@ impl BodyBuilder {
             self.push(Statement::StorageLive(
                 result.local_id().expect("task results are local places"),
             ));
-            let severian_hir::ExpressionKind::Call { callee, arguments } = &task.kind else {
+            let severian_hir::ExpressionKind::Call {
+                callee,
+                arguments,
+                evaluation_order,
+            } = &task.kind
+            else {
                 panic!("async expressions are required to contain a call")
             };
-            let arguments = arguments
-                .iter()
-                .map(|argument| Operand::Copy(self.expression(argument)))
-                .collect();
+            let arguments = self.call_arguments(callee, arguments, evaluation_order);
             let continuation = self.block();
             let callee = self.callee(callee);
             self.terminate(Terminator::Spawn {
@@ -1155,11 +1191,12 @@ impl BodyBuilder {
                     },
                 ));
             }
-            severian_hir::ExpressionKind::Call { callee, arguments } => {
-                let arguments = arguments
-                    .iter()
-                    .map(|argument| Operand::Copy(self.expression(argument)))
-                    .collect::<Vec<_>>();
+            severian_hir::ExpressionKind::Call {
+                callee,
+                arguments,
+                evaluation_order,
+            } => {
+                let arguments = self.call_arguments(callee, arguments, evaluation_order);
                 if let HirCallee::Intrinsic {
                     operation,
                     attributes,
@@ -1202,6 +1239,56 @@ impl BodyBuilder {
         self.expressions
             .insert((self.current, expression.id), result.clone());
         result
+    }
+
+    fn expression_place(&mut self, expression: &severian_hir::Expression) -> Place {
+        match &expression.kind {
+            severian_hir::ExpressionKind::Binding(binding) => self.bindings[binding].clone(),
+            severian_hir::ExpressionKind::Borrow { operand, .. } => self.expression_place(operand),
+            severian_hir::ExpressionKind::Field { object, index } => {
+                let mut place = self.expression_place(object);
+                place.projection.push(Projection::Field(*index));
+                place
+            }
+            _ => self.expression(expression),
+        }
+    }
+
+    fn call_arguments(
+        &mut self,
+        callee: &HirCallee,
+        arguments: &[severian_hir::Expression],
+        evaluation_order: &[usize],
+    ) -> Vec<Operand> {
+        let references = match callee {
+            HirCallee::Direct {
+                instance: Some(instance),
+                ..
+            } => self
+                .reference_parameters
+                .get(instance)
+                .cloned()
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let order = if evaluation_order.is_empty() {
+            (0..arguments.len()).collect::<Vec<_>>()
+        } else {
+            evaluation_order.to_vec()
+        };
+        let mut operands = vec![None; arguments.len()];
+        for index in order {
+            let argument = &arguments[index];
+            operands[index] = Some(Operand::Copy(if references.get(index) == Some(&true) {
+                self.expression_place(argument)
+            } else {
+                self.expression(argument)
+            }));
+        }
+        operands
+            .into_iter()
+            .map(|operand| operand.expect("call evaluation order covers every parameter"))
+            .collect()
     }
 
     fn callee(&self, callee: &HirCallee) -> Callee {
