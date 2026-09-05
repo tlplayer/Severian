@@ -1,0 +1,32 @@
+class Counter:
+    value: int = 0
+
+    def describe(count: int) -> string:
+        text := ""
+        index := 0
+        while index < count:
+            text = text + "x"
+            value += 1
+            index += 1
+            if index == 3:
+                return text
+        return text
+
+
+def branch(first: bool) -> string:
+    value := "initial"
+    if first:
+        value = "a" + "b"
+    else:
+        value = "x" + "y"
+    return value + "!"
+
+
+test "string ownership follows callable branches loops and returns":
+    assert(branch(true) == "ab!")
+    assert(branch(false) == "xy!")
+    counter = Counter()
+    assert(counter.describe(10) == "xxx")
+    assert(counter.value == 3)
+    assert(counter.describe(0) == "")
+    print("strings complete")

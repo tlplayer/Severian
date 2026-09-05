@@ -1,0 +1,499 @@
+import universal
+import "../../../../universal/type/scalar.sev" as scalar
+import "../../../../universal/operator/scalar.sev" as operators
+import "../ir/lib.sev"
+import "strings.sev"
+import "../../../../universal/declaration/scalar.sev" as boundary
+
+
+def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> MlirType:
+    for record in records:
+        if record.type_id.index == id.index:
+            fields: list[MlirType] = []
+            for field in record.fields:
+                fields.append(callable_storage_type(callable_mlir_type(field.type_id, records)))
+            return struct_type(fields)
+    if id.index == 2:
+        throw Error("unit has no scalar SSA value")
+    known ?= scalar.scalar_type(id)
+    if known != None:
+        if known.representation == "utf8":
+            return utf8_view_type()
+        if known.representation == "index":
+            return index_type()
+        if known.representation == "float":
+            return float_type(known.bits)
+        if known.representation == "pointer":
+            return pointer_type()
+        return integer_type(known.bits, not known.boolean and id.index != 108 and id.index != 132)
+    throw Error("scalar MIR has an unknown value type")
+
+
+def callable_mlir_results(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> list[MlirType]:
+    if id.index == 2:
+        return []
+    return [callable_mlir_type(id, records)]
+
+
+def callable_mlir_value(module: universal.Module, id: universal.ValueId) -> MlirValue:
+    return MlirValue(int(id.index), callable_mlir_type(module.values[id.index].type_id, module.records))
+
+
+def callable_function_symbol(id: universal.FunctionId) -> string:
+    return "__sev_scalar_" + string(id.value)
+
+
+def callable_return(builder: MlirOpBuilder, values: list[MlirValue], nested: bool):
+    if nested:
+        builder_create_operation(builder, operation_name("scf", "yield"), values, [], [], [], true)
+    else:
+        builder_return(builder, values)
+
+
+def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: universal.Block, result_type: universal.TypeId, nested: bool, flow: CallableFlow = CallableFlow()):
+    cursor := 0
+    for operation in block.operations:
+        cursor += 1
+        match operation:
+            case Allocate:
+                pass
+            case Load:
+                output = callable_mlir_value(module, result)
+                callable_flow_load(builder, flow, callable_mlir_value(module, address), output)
+            case Store:
+                callable_flow_store(builder, flow, callable_mlir_value(module, address), callable_mlir_value(module, value))
+            case FieldAddress:
+                output = callable_mlir_value(module, result)
+                indices = [integer_attribute(0, integer_type(32)), integer_attribute(index, integer_type(32))]
+                offsets = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], indices)
+                attributes = [MlirNamedAttribute("rawConstantIndices", offsets), MlirNamedAttribute("elem_type", type_attribute(callable_mlir_type(owner, module.records)))]
+                builder_create_operation(builder, operation_name("llvm", "getelementptr"), [callable_mlir_value(module, object)], [output], attributes)
+            case Constant:
+                output = callable_mlir_value(module, result)
+                match value:
+                    case IntegerValue:
+                        builder_constant(builder, output, integer_attribute(int(spelling), output.type_id))
+                    case FloatValue:
+                        builder_constant(builder, output, MlirAttributeValue(FloatLiteralAttributeKind, spelling, 0, false, output.type_id, []))
+                    case NoneValue:
+                        builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
+                    case StringValue:
+                        string_literal(builder, value, output)
+                    case CharacterValue:
+                        builder_constant(builder, output, integer_attribute(int(value), output.type_id))
+                    case BooleanValue:
+                        builder_constant(builder, output, boolean_attribute(value))
+                    case _:
+                        throw Error("non-scalar MIR literal")
+            case Unary:
+                input = callable_mlir_value(module, operand)
+                output = callable_mlir_value(module, result)
+                selected ?= operators.scalar_operation(operator.symbol, 1, module.values[operand.index].type_id.index == 1, scalar.scalar_representation(module.values[operand.index].type_id))
+                if selected != None:
+                    if selected.direct:
+                        builder_create_operation(builder, operation_name("arith", selected.mnemonic), [input], [output])
+                    else:
+                        identity = builder_new_value(builder, input.type_id)
+                        builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
+                        builder_binary(builder, output, operation_name("arith", selected.mnemonic), identity, input)
+                else:
+                    throw Error("scalar MIR has an unregistered unary operation")
+            case Binary:
+                lhs = callable_mlir_value(module, left)
+                rhs = callable_mlir_value(module, right)
+                output = callable_mlir_value(module, result)
+                selected ?= operators.scalar_operation(operator.symbol, 2, module.values[left.index].type_id.index == 1, scalar.scalar_representation(module.values[left.index].type_id))
+                if selected != None:
+                    attributes: list[MlirNamedAttribute] = []
+                    if selected.predicate >= 0:
+                        predicate := selected.predicate
+                        if module.values[left.index].type_id.index == 108 and predicate >= 2:
+                            predicate += 4
+                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64))))
+                    builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
+                else:
+                    throw Error("scalar MIR has an unregistered binary operation")
+            case Call:
+                inputs: list[MlirValue] = []
+                for argument in arguments:
+                    inputs.append(callable_mlir_value(module, argument))
+                outputs: list[MlirValue] = []
+                if module.values[result.index].type_id.index != 2:
+                    outputs.append(callable_mlir_value(module, result))
+                found := false
+                for callable_source in module.functions:
+                    if callable_source.id.value == function.value:
+                        native_operation = boundary.scalar_boundary(callable_source, "mlir")
+                        symbol = boundary.scalar_boundary(callable_source, "c")
+                        if native_operation != "":
+                            parts = native_operation.split(".")
+                            attributes: list[MlirNamedAttribute] = []
+                            segments = boundary.scalar_operand_segments(callable_source)
+                            if len(segments) != 0:
+                                sizes: list[MlirAttributeValue] = []
+                                for segment in segments:
+                                    sizes.append(integer_attribute(segment, integer_type(32)))
+                                segment_attribute = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], sizes)
+                                attributes.append(MlirNamedAttribute("operandSegmentSizes", segment_attribute))
+                            builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs, attributes)
+                        elif symbol != "":
+                            builder_call(builder, symbol, inputs, outputs)
+                        else:
+                            builder_call(builder, callable_function_symbol(function), inputs, outputs)
+                        found = true
+                if not found:
+                    throw Error("call has no resolved function declaration")
+            case Return:
+                outputs: list[MlirValue] = []
+                returned ?= value
+                if returned != None:
+                    outputs.append(callable_mlir_value(module, returned))
+                if flow.active.id >= 0:
+                    context = flow
+                    if len(outputs) != 0:
+                        callable_flow_store(builder, context, context.result, outputs[0])
+                    callable_flag(builder, context.active, false)
+                    return
+                callable_return(builder, outputs, nested)
+            case Choose:
+                saved = builder.insertion[0]
+                then_region = builder_create_region(builder)
+                then_entry = builder_create_block(builder, then_region)
+                builder_set_insertion_point(builder, then_entry)
+                callable_mlir_block(builder, module, then_block, module.values[result.index].type_id, true, CallableFlow(slots=flow.slots, values=flow.values[:]))
+                else_region = builder_create_region(builder)
+                else_entry = builder_create_block(builder, else_region)
+                builder_set_insertion_point(builder, else_entry)
+                callable_mlir_block(builder, module, else_block, module.values[result.index].type_id, true, CallableFlow(slots=flow.slots, values=flow.values[:]))
+                builder_set_insertion_point(builder, saved)
+                builder_create_operation(builder, operation_name("scf", "if"), [callable_mlir_value(module, condition)], [callable_mlir_value(module, result)], [], [then_region, else_region])
+            case If:
+                saved = builder.insertion[0]
+                then_region = builder_create_region(builder)
+                then_entry = builder_create_block(builder, then_region)
+                builder_set_insertion_point(builder, then_entry)
+                then_flow = callable_flow_scope(flow)
+                callable_mlir_block(builder, module, then_block, result_type, true, then_flow)
+                builder_create_operation(builder, operation_name("scf", "yield"), then_flow.values[:], terminator=true)
+                else_region = builder_create_region(builder)
+                else_entry = builder_create_block(builder, else_region)
+                builder_set_insertion_point(builder, else_entry)
+                else_flow = callable_flow_scope(flow)
+                callable_mlir_block(builder, module, else_block, result_type, true, else_flow)
+                builder_create_operation(builder, operation_name("scf", "yield"), else_flow.values[:], terminator=true)
+                builder_set_insertion_point(builder, saved)
+                merged = callable_flow_values(builder, flow)
+                builder_create_operation(builder, operation_name("scf", "if"), [callable_mlir_value(module, condition)], merged, [], [then_region, else_region])
+                callable_flow_merge(flow, merged)
+                if flow.active.id >= 0:
+                    callable_tail(builder, module, block.operations[cursor:], result_type, flow)
+                    return
+            case Loop:
+                if flow.active.id >= 0:
+                    callable_loop(builder, module, condition_block, condition, body, result_type, flow, callable_mlir_value(module, running), callable_mlir_value(module, proceeding))
+                    callable_tail(builder, module, block.operations[cursor:], result_type, flow)
+                    return
+                throw Error("loop has no callable flow context")
+            case BreakLoop:
+                if flow.active.id >= 0:
+                    callable_flag(builder, flow.loop_active[-1], false)
+                    callable_flag(builder, flow.loop_next[-1], false)
+                    return
+                throw Error("break has no loop context")
+            case ContinueLoop:
+                if flow.active.id >= 0:
+                    callable_flag(builder, flow.loop_next[-1], false)
+                    return
+                throw Error("continue has no loop context")
+            case Assert:
+                builder_assert(builder, callable_mlir_value(module, condition), "assertion failed")
+            case _:
+                throw Error("unsupported scalar MIR operation")
+
+
+def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[MlirValue], results: list[MlirType]) -> MlirFunctionHandle:
+    index := 0
+    for function in builder.program.functions:
+        if function.name == symbol:
+            if not function.declaration or len(function.arguments) != len(parameters) or len(function.result_types) != len(results):
+                throw Error("conflicting external declaration: " + symbol)
+            position := 0
+            for parameter in parameters:
+                if not same_type(parameter.type_id, function.arguments[position].type_id):
+                    throw Error("conflicting external parameter: " + symbol)
+                position += 1
+            position = 0
+            for result in results:
+                if not same_type(result, function.result_types[position]):
+                    throw Error("conflicting external result: " + symbol)
+                position += 1
+            return MlirFunctionHandle(index, MlirFunctionName(symbol), MlirBlockHandle(-1, -1), function.arguments, true)
+        index += 1
+    return builder_create_function(builder, symbol, private_visibility(), parameters, results, true)
+
+
+def lower_callables(module: universal.Module) -> MlirProgram:
+    builder = MlirOpBuilder(int(len(module.values)))
+    handles: list[MlirFunctionHandle] = []
+    for function in module.functions:
+        operation = boundary.scalar_boundary(function, "mlir")
+        if operation != "":
+            handles.append(MlirFunctionHandle(-1, MlirFunctionName("intrinsic"), MlirBlockHandle(-1, -1), [], true))
+            continue
+        parameters: list[MlirValue] = []
+        for value in function.values:
+            parameters.append(callable_mlir_value(module, value))
+        symbol := boundary.scalar_boundary(function, "c")
+        if symbol != "":
+            handles.append(callable_external(builder, symbol, parameters, callable_mlir_results(function.result_type, module.records)))
+        else:
+            handles.append(builder_create_function(builder, callable_function_symbol(function.id), private_visibility(), parameters, callable_mlir_results(function.result_type, module.records)))
+    index := 0
+    for function in module.functions:
+        body ?= function.body
+        if body != None:
+            builder_set_insertion_point(builder, handles[index].entry)
+            active = builder_new_value(builder, pointer_type())
+            callable_allocate(builder, integer_type(1), active)
+            callable_flag(builder, active, true)
+            returned = builder_new_value(builder, pointer_type())
+            flow = CallableFlow(active, returned)
+            callable_allocations(builder, module, body, flow)
+            if function.result_type.index != 2:
+                callable_storage(builder, callable_mlir_type(function.result_type, module.records), returned, flow)
+            callable_mlir_block(builder, module, body, function.result_type, false, flow)
+            outputs: list[MlirValue] = []
+            if function.result_type.index != 2:
+                output = builder_new_value(builder, callable_mlir_type(function.result_type, module.records))
+                callable_flow_load(builder, flow, returned, output)
+                outputs.append(output)
+            builder_return(builder, outputs)
+        index += 1
+    entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
+    builder_set_insertion_point(builder, entry.entry)
+    initializer_flow = CallableFlow()
+    callable_allocations(builder, module, module.initializer, initializer_flow)
+    callable_mlir_block(builder, module, module.initializer, universal.TypeId(2), false, initializer_flow)
+    for test in module.tests:
+        function ?= test.function
+        if function != None:
+            builder_call(builder, callable_function_symbol(function), [], [])
+    outputs: list[MlirValue] = []
+    main ?= module.entry
+    if main != None:
+        for function in module.functions:
+            if function.id.value == main.value:
+                if function.result_type.index == 2:
+                    builder_call(builder, callable_function_symbol(main), [], [])
+                else:
+                    outputs.append(builder_new_value(builder, callable_mlir_type(function.result_type, module.records)))
+                    builder_call(builder, callable_function_symbol(main), [], outputs)
+    if len(outputs) == 0:
+        status = builder_new_value(builder, integer_type(32))
+        builder_constant(builder, status, integer_attribute(0, status.type_id))
+        outputs.append(status)
+    builder_return(builder, outputs)
+    validate(builder.program)
+    return builder.program
+
+
+def callable_storage_type(value: MlirType) -> MlirType:
+    if type_kind_name(value.kind) == "memref":
+        # The standard memref conversion uses this ranked descriptor on the host.
+        return struct_type([pointer_type(), pointer_type(), integer_type(64), array_type(1, integer_type(64)), array_type(1, integer_type(64))])
+    if type_kind_name(value.kind) == "scalar" and scalar_kind_name(value.scalar.kind) == "index":
+        return integer_type(64)
+    return value
+
+
+def callable_allocate(builder: MlirOpBuilder, value_type: MlirType, address: MlirValue):
+    count = builder_new_value(builder, integer_type(64))
+    builder_constant(builder, count, integer_attribute(1, count.type_id))
+    builder_create_operation(builder, operation_name("llvm", "alloca"), [count], [address], [MlirNamedAttribute("elem_type", type_attribute(callable_storage_type(value_type)))])
+
+
+def callable_store(builder: MlirOpBuilder, address: MlirValue, value: MlirValue):
+    stored := value
+    storage = callable_storage_type(value.type_id)
+    if not same_type(storage, value.type_id):
+        stored = builder_new_value(builder, storage)
+        builder_create_operation(builder, operation_name("builtin", "unrealized_conversion_cast"), [value], [stored])
+    builder_create_operation(builder, operation_name("llvm", "store"), [stored, address])
+
+
+def callable_load(builder: MlirOpBuilder, address: MlirValue, output: MlirValue):
+    storage = callable_storage_type(output.type_id)
+    loaded := output
+    if not same_type(storage, output.type_id):
+        loaded = builder_new_value(builder, storage)
+    builder_create_operation(builder, operation_name("llvm", "load"), [address], [loaded])
+    if loaded.id != output.id:
+        builder_create_operation(builder, operation_name("builtin", "unrealized_conversion_cast"), [loaded], [output])
+
+
+class CallableFlow:
+    active: MlirValue = MlirValue(-1, pointer_type())
+    result: MlirValue = MlirValue(-1, pointer_type())
+    loop_active: list[MlirValue] = []
+    loop_next: list[MlirValue] = []
+    slots: list[int] = []
+    values: list[MlirValue] = []
+
+
+def callable_flag(builder: MlirOpBuilder, address: MlirValue, enabled: bool):
+    value = builder_new_value(builder, integer_type(1))
+    builder_constant(builder, value, boolean_attribute(enabled))
+    callable_store(builder, address, value)
+
+
+def callable_active(builder: MlirOpBuilder, flow: CallableFlow) -> MlirValue:
+    active := builder_new_value(builder, integer_type(1))
+    callable_load(builder, flow.active, active)
+    if len(flow.loop_next) != 0:
+        next = builder_new_value(builder, integer_type(1))
+        callable_load(builder, flow.loop_next[-1], next)
+        result = builder_new_value(builder, integer_type(1))
+        builder_binary(builder, result, operation_name("arith", "andi"), active, next)
+        active = result
+    return active
+
+
+def callable_tail(builder: MlirOpBuilder, module: universal.Module, operations: list[universal.Operation], result_type: universal.TypeId, flow: CallableFlow):
+    if len(operations) == 0:
+        return
+    condition = callable_active(builder, flow)
+    saved = builder.insertion[0]
+    region = builder_create_region(builder)
+    entry = builder_create_block(builder, region)
+    builder_set_insertion_point(builder, entry)
+    local = callable_flow_scope(flow)
+    callable_mlir_block(builder, module, universal.Block([], operations), result_type, true, local)
+    builder_create_operation(builder, operation_name("scf", "yield"), local.values[:], terminator=true)
+    otherwise = builder_create_region(builder)
+    otherwise_entry = builder_create_block(builder, otherwise)
+    builder_set_insertion_point(builder, otherwise_entry)
+    builder_create_operation(builder, operation_name("scf", "yield"), flow.values[:], terminator=true)
+    builder_set_insertion_point(builder, saved)
+    merged = callable_flow_values(builder, flow)
+    builder_create_operation(builder, operation_name("scf", "if"), [condition], merged, [], [region, otherwise])
+    callable_flow_merge(flow, merged)
+
+
+def callable_loop(builder: MlirOpBuilder, module: universal.Module, condition_block: universal.Block, condition: universal.ValueId, body: universal.Block, result_type: universal.TypeId, flow: CallableFlow, running: MlirValue, proceeding: MlirValue):
+    callable_flag(builder, running, true)
+    saved = builder.insertion[0]
+    before_region = builder_create_region(builder)
+    before_values = callable_flow_values(builder, flow)
+    before_flow = callable_flow_scope(flow)
+    callable_flow_merge(before_flow, before_values)
+    before = builder_create_block(builder, before_region, before_values)
+    builder_set_insertion_point(builder, before)
+    alive = callable_active(builder, flow)
+    loop_alive = builder_new_value(builder, integer_type(1))
+    callable_load(builder, running, loop_alive)
+    enabled = builder_new_value(builder, integer_type(1))
+    builder_binary(builder, enabled, operation_name("arith", "andi"), alive, loop_alive)
+    # A completed return/break must not evaluate a side-effecting loop condition.
+    test_region = builder_create_region(builder)
+    test = builder_create_block(builder, test_region)
+    builder_set_insertion_point(builder, test)
+    callable_mlir_block(builder, module, condition_block, universal.TypeId(1), true, CallableFlow(slots=flow.slots, values=before_values[:]))
+    builder_create_operation(builder, operation_name("scf", "yield"), [callable_mlir_value(module, condition)], terminator=true)
+    stopped_region = builder_create_region(builder)
+    stopped = builder_create_block(builder, stopped_region)
+    builder_set_insertion_point(builder, stopped)
+    no = builder_new_value(builder, integer_type(1))
+    builder_constant(builder, no, boolean_attribute(false))
+    builder_create_operation(builder, operation_name("scf", "yield"), [no], terminator=true)
+    builder_set_insertion_point(builder, before)
+    test_result = builder_new_value(builder, integer_type(1))
+    builder_create_operation(builder, operation_name("scf", "if"), [enabled], [test_result], [], [test_region, stopped_region])
+    condition_values = [test_result]
+    for value in before_values:
+        condition_values.append(value)
+    builder_create_operation(builder, operation_name("scf", "condition"), condition_values, terminator=true)
+    after_region = builder_create_region(builder)
+    after_values = callable_flow_values(builder, flow)
+    after = builder_create_block(builder, after_region, after_values)
+    builder_set_insertion_point(builder, after)
+    callable_flag(builder, proceeding, true)
+    loop_active = flow.loop_active[:]
+    loop_next = flow.loop_next[:]
+    loop_active.append(running)
+    loop_next.append(proceeding)
+    local = CallableFlow(flow.active, flow.result, loop_active, loop_next, flow.slots, after_values[:])
+    callable_mlir_block(builder, module, body, result_type, true, local)
+    builder_create_operation(builder, operation_name("scf", "yield"), local.values[:], terminator=true)
+    builder_set_insertion_point(builder, saved)
+    merged = callable_flow_values(builder, flow)
+    builder_create_operation(builder, operation_name("scf", "while"), flow.values[:], merged, [], [before_region, after_region])
+    callable_flow_merge(flow, merged)
+
+
+def callable_allocations(builder: MlirOpBuilder, module: universal.Module, block: universal.Block, flow: CallableFlow):
+    # Storage belongs to the callable, even when a declaration occurs in a loop.
+    for operation in block.operations:
+        match operation:
+            case Allocate:
+                callable_storage(builder, callable_mlir_type(type_id, module.records), callable_mlir_value(module, result), flow)
+            case If:
+                callable_allocations(builder, module, then_block, flow)
+                callable_allocations(builder, module, else_block, flow)
+            case Choose:
+                callable_allocations(builder, module, then_block, flow)
+                callable_allocations(builder, module, else_block, flow)
+            case Loop:
+                callable_allocations(builder, module, condition_block, flow)
+                callable_allocations(builder, module, body, flow)
+            case _:
+                pass
+
+
+def callable_flow_scope(flow: CallableFlow) -> CallableFlow:
+    return CallableFlow(flow.active, flow.result, flow.loop_active, flow.loop_next, flow.slots, flow.values[:])
+
+
+def callable_flow_values(builder: MlirOpBuilder, flow: CallableFlow) -> list[MlirValue]:
+    values: list[MlirValue] = []
+    for value in flow.values:
+        values.append(builder_new_value(builder, value.type_id))
+    return values
+
+
+def callable_flow_merge(flow: CallableFlow, values: list[MlirValue]):
+    index := 0
+    for value in values:
+        flow.values[index] = value
+        index += 1
+
+
+def callable_storage(builder: MlirOpBuilder, type_id: MlirType, address: MlirValue, flow: CallableFlow):
+    if type_kind_name(type_id.kind) == "memref":
+        # Keep memory views in SSA so buffer ownership can follow branch and
+        # loop results. Opaque pointer stores conceal aliases from that analysis.
+        initial = builder_new_value(builder, type_id)
+        string_literal(builder, "", initial)
+        flow.slots.append(address.id)
+        flow.values.append(initial)
+    else:
+        callable_allocate(builder, type_id, address)
+
+
+def callable_flow_load(builder: MlirOpBuilder, flow: CallableFlow, address: MlirValue, output: MlirValue):
+    index := 0
+    for slot in flow.slots:
+        if slot == address.id:
+            builder_create_operation(builder, operation_name("memref", "cast"), [flow.values[index]], [output])
+            return
+        index += 1
+    callable_load(builder, address, output)
+
+
+def callable_flow_store(builder: MlirOpBuilder, flow: CallableFlow, address: MlirValue, value: MlirValue):
+    index := 0
+    for slot in flow.slots:
+        if slot == address.id:
+            flow.values[index] = value
+            return
+        index += 1
+    callable_store(builder, address, value)

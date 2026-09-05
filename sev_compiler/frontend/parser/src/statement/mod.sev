@@ -132,6 +132,8 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
             result.items.append(universal.Trait(parser_trait_declaration(parser, [])))
         elif parser_at_identifier(parser, "def"):
             result.items.append(universal.Function(parser_function_declaration(parser, [])))
+        elif parser_at_identifier(parser, "class"):
+            result.items.append(universal.Record(parser_record_declaration(parser)))
         elif parser_at_identifier(parser, "type"):
             result.items.append(universal.Type(parser_type_declaration(parser, [])))
         elif parser_at_identifier(parser, "test"):
@@ -390,6 +392,16 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     return (universal.Block(statements, [], []), end)
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "while"):
+        start = parser_next(parser).span
+        condition = parser_expression(parser, 0)
+        parser_expect(parser, Colon, "expected colon after while condition")
+        body = parser_indented_block(parser, "while")
+        return universal.While(condition, body[0], source.Span(start.source, start.start, body[1]))
+    if parser_at_identifier(parser, "break"):
+        return universal.Break(parser_next(parser).span)
+    if parser_at_identifier(parser, "continue"):
+        return universal.Continue(parser_next(parser).span)
     if parser_at_identifier(parser, "for"):
         start = parser_next(parser).span
         name = parser_identifier(parser, "expected iteration binding")[0]
@@ -432,7 +444,21 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
 def parser_simple_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
     if parser_looks_like_binding(parser):
         return universal.BindingStatement(parser_binding(parser))
-    return universal.ExpressionStatement(parser_expression(parser, 0))
+    value = parser_expression(parser, 0)
+    assignment = parser_peek(parser).kind
+    if assignment == Equal or assignment == PlusEqual or assignment == MinusEqual or assignment == StarEqual:
+        parser_next(parser)
+        rhs = parser_expression(parser, 0)
+        update: universal.OperatorSyntax | None := None
+        if assignment != Equal:
+            operator := universal.operator_syntax(universal.Add())
+            if assignment == MinusEqual:
+                operator = universal.operator_syntax(universal.Subtract())
+            elif assignment == StarEqual:
+                operator = universal.operator_syntax(universal.Multiply())
+            update = operator
+        return universal.FieldSet(value, rhs, value.span, update)
+    return universal.ExpressionStatement(value)
 
 def parser_looks_like_binding(parser: Parser) -> bool:
     if parser.cursor[0] + 1 >= len(parser.tokens):
@@ -677,3 +703,30 @@ def precedence(operator: universal.OperatorSyntax) -> int:
 
 def parse(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
     return parser_module(Parser(tokens))
+
+
+def parser_record_declaration(parser: Parser) -> universal.RecordDeclaration | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    name = parser_identifier(parser, "expected a class name")[0]
+    parser_expect(parser, Colon, "expected colon after class name")
+    parser_expect(parser, Newline, "expected newline after class")
+    parser_separators(parser)
+    parser_expect(parser, Indent, "expected class body")
+    fields: list[universal.FunctionParameter] = []
+    methods: list[universal.FunctionDeclaration] = []
+    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        if parser_at_identifier(parser, "def"):
+            methods.append(parser_function_declaration(parser, []))
+        elif parser_at_identifier(parser, "pass"):
+            parser_next(parser)
+        else:
+            field = parser_identifier(parser, "expected a field or method")
+            parser_expect(parser, Colon, "expected field annotation")
+            annotation = parser_type_annotation(parser)
+            default: universal.Expression | None := None
+            if parser_take(parser, Equal) != None:
+                default = parser_expression(parser, 0)
+            fields.append(universal.FunctionParameter(field[0], annotation, default, field[1]))
+        parser_separators(parser)
+    end = parser_expect(parser, Dedent, "expected end of class").span.end
+    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, end))

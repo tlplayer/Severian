@@ -1,0 +1,23 @@
+class Weight:
+    value: f64 = 1.5
+
+    def change(text: string) -> string:
+        self.value += 0.5
+        return text
+
+    def shadow(value: f64) -> f64:
+        return value
+
+
+def weight() -> Weight:
+    local = Weight()
+    return local
+
+
+test "record values survive returns and retain noninteger fields":
+    value = weight()
+    assert(value.change("done") == "done")
+    assert(value.value == 2.0)
+    assert(value.shadow(9.0) == 9.0)
+    assert(value.value == 2.0)
+    print("values complete")

@@ -64,6 +64,11 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             result.items.append(child_item)
                     case _:
                         throw Error("bootstrap imports require a relative source locator")
+            case Record:
+                record_declaration := declaration
+                record_declaration.name = prefix + declaration.name
+                record_declaration.lookup = prefix
+                result.items.append(universal.Record(record_declaration))
             case Function:
                 function := declaration
                 function.name = prefix + declaration.name
@@ -76,8 +81,17 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                     result.items.append(universal.Test(test_declaration))
             case BindingItem:
                 if not root:
-                    throw Error("imported modules must contain function declarations")
-                result.items.append(item)
+                    if binding.mutable or binding.update:
+                        throw Error("imported globals must be immutable literals")
+                    match binding.value.kind:
+                        case LiteralValue:
+                            constant := binding
+                            constant.name = prefix + binding.name
+                            result.items.append(universal.BindingItem(constant))
+                        case _:
+                            throw Error("imported globals must be immutable literals")
+                else:
+                    result.items.append(item)
             case ExpressionItem:
                 if not root:
                     throw Error("imported modules cannot execute module initializers")

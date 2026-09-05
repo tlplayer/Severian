@@ -26,9 +26,9 @@ transform, and boundary modules; `bootstrap/src` only retains compatibility impo
 
 
 The pipeline uses the shared source, lexer, parser, and universal expression
-and operation models. `frontend/semantic/src/scalar.sev` resolves bindings and
-checks scalar types. `transforms/mir/src/scalar.sev` creates SSA operations.
-`transforms/mlir/src/emit/scalar.sev` lowers those operations through the typed
+and operation models. `frontend/semantic/src/callable.sev` registers callable signatures and lowers
+complete bodies. `transforms/mir/src/callable.sev` lowers calls and storage
+operations. `transforms/mlir/src/emit/callable.sev` uses the typed
 `MlirProgram` builder. Structural validation precedes terminal text printing.
 
 Supported input consists of integer/boolean bindings, signed `i8`, `i16`,
@@ -84,10 +84,18 @@ Variadic `*values: V` functions specialize for the supplied argument types;
 keyword-only. This initial form requires the pack to be first and does not
 support call-site unpacking or arbitrary collection iteration.
 
-Unsupported declarations and expressions produce diagnostics. Classes,
-general collections, nonliteral defaults, nonnumeric conversions,
-nonliteral/mutable global captures, and ordinary loops remain outside this
-slice. This executable does not yet compile itself. The broader driver and
+Concrete record classes and their instance methods use the same callable body
+lowering as free functions. Calls preserve receiver storage, source argument
+order, mutations, recursion, local rebinding, and returns. `while` and `range`
+loops support `break`, `continue`, and early returns. Imported literal constants
+remain visible in their defining callable scopes. Memory views remain in SSA
+across branches and loops so buffer ownership follows their lifetimes.
+
+Unsupported declarations and expressions produce diagnostics. General
+collections, generic classes, fallible/enum values, nonliteral parameter
+defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
+outside this slice. Record string fields require aggregate ownership lowering
+and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver and
 generic semantic pipeline remain separate unfinished work.
 
 ## Enumerated numeric conversions
@@ -289,8 +297,12 @@ The shared structural type/interner/inference port lives in
 Substitution bindings now carry `GenericParamId` and `TypeId` explicitly.
 The structural port is not connected to the compiler entry yet. The seed now
 lowers instance method bodies through ordinary callable/HIR bodies, with
-receiver storage preserved across calls. Executable regressions live in
+receiver storage preserved across calls. Seed regressions live in
 [`method_bodies.rs`](../rust_compiler/boundaries/driver/tests/method_bodies.rs).
+The native compiler now uses the same callable flow for methods and functions.
+Its regressions live in `frontend/semantic/src/callable/tests/`; run
+`python3 tests/sev_compiler/callable_bodies.py` from the repository root.
+Set `SEVERIAN_SANITIZE=1` to check the emitted binaries with sanitizers.
 The adjacent structural type tests reach ownership checking but still fail
 on a moved value. Full bootstrap acceptance is not green: numeric macro
 conversion tests still report an expected scalar type mismatch.

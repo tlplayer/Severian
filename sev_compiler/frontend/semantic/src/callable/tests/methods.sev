@@ -1,0 +1,52 @@
+class Counter:
+    value: int = 0
+
+    def bump(amount: int = 1) -> int:
+        value += amount
+        return value
+
+    def stop():
+        self.value += 1
+        return
+
+    def forward(count: int) -> int:
+        if count == 0:
+            return value
+        bump()
+        return forward(count - 1)
+
+
+def mutate(counter: Counter):
+    counter.value += 10
+
+
+def rebind(counter: Counter):
+    counter = Counter(90)
+    counter.value += 1
+
+
+test "method mutations and returns survive ordinary calls":
+    counter = Counter()
+    result = counter.bump(4)
+    assert(result == 4)
+    assert(counter.value == 4)
+    counter.stop()
+    assert(counter.value == 5)
+    assert(counter.forward(3) == 8)
+    mutate(counter)
+    assert(counter.value == 18)
+    rebind(counter)
+    assert(counter.value == 18)
+    print("methods complete")
+
+test with compiler "callable type and control-flow checks":
+    reject:
+        counter = Counter()
+        counter.bump(true)
+    reject:
+        counter = Counter()
+        counter.missing()
+    reject:
+        break
+    reject:
+        continue

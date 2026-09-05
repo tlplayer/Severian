@@ -20,6 +20,13 @@ def scalar_type_text(type_id: MlirScalarType) -> string:
 
 
 def type_text(type_id: MlirType) -> string:
+    if type_kind_name(type_id.kind) == "array":
+        return "!llvm.array<" + string(type_id.dimensions[0]) + " x " + type_text(type_id.elements[0]) + ">"
+    if type_kind_name(type_id.kind) == "struct":
+        members: list[string] = []
+        for element in type_id.elements:
+            members.append(type_text(element))
+        return "!llvm.struct<(" + members.join(", ") + ")>"
     if type_kind_name(type_id.kind) == "scalar":
         return scalar_type_text(type_id.scalar)
     if type_kind_name(type_id.kind) == "unranked_tensor":

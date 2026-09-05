@@ -1,0 +1,7 @@
+import "fixtures/constants.sev" as constants
+
+test "method bodies retain defining module constants":
+    value = constants.Counter()
+    assert(value.bump() == 7)
+    assert(value.value == 7)
+    print("imports complete")

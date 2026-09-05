@@ -39,6 +39,10 @@ enum Statement:
     Return(value: Expression | None, span: source.Span)
     Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
     If(condition: Expression, then_block: Block, else_block: Block, span: source.Span)
+    FieldSet(target: Expression, value: Expression, span: source.Span, update: OperatorSyntax | None)
+    While(condition: Expression, body: Block, span: source.Span)
+    Break(span: source.Span)
+    Continue(span: source.Span)
     ForEach(name: string, iterable: Expression, body: Block, span: source.Span)
     Match(subject: Expression, arms: list[MatchArm], span: source.Span)
 

@@ -1,0 +1,8 @@
+OFFSET = 7
+
+class Counter:
+    value: int = 0
+
+    def bump() -> int:
+        value += OFFSET
+        return value

@@ -1,0 +1,40 @@
+class Counter:
+    value: int = 0
+
+    def advance(limit: int) -> int:
+        index := 0
+        while index < limit:
+            index += 1
+            if index == 2:
+                continue
+            value += index
+            if value > 10:
+                return value
+        return value
+
+    def stop_at(limit: int):
+        while value < limit:
+            value += 1
+            if value == 5:
+                break
+        value += 10
+
+
+def sum(limit: int) -> int:
+    value := 0
+    index := 0
+    while index < limit:
+        value += index
+        index += 1
+    return value
+
+
+test "ordinary and method loops preserve control flow":
+    counter = Counter()
+    assert(counter.advance(10) == 13)
+    assert(counter.value == 13)
+    other = Counter()
+    other.stop_at(20)
+    assert(other.value == 15)
+    assert(sum(5) == 10)
+    print("loops complete")

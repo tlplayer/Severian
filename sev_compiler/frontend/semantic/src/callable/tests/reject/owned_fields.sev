@@ -1,0 +1,8 @@
+# A returned record must not conceal an allocated buffer from ownership analysis.
+class Label:
+    text: string
+
+def make() -> Label:
+    return Label("hello" + " world")
+
+assert(make().text == "hello world")

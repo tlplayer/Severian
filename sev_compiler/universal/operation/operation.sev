@@ -15,5 +15,12 @@ enum Operation:
     Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
     If(condition: ValueId, then_block: Block, else_block: Block)
     Choose(condition: ValueId, then_block: Block, else_block: Block, result: ValueId)
+    Loop(condition_block: Block, condition: ValueId, body: Block, running: ValueId, proceeding: ValueId)
+    BreakLoop
+    ContinueLoop
+    Allocate(type_id: TypeId, result: ValueId)
+    Load(address: ValueId, result: ValueId)
+    Store(address: ValueId, value: ValueId)
+    FieldAddress(object: ValueId, owner: TypeId, index: int, result: ValueId)
     Match(subject: ValueId, arms: list[MatchArm])
     CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])

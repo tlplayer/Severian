@@ -1,0 +1,45 @@
+class Counter:
+    value: int = 0
+
+    def next() -> int:
+        value += 1
+        return value
+
+    def pair(left: int, right: int = 9) -> int:
+        value += 10
+        return left * 10 + right
+
+class Holder:
+    counter: Counter
+
+
+def choose(counter: Counter, replace: bool):
+    if replace:
+        counter = Counter(100)
+    counter.value += 5
+
+
+def make() -> Holder:
+    print("r", end="")
+    return Holder(Counter())
+
+
+def mark(value: int) -> int:
+    print(value, end="")
+    return value
+
+
+test "nested receiver storage and argument evaluation order":
+    holder = Holder(Counter())
+    assert(holder.counter.next() == 1)
+    assert(holder.counter.value == 1)
+    choose(holder.counter, false)
+    assert(holder.counter.value == 6)
+    choose(holder.counter, true)
+    assert(holder.counter.value == 6)
+    assert(holder.counter.pair(right=holder.counter.next(), left=holder.counter.next()) == 87)
+    assert(holder.counter.value == 18)
+    # Receiver before explicit arguments, keyword values in source order.
+    assert(make().counter.pair(right=mark(2), left=mark(1)) == 12)
+    make().counter.value += mark(3)
+    print("receivers complete")

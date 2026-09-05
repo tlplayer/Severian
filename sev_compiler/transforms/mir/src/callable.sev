@@ -1,0 +1,217 @@
+import universal
+
+
+class CallableMirScope:
+    bindings: list[universal.ValueId] = []
+
+
+def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId:
+    id = universal.ValueId(u32(len(module.values)))
+    module.values.append(universal.Value(id, type_id))
+    return id
+
+
+def mir_expression(module: universal.Module, block: universal.Block, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId:
+    match expression.kind:
+        case LiteralValue:
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Constant(value, result))
+            return result
+        case BindingReference:
+            address = callable_mir_place(module, block, scope, expression)
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Load(address, result))
+            return result
+        case FieldReference:
+            address = callable_mir_place(module, block, scope, expression)
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Load(address, result))
+            return result
+        case RecordValue:
+            address = mir_value(module, universal.TypeId(5))
+            block.operations.append(universal.Operation.Allocate(expression.type_id, address))
+            for argument in fields:
+                value = mir_expression(module, block, scope, argument.value)
+                for record in module.records:
+                    if record.type_id.index == expression.type_id.index:
+                        index := 0
+                        for field in record.fields:
+                            if argument.name == field.name:
+                                target = mir_value(module, universal.TypeId(5))
+                                block.operations.append(universal.Operation.FieldAddress(address, expression.type_id, index, target))
+                                block.operations.append(universal.Operation.Store(target, value))
+                            index += 1
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Load(address, result))
+            return result
+        case TypeName:
+            mir_expression(module, block, scope, value)
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Constant(universal.StringValue(name), result))
+            return result
+        case Unary:
+            input = mir_expression(module, block, scope, operand)
+            if operator.symbol == "+":
+                return input
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Unary(operator, input, result))
+            return result
+        case Binary:
+            lhs = mir_expression(module, block, scope, left)
+            rhs = mir_expression(module, block, scope, right)
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Binary(operator, lhs, rhs, result))
+            return result
+        case Conditional:
+            test = mir_expression(module, block, scope, condition)
+            then_block = universal.empty_block()
+            then_result = mir_expression(module, then_block, scope, then_value)
+            then_block.operations.append(universal.Operation.Return(then_result))
+            else_block = universal.empty_block()
+            else_result = mir_expression(module, else_block, scope, else_value)
+            else_block.operations.append(universal.Operation.Return(else_result))
+            result = mir_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Choose(test, then_block, else_block, result))
+            return result
+        case ResolvedCall:
+            match callee:
+                case Direct:
+                    evaluated: list[universal.ValueId] = []
+                    for argument in arguments:
+                        if argument.value.type_id.index >= 1000:
+                            evaluated.append(callable_mir_place(module, block, scope, argument.value))
+                        else:
+                            evaluated.append(mir_expression(module, block, scope, argument.value))
+                    inputs: list[universal.ValueId] = []
+                    for declaration in module.functions:
+                        if declaration.id.value == function.declaration.value:
+                            parameter_index := 0
+                            for parameter in declaration.parameters:
+                                argument_index := 0
+                                for argument in arguments:
+                                    if argument.name == parameter.name or (argument.name == None and parameter_index == argument_index):
+                                        inputs.append(evaluated[argument_index])
+                                    argument_index += 1
+                                parameter_index += 1
+                    result = mir_value(module, expression.type_id)
+                    block.operations.append(universal.Operation.Call(universal.FunctionId(function.declaration.value), inputs, result))
+                    return result
+                case _:
+                    pass
+        case _:
+            pass
+    throw Error("scalar semantic analysis admitted an unresolved expression")
+
+
+def mir_block(module: universal.Module, block: universal.Block, scope: CallableMirScope) -> universal.Block:
+    for statement in block.statements:
+        match statement:
+            case BindingStatement:
+                value := mir_expression(module, block, scope, binding.value)
+                if binding.type_id.index >= 1000:
+                    address = mir_value(module, universal.TypeId(5))
+                    block.operations.append(universal.Operation.Allocate(binding.type_id, address))
+                    block.operations.append(universal.Operation.Store(address, value))
+                    value = address
+                if binding.update:
+                    block.operations.append(universal.Operation.Store(scope.bindings[binding.id.index], value))
+                else:
+                    cell = mir_value(module, universal.TypeId(5))
+                    stored_type = universal.TypeId(5) if binding.type_id.index >= 1000 else binding.type_id
+                    block.operations.append(universal.Operation.Allocate(stored_type, cell))
+                    block.operations.append(universal.Operation.Store(cell, value))
+                    scope.bindings.append(cell)
+            case FieldSet:
+                address = callable_mir_place(module, block, scope, target)
+                operation ?= update
+                if operation != None:
+                    original = mir_value(module, target.type_id)
+                    block.operations.append(universal.Operation.Load(address, original))
+                    rhs = mir_expression(module, block, scope, value)
+                    resolved = mir_value(module, target.type_id)
+                    block.operations.append(universal.Operation.Binary(operation, original, rhs, resolved))
+                    block.operations.append(universal.Operation.Store(address, resolved))
+                else:
+                    resolved = mir_expression(module, block, scope, value)
+                    block.operations.append(universal.Operation.Store(address, resolved))
+            case ExpressionStatement:
+                mir_expression(module, block, scope, expression)
+            case Assert:
+                value = mir_expression(module, block, scope, condition)
+                origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
+                block.operations.append(universal.Operation.Assert(value, None, origin))
+            case Return:
+                returned: universal.ValueId | None := None
+                expression_value ?= value
+                if expression_value != None:
+                    returned = mir_expression(module, block, scope, expression_value)
+                block.operations.append(universal.Operation.Return(returned))
+            case While:
+                condition_block = universal.empty_block()
+                test = mir_expression(module, condition_block, scope, condition)
+                body_mir = mir_block(module, body, CallableMirScope(scope.bindings[:]))
+                running = mir_value(module, universal.TypeId(5))
+                proceeding = mir_value(module, universal.TypeId(5))
+                block.operations.append(universal.Operation.Allocate(universal.TypeId(1), running))
+                block.operations.append(universal.Operation.Allocate(universal.TypeId(1), proceeding))
+                block.operations.append(universal.Operation.Loop(condition_block, test, body_mir, running, proceeding))
+            case Break:
+                block.operations.append(universal.Operation.BreakLoop)
+            case Continue:
+                block.operations.append(universal.Operation.ContinueLoop)
+            case If:
+                value = mir_expression(module, block, scope, condition)
+                then_mir = mir_block(module, then_block, CallableMirScope(scope.bindings[:]))
+                else_mir = mir_block(module, else_block, CallableMirScope(scope.bindings[:]))
+                block.operations.append(universal.Operation.If(value, then_mir, else_mir))
+            case _:
+                throw Error("scalar semantic analysis admitted an unsupported statement")
+    return block
+
+
+def build_callables(module: universal.Module) -> universal.Module:
+    scope = CallableMirScope()
+    module.initializer = mir_block(module, module.initializer, scope)
+    module.globals = scope.bindings
+    functions: list[universal.FunctionDeclaration] = []
+    for function in module.functions:
+        local = CallableMirScope()
+        prefix = universal.empty_block()
+        for type_id in function.parameter_types:
+            stored_type = universal.TypeId(5) if type_id.index >= 1000 else type_id
+            parameter_value = mir_value(module, stored_type)
+            function.values.append(parameter_value)
+            cell = mir_value(module, universal.TypeId(5))
+            prefix.operations.append(universal.Operation.Allocate(stored_type, cell))
+            prefix.operations.append(universal.Operation.Store(cell, parameter_value))
+            local.bindings.append(cell)
+        body ?= function.body
+        if body != None:
+            lowered = mir_block(module, body, local)
+            for operation in lowered.operations:
+                prefix.operations.append(operation)
+            function.body = prefix
+        functions.append(function)
+    module.functions = functions
+    return module
+
+
+def callable_mir_place(module: universal.Module, block: universal.Block, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId:
+    match expression.kind:
+        case BindingReference:
+            if expression.type_id.index >= 1000:
+                address = mir_value(module, universal.TypeId(5))
+                block.operations.append(universal.Operation.Load(scope.bindings[binding.index], address))
+                return address
+            return scope.bindings[binding.index]
+        case FieldReference:
+            base = callable_mir_place(module, block, scope, object)
+            result = mir_value(module, universal.TypeId(5))
+            block.operations.append(universal.Operation.FieldAddress(base, object.type_id, index, result))
+            return result
+        case _:
+            value = mir_expression(module, block, scope, expression)
+            address = mir_value(module, universal.TypeId(5))
+            block.operations.append(universal.Operation.Allocate(expression.type_id, address))
+            block.operations.append(universal.Operation.Store(address, value))
+            return address

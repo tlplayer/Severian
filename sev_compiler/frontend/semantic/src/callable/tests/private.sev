@@ -1,0 +1,23 @@
+class Counter:
+    _value: int = 0
+
+    def _bump() -> int:
+        self._value += 1
+        return _value
+
+    def bump() -> int:
+        return self._bump()
+
+
+test "self retains private member access":
+    counter = Counter()
+    assert(counter.bump() == 1)
+    print("private complete")
+
+test with compiler "private members require the owning callable scope":
+    reject:
+        counter = Counter()
+        counter._bump()
+    reject:
+        counter = Counter()
+        value = counter._value

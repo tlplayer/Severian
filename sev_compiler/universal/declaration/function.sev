@@ -97,3 +97,12 @@ def resolved_function(
     function.parameter_types = parameter_types
     function.result_type = result_type
     return function
+
+
+class RecordDeclaration:
+    name: string
+    fields: list[FunctionParameter]
+    methods: list[FunctionDeclaration]
+    span: source.Span
+    type_id: TypeId = TypeId(0)
+    lookup: string = ""

@@ -41,7 +41,8 @@ def main():
     translate = tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = tool("SEVERIAN_CLANG", "clang-21")
     compiler = ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
-    run([SEED, "build"], cwd=ROOT / "sev_compiler")
+    if not os.environ.get("SEVERIAN_SKIP_BUILD"):
+        run([SEED, "build"], cwd=ROOT / "sev_compiler")
     string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
     io_source = ROOT / "library/system/io/src/text.sev"
     scalar_tests = ROOT / "sev_compiler/frontend/semantic/src/scalar/tests"

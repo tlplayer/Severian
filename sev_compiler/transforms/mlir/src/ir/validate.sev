@@ -33,6 +33,8 @@ def validate_location(location: MlirLocation) -> bool | MlirVerificationError:
 
 
 def validate_type(type_id: MlirType) -> bool | MlirVerificationError:
+    for element in type_id.elements:
+        validate_type(element)
     kind = type_kind_name(type_id.kind)
     scalar = scalar_kind_name(type_id.scalar.kind)
     if kind == "scalar" and scalar == "integer" and type_id.scalar.bits == 0:

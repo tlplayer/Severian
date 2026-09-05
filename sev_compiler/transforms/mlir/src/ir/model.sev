@@ -28,12 +28,15 @@ enum MlirTypeKind:
     UnrankedTensorType
     MemRefType
     UnrankedMemRefType
+    StructType
+    ArrayType
 
 
 class MlirType:
     kind: MlirTypeKind
     scalar: MlirScalarType
     dimensions: list[int]
+    elements: list[MlirType] = []
 
 
 def integer_type(bits: u16, signed: bool = true) -> MlirType:
@@ -475,6 +478,10 @@ def type_kind_name(kind: MlirTypeKind) -> string:
             return "memref"
         case UnrankedMemRefType:
             return "unranked_memref"
+        case StructType:
+            return "struct"
+        case ArrayType:
+            return "array"
 
 
 def dimension_text(dimension: int) -> string:
@@ -504,6 +511,13 @@ def dimension_identity(dimension: int) -> string:
 def same_type(left: MlirType, right: MlirType) -> bool:
     if type_kind_name(left.kind) != type_kind_name(right.kind):
         return false
+    if len(left.elements) != len(right.elements):
+        return false
+    element := 0
+    for member in left.elements:
+        if not same_type(member, right.elements[element]):
+            return false
+        element += 1
     if not same_scalar_type(left.scalar, right.scalar):
         return false
     if len(left.dimensions) != len(right.dimensions):
@@ -529,3 +543,11 @@ def is_float(type_id: MlirType) -> bool:
 
 def is_boolean(type_id: MlirType) -> bool:
     return is_integer(type_id) and type_id.scalar.bits == 1
+
+
+def struct_type(elements: list[MlirType]) -> MlirType:
+    return MlirType(StructType, MlirScalarType(IntegerScalar, 8, false, 0), [], elements)
+
+
+def array_type(size: int, element: MlirType) -> MlirType:
+    return MlirType(ArrayType, MlirScalarType(IntegerScalar, 8, false, 0), [size], [element])

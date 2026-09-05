@@ -1,0 +1,1048 @@
+import diagnostics
+from diagnostics import Diagnostic
+import source
+import universal
+import "../../../universal/type/scalar.sev" as scalar
+import "../../../universal/operator/scalar.sev" as operators
+import "../../../universal/declaration/scalar.sev" as boundary
+import "packs.sev" as packs
+import "../../../universal/type/scalar_conversion.sev" as conversions
+
+
+class CallableAnalysis:
+    names: list[string] = []
+    types: list[universal.TypeId] = []
+    functions: list[universal.FunctionDeclaration] = []
+    next_id: list[int] = [0]
+    namespace: string = ""
+    mutables: list[bool] = []
+    constants: list[universal.Binding] = []
+    templates: list[universal.FunctionDeclaration] = []
+    records: list[universal.RecordDeclaration] = []
+    owner: universal.TypeId = universal.TypeId(0)
+    loop_depth: int = 0
+
+
+def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
+    return diagnostics.Diagnostic("E000200", message, span)
+
+
+def callable_annotation(annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration] = [], namespace: string = "") -> universal.TypeId | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Named:
+            if len(arguments) != 0:
+                return error(callable_diagnostic("generic types are outside the scalar bootstrap subset", annotation.span))
+            for record in records:
+                if record.name == namespace + name or record.name == name:
+                    return record.type_id
+            known ?= scalar.scalar_type_name(name)
+            if known != None:
+                return known
+            return error(callable_diagnostic("unknown scalar type " + name, annotation.span))
+        case _:
+            return error(callable_diagnostic("union types are outside the scalar bootstrap subset", annotation.span))
+
+
+def callable_path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return callable_path(object) + "." + name
+        case _:
+            return ""
+
+
+def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> universal.TypeId:
+    match expression.kind:
+        case Name:
+            index := 0
+            for name_value in state.names:
+                if name_value == name:
+                    return state.types[index]
+                index += 1
+            for constant in state.constants:
+                if constant.name == state.namespace + name or constant.name == name:
+                    return constant.type_id
+        case Call:
+            name = callable_path(callee)
+            if name == "type":
+                return universal.TypeId(3)
+            target ?= scalar.scalar_type_name(name)
+            if target != None:
+                if conversions.scalar_numeric(target):
+                    return target
+            for record in state.records:
+                if record.name == state.namespace + name or record.name == name:
+                    return record.type_id
+            method ?= callable_method(state, callee)
+            if method != None:
+                return method.result_type
+            function ?= callable_select_function(state, name, arguments)
+            if function != None:
+                return function.function.result_type
+        case Member:
+            owner = callable_hint(state, object)
+            for record in state.records:
+                if record.type_id.index == owner.index:
+                    for field in record.fields:
+                        if field.name == name:
+                            return field.type_id
+        case Unary:
+            return callable_hint(state, operand)
+        case Binary:
+            if operators.scalar_comparison(operator.symbol):
+                return universal.TypeId(1)
+            return conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
+        case LiteralValue:
+            match value:
+                case FloatValue:
+                    return universal.TypeId(164)
+                case _:
+                    pass
+        case Conditional:
+            hint = callable_hint(state, then_value)
+            if hint.index != 0:
+                return hint
+            return callable_hint(state, else_value)
+        case _:
+            pass
+    return universal.TypeId(0)
+
+
+class CallableSelection:
+    function: universal.FunctionDeclaration
+    arguments: list[universal.CallArgument]
+
+
+def callable_convert(state: CallableAnalysis, operand: universal.Expression, target: universal.TypeId, mode: string = "") -> universal.Expression | diagnostics.Diagnostic:
+    required = conversions.scalar_conversion_rank(operand.type_id, target)
+    if required < 0:
+        return error(callable_diagnostic("explicit conversion requires numeric primitive types", operand.span))
+    selected := required
+    if mode != "":
+        selected = conversions.scalar_conversion_mode(mode)
+        if selected < 0:
+            return error(callable_diagnostic("unknown numeric conversion mode " + mode, operand.span))
+        if selected < required:
+            return error(callable_diagnostic(mode + " conversion cannot satisfy the required numeric policy", operand.span))
+    if operand.type_id.index == target.index:
+        return operand
+    source_type ?= scalar.scalar_type(operand.type_id)
+    target_type ?= scalar.scalar_type(target)
+    if source_type != None:
+        if target_type != None:
+            name = "numeric.convert$" + source_type.name + "$" + target_type.name
+            for function in state.functions:
+                if function.name == name:
+                    policy = callable_expression(state, universal.Expression(universal.LiteralValue(universal.BooleanValue(selected == 3)), operand.span), universal.TypeId(1))
+                    arguments = [universal.CallArgument(None, operand, operand.span), universal.CallArgument(None, policy, operand.span)]
+                    id = universal.HirId(u32(state.next_id[0]))
+                    state.next_id[0] += 1
+                    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), arguments), operand.span, id, target)
+    return error(callable_diagnostic("missing generated numeric conversion", operand.span))
+
+
+def callable_operand(state: CallableAnalysis, expression: universal.Expression, target: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    hint = callable_hint(state, expression)
+    if hint.index != 0 and hint.index != target.index:
+        rank = conversions.scalar_conversion_rank(hint, target)
+        if rank >= 0 and (rank <= 1 or target.index == 164):
+            return callable_convert(state, callable_expression(state, expression, universal.TypeId(0)), target)
+    return callable_expression(state, expression, target)
+
+
+def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> CallableSelection:
+    count := 0
+    keyword := false
+    for argument in arguments:
+        if argument.name != None:
+            keyword = true
+        else:
+            if keyword:
+                throw Error("positional argument follows keyword argument")
+            count += 1
+    parameters = packs.pack_parameters(template, count)
+    prototype = universal.FunctionDeclaration(parameters=parameters)
+    bound = packs.bind_arguments(prototype, arguments)
+    if bound.message != "":
+        throw Error(bound.message)
+    concrete: list[universal.FunctionParameter] = []
+    suffix := ""
+    for parameter in parameters:
+        for argument in bound.arguments:
+            if argument.name == parameter.name:
+                expected := universal.TypeId(0)
+                match parameter.annotation.kind:
+                    case Named:
+                        if name != "V":
+                            expected = callable_annotation(parameter.annotation)
+                    case _:
+                        expected = callable_annotation(parameter.annotation)
+                typed = callable_expression(state, argument.value, expected)
+                known ?= scalar.scalar_type(typed.type_id)
+                if known != None:
+                    suffix += "_" + string(typed.type_id.index)
+                    annotation = universal.named_type(known.name, [], parameter.span)
+                    concrete.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span, keyword_only=parameter.keyword_only))
+                else:
+                    throw Error("variadic argument has no concrete value type")
+    instance_name = template.name + "$pack$" + string(count) + suffix
+    for function in state.functions:
+        if function.name == instance_name:
+            return CallableSelection(function, bound.arguments)
+    if len(state.functions) >= 512:
+        throw Error("bootstrap specialization limit exceeded")
+    instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup)
+    signature = callable_signature(instance, int(len(state.functions)))
+    state.functions.append(signature)
+    return CallableSelection(signature, bound.arguments)
+
+
+def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableSelection | None:
+    lookup := state.namespace + name
+    local := false
+    for template in state.templates:
+        if template.name == lookup:
+            local = true
+    for function in state.functions:
+        if function.name == lookup:
+            local = true
+    if not local:
+        lookup = "format.string" if name == "string" else name
+    for template in state.templates:
+        if template.name == lookup:
+            return callable_select_pack(state, template, arguments)
+    candidates: list[universal.FunctionDeclaration] = []
+    for function in state.functions:
+        if function.name == lookup:
+            candidates.append(function)
+    if len(candidates) == 0:
+        return None
+    message := "no overload accepts these arguments for " + name
+    for function in candidates:
+        bound = packs.bind_arguments(function, arguments)
+        if bound.message != "":
+            message = bound.message
+            continue
+        if len(candidates) == 1:
+            return CallableSelection(function, bound.arguments)
+        compatible := true
+        for argument in bound.arguments:
+            typed = callable_expression(state, argument.value, universal.TypeId(0))
+            index := 0
+            for parameter in function.parameters:
+                if argument.name == parameter.name:
+                    if typed.type_id.index != function.parameter_types[index].index:
+                        compatible = false
+                index += 1
+        if compatible:
+            return CallableSelection(function, bound.arguments)
+    throw Error(message)
+
+
+def callable_expression(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    result_type := expected
+    kind := expression.kind
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    if expected.index == 164:
+                        literal = universal.Expression(universal.LiteralValue(universal.FloatValue(spelling + ".0")), expression.span)
+                        return callable_expression(state, literal, expected)
+                    if result_type.index == 0:
+                        result_type = universal.TypeId(64)
+                    if result_type.index == 1:
+                        return error(callable_diagnostic("an integer cannot initialize bool", expression.span))
+                    if result_type.index == 2:
+                        return error(callable_diagnostic("an integer cannot initialize unit", expression.span))
+                    if result_type.index == 3 or result_type.index == 132 or result_type.index == 5 or result_type.index == 6:
+                        return error(callable_diagnostic("integer cannot initialize text or char", expression.span))
+                    number = int(spelling)
+                    if result_type.index == 108:
+                        if number < 0 or number > 255:
+                            return error(callable_diagnostic("integer literal is outside u8", expression.span))
+                    elif result_type.index != 4 and result_type.index < 64:
+                        limit = 1 << (int(result_type.index) - 1)
+                        if number < 0 - limit or number >= limit:
+                            return error(callable_diagnostic("integer literal is outside the declared type", expression.span))
+                case FloatValue:
+                    result_type = universal.TypeId(164)
+                case NoneValue:
+                    result_type = universal.TypeId(6)
+                case StringValue:
+                    result_type = universal.TypeId(3)
+                case CharacterValue:
+                    result_type = universal.TypeId(132)
+                case BooleanValue:
+                    if expected.index != 0 and expected.index != 1:
+                        return error(callable_diagnostic("a boolean cannot initialize an integer", expression.span))
+                    result_type = universal.TypeId(1)
+                case _:
+                    return error(callable_diagnostic("scalar bootstrap supports integer and boolean literals", expression.span))
+        case ResolvedCall:
+            result_type = expression.type_id
+        case RecordValue:
+            result_type = expression.type_id
+        case BindingReference:
+            result_type = expression.type_id
+        case FieldReference:
+            result_type = expression.type_id
+        case Member:
+            receiver = callable_expression(state, object, universal.TypeId(0))
+            for record in state.records:
+                if record.type_id.index == receiver.type_id.index:
+                    index := 0
+                    for field in record.fields:
+                        if field.name == name:
+                            if field.name.starts_with("_") and state.owner.index != record.type_id.index:
+                                return error(callable_diagnostic("field is private: " + name, expression.span))
+                            if expected.index != 0 and expected.index != field.type_id.index:
+                                return error(callable_diagnostic("field does not match expected type", expression.span))
+                            return universal.Expression(universal.FieldReference(receiver, index), expression.span, type_id=field.type_id)
+                        index += 1
+            return error(callable_diagnostic("unknown field " + name, expression.span))
+        case Stringify:
+            conversion = universal.Expression(universal.Call(universal.Expression(universal.Name("string"), expression.span), [universal.CallArgument(None, value, value.span)]), expression.span)
+            return callable_expression(state, conversion, universal.TypeId(3))
+        case Name:
+            found := false
+            index := 0
+            for known in state.names:
+                if known == name:
+                    result_type = state.types[index]
+                    kind = universal.BindingReference(universal.BindingId(u32(index)))
+                    found = true
+                index += 1
+            if not found:
+                field ?= callable_implicit_field(state, name, expression.span)
+                if field != None:
+                    return callable_expression(state, field, expected)
+                for constant in state.constants:
+                    if constant.name == state.namespace + name or constant.name == name:
+                        value = callable_expression(state, constant.value, constant.type_id)
+                        if expected.index != 0 and expected.index != value.type_id.index:
+                            return error(callable_diagnostic("constant does not match its expected scalar type", expression.span))
+                        return value
+                return error(callable_diagnostic("unknown name " + name, expression.span))
+        case Unary:
+            # A signed literal's range includes its sign, so -128 is valid i8.
+            if operator.symbol == "-":
+                match operand.kind:
+                    case LiteralValue:
+                        match value:
+                            case IntegerValue:
+                                literal = universal.Expression(universal.LiteralValue(universal.IntegerValue("-" + spelling)), expression.span)
+                                return callable_expression(state, literal, expected)
+                            case _:
+                                pass
+                    case _:
+                        pass
+            resolved = callable_expression(state, operand, expected)
+            result_type = resolved.type_id
+            selected ?= operators.scalar_operation(operator.symbol, 1, result_type.index == 1, scalar.scalar_representation(result_type))
+            if selected == None or result_type.index == 2 or result_type.index == 3 or result_type.index == 132:
+                return error(callable_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
+            kind = universal.Unary(operator, resolved)
+        case Conditional:
+            test = callable_expression(state, condition, universal.TypeId(1))
+            branch_type := expected
+            if branch_type.index == 0:
+                branch_type = callable_hint(state, then_value)
+                if branch_type.index == 0:
+                    branch_type = callable_hint(state, else_value)
+            then_typed = callable_expression(state, then_value, branch_type)
+            else_typed = callable_expression(state, else_value, then_typed.type_id)
+            result_type = then_typed.type_id
+            if result_type.index == 2:
+                return error(callable_diagnostic("conditional expressions require a value", expression.span))
+            kind = universal.Conditional(test, then_typed, else_typed)
+        case Binary:
+            comparison = operators.scalar_comparison(operator.symbol)
+            operand_type := universal.TypeId(0) if comparison else expected
+            if operand_type.index == 0:
+                operand_type = conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
+            lhs = callable_operand(state, left, operand_type)
+            rhs = callable_operand(state, right, lhs.type_id)
+            if lhs.type_id.index >= 1000:
+                return error(callable_diagnostic("record operators require a registered implementation", expression.span))
+            known_type ?= scalar.scalar_type(lhs.type_id)
+            if known_type != None:
+                implementation ?= operators.scalar_callable_operation(operator.symbol, known_type.name)
+                if implementation != None:
+                    for function in state.functions:
+                        if function.name == implementation.callable:
+                            operands: list[universal.CallArgument] = [universal.CallArgument(None, lhs, lhs.span), universal.CallArgument(None, rhs, rhs.span)]
+                            resolved_kind: universal.ExpressionKind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), operands)
+                            if expected.index != 0 and expected.index != function.result_type.index:
+                                return error(callable_diagnostic("operator result does not match its expected scalar type", expression.span))
+                            id = universal.HirId(u32(state.next_id[0]))
+                            state.next_id[0] += 1
+                            return universal.Expression(resolved_kind, expression.span, id, function.result_type)
+                    return error(callable_diagnostic("missing source operator implementation " + implementation.callable, expression.span))
+            selected ?= operators.scalar_operation(operator.symbol, 2, lhs.type_id.index == 1, scalar.scalar_representation(lhs.type_id))
+            if selected == None or lhs.type_id.index == 2 or lhs.type_id.index == 3 or lhs.type_id.index == 132:
+                return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
+            result_type = universal.TypeId(1) if comparison else lhs.type_id
+            kind = universal.Binary(operator, lhs, rhs)
+        case Call:
+            name = callable_path(callee)
+            for record in state.records:
+                if record.name == state.namespace + name or record.name == name:
+                    bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=record.fields), arguments)
+                    if bound.message != "":
+                        return error(callable_diagnostic(bound.message, expression.span))
+                    resolved: list[universal.CallArgument] = []
+                    for argument in bound.arguments:
+                        for field in record.fields:
+                            if argument.name == field.name:
+                                typed = callable_expression(state, argument.value, field.type_id)
+                                resolved.append(universal.CallArgument(field.name, typed, argument.span))
+                    if expected.index != 0 and expected.index != record.type_id.index:
+                        return error(callable_diagnostic("constructor does not match expected type", expression.span))
+                    return universal.Expression(universal.RecordValue(resolved), expression.span, type_id=record.type_id)
+            method ?= callable_method(state, callee)
+            if method != None:
+                receiver = callable_receiver(state, callee)
+                if method.name.split(".")[-1].starts_with("_") and state.owner.index != receiver.type_id.index:
+                    return error(callable_diagnostic("method is private: " + method.name, expression.span))
+                supplied = [universal.CallArgument(None, receiver, receiver.span)]
+                for argument in arguments:
+                    supplied.append(argument)
+                target = universal.Expression(universal.Name(method.name), callee.span)
+                return callable_expression(state, universal.Expression(universal.Call(target, supplied), expression.span), expected)
+            target ?= scalar.scalar_type_name(name)
+            if target != None:
+                if conversions.scalar_numeric(target):
+                    if len(arguments) < 1 or len(arguments) > 2:
+                        return error(callable_diagnostic("numeric conversion requires a value and optional mode", expression.span))
+                    for argument in arguments:
+                        if argument.name != None:
+                            return error(callable_diagnostic("numeric conversion arguments must be positional", argument.span))
+                    mode := ""
+                    if len(arguments) == 2:
+                        match arguments[1].value.kind:
+                            case Name:
+                                mode = name
+                            case _:
+                                return error(callable_diagnostic("numeric conversion mode must be a policy name", arguments[1].span))
+                    converted = callable_convert(state, callable_expression(state, arguments[0].value, universal.TypeId(0)), target, mode)
+                    if expected.index != 0 and expected.index != target.index:
+                        return error(callable_diagnostic("conversion result does not match its expected scalar type", expression.span))
+                    return converted
+            if name == "type":
+                if len(arguments) != 1 or arguments[0].name != None:
+                    return error(callable_diagnostic("type requires one positional value", expression.span))
+                typed_value = callable_expression(state, arguments[0].value, universal.TypeId(0))
+                known ?= scalar.scalar_type(typed_value.type_id)
+                if known != None:
+                    display := known.name
+                    if display == "i64":
+                        display = "int"
+                    elif display == "f64":
+                        display = "float"
+                    if expected.index != 0 and expected.index != 3:
+                        return error(callable_diagnostic("type name does not match its expected scalar type", expression.span))
+                    id = universal.HirId(u32(state.next_id[0]))
+                    state.next_id[0] += 1
+                    return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.TypeId(3))
+                return error(callable_diagnostic("type requires a concrete value", expression.span))
+            selected ?= callable_select_function(state, name, arguments)
+            for function in state.functions:
+                matches := false
+                if selected != None:
+                    matches = function.id.value == selected.function.id.value
+                if matches:
+                    if name in state.names:
+                        return error(callable_diagnostic("a scalar binding is not callable: " + name, expression.span))
+                    if len(arguments) != len(function.parameters) and selected == None:
+                        return error(callable_diagnostic("wrong argument count for " + name, expression.span))
+                    resolved: list[universal.CallArgument] = []
+                    if selected != None:
+                        for argument in selected.arguments:
+                            index := 0
+                            for parameter in function.parameters:
+                                if argument.name == parameter.name:
+                                    value = callable_expression(state, argument.value, function.parameter_types[index])
+                                    resolved.append(universal.CallArgument(parameter.name, value, argument.span))
+                                index += 1
+                    result_type = function.result_type
+                    kind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), resolved)
+                    id = universal.HirId(u32(state.next_id[0]))
+                    state.next_id[0] += 1
+                    if expected.index != 0 and result_type.index != expected.index:
+                        return error(callable_diagnostic("call result does not match its expected scalar type", expression.span))
+                    return universal.Expression(kind, expression.span, id, result_type)
+            for function in state.functions:
+                if function.name == state.namespace + name:
+                    return error(callable_diagnostic("no overload accepts these arguments for " + name, expression.span))
+            return error(callable_diagnostic("unknown callable " + name, expression.span))
+        case _:
+            return error(callable_diagnostic("expression is outside the scalar bootstrap subset", expression.span))
+    if expected.index != 0 and result_type.index != expected.index:
+        return error(callable_diagnostic("expression does not match its expected scalar type", expression.span))
+    id = universal.HirId(u32(state.next_id[0]))
+    state.next_id[0] += 1
+    return universal.Expression(kind, expression.span, id, result_type)
+
+
+def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> universal.Binding | diagnostics.Diagnostic:
+    index := 0
+    for name in state.names:
+        if name == binding.name:
+            if binding.mutable or binding.annotation != None:
+                return error(callable_diagnostic("duplicate scalar binding " + binding.name, binding.span))
+            if not state.mutables[index]:
+                return error(callable_diagnostic("cannot reassign immutable binding " + name, binding.span))
+            value = callable_expression(state, binding.value, state.types[index])
+            return universal.Binding(name, None, value, true, false, binding.span, universal.BindingId(u32(index)), value.type_id, true)
+        index += 1
+    if binding.update:
+        return error(callable_diagnostic("cannot update unknown binding " + binding.name, binding.span))
+    expected := universal.TypeId(0)
+    annotation ?= binding.annotation
+    if annotation != None:
+        expected = callable_annotation(annotation, state.records, state.namespace)
+    value = callable_expression(state, binding.value, expected)
+    if value.type_id.index == 2:
+        return error(callable_diagnostic("unit calls cannot initialize scalar bindings", binding.span))
+    id = universal.BindingId(u32(len(state.names)))
+    state.names.append(binding.name)
+    state.types.append(value.type_id)
+    state.mutables.append(binding.mutable)
+    return universal.Binding(binding.name, binding.annotation, value, false, false, binding.span, id, value.type_id, binding.mutable)
+
+
+def callable_expression_statement(state: CallableAnalysis, expression: universal.Expression) -> universal.Statement | diagnostics.Diagnostic:
+    match expression.kind:
+        case Call:
+            match callee.kind:
+                case Name:
+                    if name == "assert":
+                        if len(arguments) != 1 or arguments[0].name != None:
+                            return error(callable_diagnostic("assert requires one positional condition", expression.span))
+                        condition = callable_expression(state, arguments[0].value, universal.TypeId(1))
+                        return universal.Assert(condition, None, expression.span, condition.span)
+                case _:
+                    pass
+            value = callable_expression(state, expression, universal.TypeId(0))
+            return universal.ExpressionStatement(value)
+        case _:
+            pass
+    return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
+
+
+def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
+    output = universal.empty_block()
+    returned := false
+    index := 0
+    for statement in statements:
+        if returned:
+            return error(callable_diagnostic("statement after unconditional return", None))
+        match statement:
+            case BindingStatement:
+                field ?= callable_implicit_field(state, binding.name, binding.span)
+                implicit := false
+                if field != None:
+                    if binding.name not in state.names and binding.annotation == None and not binding.mutable:
+                        target = callable_expression(state, field, universal.TypeId(0))
+                        value = callable_expression(state, binding.value, target.type_id)
+                        output.statements.append(universal.FieldSet(target, value, binding.span, None))
+                        implicit = true
+                if not implicit:
+                    output.statements.append(universal.BindingStatement(callable_binding(state, binding)))
+            case FieldSet:
+                resolved = callable_expression(state, target, universal.TypeId(0))
+                match resolved.kind:
+                    case FieldReference:
+                        typed = callable_expression(state, value, resolved.type_id)
+                        operation ?= update
+                        if operation != None:
+                            callable_expression(state, universal.Expression(universal.Binary(operation, resolved, typed), span), resolved.type_id)
+                        output.statements.append(universal.FieldSet(resolved, typed, span, update))
+                    case _:
+                        return error(callable_diagnostic("assignment requires a field place", span))
+            case ExpressionStatement:
+                output.statements.append(callable_expression_statement(state, expression))
+            case Assert:
+                if message != None:
+                    return error(callable_diagnostic("assertion messages are outside the scalar bootstrap subset", span))
+                resolved = callable_expression(state, condition, universal.TypeId(1))
+                output.statements.append(universal.Assert(resolved, None, span, condition_span))
+            case Return:
+                returned_value: universal.Expression | None := None
+                expression_value ?= value
+                if expression_value != None:
+                    if result_type.index == 2:
+                        return error(callable_diagnostic("unit function cannot return a value", span))
+                    returned_value = callable_expression(state, expression_value, result_type)
+                elif result_type.index != 2:
+                    return error(callable_diagnostic("scalar function must return a value", span))
+                output.statements.append(universal.Return(returned_value, span))
+                returned = true
+            case If:
+                resolved = callable_expression(state, condition, universal.TypeId(1))
+                then_state = callable_scope(state)
+                else_state = callable_scope(state)
+                then_typed = callable_block(then_state, then_block.statements, result_type, false)
+                else_typed = callable_block(else_state, else_block.statements, result_type, false)
+                output.statements.append(universal.If(resolved, then_typed, else_typed, span))
+                returned = callable_terminates(then_typed) and callable_terminates(else_typed)
+            case ForEach:
+                expanded = callable_range(state, name, iterable, body, span, result_type)
+                for nested in expanded.statements:
+                    output.statements.append(nested)
+            case While:
+                resolved = callable_expression(state, condition, universal.TypeId(1))
+                local = callable_scope(state)
+                local.loop_depth += 1
+                typed = callable_block(local, body.statements, result_type, false)
+                output.statements.append(universal.While(resolved, typed, span))
+            case Break:
+                if state.loop_depth == 0:
+                    return error(callable_diagnostic("break outside a loop", span))
+                output.statements.append(statement)
+                returned = true
+            case Continue:
+                if state.loop_depth == 0:
+                    return error(callable_diagnostic("continue outside a loop", span))
+                output.statements.append(statement)
+                returned = true
+            case _:
+                return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
+        index += 1
+    if complete and not returned:
+        if result_type.index != 2:
+            return error(callable_diagnostic("scalar function can reach its end without returning a value", None))
+        output.statements.append(universal.Return(None, source.Span(source.SourceId(0), 0, 0)))
+    return output
+
+
+def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int, records: list[universal.RecordDeclaration] = []) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    if len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0:
+        return error(callable_diagnostic("generic or decorated functions are outside the scalar bootstrap subset", declaration.span))
+    operation = boundary.scalar_boundary(declaration, "mlir")
+    symbol = boundary.scalar_boundary(declaration, "c")
+    if len(declaration.decorators) != 0:
+        if len(declaration.decorators) != 1 or (operation == "" and symbol == ""):
+            return error(callable_diagnostic("unsupported scalar boundary annotation", declaration.span))
+        if declaration.body != None:
+            return error(callable_diagnostic("boundary declarations cannot have source bodies", declaration.span))
+        if symbol != "" and len(declaration.decorators[0].arguments) != 1:
+            return error(callable_diagnostic("C boundary requires exactly one symbol", declaration.span))
+        if operation != "" and len(operation.split(".")) != 2:
+            return error(callable_diagnostic("MLIR operation must have a dialect and mnemonic", declaration.span))
+        argument_names: list[string] = []
+        for argument in declaration.decorators[0].arguments:
+            argument_name ?= argument.name
+            if argument_name != None:
+                if argument_name in argument_names:
+                    return error(callable_diagnostic("duplicate boundary argument", declaration.span))
+                argument_names.append(argument_name)
+                if argument_name != "" and not (operation != "" and argument_name == "operand_segments") and not (symbol != "" and argument_name == "symbol"):
+                    return error(callable_diagnostic("unsupported boundary argument", declaration.span))
+        segments = boundary.scalar_operand_segments(declaration)
+        if len(segments) != 0:
+            size := 0
+            for segment in segments:
+                size += segment
+            if size != int(len(declaration.parameters)):
+                return error(callable_diagnostic("operand segments must account for every parameter", declaration.span))
+    elif declaration.body == None:
+        return error(callable_diagnostic("scalar function requires a body", declaration.span))
+    namespace := ""
+    lookup ?= declaration.lookup
+    if lookup != None:
+        namespace = lookup
+    parameter_names: list[string] = []
+    parameter_types: list[universal.TypeId] = []
+    typed_parameters: list[universal.FunctionParameter] = []
+    for source_parameter in declaration.parameters:
+        parameter := source_parameter
+        if parameter.name in parameter_names:
+            return error(callable_diagnostic("duplicate parameter " + parameter.name, parameter.span))
+        default_value ?= parameter.default
+        if default_value != None:
+            match default_value.kind:
+                case LiteralValue:
+                    pass
+                case _:
+                    return error(callable_diagnostic("bootstrap parameter defaults must be literals", parameter.span))
+        type_id = callable_annotation(parameter.annotation, records, namespace)
+        if default_value != None:
+            callable_expression(CallableAnalysis(), default_value, type_id)
+        if type_id.index == 2:
+            return error(callable_diagnostic("unit cannot be a scalar parameter", parameter.span))
+        parameter.type_id = type_id
+        if type_id.index >= 1000 and declaration.body != None:
+            parameter.modifiers = [universal.BoundaryModifier("reference")]
+        parameter_names.append(parameter.name)
+        parameter_types.append(type_id)
+        typed_parameters.append(parameter)
+    declaration.parameters = typed_parameters
+    result_type := universal.TypeId(2)
+    annotation ?= declaration.result
+    if annotation != None:
+        result_type = callable_annotation(annotation, records, namespace)
+    if symbol != "":
+        if symbol == "main" or symbol.starts_with("__sev_scalar_") or symbol.starts_with("__sev_string_"):
+            return error(callable_diagnostic("reserved external symbol " + symbol, declaration.span))
+        if result_type.index == 3 or result_type.index == 4:
+            return error(callable_diagnostic("C boundaries require scalar ABI types", declaration.span))
+        for parameter_type in parameter_types:
+            if parameter_type.index == 3 or parameter_type.index == 4:
+                return error(callable_diagnostic("C boundaries require scalar ABI types", declaration.span))
+    declaration.parameter_types = parameter_types
+    declaration.result_type = result_type
+    declaration.id = universal.FunctionId(u128(ordinal + 1))
+    declaration.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal + 1)))
+    return declaration
+
+
+def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block) -> bool | diagnostics.Diagnostic:
+    index = int(len(state.functions))
+    callable_block(state, block.statements, universal.TypeId(2))
+    cursor := index
+    # Pack calls may append signatures. Check their bodies too, without leaking
+    # either successful or rejected specializations into the surrounding module.
+    while cursor < len(state.functions):
+        function = state.functions[cursor]
+        cursor += 1
+        callable_body(state, function)
+    return true
+
+
+def analyze_callables(module: universal.Module, include_tests: bool = false) -> universal.Module | diagnostics.Diagnostic:
+    state = CallableAnalysis()
+    function_names: list[string] = []
+    for item in module.items:
+        match item:
+            case Record:
+                record_declaration := declaration
+                for previous in state.records:
+                    if previous.name == declaration.name:
+                        return error(callable_diagnostic("duplicate class " + declaration.name, declaration.span))
+                record_declaration.type_id = universal.TypeId(u32(1000 + len(state.records)))
+                state.records.append(record_declaration)
+            case _:
+                pass
+    record_index := 0
+    for record in state.records:
+        resolved_fields: list[universal.FunctionParameter] = []
+        field_names: list[string] = []
+        for field in record.fields:
+            if field.name in field_names:
+                return error(callable_diagnostic("duplicate field " + field.name, field.span))
+            field_names.append(field.name)
+            resolved_field := field
+            resolved_field.type_id = callable_annotation(field.annotation, state.records, record.lookup)
+            if resolved_field.type_id.index == 3:
+                return error(callable_diagnostic("record string fields require aggregate ownership lowering", field.span))
+            if resolved_field.type_id.index == 2:
+                return error(callable_diagnostic("unit cannot be stored in a record field", field.span))
+            resolved_fields.append(resolved_field)
+        record.fields = resolved_fields
+        state.records[record_index] = record
+        record_index += 1
+        method_names: list[string] = []
+        for method in record.methods:
+            if method.name in method_names or method.name in field_names:
+                return error(callable_diagnostic("duplicate member " + method.name, method.span))
+            method_names.append(method.name)
+            method.name = record.name + "." + method.name
+            method.lookup = record.lookup
+            receiver = universal.FunctionParameter("self", universal.named_type(record.name, [], record.span), None, record.span)
+            parameters = [receiver]
+            for parameter in method.parameters:
+                if parameter.name == "self":
+                    return error(callable_diagnostic("self is implicit in method parameters", parameter.span))
+                parameters.append(parameter)
+            method.parameters = parameters
+            state.functions.append(callable_signature(method, int(len(state.functions)), state.records))
+    for record in state.records:
+        callable_record_layout(state.records, record.type_id, [])
+    module.records = state.records
+    for item in module.items:
+        match item:
+            case Function:
+                if declaration.name == "assert" or declaration.name == "type" or declaration.name == "string":
+                    return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
+                variadic := false
+                for parameter in declaration.parameters:
+                    if parameter.variadic:
+                        variadic = true
+                if variadic:
+                    if len(declaration.decorators) != 0 or len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0:
+                        return error(callable_diagnostic("decorated or constrained packs are outside the bootstrap subset", declaration.span))
+                    if len(declaration.parameters) == 0 or not declaration.parameters[0].variadic:
+                        return error(callable_diagnostic("bootstrap variadic packs must be the first parameter", declaration.span))
+                    if declaration.name in function_names:
+                        return error(callable_diagnostic("duplicate variadic function " + declaration.name, declaration.span))
+                    if declaration.parameters[0].default != None:
+                        return error(callable_diagnostic("variadic packs cannot have defaults", declaration.span))
+                    parameter_names: list[string] = []
+                    for parameter in declaration.parameters:
+                        if parameter.name in parameter_names:
+                            return error(callable_diagnostic("duplicate parameter " + parameter.name, parameter.span))
+                        parameter_names.append(parameter.name)
+                    state.templates.append(declaration)
+                    function_names.append(declaration.name)
+                    continue
+                for template in state.templates:
+                    if template.name == declaration.name:
+                        return error(callable_diagnostic("variadic overload sets are not supported", declaration.span))
+                signature = callable_signature(declaration, int(len(state.functions)), state.records)
+                for previous in state.functions:
+                    if previous.name == signature.name and len(previous.parameter_types) == len(signature.parameter_types):
+                        duplicate := true
+                        index := 0
+                        for type_id in signature.parameter_types:
+                            if type_id.index != previous.parameter_types[index].index:
+                                duplicate = false
+                            index += 1
+                        if duplicate:
+                            return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
+                if declaration.name not in function_names:
+                    function_names.append(declaration.name)
+                state.functions.append(signature)
+            case _:
+                pass
+    # Immutable literal globals are safe to materialize in each function. Other
+    # globals keep initializer order and cannot be captured by this slice yet.
+    global_names: list[string] = []
+    for item in module.items:
+        match item:
+            case BindingItem:
+                if not binding.mutable and not binding.update and binding.name not in global_names:
+                    match binding.value.kind:
+                        case LiteralValue:
+                            expected := universal.TypeId(0)
+                            annotation ?= binding.annotation
+                            if annotation != None:
+                                expected = callable_annotation(annotation, state.records, state.namespace)
+                            global_value = callable_expression(CallableAnalysis(), binding.value, expected)
+                            state.constants.append(universal.Binding(binding.name, binding.annotation, global_value, false, false, binding.span, type_id=global_value.type_id))
+                        case _:
+                            pass
+                if binding.name not in global_names:
+                    global_names.append(binding.name)
+            case _:
+                pass
+    for item in module.items:
+        match item:
+            case BindingItem:
+                if binding.name in function_names:
+                    return error(callable_diagnostic("binding conflicts with function " + binding.name, binding.span))
+                resolved = callable_binding(state, binding)
+                module.bindings.append(resolved)
+                module.initializer.statements.append(universal.BindingStatement(resolved))
+            case ExpressionItem:
+                module.initializer.statements.append(callable_expression_statement(state, expression))
+            case Function:
+                pass
+            case Record:
+                pass
+            case Test:
+                if include_tests:
+                    if len(declaration.source_modes) == 1 and declaration.source_modes[0] == "compiler":
+                        for compiler_case in declaration.compiler_cases:
+                            isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records)
+                            checked ?= callable_check_compiler_case(isolated, compiler_case.body)
+                            rejected := false
+                            if checked is Diagnostic:
+                                rejected = true
+                            expect_rejection := false
+                            match compiler_case.expectation:
+                                case Reject:
+                                    expect_rejection = true
+                                case Accept:
+                                    pass
+                            if expect_rejection != rejected:
+                                return error(callable_diagnostic("compiler test expectation failed", compiler_case.span))
+                        continue
+                    if len(declaration.source_modes) != 0 or len(declaration.compiler_cases) != 0:
+                        return error(callable_diagnostic("only ordinary tests are supported by scalar test emission", declaration.span))
+                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=declaration.body, result_type=universal.TypeId(2), lookup=declaration.lookup)
+                    ordinal = int(len(state.functions)) + 1
+                    test_function.id = universal.FunctionId(u128(ordinal))
+                    test_function.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal)))
+                    state.functions.append(test_function)
+                    resolved_test := declaration
+                    resolved_test.function = test_function.id
+                    module.tests.append(resolved_test)
+            case _:
+                return error(callable_diagnostic("declaration is outside the scalar bootstrap subset", None))
+    index := 0
+    while index < len(state.functions):
+        function = state.functions[index]
+        index += 1
+        if function.body != None:
+            function.body = callable_body(state, function)
+        module.functions.append(function)
+        if function.name == "main" and not include_tests:
+            if len(function.parameters) != 0 or (function.result_type.index != 2 and function.result_type.index != 32):
+                return error(callable_diagnostic("main must take no arguments and return unit or i32", function.span))
+            module.entry = function.id
+    return module
+
+
+def callable_implicit_field(state: CallableAnalysis, name: string, span: source.Span) -> universal.Expression | None:
+    for record in state.records:
+        if record.type_id.index == state.owner.index:
+            for field in record.fields:
+                if field.name == name:
+                    receiver = universal.Expression(universal.Name("self"), span)
+                    return universal.Expression(universal.Member(receiver, name), span)
+    return None
+
+
+def callable_receiver(state: CallableAnalysis, callee: universal.Expression) -> universal.Expression:
+    match callee.kind:
+        case Member:
+            return callable_expression(state, object, universal.TypeId(0))
+        case _:
+            return callable_expression(state, universal.Expression(universal.Name("self"), callee.span), state.owner)
+
+
+def callable_method(state: CallableAnalysis, callee: universal.Expression) -> universal.FunctionDeclaration | None:
+    owner := state.owner
+    member := ""
+    match callee.kind:
+        case Member:
+            owner = callable_hint(state, object)
+            member = name
+        case Name:
+            if name in state.names:
+                return None
+            member = name
+        case _:
+            return None
+    for record in state.records:
+        if record.type_id.index == owner.index:
+            for function in state.functions:
+                if function.name == record.name + "." + member:
+                    return function
+    return None
+
+
+def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth)
+
+
+def callable_terminates(block: universal.Block) -> bool:
+    for statement in block.statements:
+        match statement:
+            case Return:
+                return true
+            case Break:
+                return true
+            case Continue:
+                return true
+            case If:
+                if callable_terminates(then_block) and callable_terminates(else_block):
+                    return true
+            case _:
+                pass
+    return false
+
+
+def callable_owner(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.TypeId:
+    for record in state.records:
+        for method in record.methods:
+            qualified := record.name + "." + method.name
+            if method.name.starts_with(record.name + "."):
+                qualified = method.name
+            if function.name == qualified:
+                return record.type_id
+    return universal.TypeId(0)
+
+
+def callable_range(state: CallableAnalysis, name: string, iterable: universal.Expression, body: universal.Block, span: source.Span, result_type: universal.TypeId) -> universal.Block | diagnostics.Diagnostic:
+    supplied: list[universal.CallArgument] := []
+    match iterable.kind:
+        case Call:
+            if callable_path(callee) != "range":
+                return error(callable_diagnostic("iteration requires a range", span))
+            supplied = arguments
+        case _:
+            return error(callable_diagnostic("iteration requires a range", span))
+    arguments = supplied
+    if len(arguments) < 1 or len(arguments) > 3:
+        return error(callable_diagnostic("range requires one to three positional arguments", span))
+    for argument in arguments:
+        if argument.name != None:
+            return error(callable_diagnostic("range arguments must be positional", span))
+    zero = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), span)
+    one = universal.Expression(universal.LiteralValue(universal.IntegerValue("1")), span)
+    start := zero
+    stop := arguments[0].value
+    step := one
+    if len(arguments) >= 2:
+        start = arguments[0].value
+        stop = arguments[1].value
+    if len(arguments) == 3:
+        step = arguments[2].value
+    prefix = "__range$" + string(state.next_id[0])
+    state.next_id[0] += 1
+    current_name = prefix + "$current"
+    stop_name = prefix + "$stop"
+    step_name = prefix + "$step"
+    values = [start, stop, step]
+    names = [current_name, stop_name, step_name]
+    output = universal.empty_block()
+    index := 0
+    for input in values:
+        annotation = universal.named_type("int", [], span)
+        binding = universal.Binding(names[index], annotation, input, false, false, span, mutable=true)
+        output.statements.append(universal.BindingStatement(callable_binding(state, binding)))
+        index += 1
+    current = universal.Expression(universal.Name(current_name), span)
+    bound = universal.Expression(universal.Name(stop_name), span)
+    stride = universal.Expression(universal.Name(step_name), span)
+    nonzero = universal.Expression(universal.Binary(universal.operator_syntax(universal.NotEqual()), stride, zero), span)
+    output.statements.append(universal.Assert(callable_expression(state, nonzero, universal.TypeId(1)), None, span, span))
+    positive = universal.Expression(universal.Binary(universal.operator_syntax(universal.Greater()), stride, zero), span)
+    forwards = universal.Expression(universal.Binary(universal.operator_syntax(universal.Less()), current, bound), span)
+    backwards = universal.Expression(universal.Binary(universal.operator_syntax(universal.Greater()), current, bound), span)
+    condition = universal.Expression(universal.Conditional(positive, forwards, backwards), span)
+    iteration = universal.Binding(name, None, current, false, false, span)
+    increment = universal.Expression(universal.Binary(universal.operator_syntax(universal.Add()), current, stride), span)
+    advance = universal.Binding(current_name, None, increment, true, false, span)
+    statements: list[universal.Statement] = [universal.BindingStatement(iteration), universal.BindingStatement(advance)]
+    for statement in body.statements:
+        statements.append(statement)
+    local = callable_scope(state)
+    local.loop_depth += 1
+    loop_body = callable_block(local, statements, result_type, false)
+    output.statements.append(universal.While(callable_expression(state, condition, universal.TypeId(1)), loop_body, span))
+    return output
+
+
+def callable_body(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.Block | diagnostics.Diagnostic:
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function))
+    namespace ?= function.lookup
+    if namespace != None:
+        local.namespace = namespace
+    for parameter in function.parameters:
+        local.names.append(parameter.name)
+        local.mutables.append(true)
+    local.types = function.parameter_types[:]
+    body ?= function.body
+    if body != None:
+        return callable_block(local, body.statements, function.result_type)
+    return universal.empty_block()
+
+
+def callable_record_layout(records: list[universal.RecordDeclaration], type_id: universal.TypeId, ancestors: list[int]):
+    if type_id.index < 1000:
+        return
+    identity = int(type_id.index)
+    if identity in ancestors:
+        throw Error("recursive value record requires indirection")
+    path = ancestors[:]
+    path.append(identity)
+    for record in records:
+        if record.type_id.index == type_id.index:
+            for field in record.fields:
+                callable_record_layout(records, field.type_id, path)
