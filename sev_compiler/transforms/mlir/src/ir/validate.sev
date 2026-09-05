@@ -68,6 +68,16 @@ def validate_affine_expression(expression: MlirAffineExpression, dimensions: int
 
 def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationError:
     kind = attribute_kind_name(value.kind)
+    if kind == "dense_integer":
+        validate_type(value.type_id)
+        if type_kind_name(value.type_id.kind) != "tensor" or len(value.type_id.dimensions) != 1:
+            return error(InvalidAttribute("dense integer data requires a ranked vector tensor"))
+        if value.type_id.dimensions[0] != int(len(value.elements)):
+            return error(InvalidAttribute("dense integer element count does not match its type"))
+        for element in value.elements:
+            if attribute_kind_name(element.kind) != "integer":
+                return error(InvalidAttribute("dense integer data contains a non-integer"))
+        return true
     if kind == "integer" or kind == "float" or kind == "type":
         validate_type(value.type_id)
     if kind == "symbol" and value.symbol == "":
@@ -199,6 +209,8 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
             return error(DuplicateFunction(function.name))
         names.append(function.name)
     owned_regions: list[int] = []
+    for operation in program.operations:
+        validate_operation(program, operation, [], owned_regions)
     for function in program.functions:
         location ?= function.location
         if location != None:

@@ -115,7 +115,14 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
     result = universal.Module([])
     parser_separators(parser)
     while not parser_at_simple(parser, Eof):
-        if parser_at_identifier(parser, "import"):
+        if parser_at_simple(parser, At):
+            decorators: list[universal.Decorator] = []
+            while parser_at_simple(parser, At):
+                decorators.append(parser_scalar_decorator(parser))
+            if not parser_at_identifier(parser, "def"):
+                return error(parser_fail(parser, "expected function after decorator"))
+            result.items.append(universal.Function(parser_function_declaration(parser, decorators)))
+        elif parser_at_identifier(parser, "import"):
             result.items.append(universal.Import(parser_import_declaration(parser)))
         elif parser_at_identifier(parser, "trait"):
             result.items.append(universal.Trait(parser_trait_declaration(parser, [])))
@@ -139,8 +146,36 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
         parser_separators(parser)
     return result
 
+def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    name = parser_identifier(parser, "expected decorator name")[0]
+    parser_expect(parser, LeftParen, "expected decorator arguments")
+    argument_name := ""
+    if parser.cursor[0] + 1 < len(parser.tokens) and parser.tokens[parser.cursor[0] + 1].kind == Equal:
+        argument_name = parser_identifier(parser, "expected argument name")[0]
+        parser_next(parser)
+    token = parser_next(parser)
+    match token.kind:
+        case String:
+            end = parser_expect(parser, RightParen, "expected closing decorator parenthesis").span
+            parser_expect(parser, Newline, "expected newline after decorator")
+            argument = universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(value), token.span)
+            return universal.Decorator(name, [argument], source.Span(start.source, start.start, end.end))
+        case _:
+            return error(parser_fail(parser, "decorator requires one string argument"))
+
 def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
+    match parser_peek(parser).kind:
+        case String:
+            parser_next(parser)
+            alias: string | None := None
+            if parser_at_identifier(parser, "as"):
+                parser_next(parser)
+                alias = parser_identifier(parser, "expected an import alias")[0]
+            return universal.ImportDeclaration(universal.Locator(value), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+        case _:
+            pass
     first = parser_identifier(parser, "expected an import name")
     if parser_at_identifier(parser, "from"):
         parser_next(parser)
@@ -514,10 +549,24 @@ def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics
 
 
 def is_binary_operator(kind: lexer.TokenKind) -> bool:
+    match kind:
+        case Identifier:
+            return value == "in" or value == "and" or value == "or"
+        case _:
+            pass
     return kind == Plus or kind == Minus or kind == Star or kind == Slash or kind == Percent or kind == Power or kind == EqualEqual or kind == NotEqual or kind == Less or kind == LessEqual or kind == Greater or kind == GreaterEqual
 
 
 def binary_operator(kind: lexer.TokenKind) -> universal.OperatorSyntax:
+    match kind:
+        case Identifier:
+            if value == "in":
+                return universal.operator_syntax(universal.Contains())
+            if value == "and":
+                return universal.operator_syntax(universal.LogicalAnd())
+            return universal.operator_syntax(universal.LogicalOr())
+        case _:
+            pass
     if kind == Plus:
         return universal.operator_syntax(universal.Add())
     if kind == Minus:

@@ -1,0 +1,33 @@
+# Unicode scalar arithmetic shared by literal decoding and the compiled string
+# implementation. This module requires only integer and Boolean primitives.
+def valid(value: int) -> bool:
+    if value < 0:
+        return false
+    if value > 1114111:
+        return false
+    if value < 55296:
+        return true
+    return value > 57343
+
+
+def width(value: int) -> int:
+    assert(valid(value))
+    if value <= 127:
+        return 1
+    if value <= 2047:
+        return 2
+    if value <= 65535:
+        return 3
+    return 4
+
+
+def decode_two(first: int, second: int) -> int:
+    return (first - 192) * 64 + second - 128
+
+
+def decode_three(first: int, second: int, third: int) -> int:
+    return (first - 224) * 4096 + (second - 128) * 64 + third - 128
+
+
+def decode_four(first: int, second: int, third: int, fourth: int) -> int:
+    return (first - 240) * 262144 + (second - 128) * 4096 + (third - 128) * 64 + fourth - 128

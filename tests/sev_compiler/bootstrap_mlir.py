@@ -19,9 +19,9 @@ def tool(variable, default):
     return resolved
 
 
-def run(arguments, *, output=None, succeeds=True):
+def run(arguments, *, output=None, succeeds=True, cwd=ROOT):
     result = subprocess.run(
-        [str(argument) for argument in arguments], cwd=ROOT,
+        [str(argument) for argument in arguments], cwd=cwd,
         capture_output=True, text=True, timeout=180,
     )
     if output:
@@ -41,6 +41,9 @@ def main():
     clang = tool("SEVERIAN_CLANG", "clang-21")
     compiler = ARTIFACTS / "sev-bootstrap-driver"
     run([SEED, "build", "sev_compiler/bootstrap", "--bin", "sev-bootstrap-driver", "-o", compiler])
+    string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
+    io_source = ROOT / "library/system/io/src/text.sev"
+    string_import = f'import "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
     cases = {
         "int_add": "left: i32 = 1\nright: i32 = 2\nsum: i32 = left + right\nassert(sum == 3)\n",
         "arithmetic": "left: i32 = 7\nright: i32 = 5\nanswer: i32 = (left + right) * 2 - 4\nassert(answer == 20)\n",
@@ -49,6 +52,13 @@ def main():
         "main": "def add(value: i32) -> i32:\n    return value + 1\ndef main() -> i32:\n    assert(add(41) == 42)\n    return 0\n",
         "main_status": "def main() -> i32:\n    return 7\n",
         "unit_main": "def main():\n    assert(1 == 1)\n",
+        "unsigned_bytes": "high: u8 = 255\nlow: u8 = 1\nassert(high > low)\nassert(low < high)\nassert(high >= low)\nassert(low <= high)\n",
+        "byte_bounds": string_import + 'utf8.byte_at("a", 1)\n',
+        "negative_byte": string_import + 'utf8.byte_at("a", -1)\n',
+        "character_bounds": string_import + 'utf8.character_at("λ", 1)\n',
+        "empty_character": string_import + 'utf8.character_at("", 0)\n',
+        "decode_continuation": string_import + 'utf8.decode("λ", 1)\n',
+        "imported_output": f'import "{os.path.relpath(io_source, ARTIFACTS)}" as io\nio.print("library output")\n',
     }
     inputs = {}
     for name, source in cases.items():
@@ -59,6 +69,10 @@ def main():
         "example_math": (ROOT / "docs/examples/05-building/src/math.sev", "build"),
         "example_clamp": (ROOT / "docs/examples/03-testing/01-basics/01-ordinary-and-named.sev", "test"),
         "scalar_functions": (ROOT / "tests/sev_compiler/fixtures/scalar_functions.sev", "test"),
+        "example_hello": (ROOT / "docs/examples/00-getting-started/01-hello.sev", "build"),
+        "strings": (ROOT / "tests/sev_compiler/fixtures/strings.sev", "build"),
+        "string_core": (string_source, "build"),
+        "char_encoding": (ROOT / "sev_compiler/universal/primitive/char/encoding.sev", "build"),
     })
     test_selection = ARTIFACTS / "test_selection.sev"
     test_selection.write_text("def main():\n    return\ntest:\n    assert(false)\n")
@@ -67,6 +81,15 @@ def main():
     test_main = ARTIFACTS / "test_main.sev"
     test_main.write_text("def main():\n    assert(false)\ntest:\n    assert(true)\n")
     inputs["test_excludes_main"] = (test_main, "test")
+    expected_stdout = {
+        "example_hello": "hello, severian\n",
+        "strings": 'aλ😀z\n\nquote: " slash: \\ tab:\tend\n',
+        "imported_output": "library output\n",
+    }
+    runtime_failures = {
+        "false_assertion", "false_test", "main_status", "byte_bounds",
+        "negative_byte", "character_bounds", "empty_character", "decode_continuation",
+    }
     for name, (source_path, command) in inputs.items():
         emitted = ARTIFACTS / f"{name}.mlir"
         run([compiler, command, "--emit", "mlir", source_path], output=emitted)
@@ -80,13 +103,19 @@ def main():
         run([opt, "--verify-each", emitted, "-o", verified])
         llvm_mlir = ARTIFACTS / f"{name}.llvm.mlir"
         run([opt, emitted, "--convert-scf-to-cf", "--convert-arith-to-llvm",
-             "--convert-cf-to-llvm", "--convert-func-to-llvm",
+             "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm",
              "--reconcile-unrealized-casts", "-o", llvm_mlir])
         llvm_ir = ARTIFACTS / f"{name}.ll"
         run([translate, "--mlir-to-llvmir", llvm_mlir], output=llvm_ir)
+        assert "__sev_string_from_" not in llvm_ir.read_text()
+        assert "__sev_io_" not in llvm_ir.read_text()
         executable = ARTIFACTS / name
         run([clang, llvm_ir, "-o", executable])
-        result = run([executable], succeeds=name not in {"false_assertion", "false_test", "main_status"})
+        result = run([executable], succeeds=name not in runtime_failures)
+        if name in expected_stdout:
+            assert result.stdout == expected_stdout[name], repr(result.stdout)
+            assert '"memref.global"' in text and '"memref.load"' in text
+            assert "@putchar" in llvm_ir.read_text()
         if name == "main_status":
             assert result.returncode == 7, "preserve the source main's exit status"
         print(f"PASS: {name} (source -> MLIR -> native)", flush=True)
@@ -108,6 +137,19 @@ def main():
         "unreachable": ("def answer() -> i32:\n    return 1\n    return 2\n", "statement after unconditional return"),
         "wrong_condition": ("def answer() -> i32:\n    if 1:\n        return 1\n    return 0\n", "integer cannot initialize bool"),
         "unit_binding": ("def nothing():\n    return\nvalue = nothing()\n", "unit calls cannot initialize"),
+        "wrong_string": ('value: i32 = "hello"\n', "expected scalar type"),
+        "string_add": ('value = "a" + "b"\n', "unsupported scalar binary operator"),
+        "character_count": ("value = 'ab'\n", "one Unicode scalar"),
+        "empty_character_literal": ("value = ''\n", "one Unicode scalar"),
+        "bad_escape": ('value = "\\q"\n', "unsupported literal escape"),
+        "nul_escape": ('value = "\\0"\n', "unsupported literal escape"),
+        "unterminated_string": ('value = "hello\n', "unterminated string literal"),
+        "byte_overflow": ("value: u8 = 256\n", "outside u8"),
+        "cyclic_import": ('import "cyclic_import.sev"\n', "cyclic source import"),
+        "duplicate_alias": (string_import + string_import, "duplicate import alias"),
+        "boundary_body": ('@mlir("arith.extui")\ndef convert(value: u8) -> int:\n    return 1\n', "cannot have source bodies"),
+        "c_string_abi": ('@c(symbol="puts")\ndef puts(value: string) -> i32\n', "scalar ABI types"),
+        "conflicting_external": ('@c(symbol="putchar")\ndef wrong(value: int) -> i32\n', "conflicting external parameter"),
     }
     for name, (source, diagnostic) in rejected.items():
         path = ARTIFACTS / f"{name}.sev"
@@ -117,7 +159,15 @@ def main():
         assert "error:" in result.stderr and "module {" not in result.stdout
         assert diagnostic in result.stderr, result.stderr
         print(f"PASS: {name} rejected with a diagnostic", flush=True)
-    print(f"PASS: {len(inputs) + len(rejected)} bootstrap acceptance checks")
+    # The source tree is selected explicitly when invoked outside the repository.
+    # A bare filename also exercises relative imports without a parent component.
+    relocated = run(
+        [compiler, "build", "--emit", "mlir", "imported_output.sev", "--sysroot", ROOT],
+        cwd=ARTIFACTS,
+    )
+    assert relocated.stdout == (ARTIFACTS / "imported_output.mlir").read_text()
+    print("PASS: source imports and explicit sysroot outside the repository")
+    print(f"PASS: {len(inputs) + len(rejected) + 1} bootstrap acceptance checks")
     print(f"Bootstrap acceptance artifacts: {ARTIFACTS}")
 
 

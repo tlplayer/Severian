@@ -2,7 +2,7 @@ enum LiteralValue:
     IntegerValue(spelling: string)
     FloatValue(spelling: string)
     BooleanValue(value: bool)
-    CharacterValue(value: char)
+    CharacterValue(value: u32)
     StringValue(value: string)
     BytesValue(value: list[u8])
     NoneValue

@@ -4,7 +4,7 @@ enum TokenKind:
     Identifier(value: string)
     Integer(value: string)
     Float(value: string)
-    Character(value: char)
+    Character(value: u32)
     String(value: string)
     FormattedString(value: string)
     At

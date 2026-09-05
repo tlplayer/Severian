@@ -8,10 +8,11 @@ class ScalarType:
     name: string
     bits: u16
     boolean: bool
+    representation: string = "integer"
 
 
 def scalar_types() -> list[ScalarType]:
-    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(2), "unit", 0, false), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
+    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(2), "unit", 0, false), ScalarType(TypeId(3), "string", 8, false, "utf8"), ScalarType(TypeId(4), "index", 64, false, "index"), ScalarType(TypeId(108), "u8", 8, false), ScalarType(TypeId(132), "char", 32, false), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
 
 
 def scalar_type_name(name: string) -> TypeId | None:

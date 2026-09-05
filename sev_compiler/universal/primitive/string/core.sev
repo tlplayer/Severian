@@ -1,0 +1,117 @@
+import "../char/utf8.sev" as character
+
+# The first compiled representation is an immutable UTF-8 byte view. Literals
+# own static MLIR storage; this core does not allocate or take ownership of it.
+# These declarations are typed operation bindings, not C string helpers.
+@mlir("memref.dim")
+def __dimension(value: string, dimension: index) -> index
+
+@mlir("arith.index_cast")
+def __size(value: index) -> int
+
+@mlir("arith.index_cast")
+def __index(value: int) -> index
+
+@mlir("memref.load")
+def __load(value: string, position: index) -> u8
+
+@mlir("arith.extui")
+def __byte_value(value: u8) -> int
+
+@mlir("arith.trunci")
+def __character(value: int) -> char
+
+
+def byte_count(value: string) -> int:
+    return __size(__dimension(value, 0))
+
+
+def byte_at(value: string, position: int) -> int:
+    assert(position >= 0)
+    assert(position < byte_count(value))
+    return __byte_value(__load(value, __index(position)))
+
+
+def continuation(value: int) -> bool:
+    if value < 128:
+        return false
+    return value <= 191
+
+
+def leading_width(first: int) -> int:
+    if first < 0:
+        return 0
+    if first <= 127:
+        return 1
+    if first < 194:
+        return 0
+    if first <= 223:
+        return 2
+    if first <= 239:
+        return 3
+    if first <= 244:
+        return 4
+    return 0
+
+
+def decode(value: string, offset: int) -> int:
+    first = byte_at(value, offset)
+    width = leading_width(first)
+    assert(width > 0)
+    assert(offset + width <= byte_count(value))
+    if width == 1:
+        return first
+    second = byte_at(value, offset + 1)
+    assert(continuation(second))
+    if width == 2:
+        return character.decode_two(first, second)
+    third = byte_at(value, offset + 2)
+    assert(continuation(third))
+    if width == 3:
+        decoded = character.decode_three(first, second, third)
+        assert(decoded >= 2048)
+        assert(character.valid(decoded))
+        return decoded
+    fourth = byte_at(value, offset + 3)
+    assert(continuation(fourth))
+    decoded = character.decode_four(first, second, third, fourth)
+    assert(decoded >= 65536)
+    assert(character.valid(decoded))
+    return decoded
+
+
+def __count(value: string, offset: int) -> int:
+    if offset == byte_count(value):
+        return 0
+    codepoint = decode(value, offset)
+    return 1 + __count(value, offset + character.width(codepoint))
+
+
+def length(value: string) -> int:
+    return __count(value, 0)
+
+
+def __offset(value: string, position: int, offset: int) -> int:
+    if position == 0:
+        return offset
+    codepoint = decode(value, offset)
+    return __offset(value, position - 1, offset + character.width(codepoint))
+
+
+def character_at(value: string, position: int) -> char:
+    assert(position >= 0)
+    return __character(decode(value, __offset(value, position, 0)))
+
+
+def __equal(left: string, right: string, offset: int) -> bool:
+    if offset == byte_count(left):
+        return true
+    if byte_at(left, offset) != byte_at(right, offset):
+        return false
+    return __equal(left, right, offset + 1)
+
+
+def equal(left: string, right: string) -> bool:
+    if byte_count(left) != byte_count(right):
+        return false
+    return __equal(left, right, 0)

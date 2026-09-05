@@ -1,0 +1,15 @@
+import "function.sev"
+
+
+# Source annotations describe the implementation of an F. The scalar compiler
+# recognizes these two boundary forms, never library helper/function names.
+def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
+    for decorator in function.decorators:
+        if decorator.name == name:
+            for argument in decorator.arguments:
+                match argument.value:
+                    case String:
+                        return value
+                    case _:
+                        pass
+    return ""

@@ -1,5 +1,6 @@
 import "primitive.sev"
 import "slice.sev"
+import "string/core.sev" as utf8_core
 
 import "../operator/trait/equatable.sev"
 import "../operator/trait/ordered.sev"
@@ -142,21 +143,13 @@ These helpers operate on raw bytes but remain inside the string implementation.
 They are not a second public string API.
 '''
 def __utf8_is_continuation(value: u8) -> bool:
-    return (value & 0b11000000) == 0b10000000
+    return utf8_core.continuation(int(value))
 
 
 def __utf8_width(first: u8) -> usize | UnicodeError:
-    if first <= 0x7f:
-        return 1
-
-    if first >= 0xc2 and first <= 0xdf:
-        return 2
-
-    if first >= 0xe0 and first <= 0xef:
-        return 3
-
-    if first >= 0xf0 and first <= 0xf4:
-        return 4
+    width = utf8_core.leading_width(int(first))
+    if width != 0:
+        return usize(width)
 
     throw UnicodeError(
         f"invalid UTF-8 leading byte 0x{first:02x}"

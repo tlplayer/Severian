@@ -1,0 +1,22 @@
+import "../../../../sev_compiler/universal/primitive/string/core.sev" as text
+
+# Only a byte leaves the source-owned implementation at this hosted boundary.
+# putchar belongs to the platform C library; no Severian C helper is linked.
+@c(symbol="putchar")
+def __putchar(value: i32) -> i32
+
+@mlir("arith.trunci")
+def __output_byte(value: int) -> i32
+
+
+def __write(value: string, offset: int):
+    if offset < text.byte_count(value):
+        result = __putchar(__output_byte(text.byte_at(value, offset)))
+        assert(result >= 0)
+        __write(value, offset + 1)
+
+
+def print(value: string):
+    __write(value, 0)
+    result = __putchar(10)
+    assert(result >= 0)

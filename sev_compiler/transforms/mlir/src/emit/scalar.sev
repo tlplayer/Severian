@@ -2,6 +2,8 @@ import universal
 import "../../../../universal/type/scalar.sev" as scalar
 import "../../../../universal/operator/scalar.sev" as operators
 import "../ir/lib.sev"
+import "strings.sev"
+import "../../../../universal/declaration/scalar.sev" as boundary
 
 
 def scalar_mlir_type(id: universal.TypeId) -> MlirType:
@@ -9,7 +11,11 @@ def scalar_mlir_type(id: universal.TypeId) -> MlirType:
         throw Error("unit has no scalar SSA value")
     known ?= scalar.scalar_type(id)
     if known != None:
-        return integer_type(known.bits, not known.boolean)
+        if known.representation == "utf8":
+            return utf8_view_type()
+        if known.representation == "index":
+            return index_type()
+        return integer_type(known.bits, not known.boolean and id.index != 108 and id.index != 132)
     throw Error("scalar MIR has an unknown value type")
 
 
@@ -42,6 +48,10 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 match value:
                     case IntegerValue:
                         builder_constant(builder, output, integer_attribute(int(spelling), output.type_id))
+                    case StringValue:
+                        string_literal(builder, value, output)
+                    case CharacterValue:
+                        builder_constant(builder, output, integer_attribute(int(value), output.type_id))
                     case BooleanValue:
                         builder_constant(builder, output, boolean_attribute(value))
                     case _:
@@ -64,7 +74,10 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 if selected != None:
                     attributes: list[MlirNamedAttribute] = []
                     if selected.predicate >= 0:
-                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(selected.predicate, integer_type(64))))
+                        predicate := selected.predicate
+                        if module.values[left.index].type_id.index == 108 and predicate >= 2:
+                            predicate += 4
+                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64))))
                     builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
                 else:
                     throw Error("scalar MIR has an unregistered binary operation")
@@ -75,7 +88,21 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 outputs: list[MlirValue] = []
                 if module.values[result.index].type_id.index != 2:
                     outputs.append(scalar_mlir_value(module, result))
-                builder_call(builder, scalar_function_symbol(function), inputs, outputs)
+                found := false
+                for callable_source in module.functions:
+                    if callable_source.id.value == function.value:
+                        native_operation = boundary.scalar_boundary(callable_source, "mlir")
+                        symbol = boundary.scalar_boundary(callable_source, "c")
+                        if native_operation != "":
+                            parts = native_operation.split(".")
+                            builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs)
+                        elif symbol != "":
+                            builder_call(builder, symbol, inputs, outputs)
+                        else:
+                            builder_call(builder, scalar_function_symbol(function), inputs, outputs)
+                        found = true
+                if not found:
+                    throw Error("call has no resolved function declaration")
             case Return:
                 outputs: list[MlirValue] = []
                 returned ?= value
@@ -104,19 +131,48 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 throw Error("unsupported scalar MIR operation")
 
 
+def scalar_external(builder: MlirOpBuilder, symbol: string, parameters: list[MlirValue], results: list[MlirType]) -> MlirFunctionHandle:
+    index := 0
+    for function in builder.program.functions:
+        if function.name == symbol:
+            if not function.declaration or len(function.arguments) != len(parameters) or len(function.result_types) != len(results):
+                throw Error("conflicting external declaration: " + symbol)
+            position := 0
+            for parameter in parameters:
+                if not same_type(parameter.type_id, function.arguments[position].type_id):
+                    throw Error("conflicting external parameter: " + symbol)
+                position += 1
+            position = 0
+            for result in results:
+                if not same_type(result, function.result_types[position]):
+                    throw Error("conflicting external result: " + symbol)
+                position += 1
+            return MlirFunctionHandle(index, MlirFunctionName(symbol), MlirBlockHandle(-1, -1), function.arguments, true)
+        index += 1
+    return builder_create_function(builder, symbol, private_visibility(), parameters, results, true)
+
+
 def lower_scalar(module: universal.Module) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
     for function in module.functions:
+        operation = boundary.scalar_boundary(function, "mlir")
+        if operation != "":
+            handles.append(MlirFunctionHandle(-1, MlirFunctionName("intrinsic"), MlirBlockHandle(-1, -1), [], true))
+            continue
         parameters: list[MlirValue] = []
         for value in function.values:
             parameters.append(scalar_mlir_value(module, value))
-        handles.append(builder_create_function(builder, scalar_function_symbol(function.id), private_visibility(), parameters, scalar_mlir_results(function.result_type)))
+        symbol := boundary.scalar_boundary(function, "c")
+        if symbol != "":
+            handles.append(scalar_external(builder, symbol, parameters, scalar_mlir_results(function.result_type)))
+        else:
+            handles.append(builder_create_function(builder, scalar_function_symbol(function.id), private_visibility(), parameters, scalar_mlir_results(function.result_type)))
     index := 0
     for function in module.functions:
-        builder_set_insertion_point(builder, handles[index].entry)
         body ?= function.body
         if body != None:
+            builder_set_insertion_point(builder, handles[index].entry)
             scalar_mlir_block(builder, module, body, function.result_type, false)
         index += 1
     entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])

@@ -1,6 +1,30 @@
 import source
 import diagnostics
 import "../token/mod.sev"
+import "../../../../universal/primitive/char/encoding.sev" as utf8
+
+
+def literal_escape(value: string) -> string | None:
+    if value == "n":
+        return "\n"
+    if value == "r":
+        return "\r"
+    if value == "t":
+        return "\t"
+    if value == "\\" or value == "\"" or value == "'":
+        return value
+    return None
+
+
+def literal_codepoint(value: string) -> u32:
+    bytes = value.bytes()
+    if len(bytes) == 1:
+        return u32(bytes[0])
+    if len(bytes) == 2:
+        return u32(utf8.decode_two(int(bytes[0]), int(bytes[1])))
+    if len(bytes) == 3:
+        return u32(utf8.decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2])))
+    return u32(utf8.decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3])))
 
 def make_token(file: source.SourceFile, kind: TokenKind, start: int, end: int) -> Token:
     return Token(kind, source.Span(file.id, u32(start), u32(end)))
@@ -197,10 +221,11 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             continue
 
         formatted = character == "f" and cursor + 1 < len(characters) and characters[cursor + 1] == "\""
-        if character == "\"" or formatted:
+        if character == "\"" or character == "'" or formatted:
             if formatted:
                 cursor += 1
-            block = cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
+            quote = characters[cursor]
+            block = quote == "\"" and cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
             cursor += 3 if block else 1
             content_start = cursor
             value := ""
@@ -212,15 +237,29 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 value = block_string(characters[content_start:cursor].join(""))
                 cursor += 3
             else:
-                while cursor < len(characters) and characters[cursor] != "\"":
+                while cursor < len(characters) and characters[cursor] != quote:
                     if characters[cursor] == "\n":
                         return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
+                    if characters[cursor] == "\\":
+                        cursor += 1
+                        if cursor >= len(characters):
+                            return error(diagnostics.Diagnostic("E000101", "unterminated escape", source.Span(file.id, u32(start), u32(cursor))))
+                        escaped ?= literal_escape(characters[cursor])
+                        if escaped != None:
+                            value += escaped
+                        else:
+                            return error(diagnostics.Diagnostic("E000101", "unsupported literal escape", source.Span(file.id, u32(start), u32(cursor + 1))))
+                    else:
+                        value += characters[cursor]
                     cursor += 1
                 if cursor >= len(characters):
                     return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
-                value = characters[content_start:cursor].join("")
                 cursor += 1
-            if formatted:
+            if quote == "'":
+                if len(value.characters()) != 1:
+                    return error(diagnostics.Diagnostic("E000101", "character literal requires one Unicode scalar", source.Span(file.id, u32(start), u32(cursor))))
+                tokens.append(make_token(file, TokenKind.Character(literal_codepoint(value)), start, cursor))
+            elif formatted:
                 kind: TokenKind = TokenKind.FormattedString(value)
                 tokens.append(make_token(file, kind, start, cursor))
             else:

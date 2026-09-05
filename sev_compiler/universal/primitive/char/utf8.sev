@@ -1,0 +1,4 @@
+import "encoding.sev"
+
+@mlir("arith.extui")
+def codepoint(value: char) -> int

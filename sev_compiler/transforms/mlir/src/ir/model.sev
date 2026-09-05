@@ -112,6 +112,8 @@ def operation_name_text(name: MlirOperationName) -> string:
 
 
 enum MlirAttributeKind:
+    UnitAttributeKind
+    DenseIntegerAttributeKind
     IntegerAttributeKind
     FloatAttributeKind
     StringAttributeKind
@@ -255,6 +257,10 @@ def affine_map_attribute(value: MlirAffineMap) -> MlirAttributeValue:
 
 def attribute_kind_name(kind: MlirAttributeKind) -> string:
     match kind:
+        case UnitAttributeKind:
+            return "unit"
+        case DenseIntegerAttributeKind:
+            return "dense_integer"
         case IntegerAttributeKind:
             return "integer"
         case FloatAttributeKind:
@@ -430,6 +436,7 @@ class MlirProgram:
     next_value: int
     next_region: int
     next_block: int
+    operations: list[MlirOperation] = []
 
 
 def empty_program(first_generated_value: int = 0) -> MlirProgram:

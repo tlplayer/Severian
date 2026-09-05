@@ -5,8 +5,13 @@ import process
 
 def main():
     arguments = process.arguments()
-    if len(arguments) != 5 or (arguments[1] != "build" and arguments[1] != "test") or arguments[2] != "--emit" or arguments[3] != "mlir":
-        throw Error("usage: sev-bootstrap-driver <build|test> --emit mlir SOURCE.sev")
+    if (len(arguments) != 5 and len(arguments) != 7) or (arguments[1] != "build" and arguments[1] != "test") or arguments[2] != "--emit" or arguments[3] != "mlir":
+        throw Error("usage: sev-bootstrap-driver <build|test> --emit mlir SOURCE.sev [--sysroot ROOT]")
+    sysroot := "."
+    if len(arguments) == 7:
+        if arguments[5] != "--sysroot":
+            throw Error("expected --sysroot ROOT")
+        sysroot = arguments[6]
     input = source.load(arguments[4])
-    output = compile_to_mlir(input, arguments[1] == "test")
+    output = compile_to_mlir(input, arguments[1] == "test", sysroot)
     print(output)

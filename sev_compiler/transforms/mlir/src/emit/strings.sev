@@ -1,0 +1,37 @@
+import "../ir/lib.sev"
+
+
+def utf8_view_type() -> MlirType:
+    return memref_type(MlirScalarType(IntegerScalar, 8, false, 0), [-1])
+
+
+def utf8_byte_attribute(byte: u8) -> MlirAttributeValue:
+    if byte >= 128:
+        return integer_attribute(int(byte) - 256, integer_type(8))
+    return integer_attribute(int(byte), integer_type(8))
+
+
+def string_literal(builder: MlirOpBuilder, value: string, output: MlirValue):
+    bytes = value.bytes()
+    count = int(len(bytes))
+    element_type = MlirScalarType(IntegerScalar, 8, false, 0)
+    storage_type = memref_type(element_type, [count])
+    tensor = tensor_type(element_type, [count])
+    elements: list[MlirAttributeValue] = []
+    for byte in bytes:
+        elements.append(utf8_byte_attribute(byte))
+    dense = MlirAttributeValue(DenseIntegerAttributeKind, "", 0, false, tensor, [], elements)
+    constant = MlirAttributeValue(UnitAttributeKind, "", 0, false, index_type(), [])
+    symbol = "__sev_string_" + string(output.id)
+    attributes = [
+        MlirNamedAttribute("sym_name", string_attribute_value(symbol)),
+        MlirNamedAttribute("sym_visibility", string_attribute_value("private")),
+        MlirNamedAttribute("type", type_attribute(storage_type)),
+        MlirNamedAttribute("initial_value", dense),
+        MlirNamedAttribute("constant", constant),
+    ]
+    global = MlirOperation(operation_name("memref", "global"), [], [], attributes, [], [], [], [], false)
+    builder.program.operations.append(global)
+    storage = builder_new_value(builder, storage_type)
+    builder_create_operation(builder, operation_name("memref", "get_global"), [], [storage], [MlirNamedAttribute("name", symbol_attribute(symbol))])
+    builder_create_operation(builder, operation_name("memref", "cast"), [storage], [output])

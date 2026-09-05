@@ -81,6 +81,15 @@ def escaped(value: string) -> string:
 
 def attribute_value_text(value: MlirAttributeValue) -> string:
     kind = attribute_kind_name(value.kind)
+    if kind == "unit":
+        return "unit"
+    if kind == "dense_integer":
+        values := ""
+        separator := ""
+        for element in value.elements:
+            values += separator + string(element.integer)
+            separator = ", "
+        return "dense<[" + values + "]> : " + type_text(value.type_id)
     if kind == "integer":
         return string(value.integer) + " : " + type_text(value.type_id)
     if kind == "float":
@@ -241,6 +250,8 @@ def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
 
 def print_program_unchecked(program: MlirProgram) -> string:
     output := "module {\n"
+    for operation in program.operations:
+        output += print_operation(program, operation, "  ")
     for function in program.functions:
         output += print_function(program, function)
     output += "}\n"

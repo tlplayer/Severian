@@ -1,0 +1,85 @@
+import lexer
+import parser
+import source
+import universal
+
+
+def normalized_path(path: string) -> string:
+    components: list[string] = []
+    for component in path.split("/"):
+        if component == "..":
+            if len(components) == 0:
+                if path.starts_with("/"):
+                    throw Error("module path escapes its root")
+                components.append("..")
+            elif components[-1] == "..":
+                components.append("..")
+            else:
+                components.pop()
+        elif component != "" and component != ".":
+            components.append(component)
+    prefix = "/" if path.starts_with("/") else ""
+    return prefix + components.join("/")
+
+
+def parent_path(path: string) -> string:
+    components = path.split("/")
+    if len(components) == 1:
+        return "."
+    if len(components) == 2 and components[0] == "":
+        return "/"
+    return components[:int(len(components)) - 1].join("/")
+
+
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool) -> universal.Module:
+    path = normalized_path(input.path)
+    if path in active:
+        throw Error("cyclic source import: " + path)
+    if len(active) >= 64:
+        throw Error("source import depth exceeds 64 modules")
+    stack = active[:]
+    stack.append(path)
+    parsed = parser.parse(lexer.scan(input))
+    result = universal.empty_module()
+    aliases: list[string] = []
+    for item in parsed.items:
+        match item:
+            case Import:
+                match declaration.subject:
+                    case Locator:
+                        if locator.starts_with("/"):
+                            throw Error("bootstrap imports require a relative source locator")
+                        if declaration.source_name != None:
+                            throw Error("selective imports are not supported by bootstrap source loading")
+                        alias ?= declaration.alias
+                        child_prefix := prefix
+                        if alias != None:
+                            if alias in aliases:
+                                throw Error("duplicate import alias: " + alias)
+                            aliases.append(alias)
+                            child_prefix += alias + "."
+                        child_path = normalized_path(parent_path(path) + "/" + locator)
+                        child = load_source_module(source.load(child_path), child_prefix, stack, false)
+                        for child_item in child.items:
+                            result.items.append(child_item)
+                    case _:
+                        throw Error("bootstrap imports require a relative source locator")
+            case Function:
+                function := declaration
+                function.name = prefix + declaration.name
+                function.lookup = prefix
+                result.items.append(universal.Function(function))
+            case Test:
+                if root:
+                    result.items.append(item)
+            case BindingItem:
+                if not root:
+                    throw Error("imported modules must contain function declarations")
+                result.items.append(item)
+            case ExpressionItem:
+                if not root:
+                    throw Error("imported modules cannot execute module initializers")
+                result.items.append(item)
+            case _:
+                result.items.append(item)
+    return result
