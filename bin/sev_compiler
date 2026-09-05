@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+launcher=$(readlink -f -- "$0")
+repository=$(dirname -- "$(dirname -- "$launcher")")
+compiler="$repository/sev_compiler/target/host/dev/bin/sev_compiler"
+if [ ! -x "$compiler" ]; then
+    printf '%s\n' 'Build the compiler first: cd sev_compiler && sev build' >&2
+    exit 1
+fi
+export SEVERIAN_SYSROOT="$repository"
+exec "$compiler" "$@"

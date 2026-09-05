@@ -1,0 +1,82 @@
+# Severian package manifest.
+# Generated from the compiler-owned configuration catalog.
+
+### PACKAGE ############################################################
+
+[package]
+name = "sev_compiler"
+version = "0.1.0"
+edition = "2026"
+license = "Severian License"
+default-run = "sev_compiler"
+
+### TARGETS ############################################################
+
+[[bin]]
+name = "sev_compiler"
+path = "src/main.sev"
+
+# [lib]
+# name = "sev_compiler"
+# path = "src/lib.sev"
+
+### DEPENDENCIES #######################################################
+
+[dependencies]
+diagnostics = { path = "diagnostics" }
+lexer = { path = "frontend/lexer" }
+parser = { path = "frontend/parser" }
+source = { path = "source" }
+universal = { path = "universal" }
+
+[dev-dependencies]
+
+### LANGUAGE ############################################################
+
+[language]
+type-safe = true
+
+### BUILD ###############################################################
+
+[build]
+profile = "dev"
+target = "host"
+incremental = true
+
+### DIAGNOSTICS #########################################################
+
+[diagnostics]
+mode = "user"
+message-format = "text"
+max-errors = 5
+verify-each = false
+
+### DEVELOPMENT PROFILE #################################################
+
+[profile.dev]
+opt-level = 0
+debug-symbols = true
+strip = false
+lto = false
+
+### RELEASE PROFILE #####################################################
+
+[profile.release]
+opt-level = 3
+debug-symbols = false
+strip = true
+lto = true
+
+### TESTING #############################################################
+
+[test]
+coverage-min = 0
+memory-max = "4GB"
+leaks = "deny"
+
+### PUBLISHING ##########################################################
+
+[publish]
+registry = "default"
+include-source = true
+include-interface = true

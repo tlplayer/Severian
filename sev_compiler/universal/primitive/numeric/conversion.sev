@@ -1,0 +1,170 @@
+# Enumerative bootstrap projection of the conversion families in int.sev and
+# float.sev. Family arguments expand over the target's supported scalar types.
+# Static type predicates select one body before ordinary semantic analysis.
+
+-> integer_conversion[S: source_int, T: target_int]() with source_int in int and target_int in int:
+    @mlir("arith.extsi")
+    def __signed(value: source_int) -> target_int
+
+    @mlir("arith.extui")
+    def __unsigned(value: source_int) -> target_int
+
+    @mlir("arith.trunci")
+    def __truncate(value: source_int) -> target_int
+
+    @mlir("arith.bitcast")
+    def __bits(value: source_int) -> target_int
+
+    def convert(value: source_int, wrapping: bool) -> target_int:
+        if source_int.id == target_int.id:
+            return value
+        if not wrapping:
+            if source_int.min < target_int.min:
+                assert(value >= target_int.min)
+            if source_int.max > target_int.max:
+                assert(value <= target_int.max)
+        if source_int.bits < target_int.bits:
+            if source_int.signed:
+                return __signed(value)
+            return __unsigned(value)
+        if source_int.bits > target_int.bits:
+            return __truncate(value)
+        return __bits(value)
+
+    test "enumerated conversion pair":
+        assert(convert(source_int(12), false) == target_int(12))
+
+integer_conversion[int, int]()
+
+
+-> integer_float_conversion[S: source_int, T: target_float]() with source_int in int and target_float in float:
+    @mlir("arith.sitofp")
+    def __signed(value: source_int) -> target_float
+
+    @mlir("arith.uitofp")
+    def __unsigned(value: source_int) -> target_float
+
+    def convert(value: source_int, wrapping: bool) -> target_float:
+        if source_int.signed:
+            return __signed(value)
+        return __unsigned(value)
+
+    test "enumerated conversion pair":
+        assert(convert(source_int(12), false) == target_float(12))
+
+integer_float_conversion[int, float]()
+
+
+-> float_integer_conversion[S: source_float, T: target_int]() with source_float in float and target_int in int:
+    @mlir("arith.fptosi")
+    def __signed(value: source_float) -> target_int
+
+    @mlir("arith.fptoui")
+    def __unsigned(value: source_float) -> target_int
+
+    def convert(value: source_float, wrapping: bool) -> target_int:
+        # Ordered comparisons reject nonfinite values before the cast. An
+        # exclusive upper bound avoids rounding INT64_MAX up to 2^63.
+        assert(value >= target_int.min_float)
+        assert(value < target_int.upper_float)
+        if target_int.signed:
+            return __signed(value)
+        return __unsigned(value)
+
+    test "enumerated conversion pair":
+        assert(convert(source_float(12), false) == target_int(12))
+
+float_integer_conversion[float, int]()
+
+
+-> float_conversion[S: source_float, T: target_float]() with source_float in float and target_float in float:
+    @mlir("arith.extf")
+    def __widen(value: source_float) -> target_float
+
+    @mlir("arith.truncf")
+    def __narrow(value: source_float) -> target_float
+
+    def convert(value: source_float, wrapping: bool) -> target_float:
+        if source_float.id == target_float.id:
+            return value
+        if source_float.bits < target_float.bits:
+            return __widen(value)
+        return __narrow(value)
+
+    test "enumerated conversion pair":
+        assert(convert(source_float(12), false) == target_float(12))
+
+float_conversion[float, float]()
+
+
+test "canonical conversion and explicit policies":
+    assert(int(0.8) == 0)
+    assert(int(-12.75, lossy) == -12)
+    assert(float(10) == 10.0)
+    wide: i64 = 12
+    assert(i8(wide, checked) == 12)
+    assert(i8(128, lossy) == -128)
+    assert(u8(-1, lossy) == 255)
+    assert(i16(u8(255), promote) == 255)
+    assert(i64(-9223372036854775808, identity) == -9223372036854775808)
+
+
+test "floating conversion handles representable boundary neighbors":
+    assert(int(9223372036854774784.0) == 9223372036854774784)
+    assert(int(-9223372036854775808.0) == -9223372036854775808)
+    assert(int(-0.9) == 0)
+    assert(float(9007199254740993) == 9007199254740992.0)
+    assert(i8(127.75) == 127)
+    assert(u8(255.75) == 255)
+    assert(i8(-128.0) == -128)
+    assert(i16(-32768) == -32768)
+    assert(i32(2147483647) == 2147483647)
+
+
+test with compiler "conversion modes permit only their declared degree of change":
+    accept:
+        value = i16(i8(12), promote)
+    accept:
+        value = int(0.8, lossy)
+    reject:
+        value = int(0.8, checked)
+    reject:
+        value = i8(12, promote)
+    reject:
+        value = float(1, identity)
+    reject:
+        value = int(true)
+    reject:
+        value = int("12")
+    reject:
+        value = int(1, unknown_policy)
+
+
+test "mixed arithmetic promotes either operand and nested expressions":
+    count = 10
+    ratio = 0.5
+    assert(count + ratio == 10.5)
+    assert(ratio + count == 10.5)
+    assert((count + ratio) * 2 == 21.0)
+    assert(0.5 + count == 10.5)
+    assert(count < 10.5)
+    small: i8 = -1
+    byte: u8 = 255
+    assert(small + byte == 254)
+    assert(byte + small == 254)
+
+
+test "integer extension and float conversion preserve signedness":
+    assert(i64(i8(-128)) == -128)
+    assert(i64(u8(255)) == 255)
+    assert(float(i8(-1)) == -1.0)
+    assert(float(u8(255)) == 255.0)
+    assert(u8(i8(-1), lossy) == 255)
+    assert(i8(u8(255), lossy) == -1)
+
+
+test with compiler "rejected pack specializations stay isolated":
+    reject:
+        print(1, flush="invalid")
+    accept:
+        print(1, flush=true)

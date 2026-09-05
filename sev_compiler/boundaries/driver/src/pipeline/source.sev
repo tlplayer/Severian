@@ -1,0 +1,23 @@
+import source
+import "../../../../frontend/semantic/src/scalar.sev" as semantic
+import "../../../../transforms/mir/src/scalar.sev" as mir
+import "../../../../transforms/mlir/src/emit/scalar.sev" as mlir
+import "../../../../transforms/mlir/src/ir/text.sev" as text
+import "../../../../frontend/modules/src/source.sev"
+
+
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".") -> string:
+    library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
+    parsed = load_source_module(source.load(library_path), "", [], false)
+    numeric = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/conversion.sev")), "numeric.", [], false)
+    for item in numeric.items:
+        parsed.items.append(item)
+    # A test subject may itself be a prelude module. Give its declarations a
+    # local scope so tests can exercise them without colliding with the prelude.
+    application = load_source_module(input, "__subject." if include_tests else "", [], true)
+    for item in application.items:
+        parsed.items.append(item)
+    typed = semantic.analyze_scalar(parsed, include_tests)
+    lowered = mir.build_scalar(typed)
+    program = mlir.lower_scalar(lowered)
+    return text.print_program(program)

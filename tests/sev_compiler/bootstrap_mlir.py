@@ -7,7 +7,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ARTIFACTS = ROOT / "sev_compiler/bootstrap/target/acceptance"
+ARTIFACTS = ROOT / "sev_compiler/target/acceptance"
 SEED = Path(os.environ.get("SEVERIAN_BIN", ROOT / "target/debug/sev"))
 SANITIZE = os.environ.get("SEVERIAN_SANITIZE", "0") == "1"
 
@@ -40,8 +40,8 @@ def main():
     opt = tool("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = tool("SEVERIAN_CLANG", "clang-21")
-    compiler = ARTIFACTS / "sev-bootstrap-driver"
-    run([SEED, "build", "sev_compiler/bootstrap", "--bin", "sev-bootstrap-driver", "-o", compiler])
+    compiler = ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
+    run([SEED, "build"], cwd=ROOT / "sev_compiler")
     string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
     io_source = ROOT / "library/system/io/src/text.sev"
     scalar_tests = ROOT / "sev_compiler/frontend/semantic/src/scalar/tests"
@@ -62,6 +62,16 @@ def main():
         "character_bounds": string_import + 'utf8.character_at("λ", 1)\n',
         "empty_character": string_import + 'utf8.character_at("", 0)\n',
         "decode_continuation": string_import + 'utf8.decode("λ", 1)\n',
+        "cast_i8_overflow": 'i8(128)\n',
+        "cast_i8_underflow": 'i8(-129, checked)\n',
+        "cast_u8_negative": 'u8(-1)\n',
+        "cast_u8_overflow": 'u8(256)\n',
+        "cast_i64_upper_float": 'int(9223372036854775808.0)\n',
+        "cast_i64_lower_float": 'int(-9223372036854777856.0)\n',
+        "cast_i8_float_overflow": 'i8(128.0, lossy)\n',
+        "cast_float_nan": 'int(0.0 / 0.0)\n',
+        "cast_float_infinity": 'int(1.0 / 0.0)\n',
+        "cast_float_negative_infinity": 'int(-1.0 / 0.0)\n',
         "imported_output": f'import "{os.path.relpath(io_source, ARTIFACTS)}" as io\nio.print("library output")\n',
     }
     inputs = {}
@@ -80,6 +90,11 @@ def main():
         "example_constants": (ROOT / "docs/examples/01-types/01-basic/00-constants.sev", "build"),
         "example_inference": (ROOT / "docs/examples/01-types/01-basic/02-inference.sev", "build"),
         "example_signatures": (ROOT / "docs/examples/02-functions/01-basic/02-signatures.sev", "build"),
+        "example_conversion": (ROOT / "docs/examples/01-types/01-basic/03-conversion.sev", "build"),
+        "example_conversion_tests": (ROOT / "docs/examples/01-types/01-basic/03-conversion.sev", "test"),
+        "numeric_conversion": (ROOT / "sev_compiler/universal/primitive/numeric/conversion.sev", "test"),
+        "numeric_conversion_build": (ROOT / "sev_compiler/universal/primitive/numeric/conversion.sev", "build"),
+        "example_compiler_tests": (ROOT / "docs/examples/03-testing/02-with-tests/08-compile.sev", "test"),
         "printing": (io_source, "test"),
         "example_math": (ROOT / "docs/examples/05-building/src/math.sev", "build"),
         "example_clamp": (ROOT / "docs/examples/03-testing/01-basics/01-ordinary-and-named.sev", "test"),
@@ -106,6 +121,7 @@ def main():
         "example_constants": "3\n3.1415926\n",
         "example_inference": "10:int\n0.5:float\ntrue:bool\nseverian:string\n",
         "example_signatures": "width: 24\n",
+        "example_conversion": "10\n0.5\n10.5\ntrue\nseverian\n10.5!\n",
         "printing": (
             "\ncount 42 true λ 0.5 None\na|b!next\nonly end\n"
             "values: 42:0.5:false:a\n"
@@ -122,17 +138,20 @@ def main():
             "Or inside main\n"
         ),
         "expression_values": "aλ😀\n",
-        "packs": "ba12\n1!;two!;false!;\n7;8;\n{42}\ntint\n",
+        "packs": "ba12\n1!;two!;false!;\n7;8;\n{42}\ntint\nc12\nf12\np10.5\n",
         "imported_output": "library output\n",
     }
     runtime_failures = {
+        "cast_i8_overflow", "cast_i8_underflow", "cast_u8_negative", "cast_u8_overflow",
+        "cast_i64_upper_float", "cast_i64_lower_float", "cast_i8_float_overflow",
+        "cast_float_nan", "cast_float_infinity", "cast_float_negative_infinity",
         "false_assertion", "false_test", "main_status", "byte_bounds",
         "negative_byte", "character_bounds", "empty_character", "decode_continuation",
     }
     function_counts = {}
     for name, (source_path, command) in inputs.items():
         emitted = ARTIFACTS / f"{name}.mlir"
-        run([compiler, command, "--emit", "mlir", source_path], output=emitted)
+        run([compiler, command, "--emit", "mlir", source_path, "--sysroot", ROOT], output=emitted)
         text = emitted.read_text()
         assert "module {" in text and '"func.return"' in text, "expected executable MLIR"
         function_counts[name] = sum(line.lstrip().startswith("func.func ") for line in text.splitlines())
@@ -171,7 +190,15 @@ def main():
     # to prove tests are absent from build IR, rather than merely uncalled.
     assert function_counts["false_test"] == function_counts["build_excludes_tests"] + 1
     assert function_counts["string_core"] == function_counts["string_core_build"] + 4
+    assert function_counts["numeric_conversion"] == function_counts["numeric_conversion_build"] + 40
     rejected = {
+        "numeric_mode": ('int(1.5, checked)\n', "required numeric policy"),
+        "numeric_unknown_mode": ('int(1, unknown)\n', "unknown numeric conversion mode"),
+        "numeric_keyword": ('int(value=1)\n', "must be positional"),
+        "numeric_arity": ('int()\n', "requires a value"),
+        "numeric_mode_expression": ('int(1, true)\n', "must be a policy name"),
+        "compiler_reject_accepts": ('test with compiler "wrong expectation":\n    reject:\n        value = 1\n', "compiler test expectation failed"),
+        "compiler_accept_rejects": ('test with compiler "wrong expectation":\n    accept:\n        value = missing\n', "compiler test expectation failed"),
         "unknown_name": ("answer: i32 = missing + 1\n", "unknown name missing"),
         "wrong_type": ("answer: i32 = true\n", "boolean cannot initialize an integer"),
         "overflow": ("answer: i8 = 128\n", "integer literal is outside"),
@@ -230,7 +257,8 @@ def main():
     for name, (source, diagnostic) in rejected.items():
         path = ARTIFACTS / f"{name}.sev"
         path.write_text(source)
-        result = run([compiler, "build", "--emit", "mlir", path], succeeds=False)
+        mode = "test" if name.startswith("compiler_") else "build"
+        result = run([compiler, mode, "--emit", "mlir", path, "--sysroot", ROOT], succeeds=False)
         assert result.returncode > 0, "a crash is not a diagnostic"
         assert "error:" in result.stderr and "module {" not in result.stdout
         assert diagnostic in result.stderr, result.stderr
@@ -243,8 +271,8 @@ def main():
     )
     assert relocated.stdout == (ARTIFACTS / "imported_output.mlir").read_text()
     print("PASS: source imports and explicit sysroot outside the repository")
-    print(f"PASS: {len(inputs) + len(rejected) + 1 + 4 * int(SANITIZE)} bootstrap acceptance checks")
-    print(f"Bootstrap acceptance artifacts: {ARTIFACTS}")
+    print(f"PASS: {len(inputs) + len(rejected) + 1 + 4 * int(SANITIZE)} compiler acceptance checks")
+    print(f"Compiler acceptance artifacts: {ARTIFACTS}")
 
 
 if __name__ == "__main__":

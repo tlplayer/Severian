@@ -34,8 +34,20 @@ class GenericParamId: IndexedId
     index: u32
 
 
+class InferVarId: IndexedId
+    index: u32
+
+
+class RegionId: IndexedId
+    index: u32
+
+
 class DeclarationId: StableId
     value: u128
+
+
+class PrimitiveId:
+    declaration: DeclarationId
 
 
 class CompilerId: StableId
@@ -48,8 +60,30 @@ class DefId:
     declaration: DeclarationId
 
 
+class TypeBinding:
+    parameter: GenericParamId
+    type_id: TypeId
+
+
 class Substitution:
-    arguments: list[tuple[GenericParamId, TypeId]] = []
+    arguments: list[TypeBinding] = []
+
+    def get(parameter: GenericParamId) -> TypeId | None:
+        for binding in arguments:
+            if binding.parameter.index == parameter.index:
+                return binding.type_id
+        return None
+
+    def bind(parameter: GenericParamId, type: TypeId):
+        for binding in arguments:
+            if binding.parameter.index == parameter.index:
+                if binding.type_id.index != type.index:
+                    throw Error("conflicting generic type binding")
+                return
+        position := 0
+        while position < len(arguments) and arguments[position].parameter.index < parameter.index:
+            position += 1
+        arguments.insert(position, TypeBinding(parameter, type))
 
 
 class OpId:

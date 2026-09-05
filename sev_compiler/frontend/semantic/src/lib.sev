@@ -73,7 +73,7 @@ class Analyzer:
                 if candidates == None:
                     return error(diagnostics.Diagnostic("E000202", "unknown callable " + name, value.span))
                 selected: universal.FunctionId | None = None
-                selected_substitution = universal.Substitution({})
+                selected_substitution = universal.Substitution()
                 selected_rank = 2147483647
                 ambiguous = false
                 for argument in arguments:
@@ -425,9 +425,9 @@ def infer_nominal(
         case Nominal:
             if definition != formal_definition:
                 return false
-            for parameter, formal_argument in formal_substitution.arguments:
-                actual_argument = substitution.get(parameter)
-                if actual_argument == None or not infer_type(types, formal_argument, actual_argument, bindings):
+            for binding in formal_substitution.arguments:
+                actual_argument = substitution.get(binding.parameter)
+                if actual_argument == None or not infer_type(types, binding.type_id, actual_argument, bindings):
                     return false
             return true
     return false
@@ -444,9 +444,9 @@ def infer_resource(
         case Resource:
             if definition != formal_definition:
                 return false
-            for parameter, formal_argument in formal_substitution.arguments:
-                actual_argument = substitution.get(parameter)
-                if actual_argument == None or not infer_type(types, formal_argument, actual_argument, bindings):
+            for binding in formal_substitution.arguments:
+                actual_argument = substitution.get(binding.parameter)
+                if actual_argument == None or not infer_type(types, binding.type_id, actual_argument, bindings):
                     return false
             return true
     return false
@@ -503,7 +503,9 @@ def infer_call_substitution(
     for parameter in signature.generic_parameters:
         if bindings.get(parameter) == None:
             return None
-    substitution = universal.Substitution(bindings)
+    substitution = universal.Substitution()
+    for parameter, type_id in bindings:
+        substitution.bind(parameter, type_id)
     for parameter, requirements in signature.binary_requirements:
         actual = substitution.get(parameter)
         if actual == None:
@@ -640,7 +642,7 @@ test "generic calls infer and preserve substitutions":
     types = universal.TypeContext()
     parameter_id = universal.GenericParamId(0)
     parameter = types.parameter(parameter_id)
-    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(1)), universal.Substitution({})))
+    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(1)), universal.Substitution()))
     types.add_binary(universal.OperatorSignature(universal.Less, universal.Exact(concrete), universal.Exact(concrete), universal.Exact(concrete)))
     required: set[universal.BinaryOperator] = set()
     required.add(universal.Less)
@@ -659,7 +661,7 @@ test "generic calls reject unsatisfied trait capabilities":
     types = universal.TypeContext()
     parameter_id = universal.GenericParamId(0)
     parameter = types.parameter(parameter_id)
-    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(2)), universal.Substitution({})))
+    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(2)), universal.Substitution()))
     required: set[universal.BinaryOperator] = set()
     required.add(universal.Less)
     signature = universal.resolved_function([parameter_id], true, true, {parameter_id: required}, {}, [parameter], parameter)
@@ -684,8 +686,8 @@ test "compiler capabilities are enforced during generic calls":
     types = universal.TypeContext()
     parameter_id = universal.GenericParamId(0)
     parameter = types.parameter(parameter_id)
-    transferable = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(10)), universal.Substitution({})))
-    local_only = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(11)), universal.Substitution({})))
+    transferable = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(10)), universal.Substitution()))
+    local_only = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(11)), universal.Substitution()))
     types.grant_capability(transferable, universal.Send)
     required: set[universal.CompilerCapability] = set()
     required.add(universal.Send)

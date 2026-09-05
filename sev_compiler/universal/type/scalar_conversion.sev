@@ -1,0 +1,59 @@
+import "scalar.sev"
+
+
+# Port of rust_compiler/universal/src/conversion.rs for the scalar slice.
+# Higher policy ranks permit more change: identity, promote, checked, lossy.
+def scalar_numeric(id: TypeId) -> bool:
+    return int(id.index) in [8, 16, 32, 64, 108, 164]
+
+
+def scalar_conversion_rank(from_type: TypeId, to_type: TypeId) -> int:
+    if not scalar_numeric(from_type) or not scalar_numeric(to_type):
+        return -1
+    if from_type.index == to_type.index:
+        return 0
+    if from_type.index == 164 or to_type.index == 164:
+        return 3
+    if from_type.index == 108:
+        return 1 if to_type.index > 8 else 2
+    if to_type.index == 108:
+        return 2
+    return 1 if from_type.index < to_type.index else 2
+
+
+def scalar_conversion_mode(mode: string) -> int:
+    modes = ["identity", "promote", "checked", "lossy"]
+    index := 0
+    for name in modes:
+        if mode == name:
+            return index
+        index += 1
+    return -1
+
+
+def scalar_common_numeric(left: TypeId, right: TypeId) -> TypeId:
+    if left.index == 0:
+        return right
+    if right.index == 0 or left.index == right.index:
+        return left
+    if not scalar_numeric(left) or not scalar_numeric(right):
+        return left
+    if left.index == 164 or right.index == 164:
+        return TypeId(164)
+    for index in [8, 16, 32, 64]:
+        candidate = TypeId(u32(index))
+        if scalar_conversion_rank(left, candidate) <= 1 and scalar_conversion_rank(right, candidate) <= 1:
+            return candidate
+    return TypeId(0)
+
+
+test "numeric conversion policies follow the seed classification":
+    assert(scalar_conversion_rank(TypeId(8), TypeId(8)) == 0)
+    assert(scalar_conversion_rank(TypeId(8), TypeId(64)) == 1)
+    assert(scalar_conversion_rank(TypeId(108), TypeId(16)) == 1)
+    assert(scalar_conversion_rank(TypeId(108), TypeId(8)) == 2)
+    assert(scalar_conversion_rank(TypeId(64), TypeId(108)) == 2)
+    assert(scalar_conversion_rank(TypeId(64), TypeId(164)) == 3)
+    assert(scalar_conversion_rank(TypeId(164), TypeId(64)) == 3)
+    assert(scalar_conversion_rank(TypeId(1), TypeId(64)) == -1)
+    assert(scalar_common_numeric(TypeId(8), TypeId(108)).index == 16)

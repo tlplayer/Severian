@@ -3,6 +3,7 @@ from lexer import TokenKind
 import diagnostics
 import source
 import universal
+from universal import CompilerExpectation
 
 def formatted_string_expression(value: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
     characters = value.characters()
@@ -349,6 +350,26 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
         case _:
             pass
     parser_expect(parser, Colon, "expected colon after test")
+    if "compiler" in modes:
+        parser_expect(parser, Newline, "expected newline after compiler test")
+        parser_separators(parser)
+        parser_expect(parser, Indent, "expected compiler test body")
+        cases: list[universal.CompilerTestCase] = []
+        parser_separators(parser)
+        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+            case_start = parser_peek(parser).span
+            expectation: CompilerExpectation := Accept
+            if parser_at_identifier(parser, "reject"):
+                expectation = Reject
+            elif not parser_at_identifier(parser, "accept"):
+                return error(parser_fail(parser, "compiler tests require accept or reject cases"))
+            parser_next(parser)
+            parser_expect(parser, Colon, "expected colon after compiler expectation")
+            case_block = parser_indented_block(parser, "compiler case")
+            cases.append(universal.CompilerTestCase(expectation, None, case_block[0], case_start))
+            parser_separators(parser)
+        end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
+        return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end))
     block = parser_indented_block(parser, "test")
     return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]))
 

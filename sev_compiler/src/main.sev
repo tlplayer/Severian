@@ -1,0 +1,75 @@
+import environment
+import file
+import path
+import process
+import source
+import "../boundaries/driver/src/pipeline/source.sev" as compiler
+import "../boundaries/backend/src/native_mlir.sev" as backend
+
+@c(symbol="exit")
+def exit_status(status: i32)
+
+
+def main():
+    arguments = process.arguments()
+    command := "run"
+    input := ""
+    output := ""
+    emit := ""
+    sysroot := environment.get("SEVERIAN_SYSROOT", "..")
+    application: list[string] := []
+    cursor := 1
+    if len(arguments) > 1:
+        if arguments[1] in ["build", "run", "test", "check"]:
+            command = arguments[1]
+            cursor += 1
+    while cursor < len(arguments):
+        argument = arguments[cursor]
+        if argument == "--help" or argument == "-h":
+            print("usage: sev_compiler [run|build|test|check] FILE.sev [--emit mlir] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]")
+            return
+        if argument == "--":
+            application = arguments[cursor + 1:]
+            break
+        if argument == "--emit" or argument == "--sysroot" or argument == "-o" or argument == "--output":
+            cursor += 1
+            if cursor >= len(arguments):
+                throw Error(argument + " requires a value")
+            if argument == "--emit":
+                emit = arguments[cursor]
+            elif argument == "--sysroot":
+                sysroot = arguments[cursor]
+            else:
+                output = arguments[cursor]
+        elif argument.starts_with("-"):
+            throw Error("unknown option " + argument)
+        elif input == "":
+            input = argument
+        else:
+            throw Error("unexpected argument " + argument)
+        cursor += 1
+    if input == "":
+        throw Error("expected a .sev source file; use --help for usage")
+    if emit != "" and emit != "mlir":
+        throw Error("unsupported emission stage " + emit)
+    if len(application) > 0 and command != "run":
+        throw Error("application arguments require run")
+    mlir = compiler.compile_to_mlir(source.load(input), command == "test", sysroot)
+    if emit == "mlir":
+        if output == "":
+            print(mlir)
+        else:
+            if file.write(output, mlir) != 0:
+                throw Error("could not write MLIR output")
+        return
+    if command == "check":
+        return
+    if output == "":
+        output = "target/" + path.basename(input).replace(".sev", "")
+    backend.emit_native(mlir, output)
+    if command == "build":
+        print("built " + output)
+    else:
+        status = backend.execute_native(output, application)
+        if status != 0:
+            exit_status(i32(status))

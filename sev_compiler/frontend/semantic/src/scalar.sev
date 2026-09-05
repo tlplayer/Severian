@@ -1,10 +1,12 @@
 import diagnostics
+from diagnostics import Diagnostic
 import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
 import "../../../universal/operator/scalar.sev" as operators
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
+import "../../../universal/type/scalar_conversion.sev" as conversions
 
 
 class ScalarAnalysis:
@@ -60,11 +62,25 @@ def scalar_hint(state: ScalarAnalysis, expression: universal.Expression) -> univ
             name = scalar_callable_path(callee)
             if name == "type":
                 return universal.TypeId(3)
+            target ?= scalar.scalar_type_name(name)
+            if target != None:
+                if conversions.scalar_numeric(target):
+                    return target
             function ?= scalar_select_function(state, name, arguments)
             if function != None:
                 return function.function.result_type
         case Unary:
             return scalar_hint(state, operand)
+        case Binary:
+            if operators.scalar_comparison(operator.symbol):
+                return universal.TypeId(1)
+            return conversions.scalar_common_numeric(scalar_hint(state, left), scalar_hint(state, right))
+        case LiteralValue:
+            match value:
+                case FloatValue:
+                    return universal.TypeId(164)
+                case _:
+                    pass
         case Conditional:
             hint = scalar_hint(state, then_value)
             if hint.index != 0:
@@ -78,6 +94,43 @@ def scalar_hint(state: ScalarAnalysis, expression: universal.Expression) -> univ
 class ScalarSelection:
     function: universal.FunctionDeclaration
     arguments: list[universal.CallArgument]
+
+
+def scalar_convert(state: ScalarAnalysis, operand: universal.Expression, target: universal.TypeId, mode: string = "") -> universal.Expression | diagnostics.Diagnostic:
+    required = conversions.scalar_conversion_rank(operand.type_id, target)
+    if required < 0:
+        return error(scalar_diagnostic("explicit conversion requires numeric primitive types", operand.span))
+    selected := required
+    if mode != "":
+        selected = conversions.scalar_conversion_mode(mode)
+        if selected < 0:
+            return error(scalar_diagnostic("unknown numeric conversion mode " + mode, operand.span))
+        if selected < required:
+            return error(scalar_diagnostic(mode + " conversion cannot satisfy the required numeric policy", operand.span))
+    if operand.type_id.index == target.index:
+        return operand
+    source_type ?= scalar.scalar_type(operand.type_id)
+    target_type ?= scalar.scalar_type(target)
+    if source_type != None:
+        if target_type != None:
+            name = "numeric.convert$" + source_type.name + "$" + target_type.name
+            for function in state.functions:
+                if function.name == name:
+                    policy = scalar_expression(state, universal.Expression(universal.LiteralValue(universal.BooleanValue(selected == 3)), operand.span), universal.TypeId(1))
+                    arguments = [universal.CallArgument(None, operand, operand.span), universal.CallArgument(None, policy, operand.span)]
+                    id = universal.HirId(u32(state.next_id[0]))
+                    state.next_id[0] += 1
+                    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), arguments), operand.span, id, target)
+    return error(scalar_diagnostic("missing generated numeric conversion", operand.span))
+
+
+def scalar_operand(state: ScalarAnalysis, expression: universal.Expression, target: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    hint = scalar_hint(state, expression)
+    if hint.index != 0 and hint.index != target.index:
+        rank = conversions.scalar_conversion_rank(hint, target)
+        if rank >= 0 and (rank <= 1 or target.index == 164):
+            return scalar_convert(state, scalar_expression(state, expression, universal.TypeId(0)), target)
+    return scalar_expression(state, expression, target)
 
 
 def scalar_select_pack(state: ScalarAnalysis, template: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> ScalarSelection:
@@ -265,11 +318,9 @@ def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, e
             comparison = operators.scalar_comparison(operator.symbol)
             operand_type := universal.TypeId(0) if comparison else expected
             if operand_type.index == 0:
-                operand_type = scalar_hint(state, left)
-                if operand_type.index == 0:
-                    operand_type = scalar_hint(state, right)
-            lhs = scalar_expression(state, left, operand_type)
-            rhs = scalar_expression(state, right, lhs.type_id)
+                operand_type = conversions.scalar_common_numeric(scalar_hint(state, left), scalar_hint(state, right))
+            lhs = scalar_operand(state, left, operand_type)
+            rhs = scalar_operand(state, right, lhs.type_id)
             known_type ?= scalar.scalar_type(lhs.type_id)
             if known_type != None:
                 implementation ?= operators.scalar_callable_operation(operator.symbol, known_type.name)
@@ -291,6 +342,25 @@ def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, e
             kind = universal.Binary(operator, lhs, rhs)
         case Call:
             name = scalar_callable_path(callee)
+            target ?= scalar.scalar_type_name(name)
+            if target != None:
+                if conversions.scalar_numeric(target):
+                    if len(arguments) < 1 or len(arguments) > 2:
+                        return error(scalar_diagnostic("numeric conversion requires a value and optional mode", expression.span))
+                    for argument in arguments:
+                        if argument.name != None:
+                            return error(scalar_diagnostic("numeric conversion arguments must be positional", argument.span))
+                    mode := ""
+                    if len(arguments) == 2:
+                        match arguments[1].value.kind:
+                            case Name:
+                                mode = name
+                            case _:
+                                return error(scalar_diagnostic("numeric conversion mode must be a policy name", arguments[1].span))
+                    converted = scalar_convert(state, scalar_expression(state, arguments[0].value, universal.TypeId(0)), target, mode)
+                    if expected.index != 0 and expected.index != target.index:
+                        return error(scalar_diagnostic("conversion result does not match its expected scalar type", expression.span))
+                    return converted
             if name == "type":
                 if len(arguments) != 1 or arguments[0].name != None:
                     return error(scalar_diagnostic("type requires one positional value", expression.span))
@@ -529,6 +599,29 @@ def scalar_signature(declaration: universal.FunctionDeclaration, ordinal: int) -
     return declaration
 
 
+def scalar_check_compiler_case(state: ScalarAnalysis, block: universal.Block) -> bool | diagnostics.Diagnostic:
+    index = int(len(state.functions))
+    scalar_block(state, block.statements, universal.TypeId(2))
+    cursor := index
+    # Pack calls may append signatures. Check their bodies too, without leaking
+    # either successful or rejected specializations into the surrounding module.
+    while cursor < len(state.functions):
+        function = state.functions[cursor]
+        cursor += 1
+        local = ScalarAnalysis(functions=state.functions, constants=state.constants, templates=state.templates)
+        namespace ?= function.lookup
+        if namespace != None:
+            local.namespace = namespace
+        for parameter in function.parameters:
+            local.names.append(parameter.name)
+            local.mutables.append(false)
+        local.types = function.parameter_types[:]
+        body ?= function.body
+        if body != None:
+            scalar_block(local, body.statements, function.result_type)
+    return true
+
+
 def analyze_scalar(module: universal.Module, include_tests: bool = false) -> universal.Module | diagnostics.Diagnostic:
     state = ScalarAnalysis()
     function_names: list[string] = []
@@ -612,6 +705,22 @@ def analyze_scalar(module: universal.Module, include_tests: bool = false) -> uni
                 pass
             case Test:
                 if include_tests:
+                    if len(declaration.source_modes) == 1 and declaration.source_modes[0] == "compiler":
+                        for compiler_case in declaration.compiler_cases:
+                            isolated = ScalarAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup)
+                            checked ?= scalar_check_compiler_case(isolated, compiler_case.body)
+                            rejected := false
+                            if checked is Diagnostic:
+                                rejected = true
+                            expect_rejection := false
+                            match compiler_case.expectation:
+                                case Reject:
+                                    expect_rejection = true
+                                case Accept:
+                                    pass
+                            if expect_rejection != rejected:
+                                return error(scalar_diagnostic("compiler test expectation failed", compiler_case.span))
+                        continue
                     if len(declaration.source_modes) != 0 or len(declaration.compiler_cases) != 0:
                         return error(scalar_diagnostic("only ordinary tests are supported by scalar test emission", declaration.span))
                     test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=declaration.body, result_type=universal.TypeId(2), lookup=declaration.lookup)

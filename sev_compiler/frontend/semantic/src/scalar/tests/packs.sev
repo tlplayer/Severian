@@ -32,3 +32,21 @@ test "specialized pack bindings are local and shadow outer parameters":
 test "interpolation and type names evaluate their expressions":
     print(f"{{{pair(4)}}}")
     print(type(marked("t", 1)))
+
+
+def numeric_pack(*values: V):
+    for value in values:
+        assert(value + 1 == 2)
+
+
+test with compiler "compiler cases check generated bodies in isolation":
+    reject:
+        numeric_pack("bad")
+    accept:
+        numeric_pack(1)
+
+
+test "numeric conversion and promotion evaluate their input once":
+    print(i8(marked("c", 12), checked))
+    print(int(float(marked("f", 12))))
+    print(marked("p", 10) + 0.5)

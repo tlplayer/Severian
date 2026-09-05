@@ -1,0 +1,311 @@
+import "../id/compiler.sev"
+
+
+# Structural types and inference ported from rust_compiler/universal/src/type_system.rs.
+# Type identity never depends on a printed name or the category of a source family.
+class Signature:
+    parameters: list[TypeId]
+    result: TypeId
+
+
+enum TypeKind:
+    Primitive(primitive: PrimitiveId)
+    Nominal(definition: DefId, substitution: Substitution)
+    Parameter(parameter: GenericParamId)
+    Infer(variable: InferVarId)
+    Function(signature: Signature)
+    Tuple(elements: list[TypeId])
+    Union(members: list[TypeId])
+    Reference(target: TypeId, mutable: bool, lifetime: RegionId)
+    Resource(definition: DefId, substitution: Substitution)
+
+
+class TyInterner:
+    kinds: list[TypeKind] = []
+    next_infer: u32 = 0
+
+    def intern(kind: TypeKind) -> TypeId:
+        index := 0
+        for known in kinds:
+            if known == kind:
+                return TypeId(u32(index))
+            index += 1
+        result = TypeId(u32(len(kinds)))
+        kinds.append(kind)
+        return result
+
+    def kind(type: TypeId) -> TypeKind:
+        if type.index >= len(kinds):
+            throw Error("unknown structural type identity")
+        return kinds[type.index]
+
+    def parameter(parameter: GenericParamId) -> TypeId:
+        return intern(TypeKind.Parameter(parameter))
+
+    def fresh_infer() -> TypeId:
+        variable = InferVarId(next_infer)
+        next_infer += 1
+        return intern(TypeKind.Infer(variable))
+
+    def union(members: list[TypeId]) -> TypeId:
+        canonical: list[TypeId] = []
+        for member in members:
+            match kind(member):
+                case Union:
+                    for nested in members:
+                        insert_type(canonical, nested)
+                case _:
+                    insert_type(canonical, member)
+        if len(canonical) == 1:
+            return canonical[0]
+        return intern(TypeKind.Union(canonical))
+
+    def substitute(type: TypeId, arguments: Substitution) -> TypeId:
+        match kind(type):
+            case Parameter:
+                replacement ?= arguments.get(parameter)
+                if replacement != None:
+                    return replacement
+                return type
+            case Nominal:
+                return intern(TypeKind.Nominal(definition, substitute_arguments(substitution, arguments)))
+            case Resource:
+                return intern(TypeKind.Resource(definition, substitute_arguments(substitution, arguments)))
+            case Function:
+                return intern(TypeKind.Function(Signature(substitute_types(signature.parameters, arguments), substitute(signature.result, arguments))))
+            case Tuple:
+                return intern(TypeKind.Tuple(substitute_types(elements, arguments)))
+            case Union:
+                return union(substitute_types(members, arguments))
+            case Reference:
+                return intern(TypeKind.Reference(substitute(target, arguments), mutable, lifetime))
+            case _:
+                return type
+
+    def substitute_types(types: list[TypeId], arguments: Substitution) -> list[TypeId]:
+        result: list[TypeId] = []
+        for type in types:
+            result.append(substitute(type, arguments))
+        return result
+
+    def substitute_arguments(original: Substitution, arguments: Substitution) -> Substitution:
+        result = Substitution()
+        for binding in original.arguments:
+            result.bind(binding.parameter, substitute(binding.type_id, arguments))
+        return result
+
+
+def insert_type(types: list[TypeId], type: TypeId):
+    index := 0
+    while index < len(types):
+        if types[index].index == type.index:
+            return
+        if types[index].index > type.index:
+            break
+        index += 1
+    types.insert(index, type)
+
+
+class TraitRef:
+    trait_id: DefId
+    self_type: TypeId
+    substitution: Substitution
+
+
+enum Constraint:
+    Equal(left: TypeId, right: TypeId)
+    Implements(trait: TraitRef)
+
+
+class UnifyError: Error
+    message: string
+    left: TypeId
+    right: TypeId
+
+
+class InferenceContext:
+    variables: list[InferVarId] = []
+    types: list[TypeId] = []
+    constraints: list[Constraint] = []
+
+    def resolve(interner: TyInterner, type: TypeId) -> TypeId:
+        match interner.kind(type):
+            case Infer:
+                index := 0
+                for known in variables:
+                    if known.index == variable.index:
+                        return resolve(interner, types[index])
+                    index += 1
+            case _:
+                pass
+        return type
+
+    def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+        constraints.append(Constraint.Equal(left, right))
+        unify(interner, left, right)
+
+    def bind(interner: TyInterner, variable: InferVarId, type: TypeId) -> unit | UnifyError:
+        if occurs(interner, variable, type):
+            throw UnifyError("recursive inference binding", type, type)
+        variables.append(variable)
+        types.append(type)
+
+    def occurs(interner: TyInterner, needle: InferVarId, type: TypeId) -> bool:
+        resolved = resolve(interner, type)
+        match interner.kind(resolved):
+            case Infer:
+                return variable.index == needle.index
+            case _:
+                pass
+        for child in type_children(interner.kind(resolved)):
+            if occurs(interner, needle, child):
+                return true
+        return false
+
+    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+        lhs = resolve(interner, left)
+        rhs = resolve(interner, right)
+        if lhs.index == rhs.index:
+            return
+        match interner.kind(lhs):
+            case Infer:
+                bind(interner, variable, rhs)
+                return
+            case _:
+                pass
+        match interner.kind(rhs):
+            case Infer:
+                bind(interner, variable, lhs)
+                return
+            case _:
+                pass
+        if not same_constructor(interner.kind(lhs), interner.kind(rhs)):
+            throw UnifyError("structural type mismatch", lhs, rhs)
+        left_children = type_children(interner.kind(lhs))
+        right_children = type_children(interner.kind(rhs))
+        if len(left_children) != len(right_children):
+            throw UnifyError("generic arity mismatch", lhs, rhs)
+        index := 0
+        for child in left_children:
+            unify(interner, child, right_children[index])
+            index += 1
+
+
+def type_children(kind: TypeKind) -> list[TypeId]:
+    result: list[TypeId] := []
+    match kind:
+        case Nominal:
+            for binding in substitution.arguments:
+                result.append(binding.type_id)
+        case Resource:
+            for binding in substitution.arguments:
+                result.append(binding.type_id)
+        case Tuple:
+            return elements
+        case Union:
+            return members
+        case Function:
+            result = signature.parameters[:]
+            result.append(signature.result)
+        case Reference:
+            result.append(target)
+        case _:
+            pass
+    return result
+
+
+def same_constructor(left: TypeKind, right: TypeKind) -> bool:
+    match left:
+        case Nominal:
+            left_definition = definition
+            left_arguments = substitution
+            match right:
+                case Nominal:
+                    return left_definition == definition and same_parameters(left_arguments, substitution)
+                case _:
+                    return false
+        case Resource:
+            left_definition = definition
+            left_arguments = substitution
+            match right:
+                case Resource:
+                    return left_definition == definition and same_parameters(left_arguments, substitution)
+                case _:
+                    return false
+        case Function:
+            match right:
+                case Function:
+                    return true
+                case _:
+                    return false
+        case Tuple:
+            match right:
+                case Tuple:
+                    return true
+                case _:
+                    return false
+        case Union:
+            match right:
+                case Union:
+                    return true
+                case _:
+                    return false
+        case Reference:
+            left_mutable = mutable
+            left_lifetime = lifetime
+            match right:
+                case Reference:
+                    return left_mutable == mutable and left_lifetime.index == lifetime.index
+                case _:
+                    return false
+        case _:
+            return left == right
+
+
+def same_parameters(left: Substitution, right: Substitution) -> bool:
+    if len(left.arguments) != len(right.arguments):
+        return false
+    index := 0
+    for binding in left.arguments:
+        if binding.parameter.index != right.arguments[index].parameter.index:
+            return false
+        index += 1
+    return true
+
+
+test "substitution is structural and preserves its template":
+    types = TyInterner()
+    parameter = types.parameter(GenericParamId(0))
+    concrete = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
+    template = types.intern(TypeKind.Function(Signature([parameter], parameter)))
+    arguments = Substitution()
+    arguments.bind(GenericParamId(0), concrete)
+    result = types.substitute(template, arguments)
+    expected = types.intern(TypeKind.Function(Signature([concrete], concrete)))
+    assert(result.index == expected.index)
+    assert(types.substitute(template, Substitution()).index == template.index)
+
+
+test "unification follows nested types and rejects recursive bindings":
+    types = TyInterner()
+    variable = types.fresh_infer()
+    concrete = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
+    inferred = types.intern(TypeKind.Tuple([variable, concrete]))
+    expected = types.intern(TypeKind.Tuple([concrete, concrete]))
+    context = InferenceContext()
+    context.unify(types, inferred, expected)
+    assert(context.resolve(types, variable).index == concrete.index)
+    recursive = types.fresh_infer()
+    tuple = types.intern(TypeKind.Tuple([recursive]))
+    failure ?= context.unify(types, recursive, tuple)
+    assert(failure is UnifyError)
+
+
+test "union interning flattens and canonicalizes members":
+    types = TyInterner()
+    first = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
+    second = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(2))))
+    pair = types.union([second, first, first])
+    assert(types.union([first, second]).index == pair.index)
+    assert(types.union([pair, first]).index == pair.index)
+    assert(types.union([first, first]).index == first.index)
