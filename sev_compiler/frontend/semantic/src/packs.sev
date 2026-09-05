@@ -1,0 +1,156 @@
+import universal
+
+
+class BoundArguments:
+    arguments: list[universal.CallArgument] = []
+    message: string = ""
+
+
+def bind_arguments(function: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> BoundArguments:
+    result: list[universal.CallArgument] = []
+    assigned: list[string] = []
+    positional := 0
+    keyword := false
+    for argument in arguments:
+        name := ""
+        supplied ?= argument.name
+        if supplied != None:
+            keyword = true
+            name = supplied
+        else:
+            if keyword:
+                return BoundArguments(message="positional argument follows keyword argument")
+            if positional >= len(function.parameters):
+                return BoundArguments(message="wrong argument count")
+            parameter = function.parameters[positional]
+            if parameter.keyword_only:
+                return BoundArguments(message="parameter is keyword-only: " + parameter.name)
+            name = parameter.name
+            positional += 1
+        found := false
+        for parameter in function.parameters:
+            if parameter.name == name:
+                found = true
+        if not found:
+            return BoundArguments(message="unknown keyword argument " + name)
+        if name in assigned:
+            return BoundArguments(message="duplicate argument " + name)
+        assigned.append(name)
+        result.append(universal.CallArgument(name, argument.value, argument.span))
+    for parameter in function.parameters:
+        if parameter.name not in assigned:
+            default_value ?= parameter.default
+            if default_value != None:
+                result.append(universal.CallArgument(parameter.name, default_value, parameter.span))
+            else:
+                return BoundArguments(message="wrong argument count: missing " + parameter.name)
+    return BoundArguments(result)
+
+
+def renamed(name: string, names: list[string], replacements: list[string]) -> string:
+    index := int(len(names)) - 1
+    while index >= 0:
+        if names[index] == name:
+            return replacements[index]
+        index -= 1
+    return name
+
+
+def rename_expression(expression: universal.Expression, names: list[string], replacements: list[string]) -> universal.Expression:
+    kind := expression.kind
+    match expression.kind:
+        case Name:
+            kind = universal.Name(renamed(name, names, replacements))
+        case Member:
+            kind = universal.Member(rename_expression(object, names, replacements), name)
+        case Call:
+            operands: list[universal.CallArgument] = []
+            for argument in arguments:
+                operands.append(universal.CallArgument(argument.name, rename_expression(argument.value, names, replacements), argument.span))
+            kind = universal.Call(rename_expression(callee, names, replacements), operands)
+        case Unary:
+            kind = universal.Unary(operator, rename_expression(operand, names, replacements))
+        case Binary:
+            kind = universal.Binary(operator, rename_expression(left, names, replacements), rename_expression(right, names, replacements))
+        case Conditional:
+            kind = universal.Conditional(rename_expression(condition, names, replacements), rename_expression(then_value, names, replacements), rename_expression(else_value, names, replacements))
+        case Stringify:
+            kind = universal.Stringify(rename_expression(value, names, replacements))
+        case _:
+            pass
+    return universal.Expression(kind, expression.span)
+
+
+def expand_block(block: universal.Block, pack: string, count: int, names: list[string], replacements: list[string], prefix: string) -> universal.Block:
+    result = universal.empty_block()
+    for statement in block.statements:
+        match statement:
+            case ForEach:
+                match iterable.kind:
+                    case Name:
+                        if name != pack:
+                            throw Error("bootstrap iteration requires the variadic pack")
+                    case _:
+                        throw Error("bootstrap iteration requires the variadic pack")
+                # The iteration binding and its locals get distinct names for
+                # each instantiation. Outer mutable bindings retain their names.
+                match statement:
+                    case ForEach:
+                        index := 0
+                        while index < count:
+                            loop_names = names[:]
+                            loop_replacements = replacements[:]
+                            loop_names.append(name)
+                            loop_replacements.append(pack + "__" + string(index))
+                            expanded = expand_block(body, pack, count, loop_names, loop_replacements, prefix + "__iteration_" + string(index) + "_")
+                            for expanded_statement in expanded.statements:
+                                result.statements.append(expanded_statement)
+                            index += 1
+                    case _:
+                        pass
+            case BindingStatement:
+                value = rename_expression(binding.value, names, replacements)
+                if binding.name not in names:
+                    names.append(binding.name)
+                    replacements.append(prefix + binding.name)
+                result.statements.append(universal.BindingStatement(universal.Binding(renamed(binding.name, names, replacements), binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
+            case ExpressionStatement:
+                result.statements.append(universal.ExpressionStatement(rename_expression(expression, names, replacements)))
+            case Return:
+                returned: universal.Expression | None := None
+                expression_value ?= value
+                if expression_value != None:
+                    returned = rename_expression(expression_value, names, replacements)
+                result.statements.append(universal.Return(returned, span))
+            case Assert:
+                result.statements.append(universal.Assert(rename_expression(condition, names, replacements), message, span, condition_span))
+            case If:
+                taken = expand_block(then_block, pack, count, names[:], replacements[:], prefix)
+                otherwise = expand_block(else_block, pack, count, names[:], replacements[:], prefix)
+                result.statements.append(universal.If(rename_expression(condition, names, replacements), taken, otherwise, span))
+            case _:
+                throw Error("statement is outside bootstrap variadic specialization")
+    return result
+
+
+def pack_parameters(function: universal.FunctionDeclaration, count: int) -> list[universal.FunctionParameter]:
+    result: list[universal.FunctionParameter] = []
+    pack = function.parameters[0]
+    index := 0
+    while index < count:
+        result.append(universal.FunctionParameter(pack.name + "__" + string(index), pack.annotation, None, pack.span))
+        index += 1
+    for parameter in function.parameters[1:]:
+        result.append(parameter)
+    return result
+
+
+def pack_body(function: universal.FunctionDeclaration, count: int) -> universal.Block:
+    names: list[string] = []
+    for parameter in function.parameters:
+        if not parameter.variadic:
+            names.append(parameter.name)
+    body ?= function.body
+    if body != None:
+        return expand_block(body, function.parameters[0].name, count, names, names[:], "")
+    throw Error("variadic function requires a source body")

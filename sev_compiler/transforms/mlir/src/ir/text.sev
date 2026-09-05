@@ -83,17 +83,23 @@ def attribute_value_text(value: MlirAttributeValue) -> string:
     kind = attribute_kind_name(value.kind)
     if kind == "unit":
         return "unit"
-    if kind == "dense_integer":
+    if kind == "dense_integer" or kind == "dense_integer_array":
         values := ""
         separator := ""
         for element in value.elements:
             values += separator + string(element.integer)
             separator = ", "
+        if kind == "dense_integer_array":
+            if len(value.elements) == 0:
+                return "array<" + type_text(value.type_id) + ">"
+            return "array<" + type_text(value.type_id) + ": " + values + ">"
         return "dense<[" + values + "]> : " + type_text(value.type_id)
     if kind == "integer":
         return string(value.integer) + " : " + type_text(value.type_id)
     if kind == "float":
         return string(value.floating) + " : " + type_text(value.type_id)
+    if kind == "float_literal":
+        return value.text + " : " + type_text(value.type_id)
     if kind == "string":
         return "\"" + escaped(value.text) + "\""
     if kind == "boolean":

@@ -1,4 +1,5 @@
 import "../../../../sev_compiler/universal/primitive/string/core.sev" as text
+import "../../../../sev_compiler/universal/primitive/string/format.sev" as format
 
 # Only a byte leaves the source-owned implementation at this hosted boundary.
 # putchar belongs to the platform C library; no Severian C helper is linked.
@@ -16,7 +17,63 @@ def __write(value: string, offset: int):
         __write(value, offset + 1)
 
 
-def print(value: string):
-    __write(value, 0)
-    result = __putchar(10)
-    assert(result >= 0)
+def __separator(value: string) -> string:
+    return value
+
+
+def __separator(value: None) -> string:
+    return " "
+
+
+def __ending(value: string) -> string:
+    return value
+
+
+def __ending(value: None) -> string:
+    return "\n"
+
+#TODO: Replace with MMLIR/Syste native approach defer for now
+@c(symbol="fflush")
+def __flush(stream: native_ptr) -> i32
+
+
+# V packs specialize to the concrete value types at each call. The loop is
+# expanded before scalar analysis; string conversion uses ordinary overloads.
+# This hosted slice accepts file=None (stdout). Stream objects need classes.
+def print(*objects: V, sep: V = None, end: V = None, file: None = None, flush: bool = false):
+    separator = __separator(sep)
+    ending = __ending(end)
+    first := true
+    for object in objects:
+        __write("" if first else separator, 0)
+        __write(format.string(object), 0)
+        first = false
+    __write(ending, 0)
+    if flush:
+        result = __flush(format.__pointer(0))
+        assert(result == 0)
+
+
+test "print handles empty calls, mixed values, and keyword options":
+    print()
+    print("count", 42, true, 'λ', 0.5, None)
+    print("a", "b", sep="|", end="!")
+    print("next", sep=None, end=None, file=None, flush=true)
+    print(end="only end\n")
+    print(f"values: {42}:{0.5}:{false}:{'a'}")
+
+
+test "print writes Unicode and escaped bytes":
+    print("aλ😀z")
+    print("")
+    print("quote: \" slash: \\ tab:\tend")
+
+
+test "print formats scalar boundaries":
+    print(-9223372036854775808, 9223372036854775807)
+    byte: u8 = 255
+    small: i8 = -128
+    print(byte, small, '😀', '中')
+    print(3.1415926, 1.2345678901234567, 5e-324, 1.7976931348623157e308, -0.0)
+    nan: f64 = 0.0 / 0.0
+    print(nan, 1.0 / 0.0, -1.0 / 0.0)

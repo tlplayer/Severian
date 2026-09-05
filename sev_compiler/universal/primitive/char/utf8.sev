@@ -2,3 +2,11 @@ import "encoding.sev"
 
 @mlir("arith.extui")
 def codepoint(value: char) -> int
+
+
+test "character literals preserve Unicode scalars and escapes":
+    assert(codepoint('a') == 97)
+    assert(codepoint('λ') == 955)
+    assert(codepoint('中') == 20013)
+    assert(codepoint('😀') == 128512)
+    assert(codepoint('\n') == 10)

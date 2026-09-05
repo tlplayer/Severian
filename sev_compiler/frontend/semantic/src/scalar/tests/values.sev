@@ -1,0 +1,59 @@
+import "../../../../../universal/primitive/string/core.sev" as utf8
+
+GREETING = "hello"
+
+
+def fail() -> int:
+    assert(false)
+    return 0
+
+
+def choose(value: string, keep: bool) -> string:
+    return value if keep else value + "!"
+
+
+def owned_return() -> string:
+    local = "λ" + "😀"
+    return choose(local, true)
+
+
+def grow(value: string, count: int) -> string:
+    if count == 0:
+        return value
+    return grow(value + "λ", count - 1)
+
+
+def branch_update(first: bool) -> int:
+    value := 2
+    if first:
+        value += 3
+    else:
+        value *= 4
+    return value
+
+
+test "conditional evaluation, mutation, and returned string storage":
+    assert((42 if true else fail()) == 42)
+    assert((fail() if false else 7) == 7)
+    assert((1 if false else 2 if true else fail()) == 2)
+    narrow: i8 = 4
+    assert((3 if true else narrow) == 3)
+    assert(branch_update(true) == 5)
+    assert(branch_update(false) == 8)
+    original = "a"
+    value := original
+    value += "λ"
+    snapshot = value
+    value += "😀"
+    assert(original == "a")
+    assert(snapshot == "aλ")
+    assert(value == "aλ😀")
+    assert(value != snapshot)
+    assert(("" + "") == "")
+    assert(("" + value) == value)
+    assert((value + "") == value)
+    assert(owned_return() == "λ😀")
+    assert(choose(value, false) == "aλ😀!")
+    assert(utf8.length(grow("", 64)) == 64)
+    assert(f"{{{GREETING}}}" == "{hello}")
+    print(value)

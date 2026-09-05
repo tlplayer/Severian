@@ -1,0 +1,34 @@
+def marked(label: string, value: int) -> int:
+    print(label, end="")
+    return value
+
+
+def pair(first: int, second: int = 2) -> int:
+    return first * 10 + second
+
+
+def each(*values: V, suffix: string = "!"):
+    for value in values:
+        label = f"{value}{suffix}"
+        print(label, end=";")
+
+
+def shadow(*values: V, value: string = "unused"):
+    for value in values:
+        print(value, end=";")
+
+
+test "keyword arguments keep source evaluation order":
+    print(pair(second=marked("b", 2), first=marked("a", 1)))
+
+
+test "specialized pack bindings are local and shadow outer parameters":
+    each(1, "two", false)
+    print()
+    shadow(7, 8)
+    print()
+
+
+test "interpolation and type names evaluate their expressions":
+    print(f"{{{pair(4)}}}")
+    print(type(marked("t", 1)))

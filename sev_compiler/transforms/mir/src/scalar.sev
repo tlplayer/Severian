@@ -19,8 +19,15 @@ def scalar_mir_expression(module: universal.Module, block: universal.Block, scop
             return result
         case BindingReference:
             return scope.bindings[binding.index]
+        case TypeName:
+            scalar_mir_expression(module, block, scope, value)
+            result = scalar_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Constant(universal.StringValue(name), result))
+            return result
         case Unary:
             input = scalar_mir_expression(module, block, scope, operand)
+            if operator.symbol == "+":
+                return input
             result = scalar_value(module, expression.type_id)
             block.operations.append(universal.Operation.Unary(operator, input, result))
             return result
@@ -30,12 +37,34 @@ def scalar_mir_expression(module: universal.Module, block: universal.Block, scop
             result = scalar_value(module, expression.type_id)
             block.operations.append(universal.Operation.Binary(operator, lhs, rhs, result))
             return result
+        case Conditional:
+            test = scalar_mir_expression(module, block, scope, condition)
+            then_block = universal.empty_block()
+            then_result = scalar_mir_expression(module, then_block, scope, then_value)
+            then_block.operations.append(universal.Operation.Return(then_result))
+            else_block = universal.empty_block()
+            else_result = scalar_mir_expression(module, else_block, scope, else_value)
+            else_block.operations.append(universal.Operation.Return(else_result))
+            result = scalar_value(module, expression.type_id)
+            block.operations.append(universal.Operation.Choose(test, then_block, else_block, result))
+            return result
         case ResolvedCall:
             match callee:
                 case Direct:
-                    inputs: list[universal.ValueId] = []
+                    evaluated: list[universal.ValueId] = []
                     for argument in arguments:
-                        inputs.append(scalar_mir_expression(module, block, scope, argument.value))
+                        evaluated.append(scalar_mir_expression(module, block, scope, argument.value))
+                    inputs: list[universal.ValueId] = []
+                    for declaration in module.functions:
+                        if declaration.id.value == function.declaration.value:
+                            parameter_index := 0
+                            for parameter in declaration.parameters:
+                                argument_index := 0
+                                for argument in arguments:
+                                    if argument.name == parameter.name or (argument.name == None and parameter_index == argument_index):
+                                        inputs.append(evaluated[argument_index])
+                                    argument_index += 1
+                                parameter_index += 1
                     result = scalar_value(module, expression.type_id)
                     block.operations.append(universal.Operation.Call(universal.FunctionId(function.declaration.value), inputs, result))
                     return result
@@ -51,7 +80,10 @@ def scalar_mir_block(module: universal.Module, block: universal.Block, scope: Sc
         match statement:
             case BindingStatement:
                 value = scalar_mir_expression(module, block, scope, binding.value)
-                scope.bindings.append(value)
+                if binding.update:
+                    scope.bindings[binding.id.index] = value
+                else:
+                    scope.bindings.append(value)
             case ExpressionStatement:
                 scalar_mir_expression(module, block, scope, expression)
             case Assert:

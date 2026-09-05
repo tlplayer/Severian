@@ -125,6 +125,7 @@ class TestDeclaration:
     modes: list[TestMode] = []
     function: FunctionId | None = None
     expectations: list[TestExpectation] = []
+    lookup: string = ""
 
 
 def test_mode_name(mode: TestMode) -> string:

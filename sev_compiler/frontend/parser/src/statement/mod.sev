@@ -47,7 +47,10 @@ def formatted_string_expression(value: string, span: source.Span) -> universal.E
         interpolation_tokens = lexer.scan(interpolation)
         expression_parser = Parser(interpolation_tokens)
         parsed_expression = parser_expression(expression_parser, 0)
-        parts.append(parsed_expression)
+        parser_separators(expression_parser)
+        if not parser_at_simple(expression_parser, Eof):
+            return error(diagnostics.Diagnostic("E000113", "unexpected token in formatted string interpolation", span))
+        parts.append(universal.Expression(universal.Stringify(parsed_expression), span))
         cursor += 1
     if len(literal) > 0:
         parts.append(universal.Expression(universal.LiteralValue(universal.StringValue(literal)), span))
@@ -150,19 +153,23 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected decorator name")[0]
     parser_expect(parser, LeftParen, "expected decorator arguments")
-    argument_name := ""
-    if parser.cursor[0] + 1 < len(parser.tokens) and parser.tokens[parser.cursor[0] + 1].kind == Equal:
-        argument_name = parser_identifier(parser, "expected argument name")[0]
-        parser_next(parser)
-    token = parser_next(parser)
-    match token.kind:
-        case String:
-            end = parser_expect(parser, RightParen, "expected closing decorator parenthesis").span
-            parser_expect(parser, Newline, "expected newline after decorator")
-            argument = universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(value), token.span)
-            return universal.Decorator(name, [argument], source.Span(start.source, start.start, end.end))
-        case _:
-            return error(parser_fail(parser, "decorator requires one string argument"))
+    arguments: list[universal.DecoratorArgument] = []
+    while not parser_at_simple(parser, RightParen):
+        argument_name := ""
+        if parser.cursor[0] + 1 < len(parser.tokens) and parser.tokens[parser.cursor[0] + 1].kind == Equal:
+            argument_name = parser_identifier(parser, "expected argument name")[0]
+            parser_next(parser)
+        token = parser_next(parser)
+        match token.kind:
+            case String:
+                arguments.append(universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(value), token.span))
+            case _:
+                return error(parser_fail(parser, "decorator requires string arguments"))
+        if parser_take(parser, Comma) == None:
+            break
+    end = parser_expect(parser, RightParen, "expected closing decorator parenthesis").span
+    parser_expect(parser, Newline, "expected newline after decorator")
+    return universal.Decorator(name, arguments, source.Span(start.source, start.start, end.end))
 
 def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
@@ -241,7 +248,13 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
     constraints := generic_parts[1]
     parser_expect(parser, LeftParen, "expected opening parenthesis")
     parameters: list[universal.FunctionParameter] = []
+    keyword_only := false
     while not parser_at_simple(parser, RightParen):
+        variadic = parser_take(parser, Star) != None
+        if variadic:
+            if keyword_only:
+                return error(parser_fail(parser, "only one variadic parameter is supported"))
+            keyword_only = true
         parameter = parser_identifier(parser, "expected a parameter name")
         parser_expect(parser, Colon, "expected colon after parameter")
         annotation = parser_type_annotation(parser)
@@ -251,7 +264,7 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
             parsed_default = parser_expression(parser, 0)
             default = parsed_default
             parameter_end = parsed_default.span.end
-        parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end)))
+        parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), variadic=variadic, keyword_only=keyword_only and not variadic))
         if parser_take(parser, Comma) == None:
             break
     close = parser_expect(parser, RightParen, "expected closing parenthesis").span
@@ -356,6 +369,16 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     return (universal.Block(statements, [], []), end)
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "for"):
+        start = parser_next(parser).span
+        name = parser_identifier(parser, "expected iteration binding")[0]
+        if not parser_at_identifier(parser, "in"):
+            return error(parser_fail(parser, "expected in after iteration binding"))
+        parser_next(parser)
+        iterable = parser_expression(parser, 0)
+        parser_expect(parser, Colon, "expected colon after iterable")
+        body = parser_indented_block(parser, "for")
+        return universal.ForEach(name, iterable, body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "if"):
         start = parser_next(parser).span
         condition = parser_expression(parser, 0)
@@ -395,23 +418,47 @@ def parser_looks_like_binding(parser: Parser) -> bool:
         return false
     match parser.tokens[parser.cursor[0]].kind:
         case Identifier:
-            return parser.tokens[parser.cursor[0] + 1].kind == Equal or parser.tokens[parser.cursor[0] + 1].kind == QuestionEqual or parser.tokens[parser.cursor[0] + 1].kind == ColonEqual or parser.tokens[parser.cursor[0] + 1].kind == Colon
+            next = parser.tokens[parser.cursor[0] + 1].kind
+            match next:
+                case Identifier:
+                    if parser.cursor[0] + 2 < len(parser.tokens):
+                        return parser.tokens[parser.cursor[0] + 2].kind == Equal
+                case _:
+                    pass
+            return next == Equal or next == QuestionEqual or next == ColonEqual or next == Colon or next == PlusEqual or next == MinusEqual or next == StarEqual
         case _:
             pass
     return false
 
 def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic:
     start = parser_peek(parser).span
-    name = parser_identifier(parser, "expected binding name")[0]
+    name := parser_identifier(parser, "expected binding name")[0]
     annotation: universal.TypeAnnotation | None := None
+    match parser_peek(parser).kind:
+        case Identifier:
+            annotation = universal.named_type(name, [], start)
+            name = parser_identifier(parser, "expected binding name after type")[0]
+        case _:
+            pass
     if parser_take(parser, Colon) != None:
         annotation = parser_type_annotation(parser)
+    assignment = parser_peek(parser).kind
+    if assignment == PlusEqual or assignment == MinusEqual or assignment == StarEqual:
+        parser_next(parser)
+        rhs = parser_expression(parser, 0)
+        operator := universal.operator_syntax(universal.Add())
+        if assignment == MinusEqual:
+            operator = universal.operator_syntax(universal.Subtract())
+        elif assignment == StarEqual:
+            operator = universal.operator_syntax(universal.Multiply())
+        combined = universal.Expression(universal.Binary(operator, universal.Expression(universal.Name(name), start), rhs), source.Span(start.source, start.start, rhs.span.end))
+        return universal.Binding(name, annotation, combined, true, false, combined.span)
     inferred = parser_take(parser, ColonEqual) != None
     preserve_error = not inferred and parser_take(parser, QuestionEqual) != None
     if not inferred and not preserve_error:
         parser_expect(parser, Equal, "expected `=`, `?=`, or `:=` after binding name")
     value = parser_expression(parser, 0)
-    return universal.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end))
+    return universal.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end), mutable=inferred)
 
 def parser_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
     return parse_expression(parser, minimum)
@@ -446,6 +493,14 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
             next_minimum += 1
         right = parse_expression(parser, next_minimum)
         left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
+    if minimum == 0 and parser_at_identifier(parser, "if"):
+        parser_next(parser)
+        condition = parse_expression(parser, 1)
+        if not parser_at_identifier(parser, "else"):
+            return error(parser_fail(parser, "conditional expression requires else"))
+        parser_next(parser)
+        otherwise = parse_expression(parser, 0)
+        return universal.Expression(universal.Conditional(condition, left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
     return left
 
 

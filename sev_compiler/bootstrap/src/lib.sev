@@ -9,7 +9,9 @@ import "modules.sev"
 def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".") -> string:
     library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
     parsed = load_source_module(source.load(library_path), "", [], false)
-    application = load_source_module(input, "", [], true)
+    # A test subject may itself be a prelude module. Give its declarations a
+    # local scope so tests can exercise them without colliding with the prelude.
+    application = load_source_module(input, "__subject." if include_tests else "", [], true)
     for item in application.items:
         parsed.items.append(item)
     typed = semantic.analyze_scalar(parsed, include_tests)

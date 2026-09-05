@@ -1,0 +1,200 @@
+import "core.sev" as text
+
+@mlir("arith.divsi")
+def __divide(value: int, divisor: int) -> int
+
+@mlir("arith.remsi")
+def __remainder(value: int, divisor: int) -> int
+
+@mlir("arith.trunci")
+def __byte(value: int) -> u8
+
+@mlir("arith.extsi")
+def __widen(value: i8) -> int
+
+@mlir("arith.extsi")
+def __widen(value: i16) -> int
+
+@mlir("arith.extsi")
+def __widen(value: i32) -> int
+
+@mlir("arith.extui")
+def __unsigned(value: u8) -> int
+
+
+def __digit(value: int) -> string:
+    result = text.__allocate(text.__index(1))
+    text.__store(__byte(value + 48), result, text.__index(0))
+    return result
+
+
+# Keeping the working value nonpositive also handles the minimum signed int.
+def __negative_digits(value: int) -> string:
+    digit = __digit(0 - __remainder(value, 10))
+    if value > -10:
+        return digit
+    return __negative_digits(__divide(value, 10)) + digit
+
+
+def string(value: int) -> string:
+    if value < 0:
+        return "-" + __negative_digits(value)
+    return __negative_digits(0 - value)
+
+
+def string(value: i8) -> string:
+    return string(__widen(value))
+
+
+def string(value: i16) -> string:
+    return string(__widen(value))
+
+
+def string(value: i32) -> string:
+    return string(__widen(value))
+
+
+def string(value: u8) -> string:
+    return string(__unsigned(value))
+
+
+test "decimal conversion covers zero and signed and unsigned limits":
+    assert(string(0) == "0")
+    assert(string(-9223372036854775808) == "-9223372036854775808")
+    assert(string(9223372036854775807) == "9223372036854775807")
+    byte: u8 = 255
+    small: i8 = -128
+    assert(string(byte) == "255")
+    assert(string(small) == "-128")
+
+
+def string(value: bool) -> string:
+    return "true" if value else "false"
+
+
+def string(value: string) -> string:
+    return value
+
+
+def __store_byte(destination: string, position: int, value: int):
+    text.__store(__byte(value), destination, text.__index(position))
+
+
+def string(value: char) -> string:
+    codepoint = text.character.codepoint(value)
+    width = text.character.width(codepoint)
+    result = text.__allocate(text.__index(width))
+    if width == 1:
+        __store_byte(result, 0, codepoint)
+    else:
+        __store_byte(result, width - 1, 128 + __remainder(codepoint, 64))
+        if width == 2:
+            __store_byte(result, 0, 192 + __divide(codepoint, 64))
+        else:
+            __store_byte(result, width - 2, 128 + __remainder(__divide(codepoint, 64), 64))
+            if width == 3:
+                __store_byte(result, 0, 224 + __divide(codepoint, 4096))
+            else:
+                __store_byte(result, 1, 128 + __remainder(__divide(codepoint, 4096), 64))
+                __store_byte(result, 0, 240 + __divide(codepoint, 262144))
+    return result
+
+
+test "character conversion writes all four UTF-8 widths":
+    assert(string('a') == "a")
+    assert(string('λ') == "λ")
+    assert(string('中') == "中")
+    assert(string('😀') == "😀")
+
+
+# Hosted decimal conversion boundary. Buffers, counted UTF-8 results, and the
+# search for the first significant-digit precision that round-trips are .sev.
+# The current hosted target is glibc in its default C numeric locale.
+@mlir("memref.extract_aligned_pointer_as_index")
+def __base(value: string) -> index
+
+@mlir("llvm.inttoptr")
+def __pointer(value: int) -> native_ptr
+
+@c(symbol="strfromd")
+def __decimal(destination: native_ptr, capacity: int, format: native_ptr, value: f64) -> i32
+
+@c(symbol="strtod")
+def __parse(value: native_ptr, end: native_ptr) -> f64
+
+
+# Only whole buffers with offset zero are passed to this boundary.
+def __address(value: string) -> native_ptr:
+    return __pointer(text.__size(__base(value)))
+
+
+# Keep the memref borrow across the entire C call. Returning a raw address to
+# the allocating caller would hide its last use from buffer deallocation.
+def __decimal_into(destination: string, format: string, value: f64) -> i32:
+    return __decimal(__address(destination), 128, __address(format), value)
+
+
+def __parse_buffer(value: string) -> f64:
+    return __parse(__address(value), __pointer(0))
+
+
+def __terminated(value: string) -> string:
+    size = text.byte_count(value)
+    result = text.__allocate(text.__index(size + 1))
+    text.__copy(value, result, 0, 0)
+    __store_byte(result, size, 0)
+    return result
+
+
+def __prefix(source: string, count: int, destination: string, position: int):
+    if position < count:
+        __store_byte(destination, position, text.byte_at(source, position))
+        __prefix(source, count, destination, position + 1)
+
+
+def __float(value: f64, precision: int) -> string:
+    format = __terminated("%." + string(precision) + "g")
+    buffer = text.__allocate(text.__index(128))
+    count = __widen(__decimal_into(buffer, format, value))
+    assert(count >= 0)
+    assert(count < 128)
+    result = text.__allocate(text.__index(count))
+    __prefix(buffer, count, result, 0)
+    if value != value:
+        return result
+    if __parse_buffer(buffer) == value:
+        return result
+    if precision == 17:
+        return result
+    return __float(value, precision + 1)
+
+
+def string(value: f64) -> string:
+    return __float(value, 1)
+
+
+def string(value: None) -> string:
+    return "None"
+
+
+test "string conversion preserves strings and names boolean and absent values":
+    assert(string("aλ😀") == "aλ😀")
+    assert(string(true) == "true")
+    assert(string(false) == "false")
+    assert(string(None) == "None")
+
+
+test "hosted float formatting round-trips full precision and extreme values":
+    assert(string(3.1415926) == "3.1415926")
+    assert(string(1.2345678901234567) == "1.2345678901234567")
+    assert(string(5e-324) == "5e-324")
+    assert(string(1.7976931348623157e308) == "1.7976931348623157e+308")
+    negative_zero = -0.0
+    assert(1.0 / (+negative_zero) < 0.0)
+    assert(string(negative_zero) == "-0")
+    nan: f64 = 0.0 / 0.0
+    assert(nan != nan)
+    assert(not (nan == nan))
+    assert(string(nan) == "nan")
+    assert(string(1.0 / 0.0) == "inf")
+    assert(string(-1.0 / 0.0) == "-inf")

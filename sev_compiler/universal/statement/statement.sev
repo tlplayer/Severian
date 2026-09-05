@@ -15,6 +15,7 @@ class Binding:
     span: source.Span
     id: BindingId = BindingId(0)
     type_id: TypeId = TypeId(0)
+    mutable: bool = false
 
 
 class Block:
@@ -38,6 +39,7 @@ enum Statement:
     Return(value: Expression | None, span: source.Span)
     Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
     If(condition: Expression, then_block: Block, else_block: Block, span: source.Span)
+    ForEach(name: string, iterable: Expression, body: Block, span: source.Span)
     Match(subject: Expression, arms: list[MatchArm], span: source.Span)
 
 

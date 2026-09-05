@@ -1,7 +1,8 @@
 import "../char/utf8.sev" as character
 
 # The first compiled representation is an immutable UTF-8 byte view. Literals
-# own static MLIR storage; this core does not allocate or take ownership of it.
+# own static MLIR storage; concatenation returns a newly allocated byte buffer.
+# The MLIR ownership/deallocation pipeline manages allocated result lifetimes.
 # These declarations are typed operation bindings, not C string helpers.
 @mlir("memref.dim")
 def __dimension(value: string, dimension: index) -> index
@@ -21,6 +22,12 @@ def __byte_value(value: u8) -> int
 @mlir("arith.trunci")
 def __character(value: int) -> char
 
+@mlir("memref.alloc", operand_segments="1,0")
+def __allocate(size: index) -> string
+
+@mlir("memref.store")
+def __store(value: u8, destination: string, position: index)
+
 
 def byte_count(value: string) -> int:
     return __size(__dimension(value, 0))
@@ -30,6 +37,14 @@ def byte_at(value: string, position: int) -> int:
     assert(position >= 0)
     assert(position < byte_count(value))
     return __byte_value(__load(value, __index(position)))
+
+
+test "string views count and address UTF-8 bytes":
+    value = "aλ😀z"
+    assert(byte_count(value) == 8)
+    assert(byte_at(value, 1) == 206)
+    assert(byte_at(value, 2) == 187)
+    assert(byte_count("") == 0)
 
 
 def continuation(value: int) -> bool:
@@ -103,6 +118,16 @@ def character_at(value: string, position: int) -> char:
     return __character(decode(value, __offset(value, position, 0)))
 
 
+test "character indexing decodes each UTF-8 width":
+    value = "aλ😀z"
+    assert(length(value) == 4)
+    assert(character.codepoint(character_at(value, 1)) == 955)
+    assert(character.codepoint(character_at(value, 2)) == 128512)
+    assert(length("") == 0)
+    assert(length("中") == 1)
+    assert(decode("中", 0) == 20013)
+
+
 def __equal(left: string, right: string, offset: int) -> bool:
     if offset == byte_count(left):
         return true
@@ -115,3 +140,47 @@ def equal(left: string, right: string) -> bool:
     if byte_count(left) != byte_count(right):
         return false
     return __equal(left, right, 0)
+
+
+def not_equal(left: string, right: string) -> bool:
+    return not equal(left, right)
+
+
+test "equality compares bytes and lengths":
+    assert(equal("aλ😀z", "aλ😀z"))
+    assert(not_equal("aλ😀z", "aλ😃z"))
+    assert(not_equal("a", "ab"))
+    assert(equal("", ""))
+
+
+def __copy(source: string, destination: string, offset: int, position: int):
+    if position < byte_count(source):
+        __store(__load(source, __index(position)), destination, __index(offset + position))
+        __copy(source, destination, offset, position + 1)
+
+
+# The result owns new storage; arguments remain borrowed immutable views.
+# The MLIR ownership pipeline tracks returned buffers and inserts deallocation.
+def concat(left: string, right: string) -> string:
+    left_size = byte_count(left)
+    right_size = byte_count(right)
+    size = left_size + right_size
+    assert(size >= left_size)
+    assert(size >= right_size)
+    result = __allocate(__index(size))
+    __copy(left, result, 0, 0)
+    __copy(right, result, left_size, 0)
+    return result
+
+
+test "concatenation preserves borrowed inputs and snapshots":
+    original = "a"
+    value := concat(original, "λ")
+    snapshot = value
+    value = concat(value, "😀")
+    assert(equal(original, "a"))
+    assert(equal(snapshot, "aλ"))
+    assert(equal(value, "aλ😀"))
+    assert(equal(concat("", ""), ""))
+    assert(equal(concat("", value), value))
+    assert(equal(concat(value, ""), value))

@@ -15,6 +15,10 @@ def scalar_mlir_type(id: universal.TypeId) -> MlirType:
             return utf8_view_type()
         if known.representation == "index":
             return index_type()
+        if known.representation == "float":
+            return float_type(known.bits)
+        if known.representation == "pointer":
+            return pointer_type()
         return integer_type(known.bits, not known.boolean and id.index != 108 and id.index != 132)
     throw Error("scalar MIR has an unknown value type")
 
@@ -48,6 +52,10 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 match value:
                     case IntegerValue:
                         builder_constant(builder, output, integer_attribute(int(spelling), output.type_id))
+                    case FloatValue:
+                        builder_constant(builder, output, MlirAttributeValue(FloatLiteralAttributeKind, spelling, 0, false, output.type_id, []))
+                    case NoneValue:
+                        builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
                     case StringValue:
                         string_literal(builder, value, output)
                     case CharacterValue:
@@ -59,18 +67,21 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
             case Unary:
                 input = scalar_mlir_value(module, operand)
                 output = scalar_mlir_value(module, result)
-                selected ?= operators.scalar_operation(operator.symbol, 1, module.values[operand.index].type_id.index == 1)
+                selected ?= operators.scalar_operation(operator.symbol, 1, module.values[operand.index].type_id.index == 1, scalar.scalar_representation(module.values[operand.index].type_id))
                 if selected != None:
-                    identity = builder_new_value(builder, input.type_id)
-                    builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
-                    builder_binary(builder, output, operation_name("arith", selected.mnemonic), identity, input)
+                    if selected.direct:
+                        builder_create_operation(builder, operation_name("arith", selected.mnemonic), [input], [output])
+                    else:
+                        identity = builder_new_value(builder, input.type_id)
+                        builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
+                        builder_binary(builder, output, operation_name("arith", selected.mnemonic), identity, input)
                 else:
                     throw Error("scalar MIR has an unregistered unary operation")
             case Binary:
                 lhs = scalar_mlir_value(module, left)
                 rhs = scalar_mlir_value(module, right)
                 output = scalar_mlir_value(module, result)
-                selected ?= operators.scalar_operation(operator.symbol, 2, module.values[left.index].type_id.index == 1)
+                selected ?= operators.scalar_operation(operator.symbol, 2, module.values[left.index].type_id.index == 1, scalar.scalar_representation(module.values[left.index].type_id))
                 if selected != None:
                     attributes: list[MlirNamedAttribute] = []
                     if selected.predicate >= 0:
@@ -95,7 +106,15 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                         symbol = boundary.scalar_boundary(callable_source, "c")
                         if native_operation != "":
                             parts = native_operation.split(".")
-                            builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs)
+                            attributes: list[MlirNamedAttribute] = []
+                            segments = boundary.scalar_operand_segments(callable_source)
+                            if len(segments) != 0:
+                                sizes: list[MlirAttributeValue] = []
+                                for segment in segments:
+                                    sizes.append(integer_attribute(segment, integer_type(32)))
+                                segment_attribute = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], sizes)
+                                attributes.append(MlirNamedAttribute("operandSegmentSizes", segment_attribute))
+                            builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs, attributes)
                         elif symbol != "":
                             builder_call(builder, symbol, inputs, outputs)
                         else:
@@ -109,6 +128,18 @@ def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: u
                 if returned != None:
                     outputs.append(scalar_mlir_value(module, returned))
                 scalar_return(builder, outputs, nested)
+            case Choose:
+                saved = builder.insertion[0]
+                then_region = builder_create_region(builder)
+                then_entry = builder_create_block(builder, then_region)
+                builder_set_insertion_point(builder, then_entry)
+                scalar_mlir_block(builder, module, then_block, module.values[result.index].type_id, true)
+                else_region = builder_create_region(builder)
+                else_entry = builder_create_block(builder, else_region)
+                builder_set_insertion_point(builder, else_entry)
+                scalar_mlir_block(builder, module, else_block, module.values[result.index].type_id, true)
+                builder_set_insertion_point(builder, saved)
+                builder_create_operation(builder, operation_name("scf", "if"), [scalar_mlir_value(module, condition)], [scalar_mlir_value(module, result)], [], [then_region, else_region])
             case If:
                 saved = builder.insertion[0]
                 then_region = builder_create_region(builder)

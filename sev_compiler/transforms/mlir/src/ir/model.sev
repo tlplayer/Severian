@@ -114,8 +114,10 @@ def operation_name_text(name: MlirOperationName) -> string:
 enum MlirAttributeKind:
     UnitAttributeKind
     DenseIntegerAttributeKind
+    DenseIntegerArrayAttributeKind
     IntegerAttributeKind
     FloatAttributeKind
+    FloatLiteralAttributeKind
     StringAttributeKind
     BooleanAttributeKind
     TypeAttributeKind
@@ -261,10 +263,14 @@ def attribute_kind_name(kind: MlirAttributeKind) -> string:
             return "unit"
         case DenseIntegerAttributeKind:
             return "dense_integer"
+        case DenseIntegerArrayAttributeKind:
+            return "dense_integer_array"
         case IntegerAttributeKind:
             return "integer"
         case FloatAttributeKind:
             return "float"
+        case FloatLiteralAttributeKind:
+            return "float_literal"
         case StringAttributeKind:
             return "string"
         case BooleanAttributeKind:

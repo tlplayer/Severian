@@ -37,6 +37,9 @@ enum ExpressionKind:
     Convert(operand: Expression, conversion: ExpressionConversion)
     Unary(operator: OperatorSyntax, operand: Expression)
     Binary(operator: OperatorSyntax, left: Expression, right: Expression)
+    Conditional(condition: Expression, then_value: Expression, else_value: Expression)
+    Stringify(value: Expression)
+    TypeName(value: Expression, name: string)
 
 
 def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:

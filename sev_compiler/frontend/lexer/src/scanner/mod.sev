@@ -215,10 +215,12 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
         if cursor + 1 < len(characters):
             following = characters[cursor + 1]
         symbol = punctuation(character, following)
-        if symbol != None:
-            tokens.append(make_token(file, symbol[0], start, start + symbol[1]))
-            cursor += symbol[1]
-            continue
+        leading_fraction = character == "." and cursor + 1 < len(characters) and is_digit(characters[cursor + 1])
+        if not leading_fraction:
+            if symbol != None:
+                tokens.append(make_token(file, symbol[0], start, start + symbol[1]))
+                cursor += symbol[1]
+                continue
 
         formatted = character == "f" and cursor + 1 < len(characters) and characters[cursor + 1] == "\""
         if character == "\"" or character == "'" or formatted:
@@ -267,16 +269,32 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 tokens.append(make_token(file, kind, start, cursor))
             continue
 
-        if is_digit(character):
+        if is_digit(character) or leading_fraction:
             cursor += 1
             while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
                 cursor += 1
-            floating = cursor + 1 < len(characters) and characters[cursor] == "." and is_digit(characters[cursor + 1])
+            floating := cursor + 1 < len(characters) and characters[cursor] == "." and is_digit(characters[cursor + 1])
             if floating:
                 cursor += 1
                 while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
                     cursor += 1
-            spelling = characters[start:cursor].join("").replace("_", "")
+            if leading_fraction:
+                floating = true
+            if cursor < len(characters) and (characters[cursor] == "e" or characters[cursor] == "E"):
+                floating = true
+                cursor += 1
+                if cursor < len(characters) and (characters[cursor] == "+" or characters[cursor] == "-"):
+                    cursor += 1
+                exponent_start = cursor
+                while cursor < len(characters) and is_digit(characters[cursor]):
+                    cursor += 1
+                if cursor == exponent_start:
+                    return error(diagnostics.Diagnostic("E000101", "floating exponent requires digits", source.Span(file.id, u32(start), u32(cursor))))
+            spelling := characters[start:cursor].join("").replace("_", "")
+            if leading_fraction:
+                spelling = "0" + spelling
+            if floating and "." not in spelling:
+                spelling = spelling.replace("e", ".0e").replace("E", ".0E")
             if floating:
                 tokens.append(make_token(file, TokenKind.Float(spelling), start, cursor))
             else:

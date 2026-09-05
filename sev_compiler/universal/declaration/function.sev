@@ -30,6 +30,8 @@ class FunctionParameter:
     binding: BindingId = BindingId(0)
     type_id: TypeId = TypeId(0)
     modifiers: list[BoundaryModifier] = []
+    variadic: bool = false
+    keyword_only: bool = false
 
 
 class ExternalCall:

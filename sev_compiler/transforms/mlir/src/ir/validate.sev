@@ -68,6 +68,14 @@ def validate_affine_expression(expression: MlirAffineExpression, dimensions: int
 
 def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationError:
     kind = attribute_kind_name(value.kind)
+    if kind == "dense_integer_array":
+        validate_type(value.type_id)
+        if not is_integer(value.type_id):
+            return error(InvalidAttribute("dense integer arrays require an integer element type"))
+        for element in value.elements:
+            if attribute_kind_name(element.kind) != "integer" or not same_type(element.type_id, value.type_id):
+                return error(InvalidAttribute("dense integer array element type mismatch"))
+        return true
     if kind == "dense_integer":
         validate_type(value.type_id)
         if type_kind_name(value.type_id.kind) != "tensor" or len(value.type_id.dimensions) != 1:
@@ -78,7 +86,10 @@ def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationErro
             if attribute_kind_name(element.kind) != "integer":
                 return error(InvalidAttribute("dense integer data contains a non-integer"))
         return true
-    if kind == "integer" or kind == "float" or kind == "type":
+    if kind == "float_literal":
+        if not is_float(value.type_id) or value.text == "":
+            return error(InvalidAttribute("floating literal requires a float type and spelling"))
+    if kind == "integer" or kind == "float" or kind == "float_literal" or kind == "type":
         validate_type(value.type_id)
     if kind == "symbol" and value.symbol == "":
         return error(InvalidAttribute("symbol references cannot be empty"))

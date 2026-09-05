@@ -14,5 +14,6 @@ enum Operation:
     Return(value: ValueId | None)
     Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
     If(condition: ValueId, then_block: Block, else_block: Block)
+    Choose(condition: ValueId, then_block: Block, else_block: Block, result: ValueId)
     Match(subject: ValueId, arms: list[MatchArm])
     CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])

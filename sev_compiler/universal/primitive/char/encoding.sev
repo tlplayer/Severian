@@ -10,6 +10,15 @@ def valid(value: int) -> bool:
     return value > 57343
 
 
+test "Unicode scalars exclude surrogates and out-of-range values":
+    assert(valid(0))
+    assert(valid(1114111))
+    assert(not valid(-1))
+    assert(not valid(1114112))
+    assert(not valid(55296))
+    assert(not valid(57343))
+
+
 def width(value: int) -> int:
     assert(valid(value))
     if value <= 127:
@@ -19,6 +28,16 @@ def width(value: int) -> int:
     if value <= 65535:
         return 3
     return 4
+
+
+test "UTF-8 widths change at scalar boundaries":
+    assert(width(127) == 1)
+    assert(width(128) == 2)
+    assert(width(2047) == 2)
+    assert(width(2048) == 3)
+    assert(width(65535) == 3)
+    assert(width(65536) == 4)
+    assert(width(1114111) == 4)
 
 
 def decode_two(first: int, second: int) -> int:

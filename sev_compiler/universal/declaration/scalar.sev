@@ -7,9 +7,34 @@ def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
     for decorator in function.decorators:
         if decorator.name == name:
             for argument in decorator.arguments:
-                match argument.value:
-                    case String:
-                        return value
-                    case _:
-                        pass
+                if argument.name == "" or (name == "c" and argument.name == "symbol"):
+                    match argument.value:
+                        case String:
+                            return value
+                        case _:
+                            pass
     return ""
+
+
+def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
+    for decorator in function.decorators:
+        if decorator.name == "mlir":
+            for argument in decorator.arguments:
+                if argument.name == "operand_segments":
+                    match argument.value:
+                        case String:
+                            segments: list[int] = []
+                            for part in value.split(","):
+                                if part == "":
+                                    throw Error("invalid MLIR operand segment size")
+                                for character in part.characters():
+                                    if character < "0" or character > "9":
+                                        throw Error("invalid MLIR operand segment size")
+                                size = int(part)
+                                if size < 0 or size > 2147483647:
+                                    throw Error("invalid MLIR operand segment size")
+                                segments.append(size)
+                            return segments
+                        case _:
+                            pass
+    return []

@@ -9,10 +9,40 @@ class ScalarOperation:
     mnemonic: string
     predicate: int = -1
     identity: int = 0
+    representation: string = "integer"
+    direct: bool = false
+
+
+# Source-library implementations for non-integer operators. These names refer
+# to the bootstrap prelude's ordinary resolved functions.
+class ScalarCallableOperation:
+    symbol: string
+    operand_type: string
+    callable: string
+
+
+def scalar_callable_operation(symbol: string, operand_type: string) -> ScalarCallableOperation | None:
+    operations = [ScalarCallableOperation("==", "string", "text.equal"), ScalarCallableOperation("!=", "string", "text.not_equal"), ScalarCallableOperation("+", "string", "text.concat")]
+    for operation in operations:
+        if operation.symbol == symbol and operation.operand_type == operand_type:
+            return operation
+    return None
 
 
 def scalar_operations() -> list[ScalarOperation]:
     return [
+        ScalarOperation("+", 1, false, "addf", representation="float"),
+        ScalarOperation("-", 1, false, "negf", representation="float", direct=true),
+        ScalarOperation("+", 2, false, "addf", representation="float"),
+        ScalarOperation("-", 2, false, "subf", representation="float"),
+        ScalarOperation("*", 2, false, "mulf", representation="float"),
+        ScalarOperation("/", 2, false, "divf", representation="float"),
+        ScalarOperation("==", 2, false, "cmpf", 1, representation="float"),
+        ScalarOperation("!=", 2, false, "cmpf", 13, representation="float"),
+        ScalarOperation("<", 2, false, "cmpf", 4, representation="float"),
+        ScalarOperation("<=", 2, false, "cmpf", 5, representation="float"),
+        ScalarOperation(">", 2, false, "cmpf", 2, representation="float"),
+        ScalarOperation(">=", 2, false, "cmpf", 3, representation="float"),
         ScalarOperation("+", 1, false, "addi"),
         ScalarOperation("-", 1, false, "subi"),
         ScalarOperation("not", 1, true, "xori", identity=1),
@@ -30,9 +60,10 @@ def scalar_operations() -> list[ScalarOperation]:
     ]
 
 
-def scalar_operation(symbol: string, arity: u8, boolean_operand: bool) -> ScalarOperation | None:
+def scalar_operation(symbol: string, arity: u8, boolean_operand: bool, representation: string = "integer") -> ScalarOperation | None:
+    selected_representation = "integer" if representation == "index" else representation
     for operation in scalar_operations():
-        if operation.symbol == symbol and operation.arity == arity and operation.boolean_operand == boolean_operand:
+        if operation.symbol == symbol and operation.arity == arity and operation.boolean_operand == boolean_operand and operation.representation == selected_representation:
             return operation
     return None
 

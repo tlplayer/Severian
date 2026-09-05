@@ -71,7 +71,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 result.items.append(universal.Function(function))
             case Test:
                 if root:
-                    result.items.append(item)
+                    test_declaration := declaration
+                    test_declaration.lookup = prefix
+                    result.items.append(universal.Test(test_declaration))
             case BindingItem:
                 if not root:
                     throw Error("imported modules must contain function declarations")
