@@ -1,45 +1,93 @@
 import universal
 
 
+class ScalarMirScope:
+    bindings: list[universal.ValueId] = []
+
+
 def scalar_value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId:
     id = universal.ValueId(u32(len(module.values)))
     module.values.append(universal.Value(id, type_id))
     return id
 
 
-def scalar_mir_expression(module: universal.Module, expression: universal.Expression) -> universal.ValueId:
+def scalar_mir_expression(module: universal.Module, block: universal.Block, scope: ScalarMirScope, expression: universal.Expression) -> universal.ValueId:
     match expression.kind:
         case LiteralValue:
             result = scalar_value(module, expression.type_id)
-            module.initializer.operations.append(universal.Operation.Constant(value, result))
+            block.operations.append(universal.Operation.Constant(value, result))
             return result
         case BindingReference:
-            return module.globals[binding.index]
+            return scope.bindings[binding.index]
         case Unary:
-            input = scalar_mir_expression(module, operand)
+            input = scalar_mir_expression(module, block, scope, operand)
             result = scalar_value(module, expression.type_id)
-            module.initializer.operations.append(universal.Operation.Unary(operator, input, result))
+            block.operations.append(universal.Operation.Unary(operator, input, result))
             return result
         case Binary:
-            lhs = scalar_mir_expression(module, left)
-            rhs = scalar_mir_expression(module, right)
+            lhs = scalar_mir_expression(module, block, scope, left)
+            rhs = scalar_mir_expression(module, block, scope, right)
             result = scalar_value(module, expression.type_id)
-            module.initializer.operations.append(universal.Operation.Binary(operator, lhs, rhs, result))
+            block.operations.append(universal.Operation.Binary(operator, lhs, rhs, result))
             return result
+        case ResolvedCall:
+            match callee:
+                case Direct:
+                    inputs: list[universal.ValueId] = []
+                    for argument in arguments:
+                        inputs.append(scalar_mir_expression(module, block, scope, argument.value))
+                    result = scalar_value(module, expression.type_id)
+                    block.operations.append(universal.Operation.Call(universal.FunctionId(function.declaration.value), inputs, result))
+                    return result
+                case _:
+                    pass
         case _:
-            throw Error("scalar semantic analysis admitted an unresolved expression")
+            pass
+    throw Error("scalar semantic analysis admitted an unresolved expression")
+
+
+def scalar_mir_block(module: universal.Module, block: universal.Block, scope: ScalarMirScope) -> universal.Block:
+    for statement in block.statements:
+        match statement:
+            case BindingStatement:
+                value = scalar_mir_expression(module, block, scope, binding.value)
+                scope.bindings.append(value)
+            case ExpressionStatement:
+                scalar_mir_expression(module, block, scope, expression)
+            case Assert:
+                value = scalar_mir_expression(module, block, scope, condition)
+                origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
+                block.operations.append(universal.Operation.Assert(value, None, origin))
+            case Return:
+                returned: universal.ValueId | None := None
+                expression_value ?= value
+                if expression_value != None:
+                    returned = scalar_mir_expression(module, block, scope, expression_value)
+                block.operations.append(universal.Operation.Return(returned))
+            case If:
+                value = scalar_mir_expression(module, block, scope, condition)
+                then_mir = scalar_mir_block(module, then_block, ScalarMirScope(scope.bindings[:]))
+                else_mir = scalar_mir_block(module, else_block, ScalarMirScope(scope.bindings[:]))
+                block.operations.append(universal.Operation.If(value, then_mir, else_mir))
+            case _:
+                throw Error("scalar semantic analysis admitted an unsupported statement")
+    return block
 
 
 def build_scalar(module: universal.Module) -> universal.Module:
-    for statement in module.initializer.statements:
-        match statement:
-            case BindingStatement:
-                value = scalar_mir_expression(module, binding.value)
-                module.globals.append(value)
-            case Assert:
-                value = scalar_mir_expression(module, condition)
-                origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
-                module.initializer.operations.append(universal.Operation.Assert(value, None, origin))
-            case _:
-                throw Error("scalar semantic analysis admitted an unsupported statement")
+    scope = ScalarMirScope()
+    module.initializer = scalar_mir_block(module, module.initializer, scope)
+    module.globals = scope.bindings
+    functions: list[universal.FunctionDeclaration] = []
+    for function in module.functions:
+        local = ScalarMirScope()
+        for type_id in function.parameter_types:
+            parameter_value = scalar_value(module, type_id)
+            local.bindings.append(parameter_value)
+            function.values.append(parameter_value)
+        body ?= function.body
+        if body != None:
+            function.body = scalar_mir_block(module, body, local)
+        functions.append(function)
+    module.functions = functions
     return module

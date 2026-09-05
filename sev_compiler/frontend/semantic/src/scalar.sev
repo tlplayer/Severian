@@ -2,16 +2,54 @@ import diagnostics
 import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
+import "../../../universal/operator/scalar.sev" as operators
 
 
 class ScalarAnalysis:
     names: list[string] = []
     types: list[universal.TypeId] = []
+    functions: list[universal.FunctionDeclaration] = []
     next_id: list[int] = [0]
 
 
-def scalar_diagnostic(message: string, span: source.Span) -> diagnostics.Diagnostic:
+def scalar_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
     return diagnostics.Diagnostic("E000200", message, span)
+
+
+def scalar_annotation(annotation: universal.TypeAnnotation) -> universal.TypeId | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Named:
+            if len(arguments) != 0:
+                return error(scalar_diagnostic("generic types are outside the scalar bootstrap subset", annotation.span))
+            known ?= scalar.scalar_type_name(name)
+            if known != None:
+                return known
+            return error(scalar_diagnostic("unknown scalar type " + name, annotation.span))
+        case _:
+            return error(scalar_diagnostic("union types are outside the scalar bootstrap subset", annotation.span))
+
+
+def scalar_hint(state: ScalarAnalysis, expression: universal.Expression) -> universal.TypeId:
+    match expression.kind:
+        case Name:
+            index := 0
+            for name_value in state.names:
+                if name_value == name:
+                    return state.types[index]
+                index += 1
+        case Call:
+            match callee.kind:
+                case Name:
+                    for function in state.functions:
+                        if function.name == name:
+                            return function.result_type
+                case _:
+                    pass
+        case Unary:
+            return scalar_hint(state, operand)
+        case _:
+            pass
+    return universal.TypeId(0)
 
 
 def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -25,6 +63,8 @@ def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, e
                         result_type = universal.TypeId(64)
                     if result_type.index == 1:
                         return error(scalar_diagnostic("an integer cannot initialize bool", expression.span))
+                    if result_type.index == 2:
+                        return error(scalar_diagnostic("an integer cannot initialize unit", expression.span))
                     number = int(spelling)
                     if result_type.index < 64:
                         limit = 1 << (int(result_type.index) - 1)
@@ -48,24 +88,65 @@ def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, e
             if not found:
                 return error(scalar_diagnostic("unknown name " + name, expression.span))
         case Unary:
-            if operator.symbol != "+" and operator.symbol != "-":
-                return error(scalar_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
+            # A signed literal's range includes its sign, so -128 is valid i8.
+            if operator.symbol == "-":
+                match operand.kind:
+                    case LiteralValue:
+                        match value:
+                            case IntegerValue:
+                                literal = universal.Expression(universal.LiteralValue(universal.IntegerValue("-" + spelling)), expression.span)
+                                return scalar_expression(state, literal, expected)
+                            case _:
+                                pass
+                    case _:
+                        pass
             resolved = scalar_expression(state, operand, expected)
             result_type = resolved.type_id
-            if result_type.index == 1:
-                return error(scalar_diagnostic("arithmetic requires integer operands", expression.span))
+            selected ?= operators.scalar_operation(operator.symbol, 1, result_type.index == 1)
+            if selected == None or result_type.index == 2:
+                return error(scalar_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
             kind = universal.Unary(operator, resolved)
         case Binary:
-            comparison = operator.symbol == "==" or operator.symbol == "!="
-            operand_type = universal.TypeId(0) if comparison else expected
+            comparison = operators.scalar_comparison(operator.symbol)
+            operand_type := universal.TypeId(0) if comparison else expected
+            if operand_type.index == 0:
+                operand_type = scalar_hint(state, left)
+                if operand_type.index == 0:
+                    operand_type = scalar_hint(state, right)
             lhs = scalar_expression(state, left, operand_type)
             rhs = scalar_expression(state, right, lhs.type_id)
-            if operator.symbol != "+" and operator.symbol != "-" and operator.symbol != "*" and not comparison:
+            selected ?= operators.scalar_operation(operator.symbol, 2, lhs.type_id.index == 1)
+            if selected == None or lhs.type_id.index == 2:
                 return error(scalar_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
-            if lhs.type_id.index == 1 and not comparison:
-                return error(scalar_diagnostic("arithmetic requires integer operands", expression.span))
             result_type = universal.TypeId(1) if comparison else lhs.type_id
             kind = universal.Binary(operator, lhs, rhs)
+        case Call:
+            match callee.kind:
+                case Name:
+                    for function in state.functions:
+                        if function.name == name:
+                            if name in state.names:
+                                return error(scalar_diagnostic("a scalar binding is not callable: " + name, expression.span))
+                            if len(arguments) != len(function.parameters):
+                                return error(scalar_diagnostic("wrong argument count for " + name, expression.span))
+                            resolved: list[universal.CallArgument] = []
+                            index := 0
+                            for argument in arguments:
+                                if argument.name != None:
+                                    return error(scalar_diagnostic("named arguments are outside the scalar bootstrap subset", argument.span))
+                                value = scalar_expression(state, argument.value, function.parameter_types[index])
+                                resolved.append(universal.CallArgument(None, value, argument.span))
+                                index += 1
+                            result_type = function.result_type
+                            kind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), resolved)
+                            id = universal.HirId(u32(state.next_id[0]))
+                            state.next_id[0] += 1
+                            if expected.index != 0 and result_type.index != expected.index:
+                                return error(scalar_diagnostic("call result does not match its expected scalar type", expression.span))
+                            return universal.Expression(kind, expression.span, id, result_type)
+                    return error(scalar_diagnostic("unknown callable " + name, expression.span))
+                case _:
+                    return error(scalar_diagnostic("call target must be a named scalar function", expression.span))
         case _:
             return error(scalar_diagnostic("expression is outside the scalar bootstrap subset", expression.span))
     if expected.index != 0 and result_type.index != expected.index:
@@ -75,47 +156,185 @@ def scalar_expression(state: ScalarAnalysis, expression: universal.Expression, e
     return universal.Expression(kind, expression.span, id, result_type)
 
 
-def analyze_scalar(module: universal.Module) -> universal.Module | diagnostics.Diagnostic:
+def scalar_binding(state: ScalarAnalysis, binding: universal.Binding) -> universal.Binding | diagnostics.Diagnostic:
+    if binding.name in state.names:
+        return error(scalar_diagnostic("duplicate scalar binding " + binding.name, binding.span))
+    expected := universal.TypeId(0)
+    annotation ?= binding.annotation
+    if annotation != None:
+        expected = scalar_annotation(annotation)
+    value = scalar_expression(state, binding.value, expected)
+    if value.type_id.index == 2:
+        return error(scalar_diagnostic("unit calls cannot initialize scalar bindings", binding.span))
+    id = universal.BindingId(u32(len(state.names)))
+    state.names.append(binding.name)
+    state.types.append(value.type_id)
+    return universal.Binding(binding.name, binding.annotation, value, false, false, binding.span, id, value.type_id)
+
+
+def scalar_expression_statement(state: ScalarAnalysis, expression: universal.Expression) -> universal.Statement | diagnostics.Diagnostic:
+    match expression.kind:
+        case Call:
+            match callee.kind:
+                case Name:
+                    if name == "assert":
+                        if len(arguments) != 1 or arguments[0].name != None:
+                            return error(scalar_diagnostic("assert requires one positional condition", expression.span))
+                        condition = scalar_expression(state, arguments[0].value, universal.TypeId(1))
+                        return universal.Assert(condition, None, expression.span, condition.span)
+                case _:
+                    pass
+            value = scalar_expression(state, expression, universal.TypeId(0))
+            return universal.ExpressionStatement(value)
+        case _:
+            pass
+    return error(scalar_diagnostic("expected a scalar binding, call, or assertion", expression.span))
+
+
+def scalar_block(state: ScalarAnalysis, statements: list[universal.Statement], result_type: universal.TypeId) -> universal.Block | diagnostics.Diagnostic:
+    output = universal.empty_block()
+    returned := false
+    index := 0
+    for statement in statements:
+        if returned:
+            return error(scalar_diagnostic("statement after unconditional return", None))
+        match statement:
+            case BindingStatement:
+                output.statements.append(universal.BindingStatement(scalar_binding(state, binding)))
+            case ExpressionStatement:
+                output.statements.append(scalar_expression_statement(state, expression))
+            case Assert:
+                if message != None:
+                    return error(scalar_diagnostic("assertion messages are outside the scalar bootstrap subset", span))
+                resolved = scalar_expression(state, condition, universal.TypeId(1))
+                output.statements.append(universal.Assert(resolved, None, span, condition_span))
+            case Return:
+                returned_value: universal.Expression | None := None
+                expression_value ?= value
+                if expression_value != None:
+                    if result_type.index == 2:
+                        return error(scalar_diagnostic("unit function cannot return a value", span))
+                    returned_value = scalar_expression(state, expression_value, result_type)
+                elif result_type.index != 2:
+                    return error(scalar_diagnostic("scalar function must return a value", span))
+                output.statements.append(universal.Return(returned_value, span))
+                returned = true
+            case If:
+                resolved = scalar_expression(state, condition, universal.TypeId(1))
+                # Move the continuation into each falling-through branch. This
+                # produces a structured, value-returning conditional without
+                # putting func.return inside an scf region.
+                tail = statements[index + 1:]
+                then_statements = scalar_continuation(then_block.statements, tail)
+                else_statements = scalar_continuation(else_block.statements, tail)
+                then_state = ScalarAnalysis(state.names[:], state.types[:], state.functions)
+                else_state = ScalarAnalysis(state.names[:], state.types[:], state.functions)
+                then_typed = scalar_block(then_state, then_statements, result_type)
+                else_typed = scalar_block(else_state, else_statements, result_type)
+                output.statements.append(universal.If(resolved, then_typed, else_typed, span))
+                return output
+            case _:
+                return error(scalar_diagnostic("statement is outside the scalar bootstrap subset", None))
+        index += 1
+    if not returned:
+        if result_type.index != 2:
+            return error(scalar_diagnostic("scalar function can reach its end without returning a value", None))
+        output.statements.append(universal.Return(None, source.Span(source.SourceId(0), 0, 0)))
+    return output
+
+
+def scalar_continuation(branch: list[universal.Statement], tail: list[universal.Statement]) -> list[universal.Statement]:
+    combined = branch[:]
+    for statement in branch:
+        match statement:
+            case Return:
+                return combined
+            case _:
+                pass
+    for statement in tail:
+        combined.append(statement)
+    return combined
+
+
+def scalar_signature(declaration: universal.FunctionDeclaration, ordinal: int) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    if len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0 or len(declaration.decorators) != 0:
+        return error(scalar_diagnostic("generic or decorated functions are outside the scalar bootstrap subset", declaration.span))
+    if declaration.body == None:
+        return error(scalar_diagnostic("scalar function requires a body", declaration.span))
+    parameter_names: list[string] = []
+    parameter_types: list[universal.TypeId] = []
+    for parameter in declaration.parameters:
+        if parameter.name in parameter_names:
+            return error(scalar_diagnostic("duplicate parameter " + parameter.name, parameter.span))
+        if parameter.default != None:
+            return error(scalar_diagnostic("parameter defaults are outside the scalar bootstrap subset", parameter.span))
+        type_id = scalar_annotation(parameter.annotation)
+        if type_id.index == 2:
+            return error(scalar_diagnostic("unit cannot be a scalar parameter", parameter.span))
+        parameter_names.append(parameter.name)
+        parameter_types.append(type_id)
+    result_type := universal.TypeId(2)
+    annotation ?= declaration.result
+    if annotation != None:
+        result_type = scalar_annotation(annotation)
+    declaration.parameter_types = parameter_types
+    declaration.result_type = result_type
+    declaration.id = universal.FunctionId(u128(ordinal + 1))
+    declaration.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal + 1)))
+    return declaration
+
+
+def analyze_scalar(module: universal.Module, include_tests: bool = false) -> universal.Module | diagnostics.Diagnostic:
     state = ScalarAnalysis()
+    function_names: list[string] = []
+    for item in module.items:
+        match item:
+            case Function:
+                if declaration.name in function_names or declaration.name == "assert":
+                    return error(scalar_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
+                function_names.append(declaration.name)
+                state.functions.append(scalar_signature(declaration, int(len(state.functions))))
+            case _:
+                pass
+    for function in state.functions:
+        local = ScalarAnalysis(functions=state.functions)
+        for parameter in function.parameters:
+            local.names.append(parameter.name)
+        local.types = function.parameter_types[:]
+        body ?= function.body
+        if body != None:
+            function.body = scalar_block(local, body.statements, function.result_type)
+        module.functions.append(function)
+        if function.name == "main" and not include_tests:
+            if len(function.parameters) != 0 or (function.result_type.index != 2 and function.result_type.index != 32):
+                return error(scalar_diagnostic("main must take no arguments and return unit or i32", function.span))
+            module.entry = function.id
     for item in module.items:
         match item:
             case BindingItem:
-                if binding.name in state.names:
-                    return error(scalar_diagnostic("duplicate scalar binding " + binding.name, binding.span))
-                expected := universal.TypeId(0)
-                annotation ?= binding.annotation
-                if annotation != None:
-                    match annotation.kind:
-                        case Named:
-                            if len(arguments) != 0:
-                                return error(scalar_diagnostic("generic types are outside the scalar bootstrap subset", annotation.span))
-                            known ?= scalar.scalar_type_name(name)
-                            if known != None:
-                                expected = known
-                            else:
-                                return error(scalar_diagnostic("unknown scalar type " + name, annotation.span))
-                        case _:
-                            return error(scalar_diagnostic("union types are outside the scalar bootstrap subset", annotation.span))
-                value = scalar_expression(state, binding.value, expected)
-                id = universal.BindingId(u32(len(state.names)))
-                resolved = universal.Binding(binding.name, binding.annotation, value, false, false, binding.span, id, value.type_id)
-                state.names.append(binding.name)
-                state.types.append(value.type_id)
+                if binding.name in function_names:
+                    return error(scalar_diagnostic("binding conflicts with function " + binding.name, binding.span))
+                resolved = scalar_binding(state, binding)
                 module.bindings.append(resolved)
                 module.initializer.statements.append(universal.BindingStatement(resolved))
             case ExpressionItem:
-                match expression.kind:
-                    case Call:
-                        match callee.kind:
-                            case Name:
-                                if name != "assert" or len(arguments) != 1:
-                                    return error(scalar_diagnostic("only assert(condition) is supported at module scope", expression.span))
-                                condition = scalar_expression(state, arguments[0].value, universal.TypeId(1))
-                                module.initializer.statements.append(universal.Assert(condition, None, expression.span, condition.span))
-                            case _:
-                                return error(scalar_diagnostic("unsupported scalar call", expression.span))
-                    case _:
-                        return error(scalar_diagnostic("expected a scalar binding or assertion", expression.span))
+                module.initializer.statements.append(scalar_expression_statement(state, expression))
+            case Function:
+                pass
+            case Test:
+                if include_tests:
+                    if len(declaration.source_modes) != 0 or len(declaration.compiler_cases) != 0:
+                        return error(scalar_diagnostic("only ordinary tests are supported by scalar test emission", declaration.span))
+                    test_state = ScalarAnalysis(functions=state.functions)
+                    test_body = scalar_block(test_state, declaration.body.statements, universal.TypeId(2))
+                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=test_body, result_type=universal.TypeId(2))
+                    ordinal = int(len(module.functions)) + 1
+                    test_function.id = universal.FunctionId(u128(ordinal))
+                    test_function.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal)))
+                    module.functions.append(test_function)
+                    resolved_test := declaration
+                    resolved_test.function = test_function.id
+                    module.tests.append(resolved_test)
             case _:
-                return error(diagnostics.Diagnostic("E000200", "declaration is outside the scalar bootstrap subset", None))
+                return error(scalar_diagnostic("declaration is outside the scalar bootstrap subset", None))
     return module

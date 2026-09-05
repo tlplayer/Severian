@@ -1,0 +1,49 @@
+def twice(value: i32) -> i32:
+    result = add(value, value)
+    return result
+
+def add(left: i32, right: i32) -> i32:
+    return left + right
+
+def inverted(value: bool) -> bool:
+    return not value
+
+def minimum() -> i8:
+    return -128
+
+def fib(value: int) -> int:
+    if value < 2:
+        return value
+    return fib(value - 1) + fib(value - 2)
+
+def absolute(value: i16) -> i16:
+    if value < 0:
+        result = -value
+        return result
+    else:
+        result = value
+        return result
+
+def check():
+    assert(twice(21) == 42)
+    assert(inverted(false))
+    assert(not inverted(true))
+
+test "forward calls and isolated local bindings":
+    result: i32 = 17
+    assert(add(twice(10), twice(11)) == 42)
+    assert(result == 17)
+    check()
+
+test "signed primitive bounds and comparisons":
+    assert(minimum() == -128)
+    assert(absolute(-7) == 7)
+    assert(absolute(8) == 8)
+    assert(add(-1, 0) < 0)
+    assert(add(1, 0) <= 1)
+    assert(add(1, 0) > 0)
+    assert(add(1, 0) >= 1)
+    assert(add(1, 0) != 2)
+
+test "recursive calls use runtime parameters":
+    assert(fib(10) == 55)

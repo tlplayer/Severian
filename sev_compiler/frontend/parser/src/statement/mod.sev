@@ -321,6 +321,20 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     return (universal.Block(statements, [], []), end)
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "if"):
+        start = parser_next(parser).span
+        condition = parser_expression(parser, 0)
+        parser_expect(parser, Colon, "expected colon after if condition")
+        taken = parser_indented_block(parser, "if")
+        otherwise := universal.empty_block()
+        end := taken[1]
+        if parser_at_identifier(parser, "else"):
+            parser_next(parser)
+            parser_expect(parser, Colon, "expected colon after else")
+            rejected = parser_indented_block(parser, "else")
+            otherwise = rejected[0]
+            end = rejected[1]
+        return universal.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
     if parser_at_identifier(parser, "return"):
         start = parser_next(parser).span
         if parser_at_simple(parser, Newline) or parser_at_simple(parser, Dedent):

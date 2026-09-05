@@ -182,17 +182,21 @@ def region_by_number(program: MlirProgram, id: int) -> MlirRegion:
     return selected
 
 
-def print_region(program: MlirProgram, region_id: int, indentation: string) -> string:
+def print_region(program: MlirProgram, region_id: int, indentation: string, function_entry: bool = false) -> string:
     region = region_by_number(program, region_id)
     output := "{\n"
+    first := true
     for block in region.blocks:
-        if len(block.arguments) != 0:
+        # func.func already names entry arguments in its signature. Generic
+        # operation regions and subsequent CFG blocks own their block labels.
+        if not (function_entry and first) and (len(block.arguments) != 0 or len(region.blocks) > 1):
             arguments: list[string] = []
             for argument in block.arguments:
                 arguments.append(value_text(argument) + ": " + type_text(argument.type_id))
             output += indentation + "^bb" + string(block.id) + "(" + arguments.join(", ") + "):\n"
         for operation in block.operations:
             output += print_operation(program, operation, indentation + "  ")
+        first = false
     output += indentation[:int(len(indentation)) - 2] + "}"
     return output
 
@@ -231,7 +235,7 @@ def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
     output += parameters.join(", ") + ")" + result
     if function.declaration:
         return output + "\n"
-    output += " " + print_region(program, function.body_region, "    ") + "\n"
+    output += " " + print_region(program, function.body_region, "    ", true) + "\n"
     return output
 
 

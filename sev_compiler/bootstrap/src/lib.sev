@@ -7,10 +7,10 @@ import "../../transforms/mlir/src/emit/scalar.sev" as mlir
 import "../../transforms/mlir/src/ir/text.sev" as text
 
 
-def compile_to_mlir(input: source.SourceFile) -> string:
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false) -> string:
     tokens = lexer.scan(input)
     parsed = parser.parse(tokens)
-    typed = semantic.analyze_scalar(parsed)
+    typed = semantic.analyze_scalar(parsed, include_tests)
     lowered = mir.build_scalar(typed)
     program = mlir.lower_scalar(lowered)
     return text.print_program(program)

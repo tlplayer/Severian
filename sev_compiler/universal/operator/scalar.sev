@@ -1,0 +1,44 @@
+# The symbol/signature/lowering relation is source data. Consumers share the
+# relation instead of maintaining separate operator-name dispatch tables.
+# This first lowering form covers homogeneous integer operations, comparisons,
+# and unary operations expressed with an identity constant.
+class ScalarOperation:
+    symbol: string
+    arity: u8
+    boolean_operand: bool
+    mnemonic: string
+    predicate: int = -1
+    identity: int = 0
+
+
+def scalar_operations() -> list[ScalarOperation]:
+    return [
+        ScalarOperation("+", 1, false, "addi"),
+        ScalarOperation("-", 1, false, "subi"),
+        ScalarOperation("not", 1, true, "xori", identity=1),
+        ScalarOperation("+", 2, false, "addi"),
+        ScalarOperation("-", 2, false, "subi"),
+        ScalarOperation("*", 2, false, "muli"),
+        ScalarOperation("==", 2, false, "cmpi", 0),
+        ScalarOperation("!=", 2, false, "cmpi", 1),
+        ScalarOperation("<", 2, false, "cmpi", 2),
+        ScalarOperation("<=", 2, false, "cmpi", 3),
+        ScalarOperation(">", 2, false, "cmpi", 4),
+        ScalarOperation(">=", 2, false, "cmpi", 5),
+        ScalarOperation("==", 2, true, "cmpi", 0),
+        ScalarOperation("!=", 2, true, "cmpi", 1),
+    ]
+
+
+def scalar_operation(symbol: string, arity: u8, boolean_operand: bool) -> ScalarOperation | None:
+    for operation in scalar_operations():
+        if operation.symbol == symbol and operation.arity == arity and operation.boolean_operand == boolean_operand:
+            return operation
+    return None
+
+
+def scalar_comparison(symbol: string) -> bool:
+    for operation in scalar_operations():
+        if operation.symbol == symbol and operation.arity == 2 and operation.predicate >= 0:
+            return true
+    return false

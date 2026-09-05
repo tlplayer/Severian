@@ -1,24 +1,41 @@
 import universal
 import "../../../../universal/type/scalar.sev" as scalar
+import "../../../../universal/operator/scalar.sev" as operators
 import "../ir/lib.sev"
 
 
 def scalar_mlir_type(id: universal.TypeId) -> MlirType:
+    if id.index == 2:
+        throw Error("unit has no scalar SSA value")
     known ?= scalar.scalar_type(id)
     if known != None:
         return integer_type(known.bits, not known.boolean)
-    throw Error("scalar MIR has an unknown type")
+    throw Error("scalar MIR has an unknown value type")
+
+
+def scalar_mlir_results(id: universal.TypeId) -> list[MlirType]:
+    if id.index == 2:
+        return []
+    return [scalar_mlir_type(id)]
 
 
 def scalar_mlir_value(module: universal.Module, id: universal.ValueId) -> MlirValue:
     return MlirValue(int(id.index), scalar_mlir_type(module.values[id.index].type_id))
 
 
-def lower_scalar(module: universal.Module) -> MlirProgram:
-    builder = MlirOpBuilder(int(len(module.values)))
-    entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
-    builder_set_insertion_point(builder, entry.entry)
-    for operation in module.initializer.operations:
+def scalar_function_symbol(id: universal.FunctionId) -> string:
+    return "__sev_scalar_" + string(id.value)
+
+
+def scalar_return(builder: MlirOpBuilder, values: list[MlirValue], nested: bool):
+    if nested:
+        builder_create_operation(builder, operation_name("scf", "yield"), values, [], [], [], true)
+    else:
+        builder_return(builder, values)
+
+
+def scalar_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: universal.Block, result_type: universal.TypeId, nested: bool):
+    for operation in block.operations:
         match operation:
             case Constant:
                 output = scalar_mlir_value(module, result)
@@ -32,33 +49,97 @@ def lower_scalar(module: universal.Module) -> MlirProgram:
             case Unary:
                 input = scalar_mlir_value(module, operand)
                 output = scalar_mlir_value(module, result)
-                zero = builder_new_value(builder, input.type_id)
-                builder_constant(builder, zero, integer_attribute(0, input.type_id))
-                if operator.symbol == "-":
-                    builder_binary(builder, output, operation_name("arith", "subi"), zero, input)
+                selected ?= operators.scalar_operation(operator.symbol, 1, module.values[operand.index].type_id.index == 1)
+                if selected != None:
+                    identity = builder_new_value(builder, input.type_id)
+                    builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
+                    builder_binary(builder, output, operation_name("arith", selected.mnemonic), identity, input)
                 else:
-                    builder_binary(builder, output, operation_name("arith", "addi"), zero, input)
+                    throw Error("scalar MIR has an unregistered unary operation")
             case Binary:
                 lhs = scalar_mlir_value(module, left)
                 rhs = scalar_mlir_value(module, right)
                 output = scalar_mlir_value(module, result)
-                if operator.symbol == "==" or operator.symbol == "!=":
-                    predicate = 0 if operator.symbol == "==" else 1
-                    attributes = [MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64)))]
-                    builder_binary(builder, output, operation_name("arith", "cmpi"), lhs, rhs, attributes)
+                selected ?= operators.scalar_operation(operator.symbol, 2, module.values[left.index].type_id.index == 1)
+                if selected != None:
+                    attributes: list[MlirNamedAttribute] = []
+                    if selected.predicate >= 0:
+                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(selected.predicate, integer_type(64))))
+                    builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
                 else:
-                    mnemonic := "addi"
-                    if operator.symbol == "-":
-                        mnemonic = "subi"
-                    elif operator.symbol == "*":
-                        mnemonic = "muli"
-                    builder_binary(builder, output, operation_name("arith", mnemonic), lhs, rhs)
+                    throw Error("scalar MIR has an unregistered binary operation")
+            case Call:
+                inputs: list[MlirValue] = []
+                for argument in arguments:
+                    inputs.append(scalar_mlir_value(module, argument))
+                outputs: list[MlirValue] = []
+                if module.values[result.index].type_id.index != 2:
+                    outputs.append(scalar_mlir_value(module, result))
+                builder_call(builder, scalar_function_symbol(function), inputs, outputs)
+            case Return:
+                outputs: list[MlirValue] = []
+                returned ?= value
+                if returned != None:
+                    outputs.append(scalar_mlir_value(module, returned))
+                scalar_return(builder, outputs, nested)
+            case If:
+                saved = builder.insertion[0]
+                then_region = builder_create_region(builder)
+                then_entry = builder_create_block(builder, then_region)
+                builder_set_insertion_point(builder, then_entry)
+                scalar_mlir_block(builder, module, then_block, result_type, true)
+                else_region = builder_create_region(builder)
+                else_entry = builder_create_block(builder, else_region)
+                builder_set_insertion_point(builder, else_entry)
+                scalar_mlir_block(builder, module, else_block, result_type, true)
+                builder_set_insertion_point(builder, saved)
+                outputs: list[MlirValue] = []
+                if result_type.index != 2:
+                    outputs.append(builder_new_value(builder, scalar_mlir_type(result_type)))
+                builder_create_operation(builder, operation_name("scf", "if"), [scalar_mlir_value(module, condition)], outputs, [], [then_region, else_region])
+                scalar_return(builder, outputs, nested)
             case Assert:
                 builder_assert(builder, scalar_mlir_value(module, condition), "assertion failed")
             case _:
                 throw Error("unsupported scalar MIR operation")
-    status = builder_new_value(builder, integer_type(32))
-    builder_constant(builder, status, integer_attribute(0, status.type_id))
-    builder_return(builder, [status])
+
+
+def lower_scalar(module: universal.Module) -> MlirProgram:
+    builder = MlirOpBuilder(int(len(module.values)))
+    handles: list[MlirFunctionHandle] = []
+    for function in module.functions:
+        parameters: list[MlirValue] = []
+        for value in function.values:
+            parameters.append(scalar_mlir_value(module, value))
+        handles.append(builder_create_function(builder, scalar_function_symbol(function.id), private_visibility(), parameters, scalar_mlir_results(function.result_type)))
+    index := 0
+    for function in module.functions:
+        builder_set_insertion_point(builder, handles[index].entry)
+        body ?= function.body
+        if body != None:
+            scalar_mlir_block(builder, module, body, function.result_type, false)
+        index += 1
+    entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
+    builder_set_insertion_point(builder, entry.entry)
+    scalar_mlir_block(builder, module, module.initializer, universal.TypeId(2), false)
+    for test in module.tests:
+        function ?= test.function
+        if function != None:
+            builder_call(builder, scalar_function_symbol(function), [], [])
+    outputs: list[MlirValue] = []
+    main ?= module.entry
+    if main != None:
+        for function in module.functions:
+            if function.id.value == main.value:
+                if function.result_type.index == 2:
+                    builder_call(builder, scalar_function_symbol(main), [], [])
+                else:
+                    outputs.append(builder_new_value(builder, scalar_mlir_type(function.result_type)))
+                    builder_call(builder, scalar_function_symbol(main), [], outputs)
+    if len(outputs) == 0:
+        status = builder_new_value(builder, integer_type(32))
+        builder_constant(builder, status, integer_attribute(0, status.type_id))
+        outputs.append(status)
+    builder_return(builder, outputs)
     validate(builder.program)
     return builder.program

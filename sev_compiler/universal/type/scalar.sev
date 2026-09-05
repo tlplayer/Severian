@@ -11,7 +11,7 @@ class ScalarType:
 
 
 def scalar_types() -> list[ScalarType]:
-    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
+    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(2), "unit", 0, false), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
 
 
 def scalar_type_name(name: string) -> TypeId | None:
