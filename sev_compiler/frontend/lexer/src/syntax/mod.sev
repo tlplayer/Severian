@@ -36,7 +36,7 @@ def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -
 def token_word(token: Token) -> string:
     match token.kind:
         case Identifier:
-            return value
+            return token_text(token)
         case _:
             return ""
 
@@ -53,7 +53,7 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
             bases: list[string] = []
             in_bases := false
             while cursor < len(tokens) and tokens[cursor].kind != Newline and tokens[cursor].kind != Eof:
-                if tokens[cursor].kind == Colon:
+                if token_is_symbol(tokens[cursor], ":"):
                     in_bases = true
                 elif in_bases and token_word(tokens[cursor]) != "":
                     bases.append(token_word(tokens[cursor]))
@@ -79,12 +79,12 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
                             bases.append(token_word(current))
                         if token_word(current) == "property":
                             property_cursor += 1
-                        if property_cursor + 1 < len(tokens) and (tokens[property_cursor + 1].kind == Colon or tokens[property_cursor + 1].kind == Equal):
+                        if property_cursor + 1 < len(tokens) and (token_is_symbol(tokens[property_cursor + 1], ":") or token_is_symbol(tokens[property_cursor + 1], "=")):
                             property_name = token_word(tokens[property_cursor])
                             property_cursor += 1
-                            while property_cursor < len(tokens) and tokens[property_cursor].kind != Equal and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
+                            while property_cursor < len(tokens) and not token_is_symbol(tokens[property_cursor], "=") and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
                                 property_cursor += 1
-                            if property_cursor < len(tokens) and tokens[property_cursor].kind == Equal:
+                            if property_cursor < len(tokens) and token_is_symbol(tokens[property_cursor], "="):
                                 property_cursor += 1
                                 values: list[Token] = []
                                 while property_cursor < len(tokens) and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
@@ -163,25 +163,16 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 if property.name == "symbol":
                     symbol = ""
                     for token in property.tokens:
-                        match token.kind:
-                            case String:
-                                symbol += value
-                            case SymbolToken:
-                                symbol += value
-                            case Identifier:
-                                symbol += value
-                            case Equal:
-                                symbol += "="
-                            case Pipe:
-                                symbol += "|"
-                            case _:
-                                return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
+                        if token.kind == TokenKind.String or token.kind == TokenKind.Symbol or token.kind == TokenKind.Identifier:
+                            symbol += token_text(token)
+                        else:
+                            return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
                 elif property.name == "precedence":
                     if len(property.tokens) != 1:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
                     match property.tokens[0].kind:
                         case Integer:
-                            precedence = int(value)
+                            precedence = int(token_number(property.tokens[0]))
                         case _:
                             if token_word(property.tokens[0]) == "absent":
                                 continue
@@ -193,7 +184,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         form = "Body" if property.name == "left" else "ConditionBody"
                         fixity = universal.Fixity.Prefix
                 elif property.name == "form":
-                    if len(property.tokens) != 3 or token_word(property.tokens[0]) != "GrammarForm" or property.tokens[1].kind != Dot:
+                    if len(property.tokens) != 3 or token_word(property.tokens[0]) != "GrammarForm" or not token_is_symbol(property.tokens[1], "."):
                         return error(diagnostics.diagnostic_at("E000103", "grammar form requires GrammarForm", descriptor.span))
                     form = token_word(property.tokens[2])
                     if form != "Infix" and form != "Prefix" and form != "Postfix":
@@ -204,7 +195,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         fixity = universal.Fixity.Postfix
                 elif property.name == "fixity" or property.name == "associativity":
                     contextual = descriptor.grammar and len(property.tokens) == 1
-                    if not contextual and (len(property.tokens) != 3 or property.tokens[1].kind != Dot):
+                    if not contextual and (len(property.tokens) != 3 or not token_is_symbol(property.tokens[1], ".")):
                         return error(diagnostics.diagnostic_at("E000103", "operator form must name an enum member", descriptor.span))
                     member = token_word(property.tokens[0] if contextual else property.tokens[2])
                     if property.name == "fixity":

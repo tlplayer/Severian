@@ -6,19 +6,12 @@ import "rule.sev"
 
 class LexicalSymbol:
     spelling: string
-    kind: TokenKind
 
 
 def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
     # Only the declaration/structural bootstrap is closed. Value operations are
     # supplied by registered source descriptors and use one open token category.
-    symbols = [LexicalSymbol("@", At), LexicalSymbol(":", Colon),
-        LexicalSymbol(":=", ColonEqual), LexicalSymbol("?=", QuestionEqual),
-        LexicalSymbol("=", Equal), LexicalSymbol("->", Arrow),
-        LexicalSymbol("(", LeftParen), LexicalSymbol(")", RightParen),
-        LexicalSymbol("[", LeftBracket), LexicalSymbol("]", RightBracket),
-        LexicalSymbol("{", LeftBrace), LexicalSymbol("}", RightBrace),
-        LexicalSymbol("|", Pipe), LexicalSymbol(",", Comma), LexicalSymbol(".", Dot)]
+    symbols = [LexicalSymbol("@"), LexicalSymbol(":"), LexicalSymbol(":="), LexicalSymbol("?="), LexicalSymbol("="), LexicalSymbol("->"), LexicalSymbol("("), LexicalSymbol(")"), LexicalSymbol("["), LexicalSymbol("]"), LexicalSymbol("{"), LexicalSymbol("}"), LexicalSymbol("|"), LexicalSymbol(","), LexicalSymbol(".")]
     for operation in operators:
         characters = operation.symbol.characters()
         if len(characters) == 0:
@@ -31,7 +24,7 @@ def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSy
             if previous.spelling == operation.symbol:
                 found = true
         if not found:
-            symbols.append(LexicalSymbol(operation.symbol, SymbolToken(operation.symbol)))
+            symbols.append(LexicalSymbol(operation.symbol))
     return symbols
 
 
@@ -60,5 +53,5 @@ class SymbolLexeme: LexicalRule
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         symbol ?= match_symbol(input.characters, start, symbols)
         if symbol != None:
-            return LexemeMatch(start + int(len(symbol.spelling.characters())), symbol.kind)
+            return LexemeMatch(start + int(len(symbol.spelling.characters())), TokenKind.Symbol)
         return LexemeMatch(start, None, false)

@@ -22,7 +22,7 @@ def macro_identifier(input: parser.Parser) -> string:
     token = parser.parser_next(input)
     match token.kind:
         case Identifier:
-            return value
+            return lexer.token_text(token)
         case _:
             throw Error("expected macro identifier")
 
@@ -30,20 +30,20 @@ def macro_identifier(input: parser.Parser) -> string:
 def macro_definition(input: parser.Parser) -> ScalarMacro:
     parser.parser_next(input)
     name = macro_identifier(input)
-    parser.parser_expect(input, LeftBracket, "expected macro type parameters")
+    parser.parser_expect_symbol(input, "[", "expected macro type parameters")
     bindings: list[string] = []
-    while not parser.parser_at_simple(input, RightBracket):
+    while not parser.parser_at_symbol(input, "]"):
         parameter = macro_identifier(input)
-        parser.parser_expect(input, Colon, "expected macro type binding")
+        parser.parser_expect_symbol(input, ":", "expected macro type binding")
         binding = macro_identifier(input)
         if binding in bindings:
             throw Error("duplicate macro type binding")
         bindings.append(binding)
-        if parser.parser_take(input, Comma) == None:
+        if parser.parser_take_symbol(input, ",") == None:
             break
-    parser.parser_expect(input, RightBracket, "expected closing macro parameters")
-    parser.parser_expect(input, LeftParen, "expected macro argument list")
-    parser.parser_expect(input, RightParen, "enumerative macros take no runtime arguments")
+    parser.parser_expect_symbol(input, "]", "expected closing macro parameters")
+    parser.parser_expect_symbol(input, "(", "expected macro argument list")
+    parser.parser_expect_symbol(input, ")", "enumerative macros take no runtime arguments")
     if macro_identifier(input) != "with":
         throw Error("expected enumerative macro constraints")
     families: list[string] = []
@@ -57,7 +57,7 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
         if family != "int" and family != "float":
             throw Error("unsupported scalar macro family " + family)
         families.append(family)
-    parser.parser_expect(input, Colon, "expected macro body")
+    parser.parser_expect_symbol(input, ":", "expected macro body")
     parser.parser_expect(input, Newline, "expected newline after macro")
     parser.parser_separators(input)
     parser.parser_expect(input, Indent, "expected indented macro body")
@@ -77,10 +77,10 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
         if depth == 1:
             match token.kind:
                 case Identifier:
-                    if value == "def":
+                    if lexer.token_text(token) == "def":
                         match parser.parser_peek(input).kind:
                             case Identifier:
-                                functions.append(value)
+                                functions.append(lexer.token_text(parser.parser_peek(input)))
                             case _:
                                 throw Error("expected generated function name")
                 case _:
@@ -93,11 +93,11 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
 
 def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) -> lexer.Token:
     if name == "id":
-        return lexer.token_from_lexeme(lexer.Integer("" + string(type.id.index)), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, "" + string(type.id.index))
     if name == "bits":
-        return lexer.token_from_lexeme(lexer.Integer("" + string(type.bits)), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, "" + string(type.bits))
     if name == "signed":
-        return lexer.token_from_lexeme(lexer.Identifier("false" if type.id.index == 108 else "true"), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Identifier, lexeme, "false" if type.id.index == 108 else "true")
     if type.representation == "float":
         throw Error("unsupported floating type property " + name)
     lower := "0"
@@ -114,13 +114,13 @@ def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) 
             upper = "" + string(limit)
             maximum = "" + string(limit - 1)
     if name == "min":
-        return lexer.token_from_lexeme(lexer.Integer(lower), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, lower)
     if name == "max":
-        return lexer.token_from_lexeme(lexer.Integer(maximum), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, maximum)
     if name == "min_float":
-        return lexer.token_from_lexeme(lexer.Float(lower + ".0"), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Float, lexeme, lower + ".0")
     if name == "upper_float":
-        return lexer.token_from_lexeme(lexer.Float(upper + ".0"), lexeme)
+        return lexer.token_from_lexeme(lexer.TokenKind.Float, lexeme, upper + ".0")
     throw Error("unsupported scalar type property " + name)
 
 
@@ -214,20 +214,21 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
         replacement := token
         match token.kind:
             case Identifier:
+                value = lexer.token_text(token)
                 index := 0
                 for binding in definition.bindings:
                     if value == binding:
-                        replacement = lexer.token_from_lexeme(lexer.Identifier(types[index].name), token.lexeme)
-                        if cursor + 1 < len(definition.tokens) and definition.tokens[cursor].kind == Dot:
+                        replacement = lexer.token_from_lexeme(lexer.TokenKind.Identifier, token.lexeme, types[index].name)
+                        if cursor + 1 < len(definition.tokens) and lexer.token_is_symbol(definition.tokens[cursor], "."):
                             match definition.tokens[cursor + 1].kind:
                                 case Identifier:
-                                    replacement = macro_property(types[index], value, token.lexeme)
+                                    replacement = macro_property(types[index], lexer.token_text(definition.tokens[cursor + 1]), token.lexeme)
                                 case _:
                                     throw Error("expected scalar type property")
                             cursor += 2
                     index += 1
                 if value in definition.functions:
-                    replacement = lexer.token_from_lexeme(lexer.Identifier(value + suffix), token.lexeme)
+                    replacement = lexer.token_from_lexeme(lexer.TokenKind.Identifier, token.lexeme, value + suffix)
             case _:
                 pass
         tokens.append(replacement)
@@ -275,7 +276,7 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
     depth := 0
     line_start := true
     while not parser.parser_at_simple(input, Eof):
-        if depth == 0 and line_start and parser.parser_at_simple(input, Arrow):
+        if depth == 0 and line_start and parser.parser_at_symbol(input, "->"):
             definition = macro_definition(input)
             for previous in definitions:
                 if previous.name == definition.name:
@@ -290,17 +291,17 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
                         return error(diagnostics.diagnostic_at("E000120", "duplicate macro expansion " + definition.name, parser.parser_peek(input).span))
                     invoked.append(definition.name)
                     parser.parser_next(input)
-                    parser.parser_expect(input, LeftBracket, "expected macro family arguments")
+                    parser.parser_expect_symbol(input, "[", "expected macro family arguments")
                     index := 0
                     for family in definition.families:
                         if index > 0:
-                            parser.parser_expect(input, Comma, "expected macro family separator")
+                            parser.parser_expect_symbol(input, ",", "expected macro family separator")
                         if macro_identifier(input) != family:
                             return error(diagnostics.diagnostic_at("E000120", "macro argument must name its constrained family", parser.parser_peek(input).span))
                         index += 1
-                    parser.parser_expect(input, RightBracket, "expected end of macro family arguments")
-                    parser.parser_expect(input, LeftParen, "expected macro invocation")
-                    parser.parser_expect(input, RightParen, "enumerative macros take no runtime arguments")
+                    parser.parser_expect_symbol(input, "]", "expected end of macro family arguments")
+                    parser.parser_expect_symbol(input, "(", "expected macro invocation")
+                    parser.parser_expect_symbol(input, ")", "enumerative macros take no runtime arguments")
                     parser.parser_expect(input, Newline, "macro invocation must occupy a statement")
                     macro_enumerate(definition, [], expanded)
                     invocation = true

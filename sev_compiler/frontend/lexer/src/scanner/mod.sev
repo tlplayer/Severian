@@ -72,13 +72,14 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                         pass
                 token = make_token(input, kind, start, cursor)
                 token.syntaxes = metadata
+                token.value = result.value
                 tokens.append(token)
                 if kind == TokenKind.Newline:
                     line_start = character == "\n"
             continue
 
         if discovery:
-            tokens.append(make_token(input, TokenKind.SymbolToken(character), start, start + 1))
+            tokens.append(make_token(input, TokenKind.Symbol, start, start + 1))
             cursor += 1
             continue
         return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), lexeme_span(input, start, start + 1)))
@@ -118,13 +119,20 @@ def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[T
 test "lexical classes preserve numeric forms and identifier boundaries":
     input = source.virtual_source("lexemes.sev", "12 12.5 .5 1_024 2e-3 foo_2 fuse_count")
     tokens = scan_tokens(input, [])
-    assert(tokens[0].kind == TokenKind.Integer("12"))
-    assert(tokens[1].kind == TokenKind.Float("12.5"))
-    assert(tokens[2].kind == TokenKind.Float("0.5"))
-    assert(tokens[3].kind == TokenKind.Integer("1024"))
-    assert(tokens[4].kind == TokenKind.Float("2.0e-3"))
-    assert(tokens[5].kind == TokenKind.Identifier("foo_2"))
-    assert(tokens[6].kind == TokenKind.Identifier("fuse_count"))
+    assert(tokens[0].kind == TokenKind.Integer)
+    assert(token_number(tokens[0]) == "12")
+    assert(tokens[1].kind == TokenKind.Float)
+    assert(token_number(tokens[1]) == "12.5")
+    assert(tokens[2].kind == TokenKind.Float)
+    assert(token_number(tokens[2]) == "0.5")
+    assert(tokens[3].kind == TokenKind.Integer)
+    assert(token_number(tokens[3]) == "1024")
+    assert(tokens[4].kind == TokenKind.Float)
+    assert(token_number(tokens[4]) == "2.0e-3")
+    assert(tokens[5].kind == TokenKind.Identifier)
+    assert(token_text(tokens[5]) == "foo_2")
+    assert(tokens[6].kind == TokenKind.Identifier)
+    assert(token_text(tokens[6]) == "fuse_count")
     assert(tokens[7].kind == TokenKind.Eof)
 
 
@@ -136,10 +144,10 @@ test "one symbol rule matches the longest registered spelling":
         universal.OperatorSyntax("fuse", universal.Fixity.Infix, 7, universal.Associativity.Left)]
     input = source.virtual_source("symbols.sev", "+== += + |> fuse fuse_count")
     tokens = scan_tokens(input, operators)
-    assert(tokens[0].kind == TokenKind.SymbolToken("+=="))
-    assert(tokens[1].kind == TokenKind.SymbolToken("+="))
-    assert(tokens[2].kind == TokenKind.SymbolToken("+"))
-    assert(tokens[3].kind == TokenKind.SymbolToken("|>"))
+    assert(token_is_symbol(tokens[0], "+=="))
+    assert(token_is_symbol(tokens[1], "+="))
+    assert(token_is_symbol(tokens[2], "+"))
+    assert(token_is_symbol(tokens[3], "|>"))
     assert(len(tokens[4].syntaxes) == 1)
     assert(len(tokens[5].syntaxes) == 0)
     assert(tokens[3].span.start == 9)
@@ -149,11 +157,11 @@ test "one symbol rule matches the longest registered spelling":
 test "bootstrap discovery does not activate value symbols":
     input = source.virtual_source("bootstrap.sev", "|> +==")
     tokens = scan_bootstrap(input)
-    assert(tokens[0].kind == TokenKind.Pipe)
-    assert(tokens[1].kind == TokenKind.SymbolToken(">"))
-    assert(tokens[2].kind == TokenKind.SymbolToken("+"))
-    assert(tokens[3].kind == TokenKind.Equal)
-    assert(tokens[4].kind == TokenKind.Equal)
+    assert(token_is_symbol(tokens[0], "|"))
+    assert(token_is_symbol(tokens[1], ">"))
+    assert(token_is_symbol(tokens[2], "+"))
+    assert(token_is_symbol(tokens[3], "="))
+    assert(token_is_symbol(tokens[4], "="))
     for token in tokens:
         assert(len(token.syntaxes) == 0)
 
@@ -162,27 +170,35 @@ test "strings characters and interpolation retain decoding and syntax":
     input = source.virtual_source("strings.sev", "\"hi\\n\" 'λ' f\"{1 + 2}\" \"\"\"\n    block\n    text\n\"\"\"")
     operators = [universal.operator_syntax(universal.Add())]
     tokens = scan_tokens(input, operators)
-    assert(tokens[0].kind == TokenKind.String("hi\n"))
-    assert(tokens[1].kind == TokenKind.Character(955))
-    assert(tokens[2].kind == TokenKind.FormattedString("{1 + 2}"))
+    assert(tokens[0].kind == TokenKind.String)
+    assert(token_text(tokens[0]) == "hi\n")
+    assert(tokens[1].kind == TokenKind.Character)
+    assert(literal_codepoint(token_text(tokens[1])) == 955)
+    assert(tokens[2].kind == TokenKind.FormattedString)
+    assert(token_text(tokens[2]) == "{1 + 2}")
     assert(len(tokens[2].syntaxes) == 1)
-    assert(tokens[3].kind == TokenKind.String("block\ntext\n"))
+    assert(tokens[3].kind == TokenKind.String)
+    assert(token_text(tokens[3]) == "block\ntext\n")
 
 
 test "comments blank lines and indentation share structural state":
     input = source.virtual_source("indent.sev", "root\n    # comment\n    first; second\n\nlast")
     tokens = scan_tokens(input, [])
-    assert(tokens[0].kind == TokenKind.Identifier("root"))
+    assert(tokens[0].kind == TokenKind.Identifier)
+    assert(token_text(tokens[0]) == "root")
     assert(tokens[1].kind == TokenKind.Newline)
     assert(tokens[2].kind == TokenKind.Newline)
     assert(tokens[3].kind == TokenKind.Indent)
-    assert(tokens[4].kind == TokenKind.Identifier("first"))
+    assert(tokens[4].kind == TokenKind.Identifier)
+    assert(token_text(tokens[4]) == "first")
     assert(tokens[5].kind == TokenKind.Newline)
-    assert(tokens[6].kind == TokenKind.Identifier("second"))
+    assert(tokens[6].kind == TokenKind.Identifier)
+    assert(token_text(tokens[6]) == "second")
     assert(tokens[7].kind == TokenKind.Newline)
     assert(tokens[8].kind == TokenKind.Newline)
     assert(tokens[9].kind == TokenKind.Dedent)
-    assert(tokens[10].kind == TokenKind.Identifier("last"))
+    assert(tokens[10].kind == TokenKind.Identifier)
+    assert(token_text(tokens[10]) == "last")
     assert(tokens[11].kind == TokenKind.Eof)
 
 
@@ -208,15 +224,19 @@ test "tokens preserve matched spelling separately from classified payload":
     operators = [universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left)]
     tokens = scan_tokens(input, operators)
     assert(tokens[0].lexeme.text == "total")
-    assert(tokens[0].kind == TokenKind.Identifier("total"))
+    assert(tokens[0].kind == TokenKind.Identifier)
+    assert(token_text(tokens[0]) == "total")
     assert(tokens[1].lexeme.text == "+=")
-    assert(tokens[1].kind == TokenKind.SymbolToken("+="))
+    assert(token_is_symbol(tokens[1], "+="))
     assert(tokens[2].lexeme.text == "1_024")
-    assert(tokens[2].kind == TokenKind.Integer("1024"))
+    assert(tokens[2].kind == TokenKind.Integer)
+    assert(token_number(tokens[2]) == "1024")
     assert(tokens[3].lexeme.text == ".5")
-    assert(tokens[3].kind == TokenKind.Float("0.5"))
+    assert(tokens[3].kind == TokenKind.Float)
+    assert(token_number(tokens[3]) == "0.5")
     assert(tokens[4].lexeme.text == "\"a\\n\"")
-    assert(tokens[4].kind == TokenKind.String("a\n"))
+    assert(tokens[4].kind == TokenKind.String)
+    assert(token_text(tokens[4]) == "a\n")
     for token in tokens:
         assert(token.lexeme.span.source.index == token.span.source.index)
         assert(token.lexeme.span.start == token.span.start)
@@ -237,3 +257,28 @@ test "structural tokens retain indentation and zero-width EOF origins":
     assert(tokens[4].span.start == tokens[4].span.end)
     assert(tokens[5].kind == TokenKind.Eof)
     assert(tokens[5].lexeme.text == "")
+
+
+test "all bootstrap punctuation uses the open symbol category":
+    spellings = ["@", ":", ":=", "?=", "=", "->", "(", ")", "[", "]", "{", "}", "|", ",", "."]
+    tokens = scan_tokens(source.virtual_source("punctuation.sev", spellings.join(" ")), [])
+    assert(len(tokens) == len(spellings) + 1)
+    index := 0
+    for spelling in spellings:
+        assert(tokens[index].kind == TokenKind.Symbol)
+        assert(token_is_symbol(tokens[index], spelling))
+        assert(tokens[index].value == None)
+        index += 1
+
+
+test "identifier and numeric tokens store only their source spelling":
+    tokens = scan_tokens(source.virtual_source("spelling.sev", "count 1_024 .5 2e-3"), [])
+    for token in tokens:
+        assert(token.value == None)
+    assert(token_text(tokens[0]) == "count")
+    assert(token_text(tokens[1]) == "1_024")
+    assert(token_text(tokens[2]) == ".5")
+    assert(token_text(tokens[3]) == "2e-3")
+    assert(token_number(tokens[1]) == "1024")
+    assert(token_number(tokens[2]) == "0.5")
+    assert(token_number(tokens[3]) == "2.0e-3")

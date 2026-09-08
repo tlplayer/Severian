@@ -27,7 +27,7 @@ Each example performs a compiler operation. The generic term is transformed, exe
 | `D` | Declaration | Bind declarations to symbols | `12-declaration-generic.sev` |
 | `P` | Pattern | Select a matching pattern | `13-pattern-generic.sev` |
 | `Lx` | Lexeme | Locate matched source text | `26-lexeme-generic.sev` |
-| `To` | Token | Validate lexical origin while preserving payload type | `27-token-generic.sev` |
+| `To` | Token | Validate origin while preserving token type | `27-token-generic.sev` |
 | `L` | Literal | Fold literal values | `14-literal-generic.sev` |
 | `O` | Operation | Execute operation semantics | `15-operation-generic.sev` |
 | `I` | Instruction | Remove no-op instructions | `16-instruction-generic.sev` |

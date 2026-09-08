@@ -22,6 +22,7 @@ class LexemeMatch:
     end: int
     kind: TokenKind | None
     matched: bool = true
+    value: string | None = None
 
 
 # A rule recognizes source. Lx denotes its matched lexeme, To its classified

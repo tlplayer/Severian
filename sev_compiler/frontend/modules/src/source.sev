@@ -63,7 +63,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
             match tokens[index + 1].kind:
                 case String:
-                    child = normalized_path(parent_path(file.path) + "/" + value)
+                    child = normalized_path(parent_path(file.path) + "/" + lexer.token_text(tokens[index + 1]))
                     discover_source_syntax(source.load(child), stack, files, registry)
                 case _:
                     pass

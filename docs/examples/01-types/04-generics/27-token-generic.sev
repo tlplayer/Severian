@@ -1,5 +1,5 @@
 # To - Token: a classified lexical object, preserving its matched lexeme.
-# Y remains a symbol; a token need not represent a symbol.
+# Y remains a symbol. Numeric interpretation belongs to L, after tokenization.
 
 class Span:
     start: int
@@ -19,13 +19,11 @@ trait Token:
 class IntegerToken: Token
     lexeme: Lexeme
     span: Span
-    value: int
 
 
 class IdentifierToken: Token
     lexeme: Lexeme
     span: Span
-    name: string
 
 
 def validate_origin(span: Span, lexeme: Lexeme):
@@ -39,10 +37,17 @@ def checked_token[To: Token](token: To) -> To:
     return token
 
 
+class IntegerLiteral:
+    value: int
+
+
+def integer_literal(token: IntegerToken) -> IntegerLiteral:
+    return IntegerLiteral(int(token.lexeme.text.replace("_", "")))
+
+
 test:
-    integer = checked_token(IntegerToken(Lexeme("1_024", Span(9, 14)), Span(9, 14), 1024))
-    identifier = checked_token(IdentifierToken(Lexeme("total", Span(0, 5)), Span(0, 5), "total"))
-    assert(integer.value == 1024)
+    integer = checked_token(IntegerToken(Lexeme("1_024", Span(9, 14)), Span(9, 14)))
+    identifier = checked_token(IdentifierToken(Lexeme("total", Span(0, 5)), Span(0, 5)))
+    assert(integer_literal(integer).value == 1024)
     assert(integer.lexeme.text == "1_024")
-    assert(identifier.name == "total")
     assert(identifier.lexeme.text == "total")

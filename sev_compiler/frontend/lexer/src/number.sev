@@ -32,14 +32,6 @@ class NumericLexeme: LexicalRule
                     cursor += 1
                 if cursor == exponent_start:
                     return error(diagnostics.Diagnostic("E000101", "floating exponent requires digits", lexeme_span(input, start, cursor)))
-            spelling := characters[start:cursor].join("").replace("_", "")
-            if leading_fraction:
-                spelling = "0" + spelling
-            if floating and "." not in spelling:
-                spelling = spelling.replace("e", ".0e").replace("E", ".0E")
-            if floating:
-                return LexemeMatch(cursor, TokenKind.Float(spelling))
-            else:
-                return LexemeMatch(cursor, TokenKind.Integer(spelling))
+            return LexemeMatch(cursor, TokenKind.Float if floating else TokenKind.Integer)
         return LexemeMatch(start, None, false)
 

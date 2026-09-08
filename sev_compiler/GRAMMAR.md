@@ -54,7 +54,9 @@ characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → C
 
 The [source lexer](frontend/lexer/README.md) separates `LexicalRule` scanners
 from `Lexeme` values and the `TokenTerm` contract. Tokens retain their original
-lexemes separately from decoded or normalized payloads. Operators contribute
+lexemes; their kinds are payload-free lexical/structural classifications. Every
+punctuation spelling uses the same symbol category. Numeric literal payloads
+are produced at the parser boundary; decoded string text may remain on tokens. Operators contribute
 `Y` spellings to one longest-match symbol rule.
 
 Bootstrap discovery precedes normal registered scanning. Arbitrary imported

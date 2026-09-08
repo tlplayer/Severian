@@ -89,12 +89,12 @@ class StringLexeme: LexicalRule
             if quote == "'":
                 if len(value.characters()) != 1:
                     return error(diagnostics.Diagnostic("E000101", "character literal requires one Unicode scalar", lexeme_span(input, start, cursor)))
-                return LexemeMatch(cursor, TokenKind.Character(literal_codepoint(value)))
+                return LexemeMatch(cursor, TokenKind.Character, value=value)
             elif formatted:
-                kind: TokenKind = TokenKind.FormattedString(value)
-                return LexemeMatch(cursor, kind)
+                kind: TokenKind = TokenKind.FormattedString
+                return LexemeMatch(cursor, kind, value=value)
             else:
-                kind: TokenKind = TokenKind.String(value)
-                return LexemeMatch(cursor, kind)
+                kind: TokenKind = TokenKind.String
+                return LexemeMatch(cursor, kind, value=value)
         return LexemeMatch(start, None, false)
 

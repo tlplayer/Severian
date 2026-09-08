@@ -24,4 +24,4 @@ class IdentifierLexeme: LexicalRule
         cursor := start + 1
         while cursor < len(characters) and (is_alphanumeric(characters[cursor]) or characters[cursor] == "_"):
             cursor += 1
-        return LexemeMatch(cursor, TokenKind.Identifier(characters[start:cursor].join("")))
+        return LexemeMatch(cursor, TokenKind.Identifier)

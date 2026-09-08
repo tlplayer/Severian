@@ -52,11 +52,11 @@ test "generic lexical rule entry preserves concrete token values":
     assert(number.matched)
     if number.matched:
         assert(number.end == 2)
-        assert(number.kind == TokenKind.Integer("42"))
+        assert(number.kind == TokenKind.Integer)
     identifier = lex(IdentifierLexeme(), input, 3)
     assert(identifier.matched)
     if identifier.matched:
         assert(identifier.end == 7)
-        assert(identifier.kind == TokenKind.Identifier("name"))
+        assert(identifier.kind == TokenKind.Identifier)
     assert(not lex(NumericLexeme(), input, 3).matched)
     assert(not lex(IdentifierLexeme(), input, 7).matched)
