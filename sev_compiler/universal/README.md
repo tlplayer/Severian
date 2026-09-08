@@ -73,29 +73,35 @@ Effect
     async
 
 
-Symbols
-T  Type
-V  Value
+| Symbol | Meaning |
+| ------ | ------- |
+| `T` | Type |
+| `V` | Value |
+| `S` | Shape |
+| `N` | Number of elements |
+| `E` | Error |
+| `Ex` | Expression |
+| `M` | Macro → operations |
+| `L` | Literal |
+| `O` | Operation |
+| `B` | Block |
+| `R` | Result |
+| `F` | Callable |
+| `W` | With-clause operations (including constraints) |
+| `C` | Container |
+| `Y` | Symbol |
+| `X` | Any compiler term |
+| `G` | Grammar |
+|`To`| Token Classified parser input; includes identifiers, indentation and end-of-file, not just literals or symbols. |
+|`Lx` | Lexeme Exact matched source text and span, before interpretation. It is not a literal value. |
 
-E  Error
-Ex Expression
-M  Macro
-S  Statement
-D  Declaration
-P  Pattern
-L  Literal
+This is the canonical compiler-term vocabulary. Symbols describe semantic roles;
+they do not reserve generic parameter names or erase concrete type contracts.
+Statement and instruction terms use `O`; arguments use `V`; type-kind metadata
+uses `T`. Declarations, patterns, and nodes use `X` with their specific contracts.
+`S` always means Shape, `N` always means Number of elements, and `C` always means
+Container in this vocabulary. Constraints belong to `W`.
 
-O  Operation
-I  Instruction
-B  Block
-
-A  Argument
-R  Result
-F  Callable
-
-C  Constraint
-K  Kind
-Y  Symbol
-N  Node
-X  Any compiler term ex: X: E | S | D | P | T...
-G Grammer Compiler CFG/bare metal ops/building
+Modules use `X` with an explicit module role; `M` is reserved for macros.
+Ordinary local variable names, descriptive type names, and established format
+names such as AST, HIR, MIR, CFG, and MLIR are not compiler-term abbreviations.
