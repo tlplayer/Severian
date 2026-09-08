@@ -1,0 +1,15 @@
+[package]
+name = "semantic-ir-tests"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "../../../sev_compiler/frontend/semantic/src/callable/semantic_ir_tests.sev"
+
+[dependencies]
+diagnostics = { path = "../../../sev_compiler/diagnostics" }
+lexer = { path = "../../../sev_compiler/frontend/lexer" }
+parser = { path = "../../../sev_compiler/frontend/parser" }
+source = { path = "../../../sev_compiler/source" }
+universal = { path = "../../../sev_compiler/universal" }

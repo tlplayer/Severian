@@ -4,6 +4,7 @@ import source
 import universal
 import "package.sev"
 import "queries.sev"
+import "match.sev" as matches
 
 enum AnalysisMode:
     Build
@@ -123,6 +124,12 @@ class Analyzer:
                 return universal.resolve_expression(value, new_hir_id(), resolved.result, universal.Binary(operation, left_hir, right_hir))
             case Member:
                 return error(diagnostics.Diagnostic("E000206", "member lookup requires a registered implementation", value.span))
+            case Conditional:
+                return error(diagnostics.Diagnostic("E000206", "conditional expressions require generic branch type unification", value.span))
+            case Stringify:
+                return error(diagnostics.Diagnostic("E000206", "string interpolation requires a registered conversion", value.span))
+            case _:
+                return error(diagnostics.Diagnostic("E000206", "expression is not supported by generic semantic analysis", value.span))
 
     def binding_type(binding: universal.BindingId) -> universal.TypeId:
         return self.binding_types[binding]
@@ -140,6 +147,10 @@ class Analyzer:
         return unit
 
     def binding(value: universal.Binding, output: list[universal.Binding]) -> universal.BindingId | diagnostics.Diagnostic:
+        if value.update or value.mutable or names.contains(value.name):
+            return error(diagnostics.Diagnostic("E000206", "mutable bindings and assignment require generic storage lowering", value.span))
+        if value.preserve_error:
+            return error(diagnostics.Diagnostic("E000206", "error-preserving bindings require generic error lowering", value.span))
         expected: universal.TypeId | None = None
         if value.annotation != None:
             expected = resolve_type_annotation_with_parameters(types, value.annotation, generic_types)
@@ -147,6 +158,7 @@ class Analyzer:
         id = new_binding_id()
         value.id = id
         value.type_id = expression_hir.type_id
+        value.value = expression_hir
         output.append(value)
         names[value.name] = id
         self.binding_types[id] = expression_hir.type_id
@@ -161,38 +173,55 @@ class Analyzer:
         match statement_value:
             case BindingStatement:
                 self.binding(binding, output)
-                return statement_value
+                return universal.BindingStatement(output[-1])
             case ExpressionStatement:
-                self.expression(expression, None)
-                return statement_value
+                return universal.ExpressionStatement(self.expression(expression, None))
             case Return:
                 if value != None:
-                    self.expression(value, result_type)
-                return statement_value
+                    return universal.Return(self.expression(value, result_type), span)
+                return universal.Return(None, span)
             case Assert:
                 boolean = types.resolve_name("bool")
                 string = types.resolve_name("string")
-                self.expression(condition, boolean)
+                typed_condition = self.expression(condition, boolean)
+                typed_message: universal.Expression | None = None
                 if message != None:
-                    self.expression(message, string)
-                return statement_value
+                    typed_message = self.expression(message, string)
+                return universal.Assert(typed_condition, typed_message, span, condition_span)
             case If:
                 boolean = types.resolve_name("bool")
-                self.expression(condition, boolean)
-                self.block(then_block, output, result_type)
-                self.block(else_block, output, result_type)
-                return statement_value
+                typed_condition = self.expression(condition, boolean)
+                typed_then = self.block(then_block, output, result_type)
+                typed_else = self.block(else_block, output, result_type)
+                return universal.If(typed_condition, typed_then, typed_else, span)
             case Match:
-                return error(diagnostics.Diagnostic("E000206", "generic match lowering is not implemented", span))
+                return self.statement(matches.expand_match(subject, arms, span), output, result_type)
+            case While:
+                return error(diagnostics.Diagnostic("E000206", "while requires generic loop lowering", span))
+            case ForEach:
+                return error(diagnostics.Diagnostic("E000206", "for requires generic iterator lowering", span))
+            case Break:
+                return error(diagnostics.Diagnostic("E000206", "break requires an enclosing supported loop", span))
+            case Continue:
+                return error(diagnostics.Diagnostic("E000206", "continue requires an enclosing supported loop", span))
+            case FieldSet:
+                return error(diagnostics.Diagnostic("E000206", "field assignment requires generic place resolution", span))
+            case _:
+                return error(diagnostics.Diagnostic("E000206", "statement is not supported by generic semantic analysis", None))
 
     def block(
         block: universal.Block,
         output: list[universal.Binding],
         result_type: universal.TypeId,
     ) -> universal.Block | diagnostics.Diagnostic:
+        saved_names = names.copy()
+        saved_declarations = declarations.copy()
+        typed = universal.empty_block()
         for statement_value in block.statements:
-            self.statement(statement_value, output, result_type)
-        return block
+            typed.statements.append(self.statement(statement_value, output, result_type))
+        names = saved_names
+        declarations = saved_declarations
+        return typed
 
 
 def lower_literal(expression: universal.Expression) -> universal.LiteralValue:
@@ -597,7 +626,7 @@ def analyze_with_package_functions(
         match item:
             case BindingItem:
                 analyzer.binding(binding, module.bindings)
-                module.initializer.statements.append(universal.BindingStatement(binding))
+                module.initializer.statements.append(universal.BindingStatement(module.bindings[-1]))
             case ExpressionItem:
                 module.initializer.statements.append(universal.ExpressionStatement(analyzer.expression(expression, None)))
 
@@ -626,6 +655,25 @@ def analyze_with_package_functions(
                     analyzer.binding_types[parameter.binding] = parameter.type_id
                     analyzer.declarations.add(parameter.name)
                 function.body = analyzer.block(declaration.body, module.bindings, function.result_type)
+            case BindingItem:
+                pass
+            case ExpressionItem:
+                pass
+            case Import:
+                # Package resolution has already processed imports.
+                pass
+            case Trait:
+                # Trait capabilities were registered before body analysis.
+                pass
+            case Test:
+                if context.mode == Test:
+                    return error(diagnostics.Diagnostic("E000206", "generic test body lowering is not implemented", declaration.span))
+            case Record:
+                return error(diagnostics.Diagnostic("E000206", "records require generic member registration", declaration.span))
+            case Type:
+                return error(diagnostics.Diagnostic("E000206", "type declarations require generic type registration", declaration.span))
+            case _:
+                return error(diagnostics.Diagnostic("E000206", "declaration is not supported by generic semantic analysis", None))
 
     return universal.Program([module])
 

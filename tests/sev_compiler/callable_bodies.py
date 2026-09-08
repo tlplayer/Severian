@@ -27,7 +27,7 @@ def main():
         run([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), "--mlir-to-llvmir", lowered], output=llvm)
         run([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", output])
         actual = run([output])
-        expected = {"receivers": "r21r3receivers complete\n"}.get(subject.stem, subject.stem + " complete\n")
+        expected = {"receivers": "r21r3receivers complete\n", "01_semantic_match": ""}.get(subject.stem, subject.stem + " complete\n")
         assert actual.stdout == expected, repr(actual.stdout)
         if os.environ.get("SEVERIAN_SANITIZE") == "1":
             sanitized = output.with_name(output.name + "_asan")
@@ -40,6 +40,13 @@ def main():
         for name, diagnostic in {
             "owned_fields": "record string fields require aggregate ownership lowering",
             "recursive_records": "recursive value record requires indirection",
+            "match_after_wildcard": "match arm after wildcard is unreachable",
+            "match_pattern": "match supports only literal and wildcard patterns",
+            "match_type": "a boolean cannot initialize an integer",
+            "match_equality": "unsupported scalar binary operator ==",
+            "match_return": "scalar function can reach its end without returning a value",
+            "match_scope": "unknown name local",
+            "match_missing_case": "expected case before match pattern",
         }.items():
             rejected = run([compiler, "build", "--emit", "mlir", subjects / "reject" / (name + ".sev"), "--sysroot", ROOT], succeeds=False)
             assert diagnostic in rejected.stderr, rejected.stderr

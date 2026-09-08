@@ -1,4 +1,5 @@
 import lexer
+import diagnostics
 import source
 import universal
 import "../../semantic/src/macros.sev" as macros
@@ -31,7 +32,7 @@ def parent_path(path: string) -> string:
     return components[:int(len(components)) - 1].join("/")
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool) -> universal.Module:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile]) -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path in active:
         throw Error("cyclic source import: " + path)
@@ -39,7 +40,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
         throw Error("source import depth exceeds 64 modules")
     stack = active[:]
     stack.append(path)
-    parsed = macros.parse_module(lexer.scan(input))
+    registered = source.SourceFile(source.SourceId(u32(len(files))), path, input.text)
+    files.append(registered)
+    parsed = macros.parse_module(lexer.scan(registered))
     result = universal.empty_module()
     aliases: list[string] = []
     for item in parsed.items:
@@ -59,7 +62,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             aliases.append(alias)
                             child_prefix += alias + "."
                         child_path = normalized_path(parent_path(path) + "/" + locator)
-                        child = load_source_module(source.load(child_path), child_prefix, stack, false)
+                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case _:

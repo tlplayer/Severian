@@ -6,6 +6,7 @@ import "../../../universal/type/scalar.sev" as scalar
 import "../../../universal/operator/scalar.sev" as operators
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
+import "match.sev" as matches
 import "../../../universal/type/scalar_conversion.sev" as conversions
 
 
@@ -588,7 +589,13 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 then_typed = callable_block(then_state, then_block.statements, result_type, false)
                 else_typed = callable_block(else_state, else_block.statements, result_type, false)
                 output.statements.append(universal.If(resolved, then_typed, else_typed, span))
-                returned = callable_terminates(then_typed) and callable_terminates(else_typed)
+                returned = callable_terminates(universal.Block([universal.If(resolved, then_typed, else_typed, span)]))
+            case Match:
+                expanded = matches.expand_match(subject, arms, span)
+                typed = callable_block(state, [expanded], result_type, false)
+                for nested in typed.statements:
+                    output.statements.append(nested)
+                returned = callable_terminates(typed)
             case ForEach:
                 expanded = callable_range(state, name, iterable, body, span, result_type)
                 for nested in expanded.statements:
@@ -940,6 +947,18 @@ def callable_terminates(block: universal.Block) -> bool:
             case Continue:
                 return true
             case If:
+                match condition.kind:
+                    case LiteralValue:
+                        match value:
+                            case BooleanValue:
+                                if value and callable_terminates(then_block):
+                                    return true
+                                if not value and callable_terminates(else_block):
+                                    return true
+                            case _:
+                                pass
+                    case _:
+                        pass
                 if callable_terminates(then_block) and callable_terminates(else_block):
                     return true
             case _:

@@ -1,0 +1,108 @@
+class Counter:
+    count: int
+
+    def next() -> int:
+        count += 1
+        return count
+
+
+def once(counter: Counter) -> int:
+    match counter.next():
+        case 0:
+            return 10
+        case 1:
+            return 20
+        case _:
+            return 30
+
+
+def nested(value: int) -> int:
+    match value:
+        case -1:
+            local = 11
+            return local
+        case 1:
+            match value + 1:
+                case 2:
+                    return 22
+                case _:
+                    return 99
+        case _:
+            local = 33
+            return local
+
+
+def wildcard(value: int) -> int:
+    match value:
+        case _:
+            return 7
+
+
+def fallthrough(value: int) -> int:
+    result := 4
+    match value:
+        case 1:
+            result = 8
+        case 1:
+            result = 99
+    after = result + 1
+    return after
+
+
+test "match evaluates once and takes the first matching arm":
+    counter = Counter(0)
+    assert(once(counter) == 20)
+    assert(counter.count == 1)
+    match counter.next():
+        case _:
+            assert(counter.count == 2)
+    assert(nested(-1) == 11)
+    assert(nested(1) == 22)
+    assert(nested(9) == 33)
+    assert(wildcard(0) == 7)
+    assert(fallthrough(1) == 9)
+    assert(fallthrough(0) == 5)
+
+
+test "match branches keep their locals scoped":
+    match true:
+        case false:
+            local = 1
+            assert(false)
+        case _:
+            local = 2
+            assert(local == 2)
+    local = 3
+    assert(local == 3)
+
+
+test "match resolves scalar literal equality":
+    match "λ":
+        case "other":
+            assert(false)
+        case "λ":
+            assert(true)
+        case _:
+            assert(false)
+    match 1.5:
+        case 1.5:
+            assert(true)
+        case _:
+            assert(false)
+
+
+test "match preserves loop control":
+    index := 0
+    total := 0
+    while index < 6:
+        index += 1
+        match index:
+            case 1:
+                continue
+            case 4:
+                break
+            case _:
+                total += index
+    assert(index == 4)
+    assert(total == 5)
+    print("matches complete")

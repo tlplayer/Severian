@@ -15,3 +15,42 @@ def diagnostic(code: string, message: string) -> Diagnostic:
 
 def diagnostic_at(code: string, message: string, span: source.Span) -> Diagnostic:
     return Diagnostic(code, message, span)
+
+
+def render(value: Diagnostic, files: list[source.SourceFile]) -> string:
+    heading = value.code + ": " + value.message
+    location ?= value.span
+    if location != None:
+        if int(location.source.index) < len(files):
+            input = files[location.source.index]
+            characters = input.text.characters()
+            offset = int(location.start)
+            if offset <= len(characters):
+                line := 1
+                line_start := 0
+                cursor := 0
+                while cursor < offset:
+                    if characters[cursor] == "\n":
+                        line += 1
+                        line_start = cursor + 1
+                    cursor += 1
+                line_end := offset
+                while line_end < len(characters) and characters[line_end] != "\n" and characters[line_end] != "\r":
+                    line_end += 1
+                padding := ""
+                cursor = line_start
+                while cursor < offset:
+                    padding += "\t" if characters[cursor] == "\t" else " "
+                    cursor += 1
+                number = string(line)
+                gutter := ""
+                for character in number.characters():
+                    gutter += " "
+                column = offset - line_start + 1
+                output := heading + "\n --> " + input.path
+                output += ":" + number + ":" + string(column)
+                output += "\n" + gutter + " |\n"
+                output += string(line) + " | " + characters[line_start:line_end].join("")
+                output += "\n" + gutter + " | " + padding + "^"
+                return output
+    return heading

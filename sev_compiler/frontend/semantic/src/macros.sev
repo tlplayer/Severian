@@ -1,4 +1,5 @@
 import lexer
+import diagnostics
 from lexer import TokenKind
 import parser
 import source
@@ -261,7 +262,7 @@ def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], out
                 macro_enumerate(definition, selected, output)
 
 
-def parse_module(tokens: list[lexer.Token]) -> universal.Module:
+def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
     input = parser.Parser(tokens)
     definitions: list[ScalarMacro] = []
     ordinary: list[lexer.Token] = []

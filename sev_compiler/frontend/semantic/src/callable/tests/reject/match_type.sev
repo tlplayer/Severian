@@ -1,0 +1,6 @@
+def invalid(value: int) -> int:
+    match value:
+        case true:
+            return 1
+        case _:
+            return 0

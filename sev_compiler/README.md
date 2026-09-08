@@ -91,12 +91,26 @@ loops support `break`, `continue`, and early returns. Imported literal constants
 remain visible in their defining callable scopes. Memory views remain in SSA
 across branches and loops so buffer ownership follows their lifetimes.
 
+Value `match` statements support literal patterns with an existing equality
+implementation and a final `_` wildcard. Every arm starts with `case`,
+including `case _:`.
+Semantic analysis evaluates the subject once
+and lowers arms to typed bindings and `if` branches, preserving source order,
+arm-local scopes, mutation, and loop control. Without a wildcard, a match may
+fall through; value-returning functions still require a return on every path.
+Nonliteral patterns and arms after a wildcard produce deliberate diagnostics.
+
 Unsupported declarations and expressions produce diagnostics. General
 collections, generic classes, fallible/enum values, nonliteral parameter
 defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
 outside this slice. Record string fields require aggregate ownership lowering
 and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver and
 generic semantic pipeline remain separate unfinished work.
+
+CLI lexer, parser, and semantic diagnostics retain their source file identity
+through imports and print their code, filename, line, column, source line, and
+caret when a span is available. Run `python3 tests/sev_compiler/diagnostics.py`
+from the repository root to check this reporting boundary.
 
 ## Enumerated numeric conversions
 
@@ -235,9 +249,11 @@ Every row above emits verified MLIR and runs natively. Build rows have their
 exact output checked by the acceptance runner; their integration-test blocks
 are not executed by the bootstrap test runner.
 
-Next are ordinary iteration, arrays/slices, and fuller string APIs.
-Stream objects and formatting protocols follow
-the class and interface support they require.
+Before adding further language or library surface, close the remaining generic
+pipeline gaps. Its statement and expression dispatch now diagnose unsupported
+constructs explicitly and retain lowered children. Generic loop/storage/member
+resolution, conditional type unification, and test body lowering still need
+implementation. This is separate from the executable callable path above.
 
 ```sh
 sev_compiler test --emit mlir \
@@ -269,6 +285,9 @@ Run the acceptance check with LLVM/MLIR 21 tools available:
 
 ```sh
 python3 tests/sev_compiler/bootstrap_mlir.py
+# Parser-to-HIR structure and callable/native regressions:
+target/debug/sev test tests/sev_compiler/semantic_ir
+python3 tests/sev_compiler/callable_bodies.py
 # Also check allocated string lifetimes (run outside a ptrace-based sandbox):
 SEVERIAN_SANITIZE=1 python3 tests/sev_compiler/bootstrap_mlir.py
 ```

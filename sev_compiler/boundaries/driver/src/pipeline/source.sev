@@ -1,4 +1,6 @@
 import source
+import diagnostics
+from diagnostics import Diagnostic
 import "../../../../frontend/semantic/src/callable.sev" as semantic
 import "../../../../transforms/mir/src/callable.sev" as mir
 import "../../../../transforms/mlir/src/emit/callable.sev" as mlir
@@ -7,14 +9,26 @@ import "../../../../frontend/modules/src/source.sev"
 
 
 def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".") -> string:
+    files: list[source.SourceFile] = []
+    result ?= compile_source(input, include_tests, sysroot, files)
+    if result is string:
+        return result
+    if result is Diagnostic:
+        throw Error(diagnostics.render(result, files))
+    if result is Error:
+        throw Error(result.message)
+    throw Error("source compilation returned no MLIR")
+
+
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile]) -> string | diagnostics.Diagnostic:
     library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
-    parsed = load_source_module(source.load(library_path), "", [], false)
-    numeric = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/conversion.sev")), "numeric.", [], false)
+    parsed = load_source_module(source.load(library_path), "", [], false, files)
+    numeric = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/conversion.sev")), "numeric.", [], false, files)
     for item in numeric.items:
         parsed.items.append(item)
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
-    application = load_source_module(input, "__subject." if include_tests else "", [], true)
+    application = load_source_module(input, "__subject." if include_tests else "", [], true, files)
     for item in application.items:
         parsed.items.append(item)
     typed = semantic.analyze_callables(parsed, include_tests)

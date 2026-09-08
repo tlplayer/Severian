@@ -44,7 +44,7 @@ class AbiTarget:
 
 
 def derive(specification: target.TargetSpec) -> AbiTarget:
-    convention = SysV64
+    convention := SysV64
     if specification.operating_system == target.Windows:
         convention = Win64
     elif specification.architecture == target.Aarch64:

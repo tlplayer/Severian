@@ -392,6 +392,8 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     return (universal.Block(statements, [], []), end)
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "match"):
+        return parser_match_statement(parser)
     if parser_at_identifier(parser, "while"):
         start = parser_next(parser).span
         condition = parser_expression(parser, 0)
@@ -440,6 +442,32 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
             message = parser_expression(parser, 0)
         return universal.Assert(condition, message, source.Span(start.source, start.start, condition.span.end), condition.span)
     return parser_simple_statement(parser)
+
+def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    subject = parser_expression(parser, 0)
+    parser_expect(parser, Colon, "expected colon after match subject")
+    parser_expect(parser, Newline, "expected newline after match subject")
+    parser_separators(parser)
+    parser_expect(parser, Indent, "expected indented match arms")
+    arms: list[universal.MatchArm] = []
+    parser_separators(parser)
+    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        arm_start = parser_peek(parser).span
+        if not parser_at_identifier(parser, "case"):
+            return error(parser_fail(parser, "expected case before match pattern"))
+        parser_next(parser)
+        pattern: universal.Expression | None := None
+        if parser_at_identifier(parser, "_"):
+            parser_next(parser)
+        else:
+            pattern = parser_expression(parser, 0)
+        parser_expect(parser, Colon, "expected colon after match pattern")
+        body = parser_indented_block(parser, "match arm")
+        arms.append(universal.MatchArm(body[0], span=arm_start, pattern=pattern))
+        parser_separators(parser)
+    end = parser_expect(parser, Dedent, "expected end of match").span.end
+    return universal.Match(subject, arms, source.Span(start.source, start.start, end))
 
 def parser_simple_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
     if parser_looks_like_binding(parser):

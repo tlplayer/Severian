@@ -1,0 +1,56 @@
+import diagnostics
+import source
+import universal
+
+
+def literal_pattern(expression: universal.Expression) -> bool:
+    match expression.kind:
+        case LiteralValue:
+            return true
+        case Unary:
+            if operator.symbol == "-" or operator.symbol == "+":
+                match operand.kind:
+                    case LiteralValue:
+                        return true
+                    case _:
+                        pass
+        case _:
+            pass
+    return false
+
+
+# Desugar before type checking so ordinary equality resolution, branch scopes,
+# and return analysis apply. The unspellable local evaluates the subject once.
+def expand_match(subject: universal.Expression, arms: list[universal.MatchArm], span: source.Span) -> universal.Statement | diagnostics.Diagnostic:
+    if len(arms) == 0:
+        return error(diagnostics.Diagnostic("E000206", "match requires at least one arm", span))
+    wildcard := false
+    for arm in arms:
+        if wildcard:
+            return error(diagnostics.Diagnostic("E000206", "match arm after wildcard is unreachable", arm.span))
+        if arm.annotation != None or arm.binding_name != None:
+            return error(diagnostics.Diagnostic("E000206", "match supports only literal and wildcard patterns", arm.span))
+        pattern ?= arm.pattern
+        if pattern != None:
+            if not literal_pattern(pattern):
+                return error(diagnostics.Diagnostic("E000206", "match supports only literal and wildcard patterns", pattern.span))
+        else:
+            wildcard = true
+    name = "$match_subject_" + string(span.start)
+    tail := universal.empty_block()
+    index := len(arms)
+    while index > 0:
+        index -= 1
+        arm = arms[index]
+        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+        pattern ?= arm.pattern
+        if pattern != None:
+            reference = universal.Expression(universal.Name(name), subject.span)
+            condition = universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), reference, pattern), pattern.span)
+        tail = universal.Block([universal.If(condition, arm.body, tail, span)])
+    binding = universal.Binding(name, None, subject, false, false, subject.span)
+    body = universal.Block([universal.BindingStatement(binding)])
+    for statement in tail.statements:
+        body.statements.append(statement)
+    taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+    return universal.If(taken, body, universal.empty_block(), span)

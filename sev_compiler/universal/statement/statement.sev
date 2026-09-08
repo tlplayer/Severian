@@ -31,6 +31,8 @@ class MatchArm:
     span: source.Span | None = None
     binding: BindingId | None = None
     type_id: TypeId | None = None
+    # None denotes a wildcard for value matches; type arms use annotation.
+    pattern: Expression | None = None
 
 
 enum Statement:

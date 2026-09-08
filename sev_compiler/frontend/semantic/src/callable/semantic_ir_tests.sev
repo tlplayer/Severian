@@ -1,0 +1,78 @@
+import source
+import universal
+import "../../../lexer/src/lib.sev" as lexer
+import "../../../parser/src/lib.sev" as parser
+import "../callable.sev" as semantic
+
+
+def resolved_expression(expression: universal.Expression):
+    assert(expression.type_id.index != 0)
+    match expression.kind:
+        case LiteralValue:
+            pass
+        case BindingReference:
+            pass
+        case Binary:
+            resolved_expression(left)
+            resolved_expression(right)
+        case ResolvedCall:
+            for argument in arguments:
+                resolved_expression(argument.value)
+        case _:
+            # No source Name/Call or other unhandled AST expression may survive.
+            assert(false)
+
+
+def resolved_block(block: universal.Block) -> int:
+    returns := 0
+    for statement in block.statements:
+        match statement:
+            case BindingStatement:
+                assert(binding.type_id.index != 0)
+                resolved_expression(binding.value)
+            case If:
+                assert(condition.type_id.index == 1)
+                resolved_expression(condition)
+                returns += resolved_block(then_block)
+                returns += resolved_block(else_block)
+            case Return:
+                expression ?= value
+                if expression != None:
+                    resolved_expression(expression)
+                returns += 1
+            case Assert:
+                resolved_expression(condition)
+            case _:
+                # In particular, an unresolved Match must not reach MIR.
+                assert(false)
+    return returns
+
+
+test "parsed match produces typed HIR for all arms":
+    input = source.SourceFile(source.SourceId(0), "match.sev", "def classify(value: int) -> int:\n    match value:\n        case 0:\n            return 10\n        case 1:\n            return 20\n        case _:\n            return 30\n\ntest \"match survives parser to semantic\":\n    assert(classify(0) == 10)\n    assert(classify(1) == 20)\n    assert(classify(99) == 30)\n")
+    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    match ast.items[0]:
+        case Function:
+            body ?= declaration.body
+            assert(body != None)
+            if body != None:
+                match body.statements[0]:
+                    case Match:
+                        assert(len(arms) == 3)
+                        assert(arms[0].pattern != None)
+                        assert(arms[1].pattern != None)
+                        assert(arms[2].pattern == None)
+                    case _:
+                        assert(false)
+        case _:
+            assert(false)
+    hir = semantic.analyze_callables(ast, true)
+    assert(len(hir.functions) == 2)
+    assert(len(hir.tests) == 1)
+    for function in hir.functions:
+        body ?= function.body
+        assert(body != None)
+        if body != None:
+            returns = resolved_block(body)
+            if function.name == "classify":
+                assert(returns == 3)

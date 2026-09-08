@@ -1,0 +1,45 @@
+def classify(value: int) -> int:
+    match value:
+        case 0:
+            return 10
+        case 1:
+            return 20
+        case _:
+            return 30
+
+
+test "match survives parser to semantic":
+    assert(classify(0) == 10)
+    assert(classify(1) == 20)
+    assert(classify(99) == 30)
+
+
+
+def classify_sum(limit: int) -> int:
+    total := 0
+    i := 0
+
+    while i < limit:
+        i += 1
+
+        if i == 3:
+            continue
+
+        match i:
+            case 5:
+                total += 20
+            case 7:
+                return total + 100
+            case _:
+                if i // 2 == 0:
+                    total += i
+                else:
+                    total += 1
+
+    return total
+
+
+test "nested CFG preserves match continue and early return":
+    assert(classify_sum(2) == 3)
+    assert(classify_sum(5) == 27)
+    assert(classify_sum(10) == 131)
