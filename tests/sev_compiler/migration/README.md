@@ -1,9 +1,12 @@
 # Complete source-language migration acceptance
 
+Current implementation results and outstanding work are recorded in
+[RESULTS.md](RESULTS.md) and [INVENTORY.md](INVENTORY.md).
+
 Run from the repository root after building the source compiler:
 
 ```sh
-target/debug/sev build --manifest-path sev_compiler/package.toml
+(cd sev_compiler && ../target/debug/sev build)
 python3 tests/sev_compiler/migration.py
 python3 tests/sev_compiler/migration.py Gate3SourceSyntax
 ```
@@ -42,7 +45,9 @@ as those paths are completed.
 Compiler contracts are ordinary `trait Name: G` declarations. `symbol: Y`
 accepts a source symbol, not a string naming an enum variant. Named compiler
 terms such as `Value`, `Place`, `Pure`, `LeftToRight`, and `Branch` resolve in
-the compiler context. `operator <symbol>[Name:G]` binds a real definition.
+the compiler context. `operator <symbol>[G:Name]` uses the ordinary
+generic-parameter/constraint syntax: `G` is the parameter and `Name` resolves
+to a grammar contract. The parameter spelling does not grant a capability.
 
 An abstract `semantic` requirement obtains its concrete body from the type's
 operator implementation. When the G contract supplies `semantic`, an operator

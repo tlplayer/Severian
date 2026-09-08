@@ -127,6 +127,76 @@ def inherited_traits(definitions: SemanticDefinitions, declaration: universal.Tr
     return result
 
 
+def resolve_operator_constraints(definitions: SemanticDefinitions, operation: universal.OperatorDeclaration, namespace: string) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
+    constraints: list[universal.GenericConstraint] = []
+    for constraint in operation.constraints:
+        grammar_bound := false
+        match constraint:
+            case Parameter:
+                bound_name ?= universal.simple_type_name(bound)
+                if bound_name != None:
+                    contract_definition ?= trait_named(definitions, bound_name, namespace)
+                    if contract_definition != None:
+                        if contract_definition.grammar:
+                            if operation.grammar_parameter != absent:
+                                return error(diagnostics.diagnostic_at("E000212", "operator requires one grammar binding", span))
+                            operation.grammar_parameter = parameter
+                            syntax = operation.syntax
+                            syntax.domain = universal.OperatorDomain.GrammarOperator
+                            syntax.grammar_name = bound_name
+                            operation.syntax = syntax
+                            grammar_bound = true
+                    else:
+                        known := alias_named(definitions, bound_name, namespace) != None
+                        for implementation in definitions.implementations:
+                            if implementation.name == bound_name or implementation.name == namespace + bound_name:
+                                known = true
+                        if not known:
+                            return error(diagnostics.diagnostic_at("E000212", "unknown operator constraint " + bound_name, span))
+            case _:
+                pass
+        if not grammar_bound:
+            constraints.append(constraint)
+    parameters: list[string] = []
+    grammar_parameter ?= operation.grammar_parameter
+    for parameter in operation.type_parameters:
+        retained := true
+        if grammar_parameter != absent:
+            retained = parameter != grammar_parameter
+        if retained:
+            parameters.append(parameter)
+    operation.type_parameters = parameters
+    operation.constraints = constraints
+    operation.syntax = resolve_grammar_binding(definitions, operation.syntax, namespace, operation.span)
+    return operation
+
+
+def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: universal.OperatorSyntax, namespace: string, span: source.Span) -> universal.OperatorSyntax | diagnostics.Diagnostic:
+    if syntax.domain != universal.OperatorDomain.GrammarOperator:
+        return syntax
+    contract_definition ?= trait_named(definitions, syntax.grammar_name, namespace)
+    if contract_definition == None:
+        return error(diagnostics.diagnostic_at("E000212", "unknown grammar contract " + syntax.grammar_name, span))
+    if contract_definition != None:
+        if not contract_definition.grammar:
+            return error(diagnostics.diagnostic_at("E000212", "operator binding requires a compiler G contract", span))
+        for inherited in inherited_traits(definitions, contract_definition):
+            for property in inherited.properties:
+                if property.name == "symbol":
+                    value ?= property.default
+                    if value != None:
+                        match value.kind:
+                            case SourceSymbol:
+                                if spelling != syntax.symbol:
+                                    return error(diagnostics.diagnostic_at("E000212", "operator symbol does not match its grammar contract", span))
+                                syntax.definition = contract_definition.definition
+                                return syntax
+                            case _:
+                                return error(diagnostics.diagnostic_at("E000212", "grammar symbol requires a resolved source symbol", span))
+        return error(diagnostics.diagnostic_at("E000212", "grammar binding requires a source symbol", span))
+    return syntax
+
+
 def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions()) -> SemanticDefinitions | diagnostics.Diagnostic:
     definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:])
     names: list[string] = []
@@ -134,14 +204,20 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
     for item in module.items:
         match item:
             case Trait:
-                if declaration.compiler_descriptor:
+                if declaration.name.split(".")[-1] == "G" and declaration.name != "G":
+                    return error(diagnostics.diagnostic_at("E000212", "reserved compiler contract G cannot be redeclared", declaration.span))
+                if declaration.compiler_descriptor and not declaration.grammar and declaration.name != "G":
                     definitions.symbol_descriptors.append(declaration)
                     continue
                 trait_declaration := declaration
                 if trait_declaration.name in names:
+                    if trait_declaration.name == "G":
+                        return error(diagnostics.diagnostic_at("E000212", "reserved compiler contract G cannot be redeclared", trait_declaration.span))
                     return error(diagnostics.diagnostic_at("E000212", "duplicate declaration " + trait_declaration.name, trait_declaration.span))
                 names.append(trait_declaration.name)
                 trait_declaration.definition = definition_id(trait_declaration.name, ordinal)
+                if trait_declaration.grammar:
+                    trait_declaration.definition = universal.DefId(0, u128(trait_declaration.span.source.index) + 2, universal.DeclarationId(u128(trait_declaration.span.start) + 1))
                 ordinal += 1
                 if len(trait_declaration.type_parameters) != 0 or len(trait_declaration.constraints) != 0:
                     return error(diagnostics.diagnostic_at("E000212", "generic trait declarations require trait argument substitution", trait_declaration.span))
@@ -184,6 +260,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 ordinal += 1
             case _:
                 pass
+    trait_index := 0
     for declaration in definitions.traits:
         inherited_traits(definitions, declaration)
         member_names: list[string] = []
@@ -192,11 +269,17 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 return error(diagnostics.diagnostic_at("E000212", "duplicate trait member " + method.name, declaration.span))
             member_names.append(method.name)
         symbols: list[string] = []
+        resolved_operators: list[universal.OperatorDeclaration] = []
         for operation in declaration.operators:
+            operation = resolve_operator_constraints(definitions, operation, declaration.lookup)
+            resolved_operators.append(operation)
             key = operation.syntax.symbol + string(len(operation.parameters)) + string(operation.receiver)
             if key in symbols:
                 return error(diagnostics.diagnostic_at("E000212", "duplicate trait operator " + operation.syntax.symbol, operation.span))
             symbols.append(key)
+        declaration.operators = resolved_operators
+        definitions.traits[trait_index] = declaration
+        trait_index += 1
     module.traits = definitions.traits
     module.types = definitions.aliases
     return definitions

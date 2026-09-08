@@ -170,6 +170,10 @@ def __float(value: f64, precision: int) -> string:
 
 
 def string(value: f64) -> string:
+    # NaN's sign is not part of the language's display representation. Hosted
+    # arithmetic and strfromd may preserve a negative NaN sign bit.
+    if value != value:
+        return "nan"
     return __float(value, 1)
 
 

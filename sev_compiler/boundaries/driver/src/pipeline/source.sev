@@ -23,11 +23,11 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
 
 def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile]) -> string | diagnostics.Diagnostic:
     registry = lexer.SyntaxRegistry([])
-    syntax_file = registered_source(source.load(normalized_path(sysroot + "/sev_compiler/universal/operator/kind.sev")), files)
-    lexer.discover_operator_descriptors(lexer.scan_tokens(syntax_file, [], true), registry)
-    lexer.resolve_operator_descriptors(registry)
+    parsed = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/grammar/contracts.sev")), "", [], false, files, registry)
     library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
-    parsed = load_source_module(source.load(library_path), "", [], false, files, registry)
+    library = load_source_module(source.load(library_path), "", [], false, files, registry)
+    for item in library.items:
+        parsed.items.append(item)
     numeric = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/conversion.sev")), "numeric.", [], false, files, registry)
     for item in numeric.items:
         parsed.items.append(item)

@@ -1,8 +1,8 @@
 # Symbols, operators, grammar, and CFG ownership
 
 This is the target architecture for the source compiler. Source trait/operator
-requirements and concrete specialization are executable today. Source-defined
-grammar lowering, an extensible lexical registry, and grammar-only CFG
+requirements, concrete specialization and an extensible source lexical registry
+are executable today. Compiler-semantic CFG execution and grammar-only CFG
 capabilities are not implemented yet.
 
 The combined traits/types and grammar migration is one task. Its compiler
@@ -13,7 +13,7 @@ vocabulary is contextual: metadata declarations (`effects`, `evaluation`,
 `G` trait and declarations implementing that resolved trait. Their spelling does
 not reserve ordinary variable, field, or function names globally.
 
-An operator binding such as `operator +=[AddAssign:G]` refers to that contract;
+An operator binding such as `operator +=[G:AddAssign]` refers to that contract;
 it does not make the concrete type or the operator body an implementation of
 the compiler `G` trait. In particular, it does not grant direct CFG access.
 Indirect trait inheritance must retain the compiler context, and an unrelated
@@ -34,12 +34,12 @@ parsing, and semantic information must resolve before instantiation. There is
 no implicit arithmetic policy, conversion permission, or compiler capability
 when its declaration is absent.
 
-`AddAssign:G` defines its place/value operands, evaluation order, effects,
+`trait AddAssign: G` defines its place/value operands, evaluation order, effects,
 validation, and semantic expansion. Assignment behavior comes from that
 contract. Do not introduce a handwritten mapping from `"+="` to an `"Assign"`
 behavior, derive an operator by appending `"="`, or infer mutation from a
 compiler naming convention. A binding such as
-`operator %=[RemainderAssign:G]` must resolve an actual source contract.
+`operator %=[G:RemainderAssign]` must resolve an actual source contract.
 
 ## Definition hierarchy
 
@@ -81,16 +81,19 @@ The following syntax describes the target source contract:
 class Counter:
     value: int
 
-    operator if[G](self) -> bool:
+    operator if[G:If](self) -> bool:
         return value != 0
 ```
 
-`[G]` selects the grammar operator domain. It is not a generic type parameter
-named `G`, and it does not grant the operator any CFG capability. The parser
-must preserve that distinction, registration must resolve the grammar identity,
-and overload resolution must include the domain in its key.
+`[G:If]` follows the same generic-parameter/constraint syntax as `[T:Numeric]`:
+`G` is the parameter, and `If` names its constraint. The parameter can be
+renamed. Registration resolves the constraint and its inherited contracts to
+determine that it belongs to the compiler grammar domain; the parser does not
+infer that domain from a parameter's spelling. This constraint does not grant
+the operator body CFG capability. Overload resolution includes the resolved
+domain and contract identity in its key.
 
-For `if counter:`, semantic analysis resolves `operator if[G](Counter)` and
+For `if counter:`, semantic analysis resolves `operator if[G:If](Counter)` and
 checks its result against the grammar's required `bool` result. The typed call
 retains the implementation `DefId`; `G.If` uses that value to build the branch.
 Types supply their own truth bodies. There is no compiler truth table for
@@ -103,7 +106,7 @@ implementation call. An ordinary method or a value-domain operator with the
 same spelling cannot satisfy a grammar-domain requirement.
 
 Other grammar operations can request specific protocols, such as an iterator
-from `operator for[G]`. `else`, `return`, `break`, and `continue` need no
+from `operator for[G:For]`. `else`, `return`, `break`, and `continue` need no
 type-specific operator. `throw` remains closed to the language's `Error`
 contract; arbitrary conversion hooks must not make unrelated values throwable.
 
@@ -116,7 +119,7 @@ into a field, function argument, closure, or operator body.
 
 Ordinary functions and operator bodies may contain normal `if`, loops, calls,
 and returns. Those constructs lower through their registered grammars. They
-cannot directly call CFG primitives. A `[G]` operator computes only the value
+cannot directly call CFG primitives. A grammar-constrained operator computes only the value
 or protocol requested by grammar.
 
 Enforce this on resolved compiler primitive identities and their effects, not
@@ -177,7 +180,7 @@ provenance rather than pretending those edges appeared in source syntax.
 
 2. **Resolve grammar definitions and typed operand protocols.** Add grammar
    declarations to the universal AST and shared semantic registry. Represent
-   `[G]` explicitly in operator signatures. Register grammar operand/result
+   `[G:Contract]` explicitly in operator signatures. Register grammar operand/result
    contracts and check restricted compiler effects before lowering. Exercise
    `if` on a user-defined type and through an explicit generic requirement;
    reject a non-`bool` result, a missing protocol, a same-spelled ordinary

@@ -51,7 +51,7 @@ def contract(name="Fuse", symbol="<~>", precedence=7, associativity="Left",
                 {body}
 
         extend int:
-            operator {symbol}[{name}:G](right: Self) -> Self
+            operator {symbol}[G:{name}](right: Self) -> Self
     """)
 
 
@@ -214,7 +214,7 @@ class Gate2Definitions(MigrationCase):
             "def ordinary():\n    cfg.block()\n",
             "def ordinary():\n    create = cfg.block\n    create()\n",
             "def helper():\n    cfg.block()\ndef ordinary():\n    helper()\n",
-            "class Box:\n    value: int\n    operator +[Add:G](right: Self) -> Self:\n        cfg.block()\n        return self\n",
+            "class Box:\n    value: int\n    operator +[G:Add](right: Self) -> Self:\n        cfg.block()\n        return self\n",
             '@mlir("cf.br")\ndef escaped()\ndef ordinary():\n    escaped()\n',
         ]
         for index, attempt in enumerate(attempts):
@@ -275,7 +275,7 @@ class Gate3SourceSyntax(MigrationCase):
     def test_04_rename_and_respell_contract(self):
         self.native(contract("UnrelatedName", "<!~>") + '\ntest:\n    assert(4 <!~> 2 == 42)\n')
         self.rejects(contract("UnrelatedName", "<!~>").replace(
-            "[UnrelatedName:G]", "[MissingContract:G]"), r"(?i)(unknown.*MissingContract|unresolved.*MissingContract)")
+            "[G:UnrelatedName]", "[G:MissingContract]"), r"(?i)(unknown.*MissingContract|unresolved.*MissingContract)")
 
     def test_05_conflicting_imports_are_diagnosed(self):
         self.write(contract("First", precedence=7), "first.sev")
@@ -295,10 +295,10 @@ class Gate4SemanticExecution(MigrationCase):
     def test_02_generic_requirements_select_source_implementations(self):
         self.native('''
             trait Addable:
-                operator +[Add:G](other: Self) -> Self
+                operator +[G:Add](other: Self) -> Self
             class Box: Addable:
                 amount: int
-                operator +[Add:G](other: Self) -> Self:
+                operator +[G:Add](other: Self) -> Self:
                     return Box(amount + other.amount)
             def twice[T: Addable](value: T) -> T:
                 return value + value
@@ -332,7 +332,7 @@ class Gate4SemanticExecution(MigrationCase):
         self.native('''
             class Flag:
                 enabled: bool
-                operator if[If:G](self) -> bool:
+                operator if[G:If](self) -> bool:
                     print("truth")
                     return enabled
             def right() -> bool:
@@ -370,7 +370,8 @@ class Gate5CanonicalCfg(MigrationCase):
             test:
                 assert(accumulate(2) == 3)
                 assert(accumulate(5) == 27)
-                assert(accumulate(10) == 131)
+                # Contributions: 1 + 2 + 4 + 20 + 6, then the early return adds 100.
+                assert(accumulate(10) == 133)
         ''')
 
     def test_02_source_grammar_constructs_a_branch(self):

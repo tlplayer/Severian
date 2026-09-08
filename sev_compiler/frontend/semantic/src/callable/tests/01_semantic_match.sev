@@ -31,7 +31,7 @@ def classify_sum(limit: int) -> int:
             case 7:
                 return total + 100
             case _:
-                if i // 2 == 0:
+                if i % 2 == 0:
                     total += i
                 else:
                     total += 1
@@ -42,4 +42,5 @@ def classify_sum(limit: int) -> int:
 test "nested CFG preserves match continue and early return":
     assert(classify_sum(2) == 3)
     assert(classify_sum(5) == 27)
-    assert(classify_sum(10) == 131)
+    # 1 + 2 + 4 + 20 + 6 + 100.
+    assert(classify_sum(10) == 133)

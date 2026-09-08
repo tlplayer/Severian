@@ -75,12 +75,21 @@ Compiler-language regression inputs live next to scalar semantic analysis in
 the external MLIR/native toolchain and stdout/diagnostic checks; test bodies
 do not need separate files to keep them out of builds.
 
-Operator signatures and lowering descriptions live in the shared source table
-`universal/operator/scalar.sev`. Semantic analysis and MLIR lowering consult
-that table; the emitter does not maintain a second operator-symbol switch.
-This is an initial homogeneous-scalar lowering form, not the complete
-compiler-term or extensible lowering protocol. Calls retain resolved `DefId`
-and `FunctionId` identities through HIR and MIR.
+The executable loads syntax from `universal/grammar/contracts.sev` and discovers
+imported `trait Name: G` declarations before parsing dependent bodies. Source
+symbols, precedence, associativity and inherited syntax can extend the language
+without rebuilding the executable. Explicit `[G:Name]` bindings resolve through
+the shared definition environment. A bodyless operator can bind a contract's
+typed semantic method, including calls to ordinary source helpers; its signature
+must agree with the implementation. Source contract regressions run with
+`python3 tests/sev_compiler/source_contracts.py` and the migration runner's
+`Gate3SourceSyntax` class.
+
+`universal/operator/scalar.sev` still supplies fallback lowering descriptions
+for unmigrated operations. Compile-time execution of compiler-semantic methods,
+capability enforcement and the canonical CFG pipeline remain unfinished; typed
+callable binding does not complete those migrations. Calls retain resolved
+`DefId` and `FunctionId` identities through HIR and MIR.
 
 Literal parameter defaults and concrete overloads are supported. Keyword
 arguments retain source evaluation order before being arranged for the callee.
@@ -365,13 +374,13 @@ The native compiler now uses the same callable flow for methods and functions.
 Its regressions live in `frontend/semantic/src/callable/tests/`; run
 `python3 tests/sev_compiler/callable_bodies.py` from the repository root.
 Set `SEVERIAN_SANITIZE=1` to check the emitted binaries with sanitizers.
-The adjacent structural type tests reach ownership checking but still fail
-on a moved value. Full bootstrap acceptance is not green: numeric macro
-conversion tests still report an expected scalar type mismatch.
-The callable suite also contains an existing nested-control-flow fixture using
-unsupported `//`; its expected totals assume an even-number test. The remaining
-callable cases, explicit trait/operator specializations, and rejection cases
-pass through the source compiler.
+The adjacent structural type tests have a previously reported ownership failure
+on a moved value. Bootstrap acceptance now preserves typed diagnostics from
+rejected variadic specializations, including the numeric macro regression that
+previously escaped as an untyped error. The callable nested-control-flow fixture
+uses `%` for parity and independently calculated totals, including 133 for its
+early return. The migration inventory and current acceptance boundary are in
+[`tests/sev_compiler/migration`](../tests/sev_compiler/migration/README.md).
 The scalar/macro path remains present during migration; generic functions now
 use source trait requirements, while the broader compiler-term generic system
 is still incomplete. Numeric-only macro enumeration is

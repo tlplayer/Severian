@@ -126,6 +126,10 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
                         nested -= 1
                     if nested == 1 and line_start:
                         property_cursor := cursor
+                        # Trait bodies may inherit a contract by naming it on
+                        # its own line, just as declaration headers do.
+                        if token_word(current) != "" and token_word(current) != "pass" and cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Newline:
+                            bases.append(token_word(current))
                         if token_word(current) == "property":
                             property_cursor += 1
                         if property_cursor + 1 < len(tokens) and (tokens[property_cursor + 1].kind == Colon or tokens[property_cursor + 1].kind == Equal):
@@ -162,7 +166,7 @@ def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.Operato
         if previous.symbol == syntax.symbol and previous.fixity == syntax.fixity:
             if previous.precedence != syntax.precedence or previous.associativity != syntax.associativity:
                 return error(diagnostics.diagnostic_at("E000103", "conflicting operator syntax " + syntax.symbol, span))
-            if previous.definition.declaration.value == 0:
+            if previous.definition.declaration.value == 0 or (syntax.domain == universal.OperatorDomain.GrammarOperator and previous.domain != universal.OperatorDomain.GrammarOperator):
                 registry.operators[index] = syntax
             return
         index += 1
@@ -178,7 +182,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             if descriptor.resolved:
                 index += 1
                 continue
-            eligible := descriptor.grammar or descriptor.name == "operator" or descriptor.name == "Operator"
+            eligible := descriptor.grammar or descriptor.name == "operator" or descriptor.name == "Operator" or descriptor.name == "G"
             inherited: universal.OperatorSyntax | None := None
             for base in descriptor.bases:
                 if base == "operator" or base == "Operator":
@@ -186,12 +190,14 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 for parent in registry.descriptors:
                     if parent.name == base and parent.resolved:
                         eligible = true
+                        if parent.grammar or parent.name == "G":
+                            descriptor.grammar = true
                         if parent.syntax != None:
                             inherited = parent.syntax
             if not eligible:
                 index += 1
                 continue
-            symbol := descriptor.name if descriptor.grammar else ""
+            symbol := ""
             form := ""
             fixity := universal.Fixity.Infix
             precedence := 0
@@ -208,13 +214,21 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     return error(diagnostics.diagnostic_at("E000103", "duplicate operator syntax property " + property.name, descriptor.span))
                 fields.append(property.name)
                 if property.name == "symbol":
-                    if len(property.tokens) != 1:
-                        return error(diagnostics.diagnostic_at("E000103", "operator symbol must be a constant string", descriptor.span))
-                    match property.tokens[0].kind:
-                        case String:
-                            symbol = value
-                        case _:
-                            return error(diagnostics.diagnostic_at("E000103", "operator symbol must be a constant string", descriptor.span))
+                    symbol = ""
+                    for token in property.tokens:
+                        match token.kind:
+                            case String:
+                                symbol += value
+                            case SymbolToken:
+                                symbol += value
+                            case Identifier:
+                                symbol += value
+                            case Equal:
+                                symbol += "="
+                            case Pipe:
+                                symbol += "|"
+                            case _:
+                                return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
                 elif property.name == "precedence":
                     if len(property.tokens) != 1:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
@@ -222,6 +236,8 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         case Integer:
                             precedence = int(value)
                         case _:
+                            if token_word(property.tokens[0]) == "absent":
+                                continue
                             return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
                     if precedence < 1 or precedence > 255:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be between 1 and 255", descriptor.span))
@@ -236,9 +252,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     elif form == "Postfix":
                         fixity = universal.Fixity.Postfix
                 elif property.name == "fixity" or property.name == "associativity":
-                    if len(property.tokens) != 3 or property.tokens[1].kind != Dot:
+                    contextual = descriptor.grammar and len(property.tokens) == 1
+                    if not contextual and (len(property.tokens) != 3 or property.tokens[1].kind != Dot):
                         return error(diagnostics.diagnostic_at("E000103", "operator form must name an enum member", descriptor.span))
-                    member = token_word(property.tokens[2])
+                    member = token_word(property.tokens[0] if contextual else property.tokens[2])
                     if property.name == "fixity":
                         if token_word(property.tokens[0]) != "Fixity":
                             return error(diagnostics.diagnostic_at("E000103", "operator fixity requires Fixity", descriptor.span))
@@ -249,7 +266,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         elif member != "Infix":
                             return error(diagnostics.diagnostic_at("E000103", "unknown operator fixity", descriptor.span))
                     else:
-                        if token_word(property.tokens[0]) != "Associativity":
+                        if not contextual and token_word(property.tokens[0]) != "Associativity":
                             return error(diagnostics.diagnostic_at("E000103", "operator associativity requires Associativity", descriptor.span))
                         if member == "Right":
                             associativity = universal.Associativity.Right
@@ -260,9 +277,11 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             descriptor.resolved = true
             if symbol != "":
                 if precedence == 0 and (form == "" or form == "Infix" or form == "Prefix" or form == "Postfix"):
-                    return error(diagnostics.diagnostic_at("E000103", "operator descriptor requires precedence", descriptor.span))
+                    return error(diagnostics.diagnostic_at("E000103", "operator precedence is required", descriptor.span))
                 identity = universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
                 syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form)
+                if descriptor.grammar:
+                    syntax.domain = universal.OperatorDomain.GrammarOperator
                 register_operator_syntax(registry, syntax, descriptor.span)
                 descriptor.syntax = syntax
             registry.descriptors[index] = descriptor

@@ -48,6 +48,7 @@ def main():
     scalar_tests = ROOT / "sev_compiler/frontend/semantic/src/scalar/tests"
     string_import = f'import "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
     cases = {
+        "generic_identity": "def answer[T](value: T) -> T:\n    return value\nassert(answer(42) == 42)\nassert(answer(2.5) == 2.5)\n",
         "int_add": "left: i32 = 1\nright: i32 = 2\nsum: i32 = left + right\nassert(sum == 3)\n",
         "arithmetic": "left: i32 = 7\nright: i32 = 5\nanswer: i32 = (left + right) * 2 - 4\nassert(answer == 20)\n",
         "negative": "value: i32 = -7\nanswer: i32 = value + 9\nassert(answer == 2)\n",
@@ -203,7 +204,7 @@ def main():
         "unknown_name": ("answer: i32 = missing + 1\n", "unknown name missing"),
         "wrong_type": ("answer: i32 = true\n", "boolean cannot initialize an integer"),
         "overflow": ("answer: i8 = 128\n", "integer literal is outside"),
-        "unsupported": ("def answer[T](value: T) -> T:\n    return value\n", "outside the scalar bootstrap subset"),
+        "unconstrained_operator": ("def answer[T](value: T) -> T:\n    return value + value\n", "explicit trait capability"),
         "malformed": ("answer: i32 =\n", "expected an expression"),
         "missing_return": ("def answer() -> i32:\n    value = 3\n", "without returning a value"),
         "branch_missing_return": ("def answer(value: bool) -> i32:\n    if value:\n        return 1\n", "without returning a value"),

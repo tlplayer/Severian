@@ -28,6 +28,8 @@ enum ResolvedCallee:
 
 
 enum ExpressionKind:
+    SourceSymbol(spelling: string, definition: DefId)
+    CompilerTerm(name: string, arguments: list[TypeAnnotation])
     LiteralValue(value: LiteralValue)
     Name(name: string)
     Member(object: Expression, name: string)

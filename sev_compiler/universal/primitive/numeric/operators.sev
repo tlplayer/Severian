@@ -9,25 +9,39 @@ union NativeInteger:
     i64
     u8
 
+union NativeSignedInteger:
+    i8
+    i16
+    i32
+    i64
+
+extend NativeSignedInteger:
+    operator %[G:Remainder](right: Self) -> Self:
+        return mlir(arith.remsi, self, right)
+
+extend u8:
+    operator %[G:Remainder](right: Self) -> Self:
+        return mlir(arith.remui, self, right)
+
 extend NativeInteger:
-    operator +(right: Self) -> Self:
+    operator +[G:Add](right: Self) -> Self:
         return mlir(arith.addi, self, right)
 
-    operator -(right: Self) -> Self:
+    operator -[G:Subtract](right: Self) -> Self:
         return mlir(arith.subi, self, right)
 
-    operator *(right: Self) -> Self:
+    operator *[G:Multiply](right: Self) -> Self:
         return mlir(arith.muli, self, right)
 
 extend float:
-    operator +(right: Self) -> Self:
+    operator +[G:Add](right: Self) -> Self:
         return mlir(arith.addf, self, right)
 
-    operator -(right: Self) -> Self:
+    operator -[G:Subtract](right: Self) -> Self:
         return mlir(arith.subf, self, right)
 
-    operator *(right: Self) -> Self:
+    operator *[G:Multiply](right: Self) -> Self:
         return mlir(arith.mulf, self, right)
 
-    operator /(right: Self) -> Self:
+    operator /[G:Divide](right: Self) -> Self:
         return mlir(arith.divf, self, right)

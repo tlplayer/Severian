@@ -1,0 +1,178 @@
+# Source grammar contracts loaded into the shared declaration environment.
+trait G:
+    pass
+
+
+trait Positive: G:
+    symbol: Y = +
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
+trait Negative: G:
+    symbol: Y = -
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
+trait Not: G:
+    symbol: Y = not
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
+trait Move: G:
+    symbol: Y = move
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
+trait BitwiseOr: G:
+    symbol: Y = |
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 4
+    associativity: Associativity = Left
+
+
+trait BitwiseAnd: G:
+    symbol: Y = &
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 6
+    associativity: Associativity = Left
+
+
+trait BitwiseXor: G:
+    symbol: Y = ^
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 5
+    associativity: Associativity = Left
+
+
+trait LeftShift: G:
+    symbol: Y = <<
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 7
+    associativity: Associativity = Left
+
+
+trait RightShift: G:
+    symbol: Y = >>
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 7
+    associativity: Associativity = Left
+
+
+trait Add: G:
+    symbol: Y = +
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 7
+    associativity: Associativity = Left
+
+
+trait Subtract: G:
+    symbol: Y = -
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 7
+    associativity: Associativity = Left
+
+
+trait Multiply: G:
+    symbol: Y = *
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 8
+    associativity: Associativity = Left
+
+
+trait Divide: G:
+    symbol: Y = /
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 8
+    associativity: Associativity = Left
+
+
+trait FloorDivide: G:
+    symbol: Y = //
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 8
+    associativity: Associativity = Left
+
+
+trait Remainder: G:
+    symbol: Y = %
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 8
+    associativity: Associativity = Left
+
+
+trait Power: G:
+    symbol: Y = **
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 9
+    associativity: Associativity = Right
+
+
+trait Equal: G:
+    symbol: Y = ==
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait NotEqual: G:
+    symbol: Y = !=
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait Less: G:
+    symbol: Y = <
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait LessEqual: G:
+    symbol: Y = <=
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait Greater: G:
+    symbol: Y = >
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait GreaterEqual: G:
+    symbol: Y = >=
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait Contains: G:
+    symbol: Y = in
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait LogicalAnd: G:
+    symbol: Y = and
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 2
+    associativity: Associativity = Left
+
+
+trait LogicalOr: G:
+    symbol: Y = or
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 1
+    associativity: Associativity = Left

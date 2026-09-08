@@ -270,6 +270,7 @@ def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[T
             for token in tokens:
                 if token.span.start == descriptor.span.start:
                     token.descriptor = true
+                    token.grammar = descriptor.grammar
                     syntax ?= descriptor.syntax
                     if descriptor.grammar:
                         if syntax != None:

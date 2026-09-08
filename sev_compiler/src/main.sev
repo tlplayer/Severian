@@ -54,7 +54,7 @@ def main():
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
-    mlir = compiler.compile_to_mlir(source.load(input), command == "test", sysroot)
+    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot)
     if emit == "mlir":
         if output == "":
             print(mlir)

@@ -79,6 +79,7 @@ class OperatorDeclaration:
     body: Block | None = None
     receiver: bool = true
     definition: DefId = DefId(0, 0, DeclarationId(0))
+    grammar_parameter: string | absent = absent
 
 
 class TraitDeclaration:
@@ -94,6 +95,7 @@ class TraitDeclaration:
     definition: DefId = DefId(0, 0, DeclarationId(0))
     lookup: string = ""
     compiler_descriptor: bool = false
+    grammar: bool = false
 
 
 enum CompilerExpectation:

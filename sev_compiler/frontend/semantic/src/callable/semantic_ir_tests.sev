@@ -5,6 +5,16 @@ import "../../../parser/src/lib.sev" as parser
 import "../callable.sev" as semantic
 
 
+def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
+    # These isolated parser/HIR tests supply their syntax environment explicitly;
+    # the executable obtains its environment from source G declarations.
+    syntax = [universal.operator_syntax(universal.Add()),
+        universal.operator_syntax(universal.Equal()),
+        universal.operator_syntax(universal.LeftShift()),
+        universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left)]
+    return lexer.scan(input, syntax)
+
+
 def resolved_expression(expression: universal.Expression):
     assert(expression.type_id.index != 0)
     match expression.kind:
@@ -50,7 +60,7 @@ def resolved_block(block: universal.Block) -> int:
 
 test "parsed match produces typed HIR for all arms":
     input = source.SourceFile(source.SourceId(0), "match.sev", "def classify(value: int) -> int:\n    match value:\n        case 0:\n            return 10\n        case 1:\n            return 20\n        case _:\n            return 30\n\ntest \"match survives parser to semantic\":\n    assert(classify(0) == 10)\n    assert(classify(1) == 20)\n    assert(classify(99) == 30)\n")
-    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
     match ast.items[0]:
         case Function:
             body ?= declaration.body
@@ -80,7 +90,7 @@ test "parsed match produces typed HIR for all arms":
 
 test "trait parser retains operators members and generic signatures":
     input = source.SourceFile(source.SourceId(0), "traits.sev", "trait Arithmetic:\n    operator +(right: Self) -> Self\n    operator <<[LeftShift: Y, N: int](right: N) -> Self\n    operator +=(right: Self)\n    def measure() -> int\n\ntrait Derived: Arithmetic\n\nclass Number: Arithmetic:\n    amount: int\n    operator +(right: Self) -> Self:\n        return Number(amount + right.amount)\n")
-    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
     assert(len(ast.items) == 3)
     match ast.items[0]:
         case Trait:
@@ -102,9 +112,28 @@ test "trait parser retains operators members and generic signatures":
             assert(false)
 
 
+test "operator grammar constraints retain ordinary generic parameter syntax":
+    input = source.SourceFile(source.SourceId(0), "grammar-parameter.sev", "trait Addable:\n    operator +[Grammar:Add](right: Self) -> Self\n")
+    ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
+    match ast.items[0]:
+        case Trait:
+            operation = declaration.operators[0]
+            assert(len(operation.type_parameters) == 1)
+            assert(operation.type_parameters[0] == "Grammar")
+            assert(len(operation.constraints) == 1)
+            match operation.constraints[0]:
+                case Parameter:
+                    assert(parameter == "Grammar")
+                    assert(universal.simple_type_name(bound) == "Add")
+                case _:
+                    assert(false)
+        case _:
+            assert(false)
+
+
 test "generic HIR retains required operator and concrete implementation identities":
     input = source.SourceFile(source.SourceId(0), "resolution.sev", "trait Addable:\n    operator +(other: Self) -> Self\n\nextend int:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addi, self, other)\n\nextend float:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addf, self, other)\n\ndef twice[T: Addable](value: T) -> T:\n    return value + value\n\ntest:\n    assert(twice(21) == 42)\n    assert(twice(2.5) == 5.0)\n")
-    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
     hir = semantic.analyze_callables(ast, true)
     assert(len(hir.traits) == 1)
     assert(len(hir.generic_functions) == 1)
@@ -167,7 +196,7 @@ import "../lib.sev" as package_analysis
 
 test "package and executable entries share type and member registration":
     input = source.SourceFile(source.SourceId(0), "package.sev", "type Count = int\nclass Box:\n    amount: Count\n    def get() -> Count:\n        return amount\n\ndef read(value: Box) -> Count:\n    return value.get()\n\ntest:\n    assert(read(Box(42)) == 42)\n")
-    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
     program = package_analysis.analyze_tests(ast)
     assert(len(program.modules) == 1)
     hir = program.modules[0]

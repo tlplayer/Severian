@@ -345,14 +345,28 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
                 annotation = parser_type_annotation(parser)
                 default: universal.Expression | None := None
                 if parser_take(parser, Equal) != None:
-                    default = parser_expression(parser, 0)
+                    if start_token.grammar and property_name == "symbol":
+                        symbol_token = parser_next(parser)
+                        if len(symbol_token.syntaxes) == 0:
+                            return error(parser_fail(parser, "expected a registered source symbol"))
+                        syntax = start_token.syntaxes[0] if len(start_token.syntaxes) != 0 else symbol_token.syntaxes[0]
+                        default = universal.Expression(universal.SourceSymbol(syntax.symbol, syntax.definition), symbol_token.span)
+                    elif start_token.grammar and property_name in ["left", "right"]:
+                        term = parser_type_primary(parser)
+                        match term.kind:
+                            case Named:
+                                default = universal.Expression(universal.CompilerTerm(name, arguments), term.span)
+                            case _:
+                                return error(parser_fail(parser, "expected an operand requirement"))
+                    else:
+                        default = parser_expression(parser, 0)
                 properties.append(universal.PropertyDeclaration(property_name, annotation, default, property_start))
             else:
                 # A bare type in a trait body is an inherited contract.
                 bases.append(parser_type_annotation(parser))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of trait")
-    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor)
+    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar)
 
 
 def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
@@ -371,44 +385,13 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
                 symbol = value
             case _:
                 return error(parser_fail(parser, "expected a registered operator symbol"))
-    syntax = universal.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity)
-    grammar_domain := false
-    if parser.cursor[0] + 2 < len(parser.tokens) and parser_at_simple(parser, LeftBracket) and lexer.token_word(parser.tokens[parser.cursor[0] + 1]) == "G" and parser.tokens[parser.cursor[0] + 2].kind == RightBracket:
-        grammar_domain = true
-        parser_next(parser)
-        parser_next(parser)
-        parser_next(parser)
+    syntax = universal.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity, definition=syntax.definition)
+    # Operator parameters use the same parameter:constraint grammar as other
+    # declarations. Whether a constraint denotes compiler grammar is resolved
+    # later, through its actual definition and inherited contracts.
     generic_parts = parser_type_parameters(parser)
-    if grammar_domain:
-        syntax.domain = universal.OperatorDomain.GrammarOperator
-        syntax.grammar_name = symbol
-    type_parameters: list[string] = []
-    operator_constraints: list[universal.GenericConstraint] = []
-    for generic_name in generic_parts[0]:
-        grammar_binding := false
-        for constraint in generic_parts[1]:
-            match constraint:
-                case Parameter:
-                    bound_name ?= universal.simple_type_name(bound)
-                    if bound_name == "G":
-                        if generic_name == parameter:
-                            if syntax.grammar_name != "":
-                                return error(parser_fail(parser, "operator requires one grammar binding"))
-                            syntax.domain = universal.OperatorDomain.GrammarOperator
-                            syntax.grammar_name = generic_name
-                            grammar_binding = true
-                case _:
-                    pass
-        if not grammar_binding:
-            type_parameters.append(generic_name)
-    for constraint in generic_parts[1]:
-        match constraint:
-            case Parameter:
-                bound_name ?= universal.simple_type_name(bound)
-                if bound_name != "G":
-                    operator_constraints.append(constraint)
-            case _:
-                operator_constraints.append(constraint)
+    type_parameters = generic_parts[0]
+    operator_constraints = generic_parts[1]
     parser_expect(parser, LeftParen, "expected operator parameters")
     parameters: list[universal.OperatorParameter] = []
     while not parser_at_simple(parser, RightParen):
@@ -778,6 +761,13 @@ def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics
 
 
 def token_operator(token: lexer.Token, fixity: universal.Fixity) -> universal.OperatorSyntax | None:
+    # Formatted literals carry the registry for their embedded expressions;
+    # that registry does not make the literal itself an operator.
+    match token.kind:
+        case FormattedString:
+            return None
+        case _:
+            pass
     for syntax in token.syntaxes:
         if syntax.fixity == fixity and (syntax.grammar_form == "" or syntax.grammar_form == "Infix" or syntax.grammar_form == "Prefix" or syntax.grammar_form == "Postfix"):
             return syntax

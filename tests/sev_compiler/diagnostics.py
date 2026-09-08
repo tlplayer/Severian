@@ -34,8 +34,8 @@ def main():
           'test "syntax":\n    assert(1 +* 2 == 0)\n',
           "E000120", "expected an expression", 2, 15)
     check(compiler, directory, "semantic",
-          'test "semantic":\n    assert(1 % 2 == 0)\n',
-          "E000200", "unsupported scalar binary operator %", 2, 12)
+          'test "semantic":\n    assert(1 + true == 0)\n',
+          "E000200", "a boolean cannot initialize an integer", 2, 16)
     check(compiler, directory, "lexer",
           'test "lexer":\n    value = "λ\\q"\n',
           "E000101", "unsupported literal escape", 2, 13)

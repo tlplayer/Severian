@@ -40,3 +40,4 @@ class Token:
     span: source.Span
     syntaxes: list[universal.OperatorSyntax] = []
     descriptor: bool = false
+    grammar: bool = false

@@ -46,7 +46,7 @@ def callable_path(expression: universal.Expression) -> string:
             return ""
 
 
-def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> universal.TypeId:
+def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> universal.TypeId | diagnostics.Diagnostic:
     match expression.kind:
         case Name:
             index := 0
@@ -68,10 +68,12 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             for record in state.records:
                 if record.name == state.namespace + name or record.name == name:
                     return record.type_id
-            method ?= callable_method(state, callee)
+            method_lookup = callable_method(state, callee)
+            method ?= method_lookup.function
             if method != None:
                 return method.result_type
-            function ?= callable_select_function(state, name, arguments)
+            function_lookup = callable_select_function(state, name, arguments)
+            function ?= function_lookup.selection
             if function != None:
                 return function.function.result_type
         case Member:
@@ -156,7 +158,7 @@ def callable_operand(state: CallableAnalysis, expression: universal.Expression, 
     return callable_expression(state, expression, target)
 
 
-def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> CallableSelection:
+def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> CallableSelection | diagnostics.Diagnostic:
     count := 0
     keyword := false
     for argument in arguments:
@@ -164,13 +166,13 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
             keyword = true
         else:
             if keyword:
-                throw Error("positional argument follows keyword argument")
+                return error(callable_diagnostic("positional argument follows keyword argument", argument.span))
             count += 1
     parameters = packs.pack_parameters(template, count)
     prototype = universal.FunctionDeclaration(parameters=parameters)
     bound = packs.bind_arguments(prototype, arguments)
     if bound.message != "":
-        throw Error(bound.message)
+        return error(callable_diagnostic(bound.message, template.span))
     concrete: list[universal.FunctionParameter] = []
     suffix := ""
     for parameter in parameters:
@@ -190,20 +192,20 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
                     annotation = universal.named_type(known.name, [], parameter.span)
                     concrete.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span, keyword_only=parameter.keyword_only))
                 else:
-                    throw Error("variadic argument has no concrete value type")
+                    return error(callable_diagnostic("variadic argument has no concrete value type", argument.span))
     instance_name = template.name + "$pack$" + string(count) + suffix
     for function in state.functions:
         if function.name == instance_name:
             return CallableSelection(function, bound.arguments)
     if len(state.functions) >= 512:
-        throw Error("bootstrap specialization limit exceeded")
+        return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup)
     signature = callable_signature(instance, int(len(state.functions)))
     state.functions.append(signature)
     return CallableSelection(signature, bound.arguments)
 
 
-def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableSelection | None:
+def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableOptionalSelection | diagnostics.Diagnostic:
     lookup := state.namespace + name
     local := false
     for template in state.generics:
@@ -219,14 +221,14 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
         lookup = "format.string" if name == "string" else name
     for template in state.templates:
         if template.name == lookup:
-            return callable_select_pack(state, template, arguments)
+            return CallableOptionalSelection(callable_select_pack(state, template, arguments))
     candidates: list[universal.FunctionDeclaration] = []
     for function in state.functions:
         if function.name == lookup:
             candidates.append(function)
     if len(candidates) == 0:
         generic = callable_select_generic(state, lookup, arguments)
-        return generic.selection
+        return generic
     message := "no overload accepts these arguments for " + name
     for function in candidates:
         bound = packs.bind_arguments(function, arguments)
@@ -234,7 +236,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
             message = bound.message
             continue
         if len(candidates) == 1:
-            return CallableSelection(function, bound.arguments)
+            return CallableOptionalSelection(CallableSelection(function, bound.arguments))
         compatible := true
         for argument in bound.arguments:
             typed = callable_expression(state, argument.value, universal.TypeId(0))
@@ -245,8 +247,8 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
                         compatible = false
                 index += 1
         if compatible:
-            return CallableSelection(function, bound.arguments)
-    throw Error(message)
+            return CallableOptionalSelection(CallableSelection(function, bound.arguments))
+    return error(callable_diagnostic(message, arguments[0].span if len(arguments) != 0 else None))
 
 
 def callable_expression(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -424,7 +426,8 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                     if expected.index != 0 and expected.index != record.type_id.index:
                         return error(callable_diagnostic("constructor does not match expected type", expression.span))
                     return universal.Expression(universal.RecordValue(resolved), expression.span, type_id=record.type_id)
-            method ?= callable_method(state, callee)
+            method_lookup = callable_method(state, callee)
+            method ?= method_lookup.function
             if method != None:
                 receiver = callable_receiver(state, callee)
                 if receiver.type_id.index >= 100000:
@@ -448,14 +451,21 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                 if conversions.scalar_numeric(target):
                     if len(arguments) < 1 or len(arguments) > 2:
                         return error(callable_diagnostic("numeric conversion requires a value and optional mode", expression.span))
-                    for argument in arguments:
-                        if argument.name != None:
-                            return error(callable_diagnostic("numeric conversion arguments must be positional", argument.span))
+                    if arguments[0].name != None:
+                        return error(callable_diagnostic("numeric conversion value must be positional", arguments[0].span))
                     mode := ""
                     if len(arguments) == 2:
+                        if arguments[1].name != None and arguments[1].name != "mode":
+                            return error(callable_diagnostic("unknown numeric conversion argument", arguments[1].span))
                         match arguments[1].value.kind:
                             case Name:
                                 mode = name
+                            case LiteralValue:
+                                match value:
+                                    case StringValue:
+                                        mode = value
+                                    case _:
+                                        return error(callable_diagnostic("numeric conversion mode must be a policy name", arguments[1].span))
                             case _:
                                 return error(callable_diagnostic("numeric conversion mode must be a policy name", arguments[1].span))
                     converted = callable_convert(state, callable_expression(state, arguments[0].value, universal.TypeId(0)), target, mode)
@@ -479,7 +489,8 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                     state.next_id[0] += 1
                     return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.TypeId(3))
                 return error(callable_diagnostic("type requires a concrete value", expression.span))
-            selected ?= callable_select_function(state, name, arguments)
+            function_lookup = callable_select_function(state, name, arguments)
+            selected ?= function_lookup.selection
             selected_functions: list[universal.FunctionDeclaration] = []
             if selected != None:
                 selected_functions.append(selected.function)
@@ -962,7 +973,7 @@ def callable_implicit_field(state: CallableAnalysis, name: string, span: source.
     return None
 
 
-def callable_receiver(state: CallableAnalysis, callee: universal.Expression) -> universal.Expression:
+def callable_receiver(state: CallableAnalysis, callee: universal.Expression) -> universal.Expression | diagnostics.Diagnostic:
     match callee.kind:
         case Member:
             return callable_expression(state, object, universal.TypeId(0))
@@ -970,7 +981,7 @@ def callable_receiver(state: CallableAnalysis, callee: universal.Expression) -> 
             return callable_expression(state, universal.Expression(universal.Name("self"), callee.span), state.owner)
 
 
-def callable_method(state: CallableAnalysis, callee: universal.Expression) -> universal.FunctionDeclaration | None:
+def callable_method(state: CallableAnalysis, callee: universal.Expression) -> CallableOptionalFunction | diagnostics.Diagnostic:
     owner := state.owner
     member := ""
     match callee.kind:
@@ -979,19 +990,19 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> un
             member = name
         case Name:
             if name in state.names:
-                return None
+                return CallableOptionalFunction()
             member = name
         case _:
-            return None
+            return CallableOptionalFunction()
     if owner.index >= 100000:
         required = callable_required_member(state, owner, member)
-        return required.function
+        return required
     for record in state.records:
         if record.type_id.index == owner.index:
             for function in state.functions:
                 if function.name == record.name + "." + member:
-                    return function
-    return None
+                    return CallableOptionalFunction(function)
+    return CallableOptionalFunction()
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
@@ -1208,11 +1219,43 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             owners.append(record.type_id)
                 for owner in owners:
                     for operation in declaration.operators:
+                        operation = definitions.resolve_operator_constraints(state.declarations, operation, declaration.lookup)
                         if len(operation.type_parameters) != 0 or len(operation.constraints) != 0:
                             return error(diagnostics.diagnostic_at("E000212", "generic operator implementations require operator argument inference", operation.span))
                         operation.definition = definitions.definition_id(declaration.name, 10000 + ordinal)
                         ordinal += 1
                         function := callable_operator_function(operation, owner, declaration.lookup, state.records)
+                        function.operator_syntax = definitions.resolve_grammar_binding(state.declarations, operation.syntax, declaration.lookup, operation.span)
+                        if operation.syntax.domain == universal.OperatorDomain.GrammarOperator:
+                            contract_definition ?= definitions.trait_named(state.declarations, operation.syntax.grammar_name, declaration.lookup)
+                            if contract_definition != None:
+                                if function.body == None:
+                                    for inherited in definitions.inherited_traits(state.declarations, contract_definition):
+                                        for method in inherited.methods:
+                                            if method.name == "semantic" and method.body != None and function.body == None:
+                                                if len(method.parameters) != len(function.parameters):
+                                                    return error(diagnostics.diagnostic_at("E000212", "grammar semantic operand count does not match implementation", operation.span))
+                                                receiver_annotation = universal.named_type(definitions.type_name(owner, state.records), [], operation.span)
+                                                semantic_method = callable_replace_signature(method, ["Self"], [receiver_annotation])
+                                                parameter_index := 0
+                                                for parameter in semantic_method.parameters:
+                                                    declared_type = callable_annotation(function.parameters[parameter_index].annotation, state.records, declaration.lookup, state.declarations)
+                                                    semantic_type = callable_annotation(parameter.annotation, state.records, inherited.lookup, state.declarations)
+                                                    if declared_type.index != semantic_type.index:
+                                                        return error(diagnostics.diagnostic_at("E000212", "grammar semantic operand type does not match implementation", operation.span))
+                                                    parameter_index += 1
+                                                declared_result ?= function.result
+                                                semantic_result ?= semantic_method.result
+                                                if declared_result != None:
+                                                    if semantic_result != None:
+                                                        expected_result = callable_annotation(declared_result, state.records, declaration.lookup, state.declarations)
+                                                        actual_result = callable_annotation(semantic_result, state.records, inherited.lookup, state.declarations)
+                                                        if expected_result.index != actual_result.index:
+                                                            return error(diagnostics.diagnostic_at("E000212", "grammar semantic result type does not match implementation", operation.span))
+                                                function.parameters = semantic_method.parameters
+                                                function.result = semantic_method.result
+                                                function.body = semantic_method.body
+                                                function.lookup = inherited.lookup
                         receiver_type = universal.named_type(definitions.type_name(owner, state.records), [], declaration.span)
                         family_names = [declaration.name, declaration.name.split(".")[-1]]
                         function = callable_replace_signature(function, family_names, [receiver_type, receiver_type])
@@ -1323,7 +1366,12 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
         index += 1
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
-    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution(function.type_arguments)), arguments), span, id, function.result_type)
+    resolved = universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution(function.type_arguments)), arguments), span, id, function.result_type)
+    syntax ?= function.operator_syntax
+    if syntax != None:
+        if syntax.domain == universal.OperatorDomain.GrammarOperator:
+            resolved.grammar = syntax.definition
+    return resolved
 
 
 def callable_required_member(state: CallableAnalysis, owner: universal.TypeId, name: string) -> CallableOptionalFunction | diagnostics.Diagnostic:
