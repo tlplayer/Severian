@@ -1,0 +1,16 @@
+# Wide declaration identities must survive aggregate boxing in compiler lists.
+class Row:
+    marker: i32
+    identity: u128
+    tail: i64
+
+def main():
+    rows: list[Row] = []
+    rows.append(Row(7, u128(42), 99))
+    rows.append(Row(8, u128(43), 100))
+    assert(rows[0].marker == 7)
+    assert(rows[0].identity == 42)
+    assert(rows[0].tail == 99)
+    assert(rows[1].marker == 8)
+    assert(rows[1].identity == 43)
+    assert(rows[1].tail == 100)

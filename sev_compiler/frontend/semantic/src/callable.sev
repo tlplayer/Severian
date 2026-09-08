@@ -66,6 +66,9 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             if target != None:
                 if conversions.scalar_numeric(target):
                     return target
+            constructed = callable_constructor_type(state, callee)
+            if constructed.index != 0:
+                return constructed
             for record in state.records:
                 if record.name == state.namespace + name or record.name == name:
                     return record.type_id
@@ -531,10 +534,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
             if name == "mlir":
                 return callable_mlir(state, arguments, expression.span, expected)
-            alias_type := universal.TypeId(0)
+            alias_type := callable_constructor_type(state, callee)
             alias ?= definitions.alias_named(state.declarations, name, state.namespace)
             if alias != None:
-                alias_type = alias.id
+                if alias_type.index == 0:
+                    alias_type = alias.id
             for record in state.records:
                 if record.name == state.namespace + name or record.name == name or record.type_id.index == alias_type.index:
                     bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=record.fields), arguments)
@@ -956,9 +960,9 @@ def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block
     return true
 
 
-def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions) -> universal.Module | diagnostics.Diagnostic:
+def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "") -> universal.Module | diagnostics.Diagnostic:
     registered = definitions.register_declarations(module, environment)
-    state = CallableAnalysis(functions=visible[:], declarations=registered)
+    state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace)
     own_index := 0
     function_names: list[string] = []
     for item in module.items:
@@ -967,19 +971,22 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 if declaration.extension or definitions.alias_named(state.declarations, declaration.name, declaration.lookup) != None:
                     continue
                 if len(declaration.type_parameters) != 0:
-                    return error(callable_diagnostic("generic record layout is not implemented", declaration.span))
+                    continue
                 record_declaration := declaration
                 for previous in state.records:
                     if previous.name == declaration.name:
                         return error(callable_diagnostic("duplicate class " + declaration.name, declaration.span))
                 record_declaration.type_id = universal.TypeId(u32(1000 + len(state.records)))
-                record_declaration.definition = definitions.definition_id(record_declaration.name, 30000 + int(len(state.records)))
+                for known in state.declarations.implementations:
+                    if known.name == record_declaration.name:
+                        record_declaration.definition = known.definition
                 state.records.append(record_declaration)
             case _:
                 pass
     callable_register_aliases(state)
-    record_index := 0
     for record in state.records:
+        if definitions.record_instance(state.declarations, record.type_id) != None:
+            continue
         resolved_fields: list[universal.FunctionParameter] = []
         field_names: list[string] = []
         for field in record.fields:
@@ -994,8 +1001,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 return error(callable_diagnostic("unit cannot be stored in a record field", field.span))
             resolved_fields.append(resolved_field)
         record.fields = resolved_fields
-        state.records[record_index] = record
-        record_index += 1
+        state.records[int(record.type_id.index) - 1000] = record
         method_names: list[string] = []
         for method in record.methods:
             if method.name in method_names or method.name in field_names:
@@ -1119,7 +1125,8 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 if include_tests:
                     if len(declaration.source_modes) == 1 and declaration.source_modes[0] == "compiler":
                         for compiler_case in declaration.compiler_cases:
-                            isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records, declarations=state.declarations, generics=state.generics)
+                            isolated_definitions = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
+                            isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records[:], declarations=isolated_definitions, generics=state.generics)
                             checked ?= callable_check_compiler_case(isolated, compiler_case.body)
                             rejected := false
                             if checked is Diagnostic:
@@ -1156,6 +1163,10 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             if len(function.parameters) != 0 or (function.result_type.index != 2 and function.result_type.index != 32):
                 return error(callable_diagnostic("main must take no arguments and return unit or i32", function.span))
             module.entry = function.id
+    for record in state.records:
+        callable_record_layout(state.records, record.type_id, [])
+        callable_validate_record_arguments(state, record)
+    module.records = state.records
     return module
 
 
@@ -1190,6 +1201,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
             member = name
         case _:
             return CallableOptionalFunction()
+    callable_register_record_methods(state, owner)
     if owner.index >= 100000:
         required = callable_required_member(state, owner, member)
         return required
@@ -1296,10 +1308,11 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
         local.names.append(parameter.name)
         local.mutables.append(true)
     if function.owner_type.index != 0:
-        local.declarations = definitions.SemanticDefinitions(local.declarations.aliases[:], local.declarations.traits, local.declarations.implementations)
+        local.declarations = definitions.SemanticDefinitions(local.declarations.aliases[:], local.declarations.traits, local.declarations.implementations, record_templates=local.declarations.record_templates, record_instances=local.declarations.record_instances)
         span = function.parameters[0].span
         local.declarations.aliases.append(universal.TypeDeclaration([], local.namespace + "Self", [], [], None, span, id=function.owner_type))
     local.types = function.parameter_types[:]
+    callable_record_environment(local, function.owner_type)
     body ?= function.body
     if body != None:
         return callable_block(local, body.statements, function.result_type)
@@ -1498,7 +1511,7 @@ def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId
     if contract != None:
         index := 0
         for parameter_name in contract.type_parameters:
-            if type_id.index == u32(100000 + index):
+            if type_id.index == callable_symbolic_parameter(contract, index).index:
                 for constraint in contract.constraints:
                     match constraint:
                         case Parameter:
@@ -1662,6 +1675,8 @@ def callable_validate_implementations(state: CallableAnalysis) -> unit | diagnos
 def callable_register_generic(state: CallableAnalysis, function: universal.FunctionDeclaration) -> unit | diagnostics.Diagnostic:
     if function.body == None or len(function.decorators) != 0:
         return error(diagnostics.diagnostic("E000219", "generic function requires a source body"))
+    if len(function.type_parameters) > 256:
+        return error(callable_diagnostic("generic parameter limit exceeded", function.span))
     names: list[string] = []
     for parameter in function.type_parameters:
         if parameter in names:
@@ -1693,7 +1708,7 @@ def callable_register_generic(state: CallableAnalysis, function: universal.Funct
 
 def callable_generic_environment(state: CallableAnalysis, function: universal.FunctionDeclaration, arguments: list[universal.TypeId]) -> CallableAnalysis | diagnostics.Diagnostic:
     local = callable_scope(state)
-    local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations)
+    local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances)
     local.contract = function
     lookup ?= function.lookup
     if lookup != None:
@@ -1714,7 +1729,7 @@ def callable_validate_generics(state: CallableAnalysis, module: universal.Module
         arguments: list[universal.TypeId] = []
         index := 0
         for name in function.type_parameters:
-            arguments.append(universal.TypeId(u32(100000 + index)))
+            arguments.append(callable_symbolic_parameter(function, index))
             index += 1
         local = callable_generic_environment(state, function, arguments)
         signature := callable_replace_signature(function, [], [])
@@ -1745,17 +1760,12 @@ def callable_select_generic(state: CallableAnalysis, name: string, arguments: li
         for argument in bound.arguments:
             for parameter in template.parameters:
                 if argument.name == parameter.name:
-                    formal ?= universal.simple_type_name(parameter.annotation)
-                    if formal != None:
-                        index := 0
-                        for name in template.type_parameters:
-                            if formal == name:
-                                typed = callable_expression(state, argument.value, universal.TypeId(0))
-                                actual = typed.type_id
-                                if actuals[index].index != 0 and actuals[index].index != actual.index:
-                                    return error(diagnostics.diagnostic_at("E000219", "conflicting generic type arguments", argument.span))
-                                actuals[index] = actual
-                            index += 1
+                    typed = callable_expression(state, argument.value, universal.TypeId(0))
+                    namespace := ""
+                    lookup ?= template.lookup
+                    if lookup != None:
+                        namespace = lookup
+                    callable_infer_annotation(state, parameter.annotation, typed.type_id, template.type_parameters, actuals, namespace)
         suffix := ""
         symbolic := false
         substitution = universal.Substitution([])
@@ -1763,7 +1773,7 @@ def callable_select_generic(state: CallableAnalysis, name: string, arguments: li
         for actual in actuals:
             if actual.index == 0:
                 return error(diagnostics.diagnostic("E000219", "generic parameter cannot be inferred"))
-            symbolic = symbolic or actual.index >= 100000
+            symbolic = symbolic or callable_symbolic_type(state, actual)
             suffix += "$" + string(actual.index)
             substitution.arguments.append(universal.TypeBinding(universal.GenericParamId(u32(index)), actual))
             index += 1
@@ -1833,8 +1843,8 @@ def callable_mlir(state: CallableAnalysis, arguments: list[universal.CallArgumen
     return callable_resolved_operator(state, signature, operands, span, expected)
 
 
-def analyze_callables(module: universal.Module, include_tests: bool = false) -> universal.Module | diagnostics.Diagnostic:
-    return analyze_registered_callables(module, include_tests, [], [], [], definitions.SemanticDefinitions())
+def analyze_callables(module: universal.Module, include_tests: bool = false, initializer_namespace: string = "") -> universal.Module | diagnostics.Diagnostic:
+    return analyze_registered_callables(module, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace)
 
 
 def callable_prepend_alias(declarations: definitions.SemanticDefinitions, alias: universal.TypeDeclaration):
@@ -1947,3 +1957,166 @@ def callable_protocol(state: CallableAnalysis, contract: string, property: strin
     if function != None:
         return callable_resolved_operator(state, function, operands, span, expected)
     return error(callable_diagnostic("missing source protocol implementation " + contract + "." + property, span))
+
+
+# Type-valued subscripts in constructor position use the annotation resolver.
+def callable_type_expression(expression: universal.Expression) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    match expression.kind:
+        case Name:
+            return universal.named_type(name, [], expression.span)
+        case Member:
+            return universal.named_type(callable_path(expression), [], expression.span)
+        case Subscript:
+            argument = callable_type_expression(index)
+            return universal.named_type(callable_path(object), [argument], expression.span)
+        case _:
+            return error(callable_diagnostic("expected a type argument", expression.span))
+
+
+def callable_constructor_type(state: CallableAnalysis, callee: universal.Expression) -> universal.TypeId | diagnostics.Diagnostic:
+    match callee.kind:
+        case Subscript:
+            name = callable_path(object)
+            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+                annotation = callable_type_expression(callee)
+                resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
+                callable_record_layout(state.records, resolved, [])
+                return resolved
+        case Name:
+            alias ?= definitions.alias_named(state.declarations, name, state.namespace)
+            if alias != None:
+                if len(alias.type_parameters) == 0:
+                    return callable_annotation(universal.named_type(name, [], callee.span), state.records, state.namespace, state.declarations)
+        case _:
+            pass
+    return universal.TypeId(0)
+
+
+def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId):
+    for record in state.records:
+        if record.type_id.index == owner.index:
+            instance ?= definitions.record_instance(state.declarations, record.type_id)
+            if instance != None:
+                for template in state.declarations.record_templates:
+                    if template.definition.declaration.value == instance.template.declaration.value:
+                        index := 0
+                        for name in template.type_parameters:
+                            alias = universal.TypeDeclaration([], record.lookup + name, [], [], None, record.span, id=instance.arguments[index].type_id, lookup=record.lookup)
+                            callable_prepend_alias(state.declarations, alias)
+                            index += 1
+
+
+def callable_register_record_methods(state: CallableAnalysis, owner: universal.TypeId) -> unit | diagnostics.Diagnostic:
+    for record in state.records:
+        if record.type_id.index != owner.index or definitions.record_instance(state.declarations, record.type_id) == None:
+            continue
+        local = callable_scope(state)
+        local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances)
+        callable_record_environment(local, owner)
+        for method in record.methods:
+            if len(method.type_parameters) != 0 or len(method.constraints) != 0:
+                return error(callable_diagnostic("generic record methods require method argument inference", method.span))
+            name = record.name + "." + method.name
+            found := false
+            for function in state.functions:
+                if function.name == name:
+                    found = true
+            if found:
+                continue
+            receiver_type = universal.named_type(record.name, [], record.span)
+            method = callable_replace_signature(method, ["Self"], [receiver_type])
+            method.name = name
+            method.lookup = record.lookup
+            method.owner_type = owner
+            parameters = [universal.FunctionParameter("self", receiver_type, None, record.span)]
+            for parameter in method.parameters:
+                parameters.append(parameter)
+            method.parameters = parameters
+            state.functions.append(callable_signature(method, int(len(state.functions)), state.records, local.declarations))
+
+
+def callable_infer_annotation(state: CallableAnalysis, annotation: universal.TypeAnnotation, actual: universal.TypeId, parameters: list[string], actuals: list[universal.TypeId], namespace: string) -> unit | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Named:
+            index := 0
+            for parameter in parameters:
+                if name == parameter and len(arguments) == 0:
+                    if actuals[index].index != 0 and actuals[index].index != actual.index:
+                        return error(diagnostics.diagnostic_at("E000219", "conflicting generic type arguments", annotation.span))
+                    actuals[index] = actual
+                    return
+                index += 1
+            alias ?= definitions.alias_named(state.declarations, name, namespace)
+            if alias != None:
+                target ?= alias.definition
+                if target != None:
+                    if len(arguments) != len(alias.type_parameters):
+                        return error(callable_diagnostic("type argument count mismatch", annotation.span))
+                    expanded = definitions.replace_annotation(target, alias.type_parameters, arguments)
+                    callable_infer_annotation(state, expanded, actual, parameters, actuals, alias.lookup)
+                    return
+            template ?= definitions.record_template(state.declarations, name, namespace)
+            if template != None:
+                for record in state.records:
+                    if record.type_id.index == actual.index:
+                        instance ?= definitions.record_instance(state.declarations, record.type_id)
+                        if instance != None:
+                            if instance.template.declaration.value == template.definition.declaration.value and len(arguments) == len(instance.arguments):
+                                index = 0
+                                for argument in arguments:
+                                    callable_infer_annotation(state, argument, instance.arguments[index].type_id, parameters, actuals, namespace)
+                                    index += 1
+                                return
+                return error(callable_diagnostic("generic argument has the wrong record type", annotation.span))
+        case _:
+            pass
+
+
+
+def callable_validate_record_arguments(state: CallableAnalysis, record: universal.RecordDeclaration) -> unit | diagnostics.Diagnostic:
+    instance ?= definitions.record_instance(state.declarations, record.type_id)
+    if instance == None:
+        return
+    if instance != None:
+        for template in state.declarations.record_templates:
+            if template.definition.declaration.value != instance.template.declaration.value:
+                continue
+            for constraint in template.constraints:
+                match constraint:
+                    case Parameter:
+                        bound_name ?= universal.simple_type_name(bound)
+                        if bound_name == None:
+                            return error(callable_diagnostic("constraint must name a trait", span))
+                        if bound_name != None:
+                            trait ?= definitions.trait_named(state.declarations, bound_name, template.lookup)
+                            if trait == None:
+                                return error(callable_diagnostic("unknown trait " + bound_name, span))
+                            if trait != None:
+                                index := 0
+                                for name in template.type_parameters:
+                                    if parameter == name:
+                                        actual = instance.arguments[index].type_id
+                                        if actual.index < 100000:
+                                            if not callable_satisfies(state, actual, trait):
+                                                return error(callable_diagnostic("type does not satisfy trait " + bound_name, span))
+                                    index += 1
+                    case _:
+                        return error(callable_diagnostic("predicate constraints require compile-time evaluation", template.span))
+
+
+
+def callable_symbolic_parameter(function: universal.FunctionDeclaration, index: int) -> universal.TypeId:
+    # Parameter scopes must not share identities merely because their names or
+    # positions agree. Concrete type bindings remain local to each declaration.
+    return universal.TypeId(u32(100000 + int(function.definition.declaration.value) * 256 + index))
+
+
+def callable_symbolic_type(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
+    if type_id.index >= 100000:
+        return true
+    instance ?= definitions.record_instance(state.declarations, type_id)
+    if instance != None:
+        for binding in instance.arguments:
+            if callable_symbolic_type(state, binding.type_id):
+                return true
+    return false

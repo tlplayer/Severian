@@ -70,7 +70,7 @@ pub(crate) fn generic_parameters(
                     return None;
                 }
                 match bound.simple_name().and_then(|name| name.rsplit('.').next()) {
-                    Some("Dim") => Some(GenericParamKind::Dimension),
+                    Some("Dim" | "usize") => Some(GenericParamKind::Dimension),
                     Some("Shape") => Some(GenericParamKind::Shape),
                     _ => None,
                 }

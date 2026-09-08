@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,8 +23,10 @@ typedef struct {
     size_t length;
 } sev_owned_string;
 
-typedef struct {
+typedef union {
     size_t size;
+    /* The payload follows this header and may contain a 128-bit scalar. */
+    max_align_t alignment;
 } sev_aggregate_box;
 
 extern const char *__sev_any_string(sev_pair_i64 value);

@@ -18,12 +18,40 @@ struct SliceRegion {
     active: bool,
 }
 
+// Parameters have HIR identities and types, but no local initializer. Keep
+// both kinds in the ownership environment without inventing parameter values.
+struct SliceBindings<'a> {
+    locals: BTreeMap<BindingId, &'a severian_hir::Binding>,
+    parameters: BTreeMap<BindingId, severian_universal::TypeId>,
+}
+
+impl SliceBindings<'_> {
+    fn type_id(&self, id: &BindingId) -> Option<severian_universal::TypeId> {
+        self.locals
+            .get(id)
+            .map(|binding| binding.type_id)
+            .or_else(|| self.parameters.get(id).copied())
+    }
+}
+
+impl<'a> std::ops::Deref for SliceBindings<'a> {
+    type Target = BTreeMap<BindingId, &'a severian_hir::Binding>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.locals
+    }
+}
+
 fn validate_slice_borrows(module: &Module) -> Result<(), Diagnostic> {
-    let bindings = module
+    let locals = module
         .bindings
         .iter()
         .map(|binding| (binding.id, binding))
         .collect::<BTreeMap<_, _>>();
+    let mut bindings = SliceBindings {
+        locals,
+        parameters: BTreeMap::new(),
+    };
     let slice_types = module
         .classes
         .iter()
@@ -57,6 +85,11 @@ fn validate_slice_borrows(module: &Module) -> Result<(), Diagnostic> {
         let Some(body) = &function.body else {
             continue;
         };
+        bindings.parameters = function
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.binding, parameter.contract.ty))
+            .collect();
         let parameters = function
             .parameters
             .iter()
@@ -77,7 +110,7 @@ fn validate_slice_borrows(module: &Module) -> Result<(), Diagnostic> {
 
 fn validate_slice_block(
     block: &severian_hir::Block,
-    bindings: &BTreeMap<BindingId, &severian_hir::Binding>,
+    bindings: &SliceBindings<'_>,
     slice_types: &BTreeSet<severian_universal::TypeId>,
     array_types: &BTreeSet<severian_universal::TypeId>,
     call_names: &BTreeMap<severian_universal::DefId, &str>,
@@ -301,7 +334,7 @@ fn validate_slice_block(
 
 fn validate_slice_expression(
     expression: &Expression,
-    bindings: &BTreeMap<BindingId, &severian_hir::Binding>,
+    bindings: &SliceBindings<'_>,
     slice_types: &BTreeSet<severian_universal::TypeId>,
     array_types: &BTreeSet<severian_universal::TypeId>,
     call_names: &BTreeMap<severian_universal::DefId, &str>,
@@ -333,10 +366,15 @@ fn validate_slice_expression(
                             ));
                         }
                     }
-                } else if array_types.contains(&bindings[&container].type_id)
-                    && regions
-                        .values()
-                        .any(|region| region.active && region.owner == container)
+                } else if array_types.contains(&bindings.type_id(&container).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000302",
+                        "ownership analysis encountered an unknown binding",
+                        Some(expression.span),
+                    )
+                })?) && regions
+                    .values()
+                    .any(|region| region.active && region.owner == container)
                 {
                     return Err(Diagnostic::new(
                         "E000302",
@@ -472,7 +510,7 @@ fn direct_binding(expression: &Expression) -> Option<BindingId> {
 
 fn slice_region(
     expression: &Expression,
-    bindings: &BTreeMap<BindingId, &severian_hir::Binding>,
+    bindings: &SliceBindings<'_>,
     slice_types: &BTreeSet<severian_universal::TypeId>,
     array_types: &BTreeSet<severian_universal::TypeId>,
     regions: &BTreeMap<BindingId, SliceRegion>,
@@ -506,7 +544,7 @@ fn slice_region(
 
 fn region_owner(
     expression: &Expression,
-    bindings: &BTreeMap<BindingId, &severian_hir::Binding>,
+    bindings: &SliceBindings<'_>,
     slice_types: &BTreeSet<severian_universal::TypeId>,
     array_types: &BTreeSet<severian_universal::TypeId>,
     regions: &BTreeMap<BindingId, SliceRegion>,
@@ -521,7 +559,7 @@ fn region_owner(
         }
         _ => return None,
     };
-    let ty = bindings.get(&binding)?.type_id;
+    let ty = bindings.type_id(&binding)?;
     if array_types.contains(&ty) {
         Some(binding)
     } else if slice_types.contains(&ty) {
@@ -533,7 +571,7 @@ fn region_owner(
 
 fn static_integer_value(
     expression: &Expression,
-    bindings: &BTreeMap<BindingId, &severian_hir::Binding>,
+    bindings: &SliceBindings<'_>,
     visiting: &mut BTreeSet<BindingId>,
 ) -> Option<i64> {
     match &expression.kind {
@@ -800,5 +838,160 @@ fn validate_expression(
             validate_expression(left, declared)?;
             validate_expression(right, declared)
         }
+    }
+}
+
+#[cfg(test)]
+mod slice_tests {
+    use super::*;
+    use severian_hir::CallType;
+    use severian_hir::{
+        BoundaryType, Callee, ClassDeclaration, FunctionDeclaration, FunctionId, FunctionParameter,
+        HirId,
+    };
+    use severian_source::{SourceId, Span};
+    use severian_universal::{CompileRoute, DeclarationId, DefId, Substitution, TypeId};
+
+    fn pointer_write(binding: BindingId, ty: TypeId) -> Expression {
+        let span = Span::new(SourceId(0), 0, 1);
+        Expression {
+            id: HirId(1),
+            type_id: TypeId(0),
+            span,
+            kind: ExpressionKind::Call {
+                callee: Callee::Direct {
+                    instance: None,
+                    function: DefId {
+                        package: 0,
+                        module: 0,
+                        declaration: DeclarationId(1),
+                    },
+                    substitution: Substitution::default(),
+                },
+                arguments: vec![Expression {
+                    id: HirId(2),
+                    type_id: TypeId(4),
+                    span,
+                    kind: ExpressionKind::Field {
+                        index: 0,
+                        object: Box::new(Expression {
+                            id: HirId(3),
+                            type_id: ty,
+                            kind: ExpressionKind::Binding(binding),
+                            span,
+                        }),
+                    },
+                }],
+                evaluation_order: Vec::new(),
+            },
+        }
+    }
+
+    fn writer(ty: TypeId) -> Module {
+        let parameter = BindingId(7);
+        let function = FunctionDeclaration {
+            id: FunctionId(1),
+            definition: DefId {
+                package: 0,
+                module: 0,
+                declaration: DeclarationId(1),
+            },
+            substitution: Substitution::default(),
+            name: "__sev_pointer_set_test".into(),
+            generic_parameters: Vec::new(),
+            type_parameters: Vec::new(),
+            parameters: vec![FunctionParameter {
+                binding: parameter,
+                name: "values".into(),
+                contract: BoundaryType {
+                    ty,
+                    modifiers: Vec::new(),
+                },
+            }],
+            result: BoundaryType {
+                ty: TypeId(0),
+                modifiers: Vec::new(),
+            },
+            compile_route: CompileRoute::Standard,
+            call_type: CallType::Severian,
+            body: Some(severian_hir::Block {
+                statements: vec![Statement::Expression(pointer_write(parameter, ty))],
+            }),
+        };
+        Module {
+            functions: vec![function],
+            classes: vec![ClassDeclaration {
+                id: TypeId(2),
+                name: "slice[int]".into(),
+                fields: Vec::new(),
+                variants: Vec::new(),
+            }],
+            ..Module::default()
+        }
+    }
+
+    #[test]
+    fn parameter_pointer_writes_do_not_index_the_local_binding_table() {
+        // Parameter 7 is intentionally absent from Module.bindings.
+        validate_slice_borrows(&writer(TypeId(3))).unwrap();
+    }
+
+    #[test]
+    fn parameter_array_owners_remain_subject_to_active_loans() {
+        let owner = BindingId(7);
+        let array = TypeId(3);
+        let bindings = SliceBindings {
+            locals: BTreeMap::new(),
+            parameters: [(owner, array)].into_iter().collect(),
+        };
+        let mut regions = [(
+            BindingId(8),
+            SliceRegion {
+                owner,
+                start: Some(0),
+                end: Some(2),
+                active: true,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let function = DefId {
+            package: 0,
+            module: 0,
+            declaration: DeclarationId(1),
+        };
+        let error = validate_slice_expression(
+            &pointer_write(owner, array),
+            &bindings,
+            &BTreeSet::new(),
+            &[array].into_iter().collect(),
+            &[(function, "__sev_pointer_set_test")].into_iter().collect(),
+            &mut regions,
+        )
+        .unwrap_err();
+        assert!(error.message.contains("owner cannot be written"));
+        assert_eq!(
+            region_owner(
+                &Expression {
+                    id: HirId(3),
+                    type_id: array,
+                    kind: ExpressionKind::Binding(owner),
+                    span: Span::new(SourceId(0), 0, 1)
+                },
+                &bindings,
+                &BTreeSet::new(),
+                &[array].into_iter().collect(),
+                &regions
+            ),
+            Some(owner)
+        );
+    }
+
+    #[test]
+    fn unknown_generated_binding_is_diagnosed() {
+        let mut module = writer(TypeId(3));
+        module.functions[0].parameters.clear();
+        let error = validate_slice_borrows(&module).unwrap_err();
+        assert!(error.message.contains("unknown binding"));
     }
 }

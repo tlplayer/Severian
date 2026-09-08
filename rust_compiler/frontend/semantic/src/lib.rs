@@ -1044,9 +1044,11 @@ pub(crate) fn normalize_extensions(
                     };
                     let substitution =
                         package::generic::Substitution::from_iter([(parameter.clone(), member)]);
-                    class.methods.extend(extension.methods.iter().map(|method| {
-                        package::generic::specialize_function(method, &substitution)
-                    }));
+                    class.methods.extend(
+                        extension.methods.iter().map(|method| {
+                            package::generic::specialize_member(method, &substitution)
+                        }),
+                    );
                     class
                         .operators
                         .extend(extension.operators.iter().map(|operator| {
@@ -1246,7 +1248,7 @@ fn collapse_zipped_type_families(
                 template
                     .methods
                     .iter()
-                    .map(|method| package::generic::specialize_function(method, &substitution)),
+                    .map(|method| package::generic::specialize_member(method, &substitution)),
             );
             class.operators.extend(
                 template
@@ -10887,14 +10889,12 @@ impl Analyzer<'_> {
             constructors: declaration
                 .constructors
                 .iter()
-                .map(|constructor| {
-                    package::generic::specialize_function(constructor, &substitution)
-                })
+                .map(|constructor| package::generic::specialize_member(constructor, &substitution))
                 .collect(),
             methods: declaration
                 .methods
                 .iter()
-                .map(|method| package::generic::specialize_function(method, &substitution))
+                .map(|method| package::generic::specialize_member(method, &substitution))
                 .collect(),
             operators: declaration
                 .operators
@@ -11068,14 +11068,12 @@ impl Analyzer<'_> {
             constructors: declaration
                 .constructors
                 .iter()
-                .map(|constructor| {
-                    package::generic::specialize_function(constructor, &substitution)
-                })
+                .map(|constructor| package::generic::specialize_member(constructor, &substitution))
                 .collect(),
             methods: declaration
                 .methods
                 .iter()
-                .map(|method| package::generic::specialize_function(method, &substitution))
+                .map(|method| package::generic::specialize_member(method, &substitution))
                 .collect(),
             operators: declaration
                 .operators
@@ -11549,6 +11547,33 @@ impl Analyzer<'_> {
         ty
     }
 
+    fn constructor_argument_type_name(&self, ty: TypeId) -> String {
+        if let Some((element, length)) = self.array_elements.get(&ty) {
+            return format!(
+                "array[{}, {length}]",
+                self.constructor_argument_type_name(*element)
+            );
+        }
+        if let Some(instance) = self.class_instances_by_type.get(&ty) {
+            if !instance.arguments.is_empty() {
+                return format!(
+                    "{}[{}]",
+                    instance.name,
+                    instance
+                        .arguments
+                        .iter()
+                        .map(|argument| self.constructor_argument_type_name(*argument))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
+        self.types
+            .definition(ty)
+            .map(|definition| definition.name.clone())
+            .unwrap_or_else(|| format!("type#{}", ty.0))
+    }
+
     fn class_constructor_values(
         &mut self,
         instance: &ClassInstance,
@@ -11556,6 +11581,25 @@ impl Analyzer<'_> {
         arguments: &[severian_ast::CallArgument],
         span: severian_source::Span,
     ) -> Result<Vec<Expression>, Diagnostic> {
+        // Class substitution deliberately leaves constructor generics symbolic.
+        // Infer them from actual types before requesting any concrete layouts.
+        let mut inferred_values = None;
+        let specialized;
+        let constructor = if constructor.type_parameters.is_empty() {
+            constructor
+        } else {
+            let values = arguments
+                .iter()
+                .map(|argument| self.expression(&argument.value, None))
+                .collect::<Result<Vec<_>, _>>()?;
+            let actuals = values
+                .iter()
+                .map(|value| self.constructor_argument_type_name(value.type_id))
+                .collect::<Vec<_>>();
+            specialized = package::generic::specialize_constructor(constructor, &actuals)?;
+            inferred_values = Some(values);
+            &specialized
+        };
         let body = constructor.body.as_ref().ok_or_else(|| {
             Diagnostic::new(
                 "E000211",
@@ -11563,14 +11607,25 @@ impl Analyzer<'_> {
                 Some(constructor.span),
             )
         })?;
-        let resolved_arguments = arguments
-            .iter()
-            .zip(&constructor.parameters)
-            .map(|(argument, parameter)| {
-                let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                self.expression(&argument.value, Some(parameter_type))
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let resolved_arguments = if let Some(values) = inferred_values {
+            values
+                .into_iter()
+                .zip(&constructor.parameters)
+                .map(|(value, parameter)| {
+                    let expected = self.resolve_source_type(&parameter.annotation)?;
+                    self.coerce(value, expected, false)
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?
+        } else {
+            arguments
+                .iter()
+                .zip(&constructor.parameters)
+                .map(|(argument, parameter)| {
+                    let expected = self.resolve_source_type(&parameter.annotation)?;
+                    self.expression(&argument.value, Some(expected))
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?
+        };
         let previous = self.value_substitutions.clone();
         for (parameter, argument) in constructor.parameters.iter().zip(resolved_arguments) {
             self.value_substitutions
@@ -20860,6 +20915,28 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn constructor_parameters_are_inferred_after_class_substitution() {
+        let (program, _) = analyze_source(
+            r#"
+class Box[T]:
+    value: T
+    def Box[U](input: U):
+        value = input
+
+def main():
+    box = Box[int](42)
+    assert(box.value == 42)
+"#,
+        );
+        assert!(
+            program.modules[0]
+                .classes
+                .iter()
+                .any(|class| class.name == "Box[int]")
+        );
     }
 
     #[test]

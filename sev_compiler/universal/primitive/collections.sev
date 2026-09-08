@@ -10,86 +10,86 @@ def __list_size(value: index) -> int
 
 -> int_lists[T: int]():
     @mlir("memref.alloc", operand_segments="1,0")
-    def allocate(size: index) -> list[element]
+    def allocate(size: index) -> list[T]
 
     @mlir("memref.load")
-    def load(values: list[element], position: index) -> element
+    def load(values: list[T], position: index) -> T
 
     @mlir("memref.store")
-    def store(value: element, values: list[element], position: index)
+    def store(value: T, values: list[T], position: index)
 
     @mlir("memref.dim")
-    def dimension(values: list[element], axis: index) -> index
+    def dimension(values: list[T], axis: index) -> index
 
-    def count(values: list[element]) -> int:
+    def count(values: list[T]) -> int:
         return __list_size(dimension(values, 0))
 
-    operator list_create(size: int, exemplar: element) -> list[element]:
+    operator list_create(size: int, exemplar: T) -> list[T]:
         return allocate(__list_index(size))
 
-    operator element_at(values: list[element], position: int) -> element:
+    operator element_at(values: list[T], position: int) -> T:
         assert(position >= 0)
         assert(position < count(values))
         return load(values, __list_index(position))
 
-    operator element_set(values: list[element], position: int, value: element):
+    operator element_set(values: list[T], position: int, value: T):
         assert(position >= 0)
         assert(position < count(values))
         store(value, values, __list_index(position))
 
-    operator if[G:If](self: list[element]) -> bool:
+    operator if[G:If](self: list[T]) -> bool:
         return count(self) != 0
 
-    operator iteration_start(values: list[element]) -> int:
+    operator iteration_start(values: list[T]) -> int:
         return 0
 
-    operator iteration_more(values: list[element], position: int) -> bool:
+    operator iteration_more(values: list[T], position: int) -> bool:
         return position < count(values)
 
-    operator iteration_next(values: list[element], position: int) -> int:
+    operator iteration_next(values: list[T], position: int) -> int:
         return position + 1
 
 int_lists[int]()
 
 -> float_lists[T: float]():
     @mlir("memref.alloc", operand_segments="1,0")
-    def allocate(size: index) -> list[element]
+    def allocate(size: index) -> list[T]
 
     @mlir("memref.load")
-    def load(values: list[element], position: index) -> element
+    def load(values: list[T], position: index) -> T
 
     @mlir("memref.store")
-    def store(value: element, values: list[element], position: index)
+    def store(value: T, values: list[T], position: index)
 
     @mlir("memref.dim")
-    def dimension(values: list[element], axis: index) -> index
+    def dimension(values: list[T], axis: index) -> index
 
-    def count(values: list[element]) -> int:
+    def count(values: list[T]) -> int:
         return __list_size(dimension(values, 0))
 
-    operator list_create(size: int, exemplar: element) -> list[element]:
+    operator list_create(size: int, exemplar: T) -> list[T]:
         return allocate(__list_index(size))
 
-    operator element_at(values: list[element], position: int) -> element:
+    operator element_at(values: list[T], position: int) -> T:
         assert(position >= 0)
         assert(position < count(values))
         return load(values, __list_index(position))
 
-    operator element_set(values: list[element], position: int, value: element):
+    operator element_set(values: list[T], position: int, value: T):
         assert(position >= 0)
         assert(position < count(values))
         store(value, values, __list_index(position))
 
-    operator if[G:If](self: list[element]) -> bool:
+    operator if[G:If](self: list[T]) -> bool:
         return count(self) != 0
 
-    operator iteration_start(values: list[element]) -> int:
+    operator iteration_start(values: list[T]) -> int:
         return 0
 
-    operator iteration_more(values: list[element], position: int) -> bool:
+    operator iteration_more(values: list[T], position: int) -> bool:
         return position < count(values)
 
-    operator iteration_next(values: list[element], position: int) -> int:
+    operator iteration_next(values: list[T], position: int) -> int:
         return position + 1
 
 float_lists[float]()

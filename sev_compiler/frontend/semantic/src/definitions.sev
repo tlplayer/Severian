@@ -6,11 +6,19 @@ import "../../../universal/type/scalar.sev" as scalar
 
 # Shared declaration environment. AST declarations survive with resolved
 # identities; callable analysis and the package entry use the same environment.
+class RecordInstance:
+    type_id: universal.TypeId
+    template: universal.DefId
+    arguments: list[universal.TypeBinding]
+
+
 class SemanticDefinitions:
     aliases: list[universal.TypeDeclaration] = []
     traits: list[universal.TraitDeclaration] = []
     implementations: list[universal.RecordDeclaration] = []
     symbol_descriptors: list[universal.TraitDeclaration] = []
+    record_templates: list[universal.RecordDeclaration] = []
+    record_instances: list[RecordInstance] = []
 
 
 def definition_id(name: string, ordinal: int) -> universal.DefId:
@@ -65,11 +73,18 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                             path = active[:]
                             path.append(alias.name)
                             return type_annotation(definitions, substituted, records, alias.lookup, path)
+            template ?= record_template(definitions, name, namespace)
+            if template != None:
+                return instantiate_record(definitions, template, arguments, records, namespace, annotation.span)
             for record in records:
                 if record.name == namespace + name:
+                    if len(arguments) != 0:
+                        return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
                     return record.type_id
             for record in records:
                 if record.name == name:
+                    if len(arguments) != 0:
+                        return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
                     return record.type_id
             known ?= scalar.scalar_type_name(name)
             if known != None:
@@ -281,7 +296,11 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                     return error(diagnostics.diagnostic_at("E000205", "type declaration requires a concrete alias or closed family", declaration.span))
                 definitions.aliases.append(declaration)
             case Record:
-                definitions.implementations.append(declaration)
+                record_declaration := declaration
+                record_declaration.definition = definition_id(declaration.name, 30000 + ordinal)
+                if len(declaration.type_parameters) != 0 and not declaration.extension:
+                    definitions.record_templates.append(record_declaration)
+                definitions.implementations.append(record_declaration)
                 if not declaration.extension:
                     if declaration.name in names:
                         # A family behavior declaration can share its family's name.
@@ -362,3 +381,81 @@ def error_conformance(definitions: SemanticDefinitions, records: list[universal.
                                 if inherited.definition.module == required.definition.module and inherited.definition.declaration.value == required.definition.declaration.value:
                                     return true
     return false
+
+
+# Generic records retain their declaration identity and canonical type bindings.
+# Allocate identity before resolving fields, so recursive applications terminate;
+# the concrete layout validator diagnoses recursive storage afterwards.
+def record_template(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.RecordDeclaration | None:
+    for template in definitions.record_templates:
+        if template.name == namespace + name:
+            return template
+    for template in definitions.record_templates:
+        if template.name == name:
+            return template
+    return None
+
+
+def instantiate_record(definitions: SemanticDefinitions, template: universal.RecordDeclaration, arguments: list[universal.TypeAnnotation], records: list[universal.RecordDeclaration], namespace: string, span: source.Span) -> universal.TypeId | diagnostics.Diagnostic:
+    if len(arguments) != len(template.type_parameters):
+        return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", span))
+    if len(template.traits) != 0:
+        return error(diagnostics.diagnostic_at("E000205", "generic record trait implementations require instantiated trait validation", span))
+    actuals: list[universal.TypeBinding] = []
+    replacements: list[universal.TypeAnnotation] = []
+    index := 0
+    name := template.name + "["
+    for argument in arguments:
+        actual = type_annotation(definitions, argument, records, namespace)
+        actuals.append(universal.TypeBinding(universal.GenericParamId(u32(index)), actual))
+        replacements.append(universal.named_type(type_name(actual, records), [], span))
+        if index > 0:
+            name += ", "
+        name += type_name(actual, records)
+        index += 1
+    name += "]"
+    for instance in definitions.record_instances:
+        origin = instance.template
+        if origin.module == template.definition.module and origin.declaration.value == template.definition.declaration.value:
+            equal := len(instance.arguments) == len(actuals)
+            index = 0
+            for binding in instance.arguments:
+                if equal:
+                    equal = binding.type_id.index == actuals[index].type_id.index
+                index += 1
+            if equal:
+                return instance.type_id
+    if len(records) >= 4096:
+        return error(diagnostics.diagnostic_at("E000205", "record specialization limit exceeded", span))
+    id = universal.TypeId(u32(1000 + len(records)))
+    position = len(records)
+    record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition)
+    records.append(record)
+    definitions.record_instances.append(RecordInstance(id, template.definition, actuals))
+    fields: list[universal.FunctionParameter] = []
+    names: list[string] = []
+    for field in template.fields:
+        if field.name in names:
+            return error(diagnostics.diagnostic_at("E000205", "duplicate field " + field.name, field.span))
+        names.append(field.name)
+        annotation = replace_annotation(field.annotation, template.type_parameters, replacements)
+        type_id = type_annotation(definitions, annotation, records, template.lookup)
+        if type_id.index == 3:
+            return error(diagnostics.diagnostic_at("E000205", "record string fields require aggregate ownership lowering", field.span))
+        if type_id.index == 2:
+            return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
+        fields.append(universal.FunctionParameter(field.name, annotation, field.default, field.span, type_id=type_id))
+    record.fields = fields
+    record.methods = template.methods
+    record.traits = template.traits
+    record.operators = template.operators
+    records[position] = record
+    return id
+
+
+
+def record_instance(definitions: SemanticDefinitions, type_id: universal.TypeId) -> RecordInstance | None:
+    for instance in definitions.record_instances:
+        if instance.type_id.index == type_id.index:
+            return instance
+    return None

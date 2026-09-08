@@ -31,32 +31,46 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
     parser.parser_next(input)
     name = macro_identifier(input)
     parser.parser_expect_symbol(input, "[", "expected macro type parameters")
-    bindings: list[string] = []
+    bindings: list[string] := []
+    parameters: list[string] = []
     while not parser.parser_at_symbol(input, "]"):
         parameter = macro_identifier(input)
         parser.parser_expect_symbol(input, ":", "expected macro type binding")
         binding = macro_identifier(input)
-        if binding in bindings:
-            throw Error("duplicate macro type binding")
         bindings.append(binding)
+        parameters.append(parameter)
         if parser.parser_take_symbol(input, ",") == None:
             break
     parser.parser_expect_symbol(input, "]", "expected closing macro parameters")
     parser.parser_expect_symbol(input, "(", "expected macro argument list")
     parser.parser_expect_symbol(input, ")", "enumerative macros take no runtime arguments")
-    if macro_identifier(input) != "with":
-        throw Error("expected enumerative macro constraints")
     families: list[string] = []
+    if parser.parser_at_symbol(input, ":"):
+        # In the direct form, the left-hand name is the body binding and
+        # the right-hand name is the family: -> lists[T: int]():
+        for family in bindings:
+            if family != "int" and family != "float":
+                throw Error("unsupported scalar macro family " + family)
+            families.append(family)
+        bindings = parameters
+    else:
+        if macro_identifier(input) != "with":
+            throw Error("expected enumerative macro constraints")
+        for binding in bindings:
+            if len(families) > 0:
+                if macro_identifier(input) != "and":
+                    throw Error("expected and between macro families")
+            if macro_identifier(input) != binding or macro_identifier(input) != "in":
+                throw Error("macro family constraints must follow binding order")
+            family = macro_identifier(input)
+            if family != "int" and family != "float":
+                throw Error("unsupported scalar macro family " + family)
+            families.append(family)
+    seen: list[string] = []
     for binding in bindings:
-        if len(families) > 0:
-            if macro_identifier(input) != "and":
-                throw Error("expected and between macro families")
-        if macro_identifier(input) != binding or macro_identifier(input) != "in":
-            throw Error("macro family constraints must follow binding order")
-        family = macro_identifier(input)
-        if family != "int" and family != "float":
-            throw Error("unsupported scalar macro family " + family)
-        families.append(family)
+        if binding in seen:
+            throw Error("duplicate macro type binding")
+        seen.append(binding)
     parser.parser_expect_symbol(input, ":", "expected macro body")
     parser.parser_expect(input, Newline, "expected newline after macro")
     parser.parser_separators(input)

@@ -2734,6 +2734,64 @@ fn specialized_type_name(
     type_annotation_name(&specialize_annotation(annotation, substitution))
 }
 
+/// Substitute an enclosing declaration without capturing member-local names.
+pub(crate) fn specialize_member(
+    function: &severian_ast::FunctionDeclaration,
+    enclosing: &Substitution,
+) -> severian_ast::FunctionDeclaration {
+    let mut enclosing = enclosing.clone();
+    for parameter in &function.type_parameters {
+        enclosing.kinds.remove(parameter);
+        enclosing.types.remove(parameter);
+        enclosing.dimensions.remove(parameter);
+        enclosing.shapes.remove(parameter);
+    }
+    specialize_function(function, &enclosing)
+}
+
+/// Infer a callable's own parameters after its enclosing class was substituted.
+/// In particular, array dimensions remain dimension bindings, never type names.
+pub(crate) fn specialize_constructor(
+    function: &severian_ast::FunctionDeclaration,
+    actuals: &[String],
+) -> Result<severian_ast::FunctionDeclaration, Diagnostic> {
+    let mut substitution = Substitution {
+        kinds: generic_parameters(&function.type_parameters, &function.constraints)
+            .into_iter()
+            .map(|parameter| (parameter.name, parameter.kind))
+            .collect(),
+        ..Substitution::default()
+    };
+    for (parameter, actual) in function.parameters.iter().zip(actuals) {
+        infer_substitution(
+            &parameter.annotation,
+            actual,
+            &function.type_parameters,
+            &mut substitution,
+        )
+        .map_err(|conflict| {
+            Diagnostic::new(
+                "E000204",
+                format!(
+                    "conflicting constructor argument `{}`: {} and {}",
+                    conflict.parameter, conflict.known, conflict.inferred
+                ),
+                Some(parameter.span),
+            )
+        })?;
+    }
+    for parameter in &function.type_parameters {
+        if !substitution.contains_key(parameter) {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("constructor parameter `{parameter}` cannot be inferred"),
+                Some(function.span),
+            ));
+        }
+    }
+    Ok(specialize_function(function, &substitution))
+}
+
 pub(crate) fn specialize_function(
     function: &severian_ast::FunctionDeclaration,
     substitution: &Substitution,
@@ -3209,6 +3267,69 @@ fn dim_expr_annotation(dimension: &severian_universal::DimExpr) -> TypeAnnotatio
 #[cfg(test)]
 mod environment_tests {
     use super::*;
+
+    fn constructor(source: &str) -> severian_ast::FunctionDeclaration {
+        let source = severian_source::SourceFile::virtual_source("constructor.sev", source);
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let severian_ast::Item::Class(class) = &ast.items[0] else {
+            panic!("expected class")
+        };
+        class.constructors[0].clone()
+    }
+
+    #[test]
+    fn class_substitution_does_not_capture_constructor_local_parameters() {
+        let function = constructor(
+            "class Box[T]:\n    value: int\n    def Box[T](input: T):\n        value = 1\n",
+        );
+        let class_arguments = [("T".to_owned(), "i32".to_owned())].into_iter().collect();
+        let partial = specialize_member(&function, &class_arguments);
+        assert_eq!(partial.parameters[0].annotation.simple_name(), Some("T"));
+        let concrete = specialize_constructor(&partial, &["f64".into()]).unwrap();
+        assert_eq!(concrete.parameters[0].annotation.simple_name(), Some("f64"));
+    }
+
+    #[test]
+    fn constructor_dimensions_remain_symbolic_until_argument_inference() {
+        let function = constructor(
+            "class Box[T]:\n    value: T\n    def Box[N: usize](values: array[T, N]):\n        value = values[0]\n",
+        );
+        let class_arguments = [("T".to_owned(), "i32".to_owned())].into_iter().collect();
+        let partial = specialize_function(&function, &class_arguments);
+        assert_eq!(
+            partial.parameters[0].annotation.named_parts().unwrap().1[1].simple_name(),
+            Some("N")
+        );
+        let concrete = specialize_constructor(&partial, &["array[i32, 3]".into()]).unwrap();
+        assert!(matches!(
+            concrete.parameters[0].annotation.named_parts().unwrap().1[1].kind,
+            TypeAnnotationKind::DimensionConstant(3)
+        ));
+        assert!(
+            specialize_constructor(&partial, &["i32".into()])
+                .unwrap_err()
+                .message
+                .contains("cannot be inferred")
+        );
+    }
+
+    #[test]
+    fn constructor_dimensions_must_agree_across_arguments() {
+        let function = constructor(
+            "class Box[T]:\n    value: T\n    def Box[N: usize](left: array[T, N], right: array[T, N]):\n        value = left[0]\n",
+        );
+        let class_arguments = [("T".to_owned(), "i32".to_owned())].into_iter().collect();
+        let partial = specialize_function(&function, &class_arguments);
+        let error =
+            specialize_constructor(&partial, &["array[i32, 3]".into(), "array[i32, 4]".into()])
+                .unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("conflicting constructor argument `N`")
+        );
+    }
 
     #[test]
     fn nested_specialization_retains_element_dimensions_and_shape_packs() {

@@ -759,7 +759,28 @@ fn emit_mlir_binary(
     let gpu_architecture = module
         .split_once("severian.gpu.architecture = \"")
         .and_then(|(_, suffix)| suffix.split_once('"').map(|(value, _)| value));
-    let mut lowering_arguments = vec!["--verify-each".to_owned(), "--canonicalize".to_owned()];
+    // Layout-sensitive LLVM constant expressions are folded during translation.
+    // Install the same target layout Clang will use before that can happen.
+    let target = format!("--target={target_triple}");
+    let target_ir = run_tool(
+        "clang target layout",
+        tool("SEVERIAN_CLANG", "clang-21"),
+        &[&target, "-S", "-emit-llvm", "-x", "c", "-", "-o", "-"],
+        b"",
+    )?;
+    let target_ir = String::from_utf8_lossy(&target_ir);
+    let layout = target_ir
+        .lines()
+        .find_map(|line| line.strip_prefix("target datalayout = \""))
+        .and_then(|line| line.strip_suffix('"'))
+        .ok_or_else(|| {
+            BackendError::UnsupportedOperation("Clang did not report its target data layout".into())
+        })?;
+    let mut lowering_arguments = vec![
+        "--verify-each".to_owned(),
+        format!("--set-llvm-module-datalayout=data-layout={layout}"),
+        "--canonicalize".to_owned(),
+    ];
     if let Some(architecture) = gpu_architecture {
         lowering_arguments.extend([
             "--gpu-kernel-outlining".to_owned(),

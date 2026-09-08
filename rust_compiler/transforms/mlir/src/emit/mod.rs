@@ -2414,7 +2414,6 @@ fn render_runtime_call(
         }
         if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
             let spelling = mlir_type(&ty)?;
-            let (size, _) = lowered_type_layout(module, &ty, &mut BTreeSet::new())?;
             output.push_str(&format!(
                 "{indentation}%runtime_box_one_{tag}_{index} = arith.constant 1 : i64\n"
             ));
@@ -2425,8 +2424,17 @@ fn render_runtime_call(
                 "{indentation}llvm.store %v{}, %runtime_box_slot_{tag}_{index} : {spelling}, !llvm.ptr\n",
                 value.0
             ));
+            // Ask LLVM for the aggregate stride. Recomputing it here silently
+            // truncated records containing i128: target alignment and trailing
+            // padding need not match the host-side scalar size approximation.
             output.push_str(&format!(
-                "{indentation}%runtime_box_size_{tag}_{index} = arith.constant {size} : i64\n"
+                "{indentation}%runtime_box_null_{tag}_{index} = llvm.mlir.zero : !llvm.ptr\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}%runtime_box_end_{tag}_{index} = llvm.getelementptr %runtime_box_null_{tag}_{index}[1] : (!llvm.ptr) -> !llvm.ptr, {spelling}\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}%runtime_box_size_{tag}_{index} = llvm.ptrtoint %runtime_box_end_{tag}_{index} : !llvm.ptr to i64\n"
             ));
             output.push_str(&format!(
                 "{indentation}%runtime_box_{tag}_{index} = func.call @__sev_aggregate_box(%runtime_box_slot_{tag}_{index}, %runtime_box_size_{tag}_{index}) : (!llvm.ptr, i64) -> !llvm.ptr\n"
@@ -2478,59 +2486,6 @@ fn runtime_abi_type(ty: LoweredType, aggregate_abi: bool) -> LoweredType {
     } else {
         ty
     }
-}
-
-fn lowered_type_layout(
-    module: &Module,
-    ty: &LoweredType,
-    visiting: &mut BTreeSet<u32>,
-) -> Result<(u64, u64), MlirError> {
-    let scalar = match ty {
-        LoweredType::Integer { bits, .. } => Some(u64::from(*bits).div_ceil(8).max(1)),
-        LoweredType::Float { format } => Some(u64::from(float_bits(*format)).div_ceil(8).max(1)),
-        LoweredType::Boolean | LoweredType::None | LoweredType::Unit => Some(1),
-        LoweredType::String | LoweredType::Bytes => Some(8),
-        LoweredType::Arguments => return Ok((16, 8)),
-        LoweredType::Task(_) => return Ok((8, 8)),
-        LoweredType::Aggregate(_) => None,
-        LoweredType::Tensor { .. } => {
-            return Err(MlirError::UnsupportedOperation(
-                "tensor values do not use the aggregate runtime ABI".into(),
-            ))
-        }
-    };
-    if let Some(size) = scalar {
-        return Ok((size, size.clamp(1, 8)));
-    }
-    let LoweredType::Aggregate(id) = ty else {
-        unreachable!("non-scalar layout is aggregate")
-    };
-    let declaration = module
-        .classes
-        .iter()
-        .find(|declaration| declaration.id == *id)
-        .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown aggregate class {id}")))?;
-    if !declaration.variants.is_empty() {
-        return Ok((16, 8));
-    }
-    if !visiting.insert(*id) {
-        return Err(MlirError::UnsupportedOperation(format!(
-            "aggregate class {id} has a recursive inline layout"
-        )));
-    }
-    let mut size = 0u64;
-    let mut aggregate_alignment = 1u64;
-    for field in &declaration.fields {
-        let (field_size, alignment) = lowered_type_layout(module, &field.ty, visiting)?;
-        aggregate_alignment = aggregate_alignment.max(alignment);
-        size = size.div_ceil(alignment) * alignment;
-        size = size.saturating_add(field_size);
-    }
-    visiting.remove(&id);
-    Ok((
-        size.div_ceil(aggregate_alignment) * aggregate_alignment,
-        aggregate_alignment,
-    ))
 }
 
 fn render_assert(

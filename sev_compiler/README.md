@@ -121,7 +121,7 @@ fall through; value-returning functions still require a return on every path.
 Nonliteral patterns and arms after a wildcard produce deliberate diagnostics.
 
 Unsupported declarations and expressions produce diagnostics. General
-collections, generic classes, fallible/enum values, nonliteral parameter
+collections, constant-generic classes, fallible/enum values, nonliteral parameter
 defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
 outside this slice. Record string fields require aggregate ownership lowering
 and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver remains unfinished; its semantic entry now delegates to the
@@ -290,7 +290,7 @@ missing members, incompatible results, and unsatisfied constraints are errors.
 The executable and `analyze_with_package_functions()` share
 [`definitions.sev`](frontend/semantic/src/definitions.sev) and callable body
 analysis. The package entry takes `SemanticDefinitions` as its environment,
-replacing the disconnected `TypeContext` prototype. Generic bodies are checked
+replacing the disconnected `TypeContext` prototype. Generic function bodies are checked
 with symbolic parameters before calls are specialized. `Module.generic_functions`
 retains that HIR, including references to trait operator definitions; concrete
 instances retain their template identity and ordered type bindings; resolved calls
@@ -307,9 +307,11 @@ migrated to source implementations.
 
 This is not yet the whole primitive library: the complete `int.sev` and
 `float.sev` still need conversion graphs, metadata evaluation, additional storage
-types, and richer MLIR attributes. Generic class layouts, generic trait/operator
-arguments, and predicate constraints remain unsupported. The parser retains
-operator generic parameters and bodies so these constructs cannot be mistaken
+types, and richer MLIR attributes. Generic record fields, ordinary methods,
+aliases, and nested function inference now specialize type arguments; see [generic compilation gates](../tests/sev_compiler/GENERICS.md)
+for native coverage and remaining work. Constant-generic class layouts, generic
+methods and trait/operator arguments, and predicate constraints remain
+unsupported. The parser retains operator generic parameters and bodies so these constructs cannot be mistaken
 for an empty trait contract.
 
 ```sh
