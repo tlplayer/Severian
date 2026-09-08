@@ -1,5 +1,6 @@
 import "../../../universal/cfg/cfg.sev"
 import universal
+import "../../../universal/type/scalar.sev" as scalar
 import source
 import diagnostics
 
@@ -54,6 +55,16 @@ def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnost
                 case Conditional:
                     if module.values[condition.index].type_id.index != 1:
                         return error(diagnostics.Diagnostic("E000230", "CFG branch requires bool", terminator.span))
+                case Raise:
+                    type_id = module.values[value.index].type_id
+                    valid := false
+                    for record in module.records:
+                        if record.type_id.index == type_id.index and len(universal.outcome_variants(record)) != 0:
+                            valid = true
+                    if not valid:
+                        return error(diagnostics.Diagnostic("E000230", "CFG raise requires a typed outcome", terminator.span))
+                    if body.return_type.index != 2 and body.return_type.index != type_id.index:
+                        return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", terminator.span))
                 case Finish:
                     returned ?= value
                     if returned != None:
@@ -92,11 +103,11 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
         for operation in selected.operations:
             match operation:
                 case Allocate:
-                    if type_id.index == 3:
+                    if type_id.index == 3 or (type_id.index > 200 and type_id.index < 400):
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)
-                        prefix.append(universal.Operation.Constant(universal.StringValue(""), empty))
+                        prefix.append(universal.Operation.Constant(universal.StringValue("") if type_id.index == 3 else universal.NoneValue(), empty))
                     else:
                         prefix.append(operation)
                 case _:
@@ -106,7 +117,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
         if selected.id != body.entry:
             current = []
             for slot in slots:
-                parameter = value(module, universal.TypeId(3))
+                parameter = value(module, module.values[initial[len(current)].index].type_id)
                 selected.parameters.append(parameter)
                 current.append(parameter)
         operations: list[universal.Operation] := []
@@ -146,6 +157,8 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
 
 def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
+        case IsVariant:
+            return [value]
         case Load:
             return [address]
         case Store:
@@ -168,6 +181,8 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
 
 def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
+        case IsVariant:
+            return [result]
         case Allocate:
             return [result]
         case Constant:
@@ -253,6 +268,8 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
                     available.append(int(result.index))
             inputs: list[universal.ValueId] = []
             match terminal.exit:
+                case Raise:
+                    inputs.append(value)
                 case Conditional:
                     inputs.append(condition)
                 case Finish:

@@ -78,16 +78,6 @@ enum SwitchCase:
     Type(type_id: TypeId)
 
 
-enum Terminator:
-    Goto(target: BlockId, arguments: list[Operand])
-    Branch(condition: Operand, then_block: BlockId, else_block: BlockId)
-    Switch(discriminant: Operand, targets: list[tuple[SwitchCase, BlockId]], fallback: BlockId)
-    Call(callee: Callee, arguments: list[Operand], destination: Place | None, target: BlockId, unwind: BlockId | None)
-    Return(value: Operand | None)
-    Throw(value: Operand)
-    Unreachable
-
-
 class CfgBody:
     entry: int
     blocks: list[BasicBlock]

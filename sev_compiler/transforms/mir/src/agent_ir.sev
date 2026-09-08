@@ -54,6 +54,8 @@ def values_json(values: list[universal.ValueId]) -> string:
 
 def operation_kind(operation: universal.Operation) -> string:
     match operation:
+        case IsVariant:
+            return "IsVariant"
         case Allocate:
             return "Allocate"
         case Constant:
@@ -94,6 +96,9 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
                 case Conditional:
                     kind = "ConditionalBranch"
                     payload = ",\"condition\":" + quoted(string(condition.index))
+                case Raise:
+                    kind = "Throw"
+                    payload = ",\"value\":" + quoted(string(value.index))
                 case Finish:
                     kind = "Return"
                     returned ?= value
@@ -153,6 +158,10 @@ def operation_json(operation: universal.Operation) -> string:
     operands: list[universal.ValueId] := []
     results: list[universal.ValueId] = []
     match operation:
+        case IsVariant:
+            operands.append(value)
+            results.append(result)
+            fields = ",\"variant\":" + string(variant)
         case Allocate:
             fields = ",\"type\":" + string(type_id.index)
             results.append(result)

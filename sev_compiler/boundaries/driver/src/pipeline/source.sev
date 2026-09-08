@@ -35,6 +35,9 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     primitive_operators = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/operators.sev")), "", [], false, files, registry)
     for item in primitive_operators.items:
         parsed.items.append(item)
+    collections = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/collections.sev")), "", [], false, files, registry)
+    for item in collections.items:
+        parsed.items.append(item)
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
     application = load_source_module(input, "__subject." if include_tests else "", [], true, files, registry)

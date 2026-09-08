@@ -119,3 +119,11 @@ class RecordDeclaration:
     type_parameters: list[string] = []
     constraints: list[GenericConstraint] = []
     extension: bool = false
+
+
+def outcome_variants(record: RecordDeclaration) -> list[TypeId]:
+    variants: list[TypeId] = []
+    if record.name.starts_with("$outcome$"):
+        for field in record.fields[1:]:
+            variants.append(field.type_id)
+    return variants

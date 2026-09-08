@@ -10,6 +10,7 @@ class CfgEdge:
 enum CfgExit:
     Jump(edge: CfgEdge)
     Conditional(condition: ValueId, taken: CfgEdge, otherwise: CfgEdge)
+    Raise(value: ValueId)
     Finish(value: ValueId | None)
     Dead
 

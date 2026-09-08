@@ -8,6 +8,7 @@ import "ownership.sev" as ownership
 class CallableMirScope:
     bindings: list[universal.ValueId] = []
     loops: list[tuple[int, int]] = []
+    update_operands: list[universal.ValueId] = []
 
 
 def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
@@ -18,6 +19,62 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case UpdateOperand:
+            return scope.update_operands[index]
+        case ListValue:
+            elements_values: list[universal.ValueId] = []
+            for element in elements:
+                elements_values.append(mir_expression(module, context, scope, element))
+            count = mir_value(module, universal.TypeId(64))
+            cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(len(elements))), count))
+            exemplar := count
+            if len(elements_values) != 0:
+                exemplar = elements_values[0]
+            else:
+                exemplar = mir_value(module, universal.TypeId(expression.type_id.index - 200))
+                cfg.append(context, universal.Operation.Constant(universal.NoneValue(), exemplar))
+            local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar])
+            result = mir_expression(module, context, local, construction)
+            position := 0
+            for value in elements_values:
+                index = mir_value(module, universal.TypeId(64))
+                cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(position)), index))
+                local = CallableMirScope(scope.bindings, scope.loops, [result, index, value])
+                mir_expression(module, context, local, storage)
+                position += 1
+            return result
+        case IndexReference:
+            receiver = mir_expression(module, context, scope, object)
+            offset = mir_expression(module, context, scope, index)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset]), access)
+        case OutcomeValue:
+            payload = mir_expression(module, context, scope, value)
+            address = mir_value(module, universal.TypeId(5))
+            cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
+            empty = mir_value(module, expression.type_id)
+            cfg.append(context, universal.Operation.Constant(universal.NoneValue(), empty))
+            cfg.append(context, universal.Operation.Store(address, empty))
+            tag = mir_value(module, universal.TypeId(64))
+            cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(variant)), tag))
+            tag_address = mir_value(module, universal.TypeId(5))
+            cfg.append(context, universal.Operation.FieldAddress(address, expression.type_id, 0, tag_address))
+            cfg.append(context, universal.Operation.Store(tag_address, tag))
+            payload_address = mir_value(module, universal.TypeId(5))
+            cfg.append(context, universal.Operation.FieldAddress(address, expression.type_id, variant + 1, payload_address))
+            cfg.append(context, universal.Operation.Store(payload_address, payload))
+            result = mir_value(module, expression.type_id)
+            cfg.append(context, universal.Operation.Load(address, result))
+            return result
+        case OutcomeTest:
+            input = mir_expression(module, context, scope, value)
+            result = mir_value(module, universal.TypeId(1))
+            cfg.append(context, universal.Operation.IsVariant(input, variant, result))
+            return result
+        case OutcomeUnwrap:
+            origin = cfg.origin(module, "Outcome", expression.span)
+            syntax = universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None, definition=origin.grammar)
+            evaluated = execute_grammar(module, context, scope, syntax, [value], [], expression.span, expression.type_id)
+            return semantic_runtime(evaluated, expression.span)
         case LiteralValue:
             result = mir_value(module, expression.type_id)
             cfg.append(context, universal.Operation.Constant(value, result))
@@ -68,24 +125,12 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             cfg.append(context, universal.Operation.Binary(operator, lhs, rhs, result))
             return result
         case Conditional:
-            test = mir_expression(module, context, scope, condition)
-            taken = cfg.block(context)
-            otherwise = cfg.block(context)
-            join = cfg.block(context)
-            result = mir_value(module, expression.type_id)
-            context.body.blocks[join].parameters.append(result)
-            origin := cfg.origin(module, "If", expression.span)
-            grammar ?= expression.grammar
-            if grammar != None:
-                origin = universal.CfgTerminator(universal.CfgExit.Dead, grammar, expression.span)
-            cfg.terminate(context, universal.CfgExit.Conditional(test, universal.CfgEdge(taken), universal.CfgEdge(otherwise)), origin)
-            cfg.at(context, taken)
-            then_result = mir_expression(module, context, scope, then_value)
-            cfg.terminate(context, universal.CfgExit.Jump(universal.CfgEdge(join, [then_result])), origin)
-            cfg.at(context, otherwise)
-            else_result = mir_expression(module, context, scope, else_value)
-            cfg.terminate(context, universal.CfgExit.Jump(universal.CfgEdge(join, [else_result])), origin)
-            cfg.at(context, join)
+            origin = cfg.origin(module, "Conditional", expression.span)
+            syntax = universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None, definition=origin.grammar)
+            evaluated = execute_grammar(module, context, scope, syntax, [condition, then_value, else_value], [], expression.span)
+            result = semantic_runtime(evaluated, expression.span)
+            if module.values[result.index].type_id.index != expression.type_id.index:
+                return error(diagnostics.Diagnostic("E000231", "grammar result type mismatch", expression.span))
             return result
         case ResolvedCall:
             match callee:
@@ -137,19 +182,6 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                     cfg.append(context, universal.Operation.Allocate(stored_type, cell))
                     cfg.append(context, universal.Operation.Store(cell, value))
                     scope.bindings.append(cell)
-            case FieldSet:
-                address = callable_mir_place(module, context, scope, target)
-                operation ?= update
-                if operation != None:
-                    original = mir_value(module, target.type_id)
-                    cfg.append(context, universal.Operation.Load(address, original))
-                    rhs = mir_expression(module, context, scope, value)
-                    resolved = mir_value(module, target.type_id)
-                    cfg.append(context, universal.Operation.Binary(operation, original, rhs, resolved))
-                    cfg.append(context, universal.Operation.Store(address, resolved))
-                else:
-                    resolved = mir_expression(module, context, scope, value)
-                    cfg.append(context, universal.Operation.Store(address, resolved))
             case ExpressionStatement:
                 mir_expression(module, context, scope, expression)
             case Assert:
@@ -224,6 +256,8 @@ def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, 
 enum SemanticValue:
     SourceOperand(operand: universal.LazyOperand)
     RuntimeValue(value: universal.ValueId)
+    IndexedHandle(receiver: universal.ValueId, index: universal.ValueId, access: universal.Expression, storage: universal.Expression | None)
+    PlaceHandle(address: universal.ValueId, type_id: universal.TypeId)
     BlockHandle(block: int)
     Nothing
 
@@ -231,6 +265,7 @@ enum SemanticValue:
 class SemanticFrame:
     context: cfg.ExecutionContext
     origin: universal.CfgTerminator
+    result_type: universal.TypeId = universal.TypeId(0)
     names: list[string] = []
     values: list[SemanticValue] = []
 
@@ -279,6 +314,67 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
             inputs: list[SemanticValue] = []
             for argument in arguments:
                 inputs.append(semantic_eval(module, scope, frame, argument.value))
+            if name == "place" and len(inputs) == 1:
+                match inputs[0]:
+                    case SourceOperand:
+                        match operand:
+                            case ExpressionBody:
+                                match expression.kind:
+                                    case IndexReference:
+                                        receiver = mir_expression(module, frame.context, scope, object)
+                                        offset = mir_expression(module, frame.context, scope, index)
+                                        return IndexedHandle(receiver, offset, access, storage)
+                                    case _:
+                                        pass
+                                address = callable_mir_place(module, frame.context, scope, expression)
+                                return PlaceHandle(address, expression.type_id)
+                            case _:
+                                pass
+                    case _:
+                        pass
+                return error(diagnostics.Diagnostic("E000231", "place requires a resolved destination", expression.span))
+            if name == "load" and len(inputs) == 1:
+                match inputs[0]:
+                    case IndexedHandle:
+                        local = CallableMirScope(scope.bindings, scope.loops, [receiver, index])
+                        return RuntimeValue(mir_expression(module, frame.context, local, access))
+                    case PlaceHandle:
+                        result = mir_value(module, type_id)
+                        cfg.append(frame.context, universal.Operation.Load(address, result))
+                        return RuntimeValue(result)
+                    case _:
+                        return error(diagnostics.Diagnostic("E000231", "load requires a place", expression.span))
+            if name == "store" and len(inputs) == 2:
+                value = semantic_runtime(inputs[1], expression.span)
+                match inputs[0]:
+                    case IndexedHandle:
+                        implementation ?= storage
+                        if implementation != None:
+                            local = CallableMirScope(scope.bindings, scope.loops, [receiver, index, value])
+                            mir_expression(module, frame.context, local, implementation)
+                            return Nothing
+                        return error(diagnostics.Diagnostic("E000231", "indexed storage is not writable", expression.span))
+                    case PlaceHandle:
+                        if module.values[value.index].type_id.index != type_id.index:
+                            return error(diagnostics.Diagnostic("E000231", "place store type mismatch", expression.span))
+                        cfg.append(frame.context, universal.Operation.Store(address, value))
+                        return Nothing
+                    case _:
+                        return error(diagnostics.Diagnostic("E000231", "store requires a place", expression.span))
+            if name == "apply" and len(inputs) == 3:
+                previous = semantic_runtime(inputs[1], expression.span)
+                right = semantic_runtime(inputs[2], expression.span)
+                match inputs[0]:
+                    case SourceOperand:
+                        match operand:
+                            case ExpressionBody:
+                                local = CallableMirScope(scope.bindings, scope.loops, [previous, right])
+                                return RuntimeValue(mir_expression(module, frame.context, local, expression))
+                            case _:
+                                pass
+                    case _:
+                        pass
+                return error(diagnostics.Diagnostic("E000231", "apply requires a resolved update", expression.span))
             if name == "cfg.block" and len(inputs) == 0:
                 return BlockHandle(cfg.block(frame.context))
             if name == "cfg.begin_loop" and len(inputs) == 2:
@@ -319,6 +415,32 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                 otherwise = universal.CfgEdge(semantic_block(inputs[2], expression.span))
                 cfg.terminate(frame.context, universal.CfgExit.Conditional(condition, taken, otherwise), frame.origin)
                 return Nothing
+            if name == "cfg.throw" and len(inputs) == 1:
+                raised = semantic_runtime(inputs[0], expression.span)
+                cfg.terminate(frame.context, universal.CfgExit.Raise(raised), frame.origin)
+                return Nothing
+            if name in ["outcome.success", "outcome.payload"] and len(inputs) == 1:
+                input = semantic_runtime(inputs[0], expression.span)
+                type_id = module.values[input.index].type_id
+                for record in module.records:
+                    if record.type_id.index == type_id.index:
+                        index := 0
+                        for variant in universal.outcome_variants(record):
+                            if variant.index == frame.result_type.index:
+                                if name == "outcome.success":
+                                    result = mir_value(module, universal.TypeId(1))
+                                    cfg.append(frame.context, universal.Operation.IsVariant(input, index, result))
+                                    return RuntimeValue(result)
+                                address = mir_value(module, universal.TypeId(5))
+                                cfg.append(frame.context, universal.Operation.Allocate(type_id, address))
+                                cfg.append(frame.context, universal.Operation.Store(address, input))
+                                field = mir_value(module, universal.TypeId(5))
+                                cfg.append(frame.context, universal.Operation.FieldAddress(address, type_id, index + 1, field))
+                                result = mir_value(module, variant)
+                                cfg.append(frame.context, universal.Operation.Load(field, result))
+                                return RuntimeValue(result)
+                            index += 1
+                return error(diagnostics.Diagnostic("E000231", "outcome operation requires a declared variant", expression.span))
             if name == "cfg.return" and len(inputs) <= 1:
                 returned: universal.ValueId | None := None
                 if len(inputs) == 1:
@@ -351,7 +473,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
             return error(diagnostics.Diagnostic("E000231", "invalid compiler context expression", expression.span))
 
 
-def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, syntax: universal.OperatorSyntax, operands: list[universal.Expression], bodies: list[universal.Block], span: source.Span) -> bool | diagnostics.Diagnostic:
+def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, syntax: universal.OperatorSyntax, operands: list[universal.Expression], bodies: list[universal.Block], span: source.Span, result_type: universal.TypeId = universal.TypeId(0)) -> SemanticValue | diagnostics.Diagnostic:
     for definition in module.traits:
         if definition.grammar and definition.definition.module == syntax.definition.module and definition.definition.declaration.value == syntax.definition.declaration.value:
             capable := false
@@ -361,9 +483,9 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                     if supplied != None:
                         match supplied.kind:
                             case Name:
-                                capable = name in ["Branch", "Loop", "Return", "Error"]
+                                capable = name in ["Branch", "Loop", "Return", "Error", "Mutation"]
                             case Member:
-                                capable = name in ["Branch", "Loop", "Return", "Error"]
+                                capable = name in ["Branch", "Loop", "Return", "Error", "Mutation"]
                             case _:
                                 pass
             if not capable:
@@ -372,7 +494,7 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                 if method.name == "semantic":
                     program ?= method.body
                     if program != None:
-                        frame = SemanticFrame(context, universal.CfgTerminator(universal.CfgExit.Dead, definition.definition, span))
+                        frame = SemanticFrame(context, universal.CfgTerminator(universal.CfgExit.Dead, definition.definition, span), result_type)
                         for operand in operands:
                             frame.values.append(SourceOperand(universal.LazyOperand.ExpressionBody(operand)))
                         for body in bodies:
@@ -414,8 +536,13 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                                     frame.values.append(value)
                                 case ExpressionStatement:
                                     semantic_eval(module, scope, frame, expression)
+                                case Return:
+                                    returned ?= value
+                                    if returned != None:
+                                        return semantic_eval(module, scope, frame, returned)
+                                    return Nothing
                                 case _:
                                     return error(diagnostics.Diagnostic("E000231", "unsupported semantic context statement", span))
-                        return true
+                        return Nothing
             return error(diagnostics.Diagnostic("E000231", "grammar requires a semantic body", span))
     return error(diagnostics.Diagnostic("E000231", "unresolved grammar capability", span))

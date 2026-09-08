@@ -17,6 +17,9 @@ def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDecla
         throw Error("unit has no scalar SSA value")
     known ?= scalar.scalar_type(id)
     if known != None:
+        if known.representation == "buffer":
+            element = callable_mlir_type(universal.TypeId(id.index - 200), records)
+            return memref_type(element.scalar, [-1])
         if known.representation == "utf8":
             return utf8_view_type()
         if known.representation == "index":
@@ -48,6 +51,14 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
     for operation in block.operations:
         cursor += 1
         match operation:
+            case IsVariant:
+                input = callable_mlir_value(module, value)
+                tag = builder_new_value(builder, integer_type(64))
+                positions = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(64), [], [integer_attribute(0, integer_type(64))])
+                builder_create_operation(builder, operation_name("llvm", "extractvalue"), [input], [tag], [MlirNamedAttribute("position", positions)])
+                expected = builder_new_value(builder, integer_type(64))
+                builder_constant(builder, expected, integer_attribute(variant, expected.type_id))
+                builder_binary(builder, callable_mlir_value(module, result), operation_name("arith", "cmpi"), tag, expected, [MlirNamedAttribute("predicate", integer_attribute(0, integer_type(64)))])
             case Allocate:
                 callable_allocate(builder, callable_mlir_type(type_id, module.records), callable_mlir_value(module, result))
             case Alias:
@@ -71,7 +82,13 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                     case FloatValue:
                         builder_constant(builder, output, MlirAttributeValue(FloatLiteralAttributeKind, spelling, 0, false, output.type_id, []))
                     case NoneValue:
-                        builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
+                        if type_kind_name(output.type_id.kind) == "memref":
+                            size = builder_new_value(builder, index_type())
+                            builder_constant(builder, size, integer_attribute(0, size.type_id))
+                            sizes = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [integer_attribute(1, integer_type(32)), integer_attribute(0, integer_type(32))])
+                            builder_create_operation(builder, operation_name("memref", "alloc"), [size], [output], [MlirNamedAttribute("operandSegmentSizes", sizes)])
+                        else:
+                            builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
                     case StringValue:
                         string_literal(builder, value, output)
                     case CharacterValue:
@@ -281,6 +298,14 @@ def callable_cfg(builder: MlirOpBuilder, module: universal.Module, body: univers
                     segments = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], sizes)
                     state = operation_state(operation_definition("cf", "cond_br", true), operands=inputs, attributes=[MlirNamedAttribute("operandSegmentSizes", segments)], successors=[handles[taken.target].block, handles[otherwise.target].block])
                     builder_create(builder, state)
+                case Raise:
+                    if body.return_type.index == module.values[value.index].type_id.index:
+                        builder_return(builder, [callable_mlir_value(module, value)])
+                    else:
+                        failed = builder_new_value(builder, integer_type(1))
+                        builder_constant(builder, failed, boolean_attribute(false))
+                        builder_assert(builder, failed, "unhandled typed error")
+                        builder_create_operation(builder, operation_name("llvm", "unreachable"), terminator=true)
                 case Finish:
                     outputs: list[MlirValue] = []
                     returned ?= value

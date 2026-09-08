@@ -39,6 +39,7 @@ enum Statement:
     GrammarApply(syntax: OperatorSyntax, operands: list[Expression], bodies: list[Block], span: source.Span, exits: bool)
     BindingStatement(binding: Binding)
     ExpressionStatement(expression: Expression)
+    Throw(value: Expression, span: source.Span)
     Return(value: Expression | None, span: source.Span)
     Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
     If(condition: Expression, then_block: Block, else_block: Block, span: source.Span)

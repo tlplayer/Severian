@@ -245,8 +245,10 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                 test_declaration := declaration
                 test_declaration.body = macro_block(declaration.body)
                 output.items.append(universal.Test(test_declaration))
+            case OperatorItem:
+                output.items.append(item)
             case _:
-                throw Error("enumerative macro bodies must emit functions or tests")
+                throw Error("enumerative macro bodies must emit functions, operators or tests")
 
 
 def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], output: universal.Module):

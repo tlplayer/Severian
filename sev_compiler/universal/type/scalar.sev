@@ -16,6 +16,9 @@ def scalar_types() -> list[ScalarType]:
 
 
 def scalar_type_name(name: string) -> TypeId | None:
+    for element in scalar_types():
+        if name == "$buffer$" + element.name:
+            return TypeId(200 + element.id.index)
     for scalar in scalar_types():
         if scalar.name == name or (name == "int" and scalar.name == "i64") or (name == "float" and scalar.name == "f64"):
             return scalar.id
@@ -23,6 +26,9 @@ def scalar_type_name(name: string) -> TypeId | None:
 
 
 def scalar_type(id: TypeId) -> ScalarType | None:
+    for element in scalar_types():
+        if id.index == 200 + element.id.index:
+            return ScalarType(id, "$buffer$" + element.name, element.bits, false, "buffer")
     for scalar in scalar_types():
         if scalar.id.index == id.index:
             return scalar

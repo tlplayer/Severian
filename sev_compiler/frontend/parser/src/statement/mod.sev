@@ -529,6 +529,10 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
             otherwise = rejected[0]
             end = rejected[1]
         return universal.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+    if parser_at_identifier(parser, "throw"):
+        start = parser_next(parser).span
+        value = parser_expression(parser, 0)
+        return universal.Throw(value, source.Span(start.source, start.start, value.span.end))
     if parser_at_identifier(parser, "return"):
         start = parser_next(parser).span
         if parser_at_simple(parser, Newline) or parser_at_simple(parser, Dedent):
@@ -574,18 +578,14 @@ def parser_simple_statement(parser: Parser) -> universal.Statement | diagnostics
     if parser_looks_like_binding(parser):
         return universal.BindingStatement(parser_binding(parser))
     value = parser_expression(parser, 0)
-    assignment = parser_peek(parser).kind
-    if assignment == Equal or assignment == PlusEqual or assignment == MinusEqual or assignment == StarEqual:
+    assignment = parser_peek(parser)
+    update: universal.OperatorSyntax | None := None
+    for syntax in assignment.syntaxes:
+        if syntax.grammar_form == "Assignment":
+            update = syntax
+    if assignment.kind == Equal or update != None:
         parser_next(parser)
         rhs = parser_expression(parser, 0)
-        update: universal.OperatorSyntax | None := None
-        if assignment != Equal:
-            operator := universal.operator_syntax(universal.Add())
-            if assignment == MinusEqual:
-                operator = universal.operator_syntax(universal.Subtract())
-            elif assignment == StarEqual:
-                operator = universal.operator_syntax(universal.Multiply())
-            update = operator
         return universal.FieldSet(value, rhs, value.span, update)
     return universal.ExpressionStatement(value)
 
@@ -601,7 +601,7 @@ def parser_looks_like_binding(parser: Parser) -> bool:
                         return parser.tokens[parser.cursor[0] + 2].kind == Equal
                 case _:
                     pass
-            return next == Equal or next == QuestionEqual or next == ColonEqual or next == Colon or next == PlusEqual or next == MinusEqual or next == StarEqual
+            return next == Equal or next == QuestionEqual or next == ColonEqual or next == Colon
         case _:
             pass
     return false
@@ -618,17 +618,6 @@ def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic
             pass
     if parser_take(parser, Colon) != None:
         annotation = parser_type_annotation(parser)
-    assignment = parser_peek(parser).kind
-    if assignment == PlusEqual or assignment == MinusEqual or assignment == StarEqual:
-        parser_next(parser)
-        rhs = parser_expression(parser, 0)
-        operator := universal.operator_syntax(universal.Add())
-        if assignment == MinusEqual:
-            operator = universal.operator_syntax(universal.Subtract())
-        elif assignment == StarEqual:
-            operator = universal.operator_syntax(universal.Multiply())
-        combined = universal.Expression(universal.Binary(operator, universal.Expression(universal.Name(name), start), rhs), source.Span(start.source, start.start, rhs.span.end))
-        return universal.Binding(name, annotation, combined, true, false, combined.span)
     inferred = parser_take(parser, ColonEqual) != None
     preserve_error = not inferred and parser_take(parser, QuestionEqual) != None
     if not inferred and not preserve_error:
@@ -708,6 +697,10 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                     break
             end = parser_expect(parser, RightParen, "expected closing parenthesis").span.end
             value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
+        elif parser_take(parser, LeftBracket) != None:
+            index = parse_expression(parser, 0)
+            end = parser_expect(parser, RightBracket, "expected closing subscript bracket").span.end
+            value = universal.Expression(universal.Subscript(value, index), source.Span(value.span.source, value.span.start, end))
         elif parser_take(parser, Dot) != None:
             member = parser_identifier(parser, "expected member name")
             value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
@@ -737,6 +730,14 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
         case FormattedString:
             return formatted_string_expression(value, token.span, token.syntaxes)
+        case LeftBracket:
+            elements: list[universal.Expression] = []
+            while not parser_at_simple(parser, RightBracket):
+                elements.append(parse_expression(parser, 0))
+                if parser_take(parser, Comma) == None:
+                    break
+            end = parser_expect(parser, RightBracket, "expected closing list bracket").span.end
+            return universal.Expression(universal.ListLiteral(elements), source.Span(token.span.source, token.span.start, end))
         case LeftParen:
             value = parse_expression(parser, 0)
             parser_expect(parser, RightParen, "expected closing parenthesis")

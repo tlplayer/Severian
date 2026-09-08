@@ -14,11 +14,6 @@ enum TokenKind:
     ColonEqual
     QuestionEqual
     Equal
-    PlusEqual
-    MinusEqual
-    StarEqual
-    SlashEqual
-    PercentEqual
     Arrow
     LeftParen
     RightParen

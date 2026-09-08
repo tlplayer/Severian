@@ -322,6 +322,43 @@ class Gate4SemanticExecution(MigrationCase):
                 assert(values[0] == 42)
         ''', expected="index\nrhs\n")
 
+    def test_06_compound_field_update_preserves_implementation_and_receiver(self):
+        self.native('''
+            class Value:
+                amount: int
+                operator +[G:Add](other: Self) -> Self:
+                    print("update")
+                    return Value(amount + other.amount + 1)
+            class Holder:
+                value: Value
+            def receiver(holder: Holder) -> Holder:
+                print("receiver")
+                return holder
+            def rhs() -> Value:
+                print("rhs")
+                return Value(4)
+            test:
+                holder = Holder(Value(37))
+                receiver(holder).value += rhs()
+        ''', expected="receiver\nrhs\nupdate\n")
+
+    def test_07_indexed_update_evaluates_receiver_once(self):
+        self.native('''
+            def receiver(values: list[int]) -> list[int]:
+                print("receiver")
+                return values
+            def index() -> int:
+                print("index")
+                return 0
+            def rhs() -> int:
+                print("rhs")
+                return 5
+            test:
+                values = [37]
+                receiver(values)[index()] += rhs()
+                assert(values[0] == 42)
+        ''', expected="receiver\nindex\nrhs\n")
+
     def test_04_assignment_requires_a_writable_place(self):
         self.rejects('test:\n    value = 40\n    value += 2\n',
                      r"(?i)(immutable|writ[ae]ble|mutable place)")
@@ -470,6 +507,52 @@ class Gate5CanonicalCfg(MigrationCase):
         self.rejects('def invalid():\n    throw 42\n', r"(?i)(throw.*Error|Error.*throw)")
 
 
+    def test_06_error_identity_and_guarded_projection(self):
+        self.native('''
+            class First: Error:
+                value: int
+            class Second: Error:
+                value: int
+            def checked(value: int) -> int | First | Second:
+                if value < 0:
+                    throw First(value)
+                if value == 0:
+                    throw Second(value)
+                return value
+            def forwarded(value: int) -> int | First | Second:
+                return checked(value)
+            test:
+                first ?= forwarded(-7)
+                if first is Second:
+                    assert(false)
+                if first is First:
+                    assert(first.value == -7)
+                else:
+                    assert(false)
+                second ?= forwarded(0)
+                if second is Second:
+                    assert(second.value == 0)
+                else:
+                    assert(false)
+                assert(forwarded(42) == 42)
+        ''')
+        self.rejects('''
+            class First: Error:
+                value: int
+            def checked() -> int | First:
+                throw First(7)
+            test:
+                result ?= checked()
+                assert(result.value == 7)
+        ''', r"(?i)(unknown field|narrow|variant)", name="unguarded.sev")
+        self.rejects('''
+            class LooksLikeError:
+                value: int
+            def invalid():
+                throw LooksLikeError(42)
+        ''', r"(?i)(throw.*Error|Error.*throw)", name="not-error.sev")
+
+
 class Gate6LibraryAndRetirement(MigrationCase):
     def test_01_actual_integer_and_float_sources(self):
         for filename in ("int.sev", "float.sev"):
@@ -533,6 +616,27 @@ class Gate6LibraryAndRetirement(MigrationCase):
         self.rejects('test:\n    value = 21 + 21\n',
                      r"(?i)(unknown|unresolved|missing|unregistered|requires).*([+]\b|Add|operator|grammar)|(?i:expected.*operator)",
                      sysroot=overlay)
+
+    def test_06_conditional_expression_executes_source_grammar(self):
+        overlay = self.directory / "conditional-sysroot"
+        (overlay / "sev_compiler").mkdir(parents=True)
+        shutil.copytree(ROOT / "sev_compiler/universal", overlay / "sev_compiler/universal")
+        (overlay / "library").symlink_to(ROOT / "library", target_is_directory=True)
+        path = overlay / "sev_compiler/universal/grammar/contracts.sev"
+        original = path.read_text()
+        before, conditional = original.split("trait Conditional: G:", 1)
+        self.assertIn("cfg.branch(value, taken, otherwise)", conditional)
+        path.write_text(before + "trait Conditional: G:" + conditional.replace(
+            "cfg.branch(value, taken, otherwise)", "cfg.branch(value, otherwise, taken)", 1))
+        self.native('''
+            def left() -> int:
+                assert(false)
+                return 7
+            def right() -> int:
+                return 42
+            test:
+                assert((left() if true else right()) == 42)
+        ''', sysroot=overlay)
 
     def test_05_legacy_dispatch_and_parallel_topology_are_retired(self):
         forbidden = {

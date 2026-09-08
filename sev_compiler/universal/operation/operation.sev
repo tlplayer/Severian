@@ -7,11 +7,11 @@ import "../statement/statement.sev"
 
 enum Operation:
     Coverage(point: CoveragePoint)
+    IsVariant(value: ValueId, variant: int, result: ValueId)
     Constant(value: LiteralValue, result: ValueId)
     Unary(operator: OperatorSyntax, operand: ValueId, result: ValueId)
     Binary(operator: OperatorSyntax, left: ValueId, right: ValueId, result: ValueId)
     Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
-    Return(value: ValueId | None)
     Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
     Allocate(type_id: TypeId, result: ValueId)
     Alias(value: ValueId, result: ValueId)

@@ -41,24 +41,30 @@ def alias_named(definitions: SemanticDefinitions, name: string, namespace: strin
 def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
-            if len(arguments) != 0:
-                return error(diagnostics.diagnostic_at("E000205", "type arguments require a generic type declaration", annotation.span))
+            if name == "buffer" and len(arguments) == 1:
+                element = type_annotation(definitions, arguments[0], records, namespace, active)
+                if int(element.index) not in [1, 8, 16, 32, 64, 108, 132, 164]:
+                    return error(diagnostics.diagnostic_at("E000205", "buffer elements require scalar storage", annotation.span))
+                return universal.TypeId(200 + element.index)
             alias ?= alias_named(definitions, name, namespace)
             if alias != None:
+                if len(alias.type_parameters) != len(arguments):
+                    return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
                 if alias.name in active:
                     return error(diagnostics.diagnostic_at("E000205", "cyclic type alias " + alias.name, annotation.span))
                 if alias.id.index != 0:
                     return alias.id
                 target ?= alias.definition
                 if target != None:
-                    match target.kind:
+                    substituted = replace_annotation(target, alias.type_parameters, arguments)
+                    match substituted.kind:
                         case Union:
                             # Family values still require a concrete member.
                             return error(diagnostics.diagnostic_at("E000205", "family requires a concrete member: " + alias.name, annotation.span))
                         case _:
                             path = active[:]
                             path.append(alias.name)
-                            return type_annotation(definitions, target, records, alias.lookup, path)
+                            return type_annotation(definitions, substituted, records, alias.lookup, path)
             for record in records:
                 if record.name == namespace + name:
                     return record.type_id
@@ -69,6 +75,33 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
             if known != None:
                 return known
             return error(diagnostics.diagnostic_at("E000205", "unknown type " + name, annotation.span))
+        case Union:
+            variants: list[universal.TypeId] = []
+            key := "$outcome"
+            for member in members:
+                variant = type_annotation(definitions, member, records, namespace, active)
+                for previous in variants:
+                    if previous.index == variant.index:
+                        return error(diagnostics.diagnostic_at("E000205", "duplicate outcome variant", annotation.span))
+                variants.append(variant)
+                key += "$" + string(variant.index)
+            for record in records:
+                if record.name == key:
+                    return record.type_id
+            successes := 0
+            for variant in variants:
+                if not error_conformance(definitions, records, variant):
+                    successes += 1
+            if successes != 1 or len(variants) < 2:
+                return error(diagnostics.diagnostic_at("E000205", "typed outcome requires one success type and Error variants", annotation.span))
+            fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.TypeId(64))]
+            index := 0
+            for variant in variants:
+                fields.append(universal.FunctionParameter("$variant" + string(index), universal.named_type(type_name(variant, records), [], annotation.span), None, annotation.span, type_id=variant))
+                index += 1
+            id = universal.TypeId(u32(1000 + len(records)))
+            records.append(universal.RecordDeclaration(key, fields, [], annotation.span, type_id=id))
+            return id
         case _:
             return error(diagnostics.diagnostic_at("E000205", "a value requires one concrete type", annotation.span))
 
@@ -244,7 +277,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 if declaration.name in names:
                     return error(diagnostics.diagnostic_at("E000205", "duplicate declaration " + declaration.name, declaration.span))
                 names.append(declaration.name)
-                if len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0 or declaration.definition == None:
+                if len(declaration.constraints) != 0 or declaration.definition == None:
                     return error(diagnostics.diagnostic_at("E000205", "type declaration requires a concrete alias or closed family", declaration.span))
                 definitions.aliases.append(declaration)
             case Record:
@@ -311,3 +344,21 @@ def family_members(definitions: SemanticDefinitions, annotation: universal.TypeA
                     path.append(alias.name)
                     return family_members(definitions, target, records, alias.lookup, path)
     return [type_annotation(definitions, annotation, records, namespace)]
+
+
+def error_conformance(definitions: SemanticDefinitions, records: list[universal.RecordDeclaration], type_id: universal.TypeId) -> bool | diagnostics.Diagnostic:
+    required ?= trait_named(definitions, "Error", "")
+    if required == None:
+        return false
+    if required != None:
+        for record in records:
+            if record.type_id.index == type_id.index:
+                for base in record.traits:
+                    name ?= universal.simple_type_name(base)
+                    if name != None:
+                        declared ?= trait_named(definitions, name, record.lookup)
+                        if declared != None:
+                            for inherited in inherited_traits(definitions, declared):
+                                if inherited.definition.module == required.definition.module and inherited.definition.declaration.value == required.definition.declaration.value:
+                                    return true
+    return false

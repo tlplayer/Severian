@@ -1,0 +1,125 @@
+# Source list construction, access, mutation, truth and iteration protocols.
+# buffer[T] is the typed rank-one MLIR storage boundary.
+type list[T] = buffer[T]
+
+@mlir("arith.index_cast")
+def __list_index(value: int) -> index
+
+@mlir("arith.index_cast")
+def __list_size(value: index) -> int
+
+-> int_lists[T: element]() with element in int:
+    @mlir("memref.alloc", operand_segments="1,0")
+    def allocate(size: index) -> list[element]
+
+    @mlir("memref.load")
+    def load(values: list[element], position: index) -> element
+
+    @mlir("memref.store")
+    def store(value: element, values: list[element], position: index)
+
+    @mlir("memref.dim")
+    def dimension(values: list[element], axis: index) -> index
+
+    def count(values: list[element]) -> int:
+        return __list_size(dimension(values, 0))
+
+    operator list_create(size: int, exemplar: element) -> list[element]:
+        return allocate(__list_index(size))
+
+    operator element_at(values: list[element], position: int) -> element:
+        assert(position >= 0)
+        assert(position < count(values))
+        return load(values, __list_index(position))
+
+    operator element_set(values: list[element], position: int, value: element):
+        assert(position >= 0)
+        assert(position < count(values))
+        store(value, values, __list_index(position))
+
+    operator if[G:If](self: list[element]) -> bool:
+        return count(self) != 0
+
+    operator iteration_start(values: list[element]) -> int:
+        return 0
+
+    operator iteration_more(values: list[element], position: int) -> bool:
+        return position < count(values)
+
+    operator iteration_next(values: list[element], position: int) -> int:
+        return position + 1
+
+int_lists[int]()
+
+-> float_lists[T: element]() with element in float:
+    @mlir("memref.alloc", operand_segments="1,0")
+    def allocate(size: index) -> list[element]
+
+    @mlir("memref.load")
+    def load(values: list[element], position: index) -> element
+
+    @mlir("memref.store")
+    def store(value: element, values: list[element], position: index)
+
+    @mlir("memref.dim")
+    def dimension(values: list[element], axis: index) -> index
+
+    def count(values: list[element]) -> int:
+        return __list_size(dimension(values, 0))
+
+    operator list_create(size: int, exemplar: element) -> list[element]:
+        return allocate(__list_index(size))
+
+    operator element_at(values: list[element], position: int) -> element:
+        assert(position >= 0)
+        assert(position < count(values))
+        return load(values, __list_index(position))
+
+    operator element_set(values: list[element], position: int, value: element):
+        assert(position >= 0)
+        assert(position < count(values))
+        store(value, values, __list_index(position))
+
+    operator if[G:If](self: list[element]) -> bool:
+        return count(self) != 0
+
+    operator iteration_start(values: list[element]) -> int:
+        return 0
+
+    operator iteration_more(values: list[element], position: int) -> bool:
+        return position < count(values)
+
+    operator iteration_next(values: list[element], position: int) -> int:
+        return position + 1
+
+float_lists[float]()
+
+@mlir("memref.dim")
+def __string_dimension(value: string, axis: index) -> index
+
+operator if[G:If](self: string) -> bool:
+    return __list_size(__string_dimension(self, 0)) != 0
+
+class Range:
+    start: int
+    stop: int
+    step: int
+
+def range(stop: int) -> Range:
+    return Range(0, stop, 1)
+
+def range(start: int, stop: int, step: int = 1) -> Range:
+    assert(step != 0)
+    return Range(start, stop, step)
+
+operator iteration_start(value: Range) -> int:
+    return value.start
+
+operator iteration_more(value: Range, position: int) -> bool:
+    return position < value.stop if value.step > 0 else position > value.stop
+
+operator iteration_next(value: Range, position: int) -> int:
+    return position + value.step
+
+operator element_at(value: Range, position: int) -> int:
+    return position

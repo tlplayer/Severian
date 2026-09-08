@@ -271,3 +271,176 @@ trait Return: G:
     def semantic(value: Ex | absent):
         result = lower(value)
         cfg.return(result)
+
+
+trait Conditional: G:
+    control_flow: ControlFlow = Branch
+
+    def semantic(condition: Ex, then_value: Ex, else_value: Ex) -> X:
+        value = lower(condition)
+        taken = cfg.block()
+        otherwise = cfg.block()
+        exit = cfg.block()
+        cfg.branch(value, taken, otherwise)
+        cfg.at(taken)
+        selected = lower(then_value)
+        result = cfg.parameter(exit, selected)
+        cfg.goto(exit, selected)
+        cfg.at(otherwise)
+        alternative = lower(else_value)
+        cfg.goto(exit, alternative)
+        cfg.at(exit)
+        return result
+
+
+trait Assign: G:
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex):
+        target = place(destination)
+        right = lower(value)
+        store(target, right)
+
+
+trait AddAssign: G:
+    symbol: Y = +=
+    form: GrammarForm = GrammarForm.Assignment
+    operation: string = "+"
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex, update: Ex):
+        target = place(destination)
+        previous = load(target)
+        right = lower(value)
+        updated = apply(update, previous, right)
+        store(target, updated)
+
+
+trait SubtractAssign: G:
+    symbol: Y = -=
+    form: GrammarForm = GrammarForm.Assignment
+    operation: string = "-"
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex, update: Ex):
+        target = place(destination)
+        previous = load(target)
+        right = lower(value)
+        updated = apply(update, previous, right)
+        store(target, updated)
+
+
+trait MultiplyAssign: G:
+    symbol: Y = *=
+    form: GrammarForm = GrammarForm.Assignment
+    operation: string = "*"
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex, update: Ex):
+        target = place(destination)
+        previous = load(target)
+        right = lower(value)
+        updated = apply(update, previous, right)
+        store(target, updated)
+
+
+trait DivideAssign: G:
+    symbol: Y = /=
+    form: GrammarForm = GrammarForm.Assignment
+    operation: string = "/"
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex, update: Ex):
+        target = place(destination)
+        previous = load(target)
+        right = lower(value)
+        updated = apply(update, previous, right)
+        store(target, updated)
+
+
+trait RemainderAssign: G:
+    symbol: Y = %=
+    form: GrammarForm = GrammarForm.Assignment
+    operation: string = "%"
+    control_flow: ControlFlow = Mutation
+
+    def semantic(destination: Ex, value: Ex, update: Ex):
+        target = place(destination)
+        previous = load(target)
+        right = lower(value)
+        updated = apply(update, previous, right)
+        store(target, updated)
+
+
+trait Error:
+    pass
+
+
+trait Is: G:
+    symbol: Y = is
+    fixity: Fixity = Fixity.Infix
+    precedence: int = 3
+    associativity: Associativity = None
+
+
+trait Throw: G:
+    control_flow: ControlFlow = Error
+
+    def semantic(value: Ex):
+        result = lower(value)
+        cfg.throw(result)
+
+
+trait Outcome: G:
+    control_flow: ControlFlow = Error
+
+    def semantic(value: Ex):
+        result = lower(value)
+        valid = outcome.success(result)
+        taken = cfg.block()
+        failed = cfg.block()
+        cfg.branch(valid, taken, failed)
+        cfg.at(failed)
+        cfg.throw(result)
+        cfg.at(taken)
+        payload = outcome.payload(result)
+        return payload
+
+
+trait List: G:
+    construction: string = "list_create"
+
+
+trait Index: G:
+    access: string = "element_at"
+    storage: string = "element_set"
+
+
+trait Iteration: G:
+    start: string = "iteration_start"
+    condition: string = "iteration_more"
+    access: string = "element_at"
+    advance: string = "iteration_next"
+
+
+trait For: G:
+    control_flow: ControlFlow = Loop
+
+    def semantic(condition: Ex, body: B, advance: B):
+        header = cfg.block()
+        execute = cfg.block()
+        step = cfg.block()
+        exit = cfg.block()
+        cfg.goto(header)
+        cfg.at(header)
+        value = lower(condition)
+        cfg.branch(value, execute, exit)
+        cfg.begin_loop(step, exit)
+        cfg.at(execute)
+        lower(body)
+        cfg.fallthrough(step)
+        cfg.at(step)
+        lower(advance)
+        cfg.fallthrough(header)
+        cfg.end_loop()
+        cfg.at(exit)
