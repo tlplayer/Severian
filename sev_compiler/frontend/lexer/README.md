@@ -33,7 +33,7 @@ through `token_is_symbol`/`parser_expect_symbol`; new value operators still
 resolve through registered syntax rather than additional parser branches.
 
 Ordinary identifiers, numeric tokens, and symbols store no second text value.
-`token_text` reads their lexeme, while `token_number` normalizes numeric spelling
+`string(token)` uses Token's `operator <=>(self) -> string` to read their lexeme, while `token_number` normalizes numeric spelling
 on demand at literal construction (or syntax-metadata evaluation). The optional
 `Token.value` holds decoded string/character text or a macro replacement. Escape
 validation remains lexical for now; character-to-codepoint conversion happens
@@ -93,30 +93,71 @@ imported value operator is active in this pass. Module discovery traverses
 imports, resolves their descriptors, then `scan_registered` scans the affected
 source with the complete symbol environment. Bootstrap still shares the
 literal implementations, including formatted and block strings, so it can
-walk existing compiler definitions without another independent scanner.
+walk existing compiler definitions without another independent scanner. Literal
+diagnostics are deferred until configured scanning, so a new raw literal may
+contain text that would be invalid inside a bootstrap string.
 
-The Rust seed compiles these Severian rules into the source compiler. It does
-not yet support a heterogeneous `list[LexicalRule]`. The rule composition is
-therefore statically specialized. The generic dispatcher lives with the
-concrete rule imports because the seed also cannot specialize an imported
-generic for a caller-only record type. This limitation must be fixed before
-arbitrary external rules can use the shared generic entry point.
+The Rust seed compiles the built-in rules into the source compiler. Imported
+concrete, stateless `LexicalRule` classes are loaded separately: the module
+loader parses their definitions with the standard language, and `runtime.sev`
+executes their universal source bodies. The lexer never imports the parser.
+Definitions are masked out of the application pass while preserving character
+offsets; they do not become runtime application classes.
 
-Importing arbitrary lexical-rule implementations into an already-built compiler is
-**not implemented**. It requires discovery and validation of lexical contracts,
-a compiler-time execution or precompiled-package mechanism for rule bodies,
-and a registry that retains definition identity. Keep that work separate from
-`G` metadata discovery: reading a rule declaration alone does not execute it.
-A future registry must specify rule priority, reject ambiguous matches, retain
-progress checks, and preserve lexical context through interpolation and imports.
+## Imported lexical rules
 
-The later acceptance gate is a package-defined lexical form that changes
-behavior when only its Severian rule body changes, with the compiler binary
-unchanged. The operator acceptance gate exercises that property for `G`/`Y` spellings.
-`test_imported_punctuation_keeps_frontend_and_binary_unchanged` imports `|>` and
-then `|~>` from a source package, executes both directly and in interpolation,
-and verifies unchanged lexer/parser sources and compiler binary. `TokenKind`
-is covered by the same source snapshot.
+A relative source import can contribute a rule without changing the compiler
+binary. Its contract is the same `scan(input: LexemeInput, start: int)` used by
+the built-in lexical classes. `Lx` still denotes the resulting source lexeme,
+not the rule implementation.
+
+```sev
+class SigilInteger: LexicalRule:
+    def scan(input: LexemeInput, start: int) -> LexemeMatch:
+        characters = input.characters
+        if characters[start] != "~":
+            return LexemeMatch(start, None, false)
+        cursor := start + 1
+        while cursor < len(characters) and is_digit(characters[cursor]):
+            cursor += 1
+        if cursor == start + 1:
+            return LexemeMatch(start, None, false)
+        return LexemeMatch(cursor, TokenKind.Integer, value=lexeme_text(input, start + 1, cursor))
+```
+
+Importing that file makes `~42` an integer token with source lexeme `~42` and
+literal text `42`. Editing the method body changes tokenization on the next
+compilation, without rebuilding either compiler. A symbol result resolves its
+normalized spelling through the existing `Y`/`G` registry. Formatted-string
+interpolation retains the imported lexical environment. Run an importing subject
+with the source compiler (the Rust seed does not load these extensions):
+
+```sh
+sev_compiler/target/host/dev/bin/sev_compiler test subject.sev --sysroot .
+```
+
+Whitespace, comments, and structural events remain owned by the standard
+scanner. At other positions imported rules run before built-in literal and
+symbol rules. The longest imported match wins; an optional constant
+`priority: int = 1` resolves equal lengths. Equal length and priority is an
+ambiguity error, independent of import order. If no imported rule matches,
+scanning falls back to the standard rules. Every successful match must advance within the source bounds.
+
+The source evaluator supports integer/text/boolean expressions, character
+indexing, local bindings, conditions, while loops, return/break/continue, assertions,
+and concrete helper methods on the rule. It exposes `len`, `string`,
+`is_digit`, `lexeme_text`, `lexeme_span`, source diagnostics, and text methods `characters`, `starts_with`,
+`ends_with`, `replace`, and `join`. Unsupported operations produce diagnostics;
+there is no filesystem, process, or CFG capability. Each invocation has a
+10,000-expression budget and a 64-call depth limit. Generic/stateful imported
+rule objects and arbitrary application/library calls are not yet supported;
+built-in rule dispatch continues to use `lex[Rule: LexicalRule]`.
+
+`tests/sev_compiler/lexical_rules.py` exercises imported numeric and string
+forms, body changes, normalized symbols, interpolation, priorities, progress,
+and execution limits. Its migration check verifies unchanged lexer/parser
+sources and compiler binary. The corresponding operator gate in
+`source_contracts.py` imports `|>` and `|~>` without changing those files.
 
 ## Validation
 
@@ -131,5 +172,6 @@ cd sev_compiler
 cd ..
 python3 tests/sev_compiler/migration.py Gate3SourceSyntax
 python3 tests/sev_compiler/source_contracts.py
+python3 tests/sev_compiler/lexical_rules.py
 python3 tests/sev_compiler/diagnostics.py
 ```

@@ -12381,6 +12381,37 @@ impl Analyzer<'_> {
         value: Expression,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        if let Some(owner) = self.class_instances_by_type.get(&value.type_id).cloned() {
+            let mut conversions = owner.operators.iter().filter(|operator| {
+                operator.operator == severian_ast::OperatorSyntax::Conversion
+                    && operator.type_parameters.is_empty()
+                    && operator.parameters.is_empty()
+                    && operator.result.simple_name() == Some("string")
+            });
+            if let Some(operator) = conversions.next() {
+                if conversions.next().is_some() {
+                    return Err(Diagnostic::new(
+                        "E000212",
+                        "ambiguous string conversion",
+                        Some(span),
+                    ));
+                }
+                let method = severian_ast::FunctionDeclaration {
+                    decorators: operator.decorators.clone(),
+                    compile_time: false,
+                    name: "<=>string".into(),
+                    type_parameters: Vec::new(),
+                    constraints: operator.constraints.clone(),
+                    contracts: operator.contracts.clone(),
+                    hook: None,
+                    parameters: Vec::new(),
+                    result: operator.result.clone(),
+                    body: Some(operator.body.clone()),
+                    span: operator.span,
+                };
+                return self.lower_method_callable(&owner, &method, value, &[], None, span);
+            }
+        }
         if self.any_type == Some(value.type_id) {
             let string = self
                 .types
@@ -20829,6 +20860,36 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn concrete_string_conversion_lowers_the_operator_body() {
+        let (program, _) = analyze_source(
+            r#"
+class Spelling:
+    text: string
+
+    operator <=>(self) -> string:
+        if self.text == "":
+            return "empty"
+        return self.text
+
+def convert(text: string) -> string:
+    return string(Spelling(text))
+
+def interpolate(text: string) -> string:
+    spelling = Spelling(text)
+    return f"{spelling}"
+"#,
+        );
+        assert_eq!(
+            program.modules[0]
+                .functions
+                .iter()
+                .filter(|function| function.name.contains("<=>string"))
+                .count(),
+            1,
+        );
     }
 
     #[test]

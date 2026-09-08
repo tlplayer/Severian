@@ -7,17 +7,22 @@ import "number.sev"
 import "string.sev"
 import "symbol.sev"
 import "trivia.sev"
+import "runtime.sev"
 
 
-# The seed specializes this composition; it cannot store trait objects yet.
-# Every spelling supplied by G/Y still uses the same longest-match rule.
+# Built-in rules are specialized; imported rules execute source bodies through
+# the same LexicalRule contract. G/Y spellings share one symbol matcher.
 class StandardLexemes: LexicalRule
     symbols: list[LexicalSymbol]
+    rules: list[SourceLexicalRule] = []
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         trivia = lex(TriviaLexeme(), input, start)
         if trivia.matched:
             return trivia
+        contributed = match_source_rules(rules, input, start)
+        if contributed.matched:
+            return contributed
         characters = input.characters
         leading_fraction = characters[start] == "." and start + 1 < len(characters) and is_digit(characters[start + 1])
         if not leading_fraction:

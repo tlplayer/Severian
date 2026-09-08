@@ -1,0 +1,51 @@
+import lexer
+import parser
+import source
+import diagnostics
+import universal
+
+
+def lexical_definition(descriptor: lexer.OperatorDescriptor) -> bool:
+    return "LexicalRule" in descriptor.bases
+
+
+# Preserve every source offset while separating the compiler definitions from
+# source that can use them. Definitions always use the bootstrap language.
+def lexical_source(file: source.SourceFile, registry: lexer.SyntaxRegistry, definitions: bool) -> source.SourceFile:
+    ranges: list[lexer.OperatorDescriptor] = []
+    for descriptor in registry.descriptors:
+        if descriptor.span.source.index == file.id.index and lexical_definition(descriptor):
+            ranges.append(descriptor)
+    if len(ranges) == 0 and not definitions:
+        return file
+    characters = file.text.characters()
+    index := 0
+    for character in characters:
+        included := false
+        for descriptor in ranges:
+            if index >= int(descriptor.span.start) and index < int(descriptor.end):
+                included = true
+        if included != definitions and character != "\n" and character != "\r":
+            characters[index] = " "
+        index += 1
+    return source.SourceFile(file.id, file.path, characters.join(""))
+
+
+def discover_lexical_rules(files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> unit | diagnostics.Diagnostic:
+    for file in files:
+        if file.path in registry.lexical_discovered:
+            continue
+        registry.lexical_discovered.append(file.path)
+        found := false
+        for descriptor in registry.descriptors:
+            if descriptor.span.source.index == file.id.index and lexical_definition(descriptor):
+                found = true
+        if found:
+            definitions = lexical_source(file, registry, true)
+            parsed = parser.parse(lexer.scan_tokens(definitions, registry.operators[:]))
+            for item in parsed.items:
+                match item:
+                    case Record:
+                        registry.rules.append(lexer.source_lexical_rule(declaration))
+                    case _:
+                        return error(diagnostics.diagnostic("E000105", "lexical rules must be classes implementing LexicalRule"))

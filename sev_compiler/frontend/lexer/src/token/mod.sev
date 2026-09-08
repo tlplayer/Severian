@@ -31,6 +31,15 @@ class Token: TokenTerm
     descriptor: bool = false
     grammar: bool = false
     value: string | None = None
+    lexical_rules: list[universal.RecordDeclaration] = []
+
+    operator <=>(self) -> string:
+        # Only decoded text and macro replacements need an override. Ordinary
+        # identifiers, symbols and numeric tokens retain one source spelling.
+        supplied ?= self.value
+        if supplied != None:
+            return supplied
+        return self.lexeme.text
 
 
 def validate_token_origin(span: source.Span, lexeme: Lexeme):
@@ -49,18 +58,9 @@ def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = No
     return checked_token(Token(kind, lexeme.span, lexeme, value=value))
 
 
-def token_text(token: Token) -> string:
-    # Only decoded text and macro replacements need an override. Ordinary
-    # identifiers, symbols and numeric tokens retain a single source spelling.
-    supplied ?= token.value
-    if supplied != None:
-        return supplied
-    return token.lexeme.text
-
-
 def token_number(token: Token) -> string:
     # Numeric spelling becomes a literal payload at the parser boundary.
-    spelling := token_text(token).replace("_", "")
+    spelling := string(token).replace("_", "")
     if token.kind == TokenKind.Float:
         if spelling.starts_with("."):
             spelling = "0" + spelling
@@ -70,4 +70,4 @@ def token_number(token: Token) -> string:
 
 
 def token_is_symbol(token: Token, spelling: string) -> bool:
-    return token.kind == TokenKind.Symbol and token_text(token) == spelling
+    return token.kind == TokenKind.Symbol and string(token) == spelling

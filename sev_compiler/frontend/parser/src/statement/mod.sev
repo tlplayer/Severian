@@ -5,7 +5,10 @@ import source
 import universal
 from universal import CompilerExpectation
 
-def formatted_string_expression(value: string, span: source.Span, syntaxes: list[universal.OperatorSyntax]) -> universal.Expression | diagnostics.Diagnostic:
+def formatted_string_expression(value: string, span: source.Span, syntaxes: list[universal.OperatorSyntax], lexical_rules: list[universal.RecordDeclaration] = []) -> universal.Expression | diagnostics.Diagnostic:
+    rules: list[lexer.SourceLexicalRule] = []
+    for declaration in lexical_rules:
+        rules.append(lexer.source_lexical_rule(declaration))
     characters = value.characters()
     cursor := 0
     literal := ""
@@ -45,7 +48,7 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
         if len(expression_source) == 0:
             return error(diagnostics.Diagnostic("E000113", "formatted string interpolation may not be empty", span))
         interpolation = source.SourceFile(span.source, "<formatted-string>", expression_source)
-        interpolation_tokens = lexer.scan(interpolation, syntaxes)
+        interpolation_tokens = lexer.scan_tokens(interpolation, syntaxes, rules=rules)
         expression_parser = Parser(interpolation_tokens)
         parsed_expression = parser_expression(expression_parser, 0)
         parser_separators(expression_parser)
@@ -80,7 +83,7 @@ def parser_next(parser: Parser) -> lexer.Token:
 def parser_at_identifier(parser: Parser, expected: string) -> bool:
     match parser_peek(parser).kind:
         case Identifier:
-            return lexer.token_text(parser_peek(parser)) == expected
+            return string(parser_peek(parser)) == expected
         case _:
             pass
     return false
@@ -100,7 +103,7 @@ def parser_identifier(parser: Parser, message: string) -> tuple[string, source.S
     token = parser_next(parser)
     match token.kind:
         case Identifier:
-            return (lexer.token_text(token), token.span)
+            return (string(token), token.span)
         case _:
             pass
     return error(diagnostics.Diagnostic("E000120", message, token.span))
@@ -192,7 +195,7 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
         token = parser_next(parser)
         match token.kind:
             case String:
-                arguments.append(universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(lexer.token_text(token)), token.span))
+                arguments.append(universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(string(token)), token.span))
             case _:
                 return error(parser_fail(parser, "decorator requires string arguments"))
         if parser_take_symbol(parser, ",") == None:
@@ -205,7 +208,7 @@ def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | d
     start = parser_next(parser).span
     match parser_peek(parser).kind:
         case String:
-            value = lexer.token_text(parser_next(parser))
+            value = string(parser_next(parser))
             alias: string | None := None
             if parser_at_identifier(parser, "as"):
                 parser_next(parser)
@@ -397,9 +400,9 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     else:
         match token.kind:
             case Identifier:
-                symbol = lexer.token_text(token)
+                symbol = string(token)
             case Symbol:
-                symbol = lexer.token_text(token)
+                symbol = string(token)
             case _:
                 return error(parser_fail(parser, "expected a registered operator symbol"))
     syntax = universal.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity, definition=syntax.definition)
@@ -451,7 +454,7 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
     name: string | None := None
     match parser_peek(parser).kind:
         case String:
-            name = lexer.token_text(parser_next(parser))
+            name = string(parser_next(parser))
         case _:
             pass
     parser_expect_symbol(parser, ":", "expected colon after test")
@@ -724,7 +727,7 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     token = parser_next(parser)
     match token.kind:
         case Identifier:
-            value = lexer.token_text(token)
+            value = string(token)
             if value == "true":
                 return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
             if value == "false":
@@ -739,14 +742,14 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             value = lexer.token_number(token)
             return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
         case Character:
-            value = lexer.literal_codepoint(lexer.token_text(token))
+            value = lexer.literal_codepoint(string(token))
             return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
         case String:
-            value = lexer.token_text(token)
+            value = string(token)
             return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
         case FormattedString:
-            value = lexer.token_text(token)
-            return formatted_string_expression(value, token.span, token.syntaxes)
+            value = string(token)
+            return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
         case _:
             pass
     if lexer.token_is_symbol(token, "["):

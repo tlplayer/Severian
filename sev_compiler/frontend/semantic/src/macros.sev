@@ -22,7 +22,7 @@ def macro_identifier(input: parser.Parser) -> string:
     token = parser.parser_next(input)
     match token.kind:
         case Identifier:
-            return lexer.token_text(token)
+            return string(token)
         case _:
             throw Error("expected macro identifier")
 
@@ -77,10 +77,10 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
         if depth == 1:
             match token.kind:
                 case Identifier:
-                    if lexer.token_text(token) == "def":
+                    if string(token) == "def":
                         match parser.parser_peek(input).kind:
                             case Identifier:
-                                functions.append(lexer.token_text(parser.parser_peek(input)))
+                                functions.append(string(parser.parser_peek(input)))
                             case _:
                                 throw Error("expected generated function name")
                 case _:
@@ -214,7 +214,7 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
         replacement := token
         match token.kind:
             case Identifier:
-                value = lexer.token_text(token)
+                value = string(token)
                 index := 0
                 for binding in definition.bindings:
                     if value == binding:
@@ -222,7 +222,7 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                         if cursor + 1 < len(definition.tokens) and lexer.token_is_symbol(definition.tokens[cursor], "."):
                             match definition.tokens[cursor + 1].kind:
                                 case Identifier:
-                                    replacement = macro_property(types[index], lexer.token_text(definition.tokens[cursor + 1]), token.lexeme)
+                                    replacement = macro_property(types[index], string(definition.tokens[cursor + 1]), token.lexeme)
                                 case _:
                                     throw Error("expected scalar type property")
                             cursor += 2

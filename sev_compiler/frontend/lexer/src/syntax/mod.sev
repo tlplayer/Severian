@@ -2,6 +2,7 @@ import source
 import diagnostics
 import universal
 import "../token/mod.sev"
+import "../runtime.sev"
 
 
 class SyntaxProperty:
@@ -17,12 +18,15 @@ class OperatorDescriptor:
     resolved: bool = false
     syntax: universal.OperatorSyntax | None = None
     grammar: bool = false
+    end: u32 = 0
 
 
 class SyntaxRegistry:
     operators: list[universal.OperatorSyntax]
     descriptors: list[OperatorDescriptor] = []
     discovered: list[string] = []
+    rules: list[SourceLexicalRule] = []
+    lexical_discovered: list[string] = []
 
 
 def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -> list[universal.OperatorSyntax]:
@@ -36,7 +40,7 @@ def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -
 def token_word(token: Token) -> string:
     match token.kind:
         case Identifier:
-            return token_text(token)
+            return string(token)
         case _:
             return ""
 
@@ -93,7 +97,8 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
                                 properties.append(SyntaxProperty(property_name, values))
                     line_start = current.kind == Newline or current.kind == Dedent
                     cursor += 1
-            registry.descriptors.append(OperatorDescriptor(name, bases, properties, token.span, grammar=word == "grammar"))
+            end = tokens[cursor].span.start if cursor < len(tokens) else tokens[-1].span.end
+            registry.descriptors.append(OperatorDescriptor(name, bases, properties, token.span, grammar=word == "grammar", end=end))
             continue
         if token.kind == Indent:
             depth += 1
@@ -164,7 +169,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     symbol = ""
                     for token in property.tokens:
                         if token.kind == TokenKind.String or token.kind == TokenKind.Symbol or token.kind == TokenKind.Identifier:
-                            symbol += token_text(token)
+                            symbol += string(token)
                         else:
                             return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
                 elif property.name == "precedence":

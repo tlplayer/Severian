@@ -3,6 +3,7 @@ import diagnostics
 import source
 import universal
 import "../../semantic/src/macros.sev" as macros
+import "lexical.sev"
 
 
 def normalized_path(path: string) -> string:
@@ -63,7 +64,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
             match tokens[index + 1].kind:
                 case String:
-                    child = normalized_path(parent_path(file.path) + "/" + lexer.token_text(tokens[index + 1]))
+                    child = normalized_path(parent_path(file.path) + "/" + string(tokens[index + 1]))
                     discover_source_syntax(source.load(child), stack, files, registry)
                 case _:
                     pass
@@ -82,8 +83,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     stack.append(path)
     discover_source_syntax(input, [], files, registry)
     lexer.resolve_operator_descriptors(registry)
+    discover_lexical_rules(files, registry)
     registered = registered_source(input, files)
-    parsed = macros.parse_module(lexer.scan_registered(registered, registry))
+    parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
     result = universal.empty_module()
     aliases: list[string] = []
     for item in parsed.items:

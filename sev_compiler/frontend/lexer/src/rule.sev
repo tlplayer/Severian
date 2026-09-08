@@ -18,6 +18,12 @@ def lexeme_span(input: LexemeInput, start: int, end: int) -> source.Span:
     return source.Span(input.file.id, u32(start), u32(end))
 
 
+def lexeme_text(input: LexemeInput, start: int, end: int) -> string | diagnostics.Diagnostic:
+    if start < 0 or end < start or end > len(input.characters):
+        return error(diagnostics.diagnostic_at("E000104", "lexeme source slice is out of bounds", lexeme_span(input, 0, 0)))
+    return input.characters[start:end].join("")
+
+
 class LexemeMatch:
     end: int
     kind: TokenKind | None
@@ -29,4 +35,3 @@ class LexemeMatch:
 # token, and G owns grammar/CFG behavior.
 trait LexicalRule:
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic
-

@@ -2588,7 +2588,9 @@ impl Parser<'_> {
             });
         }
         self.expect(&TokenKind::Colon, "expected `:` after operator signature")?;
-        if operator == OperatorSyntax::Conversion {
+        if operator == OperatorSyntax::Conversion && !type_parameters.is_empty() {
+            // Generic conversion graphs still use the bootstrap's opaque form.
+            // A concrete conversion has an ordinary executable operator body.
             let end = self.opaque_indented_block("conversion operator")?;
             return Ok(OperatorImplementation {
                 decorators,

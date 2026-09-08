@@ -17,10 +17,22 @@ def scan_bootstrap(file: source.SourceFile) -> list[Token] | diagnostics.Diagnos
     return scan_with(file, StandardLexemes(lexical_symbols([])), [], true)
 
 
-def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
+def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax], discovery: bool = false, rules: list[SourceLexicalRule] = []) -> list[Token] | diagnostics.Diagnostic:
     if discovery:
         return scan_bootstrap(file)
-    return scan_with(file, StandardLexemes(lexical_symbols(syntaxes)), syntaxes)
+    tokens = scan_with(file, StandardLexemes(lexical_symbols(syntaxes), rules), syntaxes)
+    declarations: list[universal.RecordDeclaration] = []
+    for rule in rules:
+        declaration ?= rule.declaration
+        if declaration != None:
+            declarations.append(declaration)
+    index := 0
+    for token in tokens:
+        if token.kind == TokenKind.FormattedString:
+            token.lexical_rules = declarations
+            tokens[index] = token
+        index += 1
+    return tokens
 
 
 def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
@@ -59,12 +71,27 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
 
         start = cursor
         character = characters[cursor]
-        result = lex(rule, input, start)
+        result := LexemeMatch(start, None, false)
+        if discovery:
+            # Source may contain a package-defined literal whose contents are
+            # invalid in the bootstrap language. Validate it only after imports
+            # have installed their rules; discovery still retains every span.
+            candidate ?= lex(rule, input, start)
+            if candidate is LexemeMatch:
+                result = candidate
+            else:
+                result = LexemeMatch(start + 1, TokenKind.Symbol)
+        else:
+            result = lex(rule, input, start)
         if result.matched:
             cursor = result.end
             kind ?= result.kind
             if kind != None:
                 metadata := symbol_syntaxes(syntaxes, characters[start:cursor].join(""))
+                if kind == TokenKind.Symbol or kind == TokenKind.Identifier:
+                    normalized ?= result.value
+                    if normalized != None:
+                        metadata = symbol_syntaxes(syntaxes, normalized)
                 match kind:
                     case FormattedString:
                         metadata = syntaxes
@@ -99,7 +126,7 @@ def scan(file: source.SourceFile, operators: list[universal.OperatorSyntax] = []
 
 
 def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[Token] | diagnostics.Diagnostic:
-    tokens = scan_tokens(file, registry.operators)
+    tokens = scan_tokens(file, registry.operators, rules=registry.rules)
     for descriptor in registry.descriptors:
         if descriptor.resolved and descriptor.span.source.index == file.id.index:
             index := 0
@@ -130,9 +157,9 @@ test "lexical classes preserve numeric forms and identifier boundaries":
     assert(tokens[4].kind == TokenKind.Float)
     assert(token_number(tokens[4]) == "2.0e-3")
     assert(tokens[5].kind == TokenKind.Identifier)
-    assert(token_text(tokens[5]) == "foo_2")
+    assert(string(tokens[5]) == "foo_2")
     assert(tokens[6].kind == TokenKind.Identifier)
-    assert(token_text(tokens[6]) == "fuse_count")
+    assert(string(tokens[6]) == "fuse_count")
     assert(tokens[7].kind == TokenKind.Eof)
 
 
@@ -171,34 +198,34 @@ test "strings characters and interpolation retain decoding and syntax":
     operators = [universal.operator_syntax(universal.Add())]
     tokens = scan_tokens(input, operators)
     assert(tokens[0].kind == TokenKind.String)
-    assert(token_text(tokens[0]) == "hi\n")
+    assert(string(tokens[0]) == "hi\n")
     assert(tokens[1].kind == TokenKind.Character)
-    assert(literal_codepoint(token_text(tokens[1])) == 955)
+    assert(literal_codepoint(string(tokens[1])) == 955)
     assert(tokens[2].kind == TokenKind.FormattedString)
-    assert(token_text(tokens[2]) == "{1 + 2}")
+    assert(string(tokens[2]) == "{1 + 2}")
     assert(len(tokens[2].syntaxes) == 1)
     assert(tokens[3].kind == TokenKind.String)
-    assert(token_text(tokens[3]) == "block\ntext\n")
+    assert(string(tokens[3]) == "block\ntext\n")
 
 
 test "comments blank lines and indentation share structural state":
     input = source.virtual_source("indent.sev", "root\n    # comment\n    first; second\n\nlast")
     tokens = scan_tokens(input, [])
     assert(tokens[0].kind == TokenKind.Identifier)
-    assert(token_text(tokens[0]) == "root")
+    assert(string(tokens[0]) == "root")
     assert(tokens[1].kind == TokenKind.Newline)
     assert(tokens[2].kind == TokenKind.Newline)
     assert(tokens[3].kind == TokenKind.Indent)
     assert(tokens[4].kind == TokenKind.Identifier)
-    assert(token_text(tokens[4]) == "first")
+    assert(string(tokens[4]) == "first")
     assert(tokens[5].kind == TokenKind.Newline)
     assert(tokens[6].kind == TokenKind.Identifier)
-    assert(token_text(tokens[6]) == "second")
+    assert(string(tokens[6]) == "second")
     assert(tokens[7].kind == TokenKind.Newline)
     assert(tokens[8].kind == TokenKind.Newline)
     assert(tokens[9].kind == TokenKind.Dedent)
     assert(tokens[10].kind == TokenKind.Identifier)
-    assert(token_text(tokens[10]) == "last")
+    assert(string(tokens[10]) == "last")
     assert(tokens[11].kind == TokenKind.Eof)
 
 
@@ -225,7 +252,7 @@ test "tokens preserve matched spelling separately from classified payload":
     tokens = scan_tokens(input, operators)
     assert(tokens[0].lexeme.text == "total")
     assert(tokens[0].kind == TokenKind.Identifier)
-    assert(token_text(tokens[0]) == "total")
+    assert(string(tokens[0]) == "total")
     assert(tokens[1].lexeme.text == "+=")
     assert(token_is_symbol(tokens[1], "+="))
     assert(tokens[2].lexeme.text == "1_024")
@@ -236,7 +263,7 @@ test "tokens preserve matched spelling separately from classified payload":
     assert(token_number(tokens[3]) == "0.5")
     assert(tokens[4].lexeme.text == "\"a\\n\"")
     assert(tokens[4].kind == TokenKind.String)
-    assert(token_text(tokens[4]) == "a\n")
+    assert(string(tokens[4]) == "a\n")
     for token in tokens:
         assert(token.lexeme.span.source.index == token.span.source.index)
         assert(token.lexeme.span.start == token.span.start)
@@ -244,6 +271,12 @@ test "tokens preserve matched spelling separately from classified payload":
         assert(token.lexeme.text == input.text.characters()[int(token.span.start):int(token.span.end)].join(""))
     assert(tokens[5].kind == TokenKind.Eof)
     assert(tokens[5].lexeme.text == "")
+    assert(string(tokens[5]) == "")
+    replacement = token_from_lexeme(TokenKind.Identifier, tokens[0].lexeme, "expanded")
+    assert(string(replacement) == "expanded")
+    assert(replacement.lexeme.text == "total")
+    empty = token_from_lexeme(TokenKind.String, tokens[4].lexeme, "")
+    assert(string(empty) == "")
 
 
 test "structural tokens retain indentation and zero-width EOF origins":
@@ -266,6 +299,7 @@ test "all bootstrap punctuation uses the open symbol category":
     index := 0
     for spelling in spellings:
         assert(tokens[index].kind == TokenKind.Symbol)
+        assert(string(tokens[index]) == spelling)
         assert(token_is_symbol(tokens[index], spelling))
         assert(tokens[index].value == None)
         index += 1
@@ -275,10 +309,10 @@ test "identifier and numeric tokens store only their source spelling":
     tokens = scan_tokens(source.virtual_source("spelling.sev", "count 1_024 .5 2e-3"), [])
     for token in tokens:
         assert(token.value == None)
-    assert(token_text(tokens[0]) == "count")
-    assert(token_text(tokens[1]) == "1_024")
-    assert(token_text(tokens[2]) == ".5")
-    assert(token_text(tokens[3]) == "2e-3")
+    assert(string(tokens[0]) == "count")
+    assert(string(tokens[1]) == "1_024")
+    assert(string(tokens[2]) == ".5")
+    assert(string(tokens[3]) == "2e-3")
     assert(token_number(tokens[1]) == "1024")
     assert(token_number(tokens[2]) == "0.5")
     assert(token_number(tokens[3]) == "2.0e-3")

@@ -1,0 +1,549 @@
+import source
+import diagnostics
+import universal
+import "rule.sev"
+import "identifier.sev"
+
+
+# Imported rules retain universal source bodies. This evaluator has no parser
+# dependency and grants no filesystem, process, or CFG capability to a rule.
+enum LexicalValue:
+    Number(number: int)
+    Text(text: string)
+    Truth(truth: bool)
+    Characters(characters: list[string])
+    Input(input: LexemeInput)
+    Category(kind: TokenKind)
+    Result(result: LexemeMatch)
+    Location(span: source.Span)
+    Failure(diagnostic: diagnostics.Diagnostic)
+    Nothing
+
+
+class SourceLexicalRule: LexicalRule
+    name: string
+    methods: list[universal.FunctionDeclaration]
+    span: source.Span
+    priority: int = 0
+    declaration: universal.RecordDeclaration | None = None
+
+    def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+        frame = LexicalFrame(self, [10000])
+        value = lexical_invoke(frame, "scan", [LexicalValue.Input(input), LexicalValue.Number(start)], span)
+        match value:
+            case Result:
+                return result
+            case Failure:
+                return error(diagnostic)
+            case _:
+                return error(lexical_error("scan must return LexemeMatch", span))
+
+
+def source_lexical_rule(declaration: universal.RecordDeclaration) -> SourceLexicalRule | diagnostics.Diagnostic:
+    if len(declaration.type_parameters) != 0:
+        return error(lexical_error("rule classes must be concrete", declaration.span))
+    priority := 0
+    for field in declaration.fields:
+        if field.name != "priority":
+            return error(lexical_error("rule instances are stateless; only priority may be declared", field.span))
+        default_expression ?= field.default
+        if default_expression != None:
+            match default_expression.kind:
+                case LiteralValue:
+                    match value:
+                        case IntegerValue:
+                            priority = int(spelling)
+                        case _:
+                            return error(lexical_error("priority requires a constant integer", field.span))
+                case _:
+                    return error(lexical_error("priority requires a constant integer", field.span))
+        else:
+            return error(lexical_error("priority requires a constant integer", field.span))
+    names: list[string] = []
+    found := false
+    for method in declaration.methods:
+        if method.name in names:
+            return error(lexical_error("duplicate lexical method " + method.name, declaration.span))
+        names.append(method.name)
+        if method.body == None or len(method.type_parameters) != 0:
+            return error(lexical_error("lexical methods require concrete bodies", declaration.span))
+        if method.name == "scan":
+            found = true
+            if len(method.parameters) != 2:
+                return error(lexical_error("scan requires input: LexemeInput and start: int", declaration.span))
+            if universal.simple_type_name(method.parameters[0].annotation) != "LexemeInput" or universal.simple_type_name(method.parameters[1].annotation) != "int":
+                return error(lexical_error("scan requires input: LexemeInput and start: int", declaration.span))
+    if not found:
+        return error(lexical_error("missing scan implementation", declaration.span))
+    return SourceLexicalRule(declaration.name, declaration.methods, declaration.span, priority, declaration)
+
+
+class LexicalFrame:
+    rule: SourceLexicalRule
+    budget: list[int]
+    names: list[string] = []
+    values: list[LexicalValue] = []
+    depth: int = 0
+
+
+class LexicalFlow:
+    value: LexicalValue = LexicalValue.Nothing
+    returned: bool = false
+    breaking: bool = false
+    continuing: bool = false
+
+
+def lexical_error(message: string, span: source.Span) -> diagnostics.Diagnostic:
+    return diagnostics.Diagnostic("E000105", "lexical rule: " + message, span)
+
+
+def lexical_tick(frame: LexicalFrame, span: source.Span) -> unit | diagnostics.Diagnostic:
+    budget = frame.budget
+    budget[0] -= 1
+    if budget[0] < 0:
+        return error(lexical_error("execution budget exceeded", span))
+
+
+def lexical_number(value: LexicalValue, span: source.Span) -> int | diagnostics.Diagnostic:
+    match value:
+        case Number:
+            return number
+        case _:
+            return error(lexical_error("expected an integer", span))
+
+
+def lexical_text(value: LexicalValue, span: source.Span) -> string | diagnostics.Diagnostic:
+    match value:
+        case Text:
+            return text
+        case _:
+            return error(lexical_error("expected text", span))
+
+
+def lexical_truth(value: LexicalValue, span: source.Span) -> bool | diagnostics.Diagnostic:
+    match value:
+        case Truth:
+            return truth
+        case _:
+            return error(lexical_error("expected a boolean", span))
+
+
+def lexical_get(frame: LexicalFrame, name: string, span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+    index := 0
+    for known in frame.names:
+        if known == name:
+            return frame.values[index]
+        index += 1
+    return error(lexical_error("unknown binding " + name, span))
+
+
+def lexical_set(frame: LexicalFrame, name: string, value: LexicalValue):
+    index := 0
+    for known in frame.names:
+        if known == name:
+            frame.values[index] = value
+            return
+        index += 1
+    frame.names.append(name)
+    frame.values.append(value)
+
+
+def lexical_path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return lexical_path(object) + "." + name
+        case _:
+            return ""
+
+
+def lexical_category(name: string, span: source.Span) -> TokenKind | diagnostics.Diagnostic:
+    if name == "Identifier":
+        return TokenKind.Identifier
+    if name == "Integer":
+        return TokenKind.Integer
+    if name == "Float":
+        return TokenKind.Float
+    if name == "Character":
+        return TokenKind.Character
+    if name == "String":
+        return TokenKind.String
+    if name == "FormattedString":
+        return TokenKind.FormattedString
+    if name == "Symbol":
+        return TokenKind.Symbol
+    return error(lexical_error("unknown or structural token category " + name, span))
+
+
+def lexical_equal(left: LexicalValue, right: LexicalValue) -> bool:
+    match left:
+        case Number:
+            first = number
+            match right:
+                case Number:
+                    return first == number
+                case _:
+                    return false
+        case Text:
+            first = text
+            match right:
+                case Text:
+                    return first == text
+                case _:
+                    return false
+        case Truth:
+            first = truth
+            match right:
+                case Truth:
+                    return first == truth
+                case _:
+                    return false
+        case Nothing:
+            match right:
+                case Nothing:
+                    return true
+                case _:
+                    return false
+        case _:
+            return false
+
+
+def lexical_binary(symbol: string, left: LexicalValue, right: LexicalValue, span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+    if symbol == "==" or symbol == "!=":
+        equal = lexical_equal(left, right)
+        return LexicalValue.Truth(equal if symbol == "==" else not equal)
+    match left:
+        case Text:
+            lhs = text
+            rhs = lexical_text(right, span)
+            if symbol == "+":
+                return LexicalValue.Text(lhs + rhs)
+            if symbol == "in":
+                return LexicalValue.Truth(lhs in rhs)
+            if symbol == "not in":
+                return LexicalValue.Truth(lhs not in rhs)
+            if symbol == "<":
+                return LexicalValue.Truth(lhs < rhs)
+            if symbol == "<=":
+                return LexicalValue.Truth(lhs <= rhs)
+            if symbol == ">":
+                return LexicalValue.Truth(lhs > rhs)
+            if symbol == ">=":
+                return LexicalValue.Truth(lhs >= rhs)
+        case Number:
+            lhs = number
+            rhs = lexical_number(right, span)
+            if symbol == "+":
+                return LexicalValue.Number(lhs + rhs)
+            if symbol == "-":
+                return LexicalValue.Number(lhs - rhs)
+            if symbol == "*":
+                return LexicalValue.Number(lhs * rhs)
+            if symbol == "/" or symbol == "//" or symbol == "%":
+                if rhs == 0:
+                    return error(lexical_error("division by zero", span))
+                return LexicalValue.Number(lhs % rhs if symbol == "%" else lhs // rhs)
+            if symbol == "<":
+                return LexicalValue.Truth(lhs < rhs)
+            if symbol == "<=":
+                return LexicalValue.Truth(lhs <= rhs)
+            if symbol == ">":
+                return LexicalValue.Truth(lhs > rhs)
+            if symbol == ">=":
+                return LexicalValue.Truth(lhs >= rhs)
+        case _:
+            pass
+    return error(lexical_error("unsupported binary operation " + symbol, span))
+
+
+def lexical_invoke(parent: LexicalFrame, name: string, arguments: list[LexicalValue], span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+    if parent.depth >= 64:
+        return error(lexical_error("call depth exceeded", span))
+    for method in parent.rule.methods:
+        if method.name == name:
+            if len(method.parameters) != len(arguments):
+                return error(lexical_error("wrong argument count for " + name, span))
+            frame = LexicalFrame(parent.rule, parent.budget, depth=parent.depth + 1)
+            index := 0
+            for parameter in method.parameters:
+                lexical_set(frame, parameter.name, arguments[index])
+                index += 1
+            body ?= method.body
+            if body != None:
+                result = lexical_block(frame, body)
+                if result.breaking or result.continuing:
+                    return error(lexical_error("loop control escaped a method", span))
+                return result.value
+            return error(lexical_error("method has no body: " + name, span))
+    return error(lexical_error("unknown callable " + name, span))
+
+
+def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: list[universal.CallArgument], span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+    path = lexical_path(callee)
+    values: list[LexicalValue] = []
+    for argument in arguments:
+        values.append(lexical_expression(frame, argument.value))
+        if argument.name != None and path != "LexemeMatch":
+            return error(lexical_error("named arguments are only supported for LexemeMatch", span))
+    if path == "LexemeMatch":
+        slots: list[LexicalValue] = [LexicalValue.Number(0), LexicalValue.Nothing, LexicalValue.Truth(true), LexicalValue.Nothing]
+        supplied: list[bool] = [false, false, false, false]
+        index := 0
+        for argument in arguments:
+            position := index
+            name ?= argument.name
+            if name != None:
+                position = 0 if name == "end" else 1 if name == "kind" else 2 if name == "matched" else 3 if name == "value" else -1
+            if position < 0 or position >= 4:
+                return error(lexical_error("unknown LexemeMatch argument", span))
+            if supplied[position]:
+                return error(lexical_error("duplicate LexemeMatch argument", span))
+            supplied[position] = true
+            slots[position] = values[index]
+            index += 1
+        if not supplied[0] or not supplied[1]:
+            return error(lexical_error("LexemeMatch requires end and kind", span))
+        token_kind: TokenKind | None := None
+        match slots[1]:
+            case Category:
+                token_kind = kind
+            case Nothing:
+                pass
+            case _:
+                return error(lexical_error("LexemeMatch kind must be TokenKind or None", span))
+        normalized: string | None := None
+        match slots[3]:
+            case Text:
+                normalized = text
+            case Nothing:
+                pass
+            case _:
+                return error(lexical_error("LexemeMatch value must be string or None", span))
+        return LexicalValue.Result(LexemeMatch(lexical_number(slots[0], span), token_kind, lexical_truth(slots[2], span), normalized))
+    if path == "len" and len(values) == 1:
+        match values[0]:
+            case Text:
+                return LexicalValue.Number(int(len(text.characters())))
+            case Characters:
+                return LexicalValue.Number(int(len(characters)))
+            case _:
+                return error(lexical_error("len requires source text or characters", span))
+    if path == "string" and len(values) == 1:
+        match values[0]:
+            case Number:
+                return LexicalValue.Text(string(number))
+            case Text:
+                return values[0]
+            case _:
+                return error(lexical_error("string requires an integer or text", span))
+    if path == "is_digit" and len(values) == 1:
+        return LexicalValue.Truth(is_digit(lexical_text(values[0], span)))
+    if path == "Error" and len(values) == 1:
+        return LexicalValue.Failure(diagnostics.Diagnostic("E000105", lexical_text(values[0], span), span))
+    if path == "error" and len(values) == 1:
+        match values[0]:
+            case Failure:
+                return values[0]
+            case _:
+                return error(lexical_error("error requires a diagnostic", span))
+    if path == "lexeme_span" and len(values) == 3:
+        match values[0]:
+            case Input:
+                start = lexical_number(values[1], span)
+                end = lexical_number(values[2], span)
+                if start < 0 or end < start or end > len(input.characters):
+                    return error(lexical_error("source span is out of bounds", span))
+                return LexicalValue.Location(lexeme_span(input, start, end))
+            case _:
+                return error(lexical_error("lexeme_span requires LexemeInput", span))
+    if (path == "Diagnostic" or path == "diagnostics.Diagnostic") and len(values) == 3:
+        match values[2]:
+            case Location:
+                return LexicalValue.Failure(diagnostics.Diagnostic(lexical_text(values[0], span), lexical_text(values[1], span), span))
+            case _:
+                return error(lexical_error("Diagnostic requires a source span", span))
+    if path == "lexeme_text" and len(values) == 3:
+        match values[0]:
+            case Input:
+                start = lexical_number(values[1], span)
+                end = lexical_number(values[2], span)
+                if start < 0 or end < start or end > len(input.characters):
+                    return error(lexical_error("source slice is out of bounds", span))
+                return LexicalValue.Text(input.characters[start:end].join(""))
+            case _:
+                return error(lexical_error("lexeme_text requires LexemeInput", span))
+    match callee.kind:
+        case Member:
+            if lexical_path(object) == "self":
+                return lexical_invoke(frame, name, values, span)
+            receiver = lexical_expression(frame, object)
+            match receiver:
+                case Text:
+                    if name == "characters" and len(values) == 0:
+                        return LexicalValue.Characters(text.characters())
+                    if name == "starts_with" and len(values) == 1:
+                        return LexicalValue.Truth(text.starts_with(lexical_text(values[0], span)))
+                    if name == "ends_with" and len(values) == 1:
+                        return LexicalValue.Truth(text.ends_with(lexical_text(values[0], span)))
+                    if name == "replace" and len(values) == 2:
+                        return LexicalValue.Text(text.replace(lexical_text(values[0], span), lexical_text(values[1], span)))
+                case Characters:
+                    if name == "join" and len(values) == 1:
+                        return LexicalValue.Text(characters.join(lexical_text(values[0], span)))
+                case _:
+                    pass
+            return error(lexical_error("unsupported lexical method " + name, span))
+        case _:
+            return lexical_invoke(frame, path, values, span)
+
+
+def lexical_expression(frame: LexicalFrame, expression: universal.Expression) -> LexicalValue | diagnostics.Diagnostic:
+    lexical_tick(frame, expression.span)
+    span = expression.span
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    return LexicalValue.Number(int(spelling))
+                case StringValue:
+                    return LexicalValue.Text(value)
+                case BooleanValue:
+                    return LexicalValue.Truth(value)
+                case NoneValue:
+                    return LexicalValue.Nothing
+                case _:
+                    return error(lexical_error("unsupported literal", span))
+        case Name:
+            return lexical_get(frame, name, span)
+        case Member:
+            if lexical_path(object) == "TokenKind":
+                return LexicalValue.Category(lexical_category(name, span))
+            receiver = lexical_expression(frame, object)
+            match receiver:
+                case Input:
+                    if name == "characters":
+                        return LexicalValue.Characters(input.characters)
+                case Result:
+                    if name == "end":
+                        return LexicalValue.Number(result.end)
+                    if name == "matched":
+                        return LexicalValue.Truth(result.matched)
+                case _:
+                    pass
+            return error(lexical_error("unsupported member " + name, span))
+        case Call:
+            return lexical_call(frame, callee, arguments, span)
+        case Subscript:
+            receiver = lexical_expression(frame, object)
+            position := lexical_number(lexical_expression(frame, index), span)
+            sequence: list[string] := []
+            match receiver:
+                case Characters:
+                    sequence = characters
+                case Text:
+                    sequence = text.characters()
+                case _:
+                    return error(lexical_error("indexing requires text or characters", span))
+            if position < 0:
+                position += int(len(sequence))
+            if position < 0 or position >= len(sequence):
+                return error(lexical_error("character index is out of bounds", span))
+            return LexicalValue.Text(sequence[position])
+        case Unary:
+            value = lexical_expression(frame, operand)
+            if operator.symbol == "not":
+                return LexicalValue.Truth(not lexical_truth(value, span))
+            if operator.symbol == "-":
+                return LexicalValue.Number(-lexical_number(value, span))
+            if operator.symbol == "+":
+                return LexicalValue.Number(lexical_number(value, span))
+            return error(lexical_error("unsupported unary operator", span))
+        case Binary:
+            lhs = lexical_expression(frame, left)
+            if operator.symbol == "and":
+                return LexicalValue.Truth(lexical_truth(lhs, span) and lexical_truth(lexical_expression(frame, right), span))
+            if operator.symbol == "or":
+                return LexicalValue.Truth(lexical_truth(lhs, span) or lexical_truth(lexical_expression(frame, right), span))
+            return lexical_binary(operator.symbol, lhs, lexical_expression(frame, right), span)
+        case Conditional:
+            if lexical_truth(lexical_expression(frame, condition), span):
+                return lexical_expression(frame, then_value)
+            return lexical_expression(frame, else_value)
+        case _:
+            return error(lexical_error("unsupported expression", span))
+
+
+def lexical_block(frame: LexicalFrame, block: universal.Block) -> LexicalFlow | diagnostics.Diagnostic:
+    for statement in block.statements:
+        match statement:
+            case BindingStatement:
+                lexical_set(frame, binding.name, lexical_expression(frame, binding.value))
+            case FieldSet:
+                name = lexical_path(target)
+                if name == "" or "." in name:
+                    return error(lexical_error("only local bindings can be updated", span))
+                replacement := lexical_expression(frame, value)
+                operation ?= update
+                if operation != None:
+                    symbol = operation.symbol.replace("=", "")
+                    replacement = lexical_binary(symbol, lexical_get(frame, name, span), replacement, span)
+                lexical_set(frame, name, replacement)
+            case ExpressionStatement:
+                lexical_expression(frame, expression)
+            case Return:
+                returned ?= value
+                if returned != None:
+                    return LexicalFlow(lexical_expression(frame, returned), true)
+                return LexicalFlow(returned=true)
+            case If:
+                chosen = then_block if lexical_truth(lexical_expression(frame, condition), span) else else_block
+                flow = lexical_block(frame, chosen)
+                if flow.returned or flow.breaking or flow.continuing:
+                    return flow
+            case While:
+                while lexical_truth(lexical_expression(frame, condition), span):
+                    flow = lexical_block(frame, body)
+                    if flow.returned:
+                        return flow
+                    if flow.breaking:
+                        break
+            case Break:
+                return LexicalFlow(breaking=true)
+            case Continue:
+                return LexicalFlow(continuing=true)
+            case Assert:
+                if not lexical_truth(lexical_expression(frame, condition), span):
+                    return error(lexical_error("assertion failed", span))
+            case Throw:
+                failure = lexical_expression(frame, value)
+                match failure:
+                    case Failure:
+                        return error(diagnostic)
+                    case _:
+                        return error(lexical_error(lexical_text(failure, span), span))
+            case _:
+                return error(lexical_error("unsupported statement", frame.rule.span))
+    return LexicalFlow()
+
+
+def match_source_rules(rules: list[SourceLexicalRule], input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+    selected := LexemeMatch(start, None, false)
+    priority := 0
+    owner := ""
+    ambiguous := false
+    for rule in rules:
+        result = rule.scan(input, start)
+        if result.matched:
+            if result.end <= start or result.end > len(input.characters):
+                return error(diagnostics.diagnostic_at("E000104", "lexical rule must consume a nonempty source range: " + rule.name, lexeme_span(input, start, start)))
+            if not selected.matched or result.end > selected.end or (result.end == selected.end and rule.priority > priority):
+                selected = result
+                priority = rule.priority
+                owner = rule.name
+                ambiguous = false
+            elif result.end == selected.end and rule.priority == priority:
+                ambiguous = true
+    if ambiguous:
+        return error(diagnostics.diagnostic_at("E000106", "ambiguous lexical rules at " + owner, lexeme_span(input, start, selected.end)))
+    return selected
