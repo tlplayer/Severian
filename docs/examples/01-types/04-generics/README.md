@@ -23,36 +23,40 @@ Each example performs a compiler operation. The generic term is transformed, exe
 | `E` | Error | Wrap a concrete error with pass and source context | `08-error-generic.sev` |
 | `Ex` | Expression | Constant-fold an expression | `09-expression-generic.sev` |
 | `M` | Macro | Expand compiler input | `10-macro-generic.sev` |
-| `S` | Statement | Execute a statement sequence | `11-statement-generic.sev` |
-| `D` | Declaration | Bind declarations to symbols | `12-declaration-generic.sev` |
-| `P` | Pattern | Select a matching pattern | `13-pattern-generic.sev` |
+| `O` | Operation (statement) | Execute a statement sequence | `11-statement-generic.sev` |
+| `X` | Any compiler term (declaration) | Bind declarations to symbols | `12-declaration-generic.sev` |
+| `X` | Any compiler term (pattern) | Select a matching pattern | `13-pattern-generic.sev` |
 | `Lx` | Lexeme | Locate matched source text | `26-lexeme-generic.sev` |
 | `To` | Token | Validate origin while preserving token type | `27-token-generic.sev` |
 | `L` | Literal | Fold literal values | `14-literal-generic.sev` |
 | `O` | Operation | Execute operation semantics | `15-operation-generic.sev` |
-| `I` | Instruction | Remove no-op instructions | `16-instruction-generic.sev` |
+| `O` | Operation (instruction) | Remove no-op instructions | `16-instruction-generic.sev` |
 | `B` | Block | Add a missing terminator | `17-block-generic.sev` |
-| `A` | Argument | Prepend a receiver without erasing argument type | `18-argument-generic.sev` |
+| `V` | Value (argument) | Prepend a receiver without erasing argument type | `18-argument-generic.sev` |
 | `R` | Result | Merge pass results | `19-result-generic.sev` |
 | `F` | Callable | Invoke a callable generically | `20-callable-generic.sev` |
-| `C` | Constraint | Evaluate semantic constraints | `21-constraint-generic.sev` |
-| `K` | Kind | Select a compatible wider kind | `22-kind-generic.sev` |
+| `W` | With-clause operation (constraint) | Evaluate semantic constraints | `21-constraint-generic.sev` |
+| `T` | Type (kind metadata) | Select a compatible wider kind | `22-kind-generic.sev` |
 | `Y` | Symbol | Resolve symbol identity to operation semantics | `23-symbol-generic.sev` |
-| `N` | Node | Traverse nodes across IR levels | `24-node-generic.sev` |
+| `X` | Any compiler term (node) | Traverse nodes across IR levels | `24-node-generic.sev` |
 | `X` | Any compiler term | Run a category-independent pass | `25-compiler-term-generic.sev` |
 
-`Lx` is matched source text/span; `To` is its classified token. `L` remains
-Literal and `Y` remains Symbol. A lexical rule produces these terms; it is not
-itself an `Lx`.
+The [canonical vocabulary](../../../../sev_compiler/universal/README.md) also
+reserves `S` for Shape, `N` for Number of elements, `C` for Container, and `G`
+for Grammar. `W` describes With-clause operations, including constraints.
+
+`Lx` lexemes preserve matched source text/spans; `To` tokens classify that source
+for the parser. Both retain their specific contracts in these examples. `L` remains
+Literal and `Y` remains Symbol. A lexical rule produces lexemes and tokens.
 
 ```text
-characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → CFG
+characters → Lx → To → parser → Y / L / Ex / O / X → G → CFG
 ```
 
-`E` is Error; `Ex` is Expression. `O` executes semantic behavior; `Y` identifies
-the resolved symbol that refers to behavior. `X` is the umbrella compiler-term
-parameter, including `Lx` and `To` alongside `E`, `S`, `D`, `P`, `T`, and the
-other categories.
+`E` is Error; `Ex` is Expression. `O` covers statements and instructions; `V`
+covers arguments; `T` covers type-kind metadata. `X` covers declarations,
+patterns and nodes without erasing their specific API constraints. These are
+naming conventions, not a requirement to combine their concrete representations.
 
 ## Generative callables
 

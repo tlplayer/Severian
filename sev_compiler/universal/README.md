@@ -92,8 +92,8 @@ Effect
 | `Y` | Symbol |
 | `X` | Any compiler term |
 | `G` | Grammar |
-|`To`| Token Classified parser input; includes identifiers, indentation and end-of-file, not just literals or symbols. |
-|`Lx` | Lexeme Exact matched source text and span, before interpretation. It is not a literal value. |
+| `To` | Token — classified parser input; includes identifiers, indentation and end-of-file, not just literals or symbols. |
+| `Lx` | Lexeme — exact matched source text and span, before interpretation. It is not a literal value. |
 
 This is the canonical compiler-term vocabulary. Symbols describe semantic roles;
 they do not reserve generic parameter names or erase concrete type contracts.

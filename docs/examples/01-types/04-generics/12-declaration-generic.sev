@@ -1,4 +1,4 @@
-# D - Declaration
+# X - Any compiler term (declaration)
 # Bind declarations to resolved symbol identifiers.
 
 trait DeclarationTerm:
@@ -13,8 +13,8 @@ class LocalDeclaration: DeclarationTerm
         return LocalDeclaration(symbol_id, slots)
 
 
-def bind_declarations[D: DeclarationTerm](declarations: list[D], first_symbol: u64) -> list[D]:
-    bound: list[D] = []
+def bind_declarations[X: DeclarationTerm](declarations: list[X], first_symbol: u64) -> list[X]:
+    bound: list[X] = []
     next_symbol := first_symbol
 
     for declaration in declarations:

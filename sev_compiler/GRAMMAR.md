@@ -43,13 +43,13 @@ compiler naming convention. A binding such as
 
 ## Lexical layer
 
-`Lx` identifies matched source text and its span; `To` identifies the
+`Lx` (Lexeme) identifies matched source text and its span; `To` (Token) identifies the
 classified lexical object handed to the parser. `L` remains Literal and `Y`
 remains a syntactic/resolved symbol. A symbol token can refer to `Y`; identifiers,
 literals, newlines, indentation, and EOF are tokens too.
 
 ```text
-characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → CFG
+characters → Lx → To → parser → Y / L / Ex / O / X → G → CFG
 ```
 
 The [source lexer](frontend/lexer/README.md) separates `LexicalRule` scanners

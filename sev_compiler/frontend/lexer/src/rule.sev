@@ -31,7 +31,7 @@ class LexemeMatch:
     value: string | None = None
 
 
-# A rule recognizes source. Lx denotes its matched lexeme, To its classified
-# token, and G owns grammar/CFG behavior.
+# A rule recognizes source and produces lexemes and classified tokens.
+# Lx and To have distinct contracts; G owns grammar/CFG behavior.
 trait LexicalRule:
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic

@@ -633,7 +633,7 @@ fn agent_ir_emits_a_queryable_semantic_directory() {
     let repeated = root.join("semantic-agent-ir-repeated");
     fs::write(
         &source,
-        "def increment(value: i64) -> i64:\n    return value + 1\n\ndef main():\n    print(increment(41))\n\ntest \"increment\":\n    assert(increment(1) == 2)\n",
+        "trait Tagged:\n    def tag() -> i64\n\nclass Marker:\n    value: i64\n\ndef increment(value: i64) -> i64:\n    return value + 1\n\ndef main():\n    marker := Marker(41)\n    print(increment(marker.value))\n\ntest \"increment\":\n    assert(increment(1) == 2)\n",
     )
     .unwrap();
 
@@ -664,8 +664,14 @@ fn agent_ir_emits_a_queryable_semantic_directory() {
 
     let package: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(emitted.join("package.json")).unwrap()).unwrap();
-    assert_eq!(package["agent_ir"], 1);
+    assert_eq!(package["agent_ir"], 2);
     assert_eq!(package["package"], "agent");
+    assert!(package["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|id| id.as_str().unwrap().starts_with("X:module:")));
+
     assert!(package["counts"]["declarations"].as_u64().unwrap() >= 2);
     assert_eq!(package["counts"]["tests"], 1);
     assert!(package["public_api"]
@@ -681,6 +687,52 @@ fn agent_ir_emits_a_queryable_semantic_directory() {
 
     let declarations = fs::read_to_string(emitted.join("declarations.jsonl")).unwrap();
     assert!(declarations.contains("increment"), "{declarations}");
+    let increment: serde_json::Value = declarations
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|declaration| declaration["name"] == "increment")
+        .unwrap();
+    let argument = &increment["signature"]["arguments"][0];
+    assert_eq!(argument["kind"], "V");
+    assert_eq!(argument["role"], "argument");
+    assert!(argument["id"].as_str().unwrap().starts_with("V:"));
+    assert!(argument["id"].as_str().unwrap().contains(":argument:value"));
+    assert!(increment["module"]
+        .as_str()
+        .unwrap()
+        .starts_with("X:module:"));
+    let records = declarations
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let marker = records
+        .iter()
+        .find(|record| record["name"] == "Marker")
+        .unwrap();
+    assert_eq!(marker["kind"], "X");
+    assert_eq!(marker["declaration_kind"], "class");
+    assert!(marker["id"]
+        .as_str()
+        .unwrap()
+        .starts_with("X:declaration:"));
+    let tagged = records
+        .iter()
+        .find(|record| record["name"] == "Tagged")
+        .unwrap();
+    assert_eq!(tagged["kind"], "W");
+    assert_eq!(tagged["declaration_kind"], "trait");
+    assert!(tagged["id"].as_str().unwrap().starts_with("W:"));
+    let symbols = fs::read_to_string(emitted.join("symbols.jsonl")).unwrap();
+    for declaration in [marker, tagged] {
+        let symbol = symbols
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|symbol| symbol["id"] == declaration["id"])
+            .unwrap();
+        assert_eq!(symbol["kind"], declaration["kind"]);
+    }
+
+
     assert!(declarations.contains("semantic_hash"), "{declarations}");
     assert!(declarations.contains("interface_hash"), "{declarations}");
     assert!(declarations.contains("dependency_hash"), "{declarations}");

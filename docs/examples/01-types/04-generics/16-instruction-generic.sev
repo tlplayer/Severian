@@ -1,4 +1,4 @@
-# I - Instruction
+# O - Operation (instruction)
 # Remove no-op instructions, then execute the optimized instruction stream.
 
 trait InstructionTerm:
@@ -16,8 +16,8 @@ class AddImmediate: InstructionTerm
         return register + amount
 
 
-def remove_noops[I: InstructionTerm](instructions: list[I]) -> list[I]:
-    optimized: list[I] = []
+def remove_noops[O: InstructionTerm](instructions: list[O]) -> list[O]:
+    optimized: list[O] = []
 
     for instruction in instructions:
         if instruction.is_noop() == false:
@@ -26,7 +26,7 @@ def remove_noops[I: InstructionTerm](instructions: list[I]) -> list[I]:
     return optimized
 
 
-def execute_instructions[I: InstructionTerm](instructions: list[I], initial: i64) -> i64:
+def execute_instructions[O: InstructionTerm](instructions: list[O], initial: i64) -> i64:
     register := initial
 
     for instruction in instructions:

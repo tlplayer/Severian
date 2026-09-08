@@ -1,4 +1,4 @@
-# P - Pattern
+# X - Any compiler term (pattern)
 # Select the first matching pattern instead of exposing pattern metadata.
 
 trait PatternTerm:
@@ -13,7 +13,7 @@ class RangePattern: PatternTerm
         return minimum <= value and value <= maximum
 
 
-def select_pattern[P: PatternTerm](patterns: list[P], value: i64) -> i64:
+def select_pattern[X: PatternTerm](patterns: list[X], value: i64) -> i64:
     for pattern in patterns with index := 0:
         if pattern.matches(value):
             return index

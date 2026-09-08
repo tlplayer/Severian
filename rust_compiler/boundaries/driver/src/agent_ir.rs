@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-const AGENT_IR_VERSION: u32 = 1;
+// Version 2 uses the canonical compiler-term vocabulary for every ID kind.
+const AGENT_IR_VERSION: u32 = 2;
 
 pub(crate) fn write(
     output: &Path,
@@ -88,7 +89,7 @@ pub(crate) fn write(
             .get(module_index)
             .and_then(|resolved| module_ids.get(&resolved.id))
             .cloned()
-            .unwrap_or_else(|| format!("M:{package}:module-{module_index}"));
+            .unwrap_or_else(|| format!("X:module:{package}:module-{module_index}"));
         let source_functions = graph
             .modules
             .get(module_index)
@@ -116,8 +117,9 @@ pub(crate) fn write(
                     let type_id = type_identifier(types, argument.contract.ty);
                     type_edges.push(json!({"from": id, "relationship": "accepts", "to": type_id}));
                     json!({
-                        "id": format!("A:{}:{}", id.trim_start_matches("F:"), argument.name),
-                        "kind": "A",
+                        "id": format!("V:{}:argument:{}", id.trim_start_matches("F:"), argument.name),
+                        "kind": "V",
+                        "role": "argument",
                         "name": argument.name,
                         "type": type_id,
                         "modifiers": argument.contract.modifiers.iter().map(|modifier| modifier.name.as_str()).collect::<Vec<_>>(),
@@ -187,8 +189,8 @@ pub(crate) fn write(
             }
             let type_id = type_identifier(types, class.id);
             let id = format!(
-                "D:{}:class:{}",
-                module_id.trim_start_matches("M:"),
+                "X:declaration:{}:class:{}",
+                module_id.trim_start_matches("X:module:"),
                 class.id.0
             );
             type_edges.push(json!({"from": id, "relationship": "declares", "to": type_id}));
@@ -203,7 +205,7 @@ pub(crate) fn write(
                 .collect::<Vec<_>>();
             declarations.push(json!({
                 "id": id,
-                "kind": "D",
+                "kind": "X",
                 "declaration_kind": "class",
                 "name": class.name,
                 "module": module_id,
@@ -213,7 +215,7 @@ pub(crate) fn write(
             }));
             symbols.insert(
                 id.clone(),
-                json!({"id": id, "kind": "D", "name": class.name}),
+                json!({"id": id, "kind": "X", "name": class.name}),
             );
             if module_index == root_module_index && root_types.contains(class.name.as_str()) {
                 public_api.push(type_id);
@@ -228,10 +230,10 @@ pub(crate) fn write(
             if !source_traits.contains(declaration.name.as_str()) {
                 continue;
             }
-            let id = format!("C:{}", def_identifier(declaration.definition));
+            let id = format!("W:{}", def_identifier(declaration.definition));
             declarations.push(json!({
                 "id": id,
-                "kind": "C",
+                "kind": "W",
                 "declaration_kind": "trait",
                 "name": declaration.name,
                 "module": module_id,
@@ -241,7 +243,7 @@ pub(crate) fn write(
             }));
             symbols.insert(
                 id.clone(),
-                json!({"id": id, "kind": "C", "name": declaration.name}),
+                json!({"id": id, "kind": "W", "name": declaration.name}),
             );
         }
         for test in &hir_module.tests {
@@ -323,7 +325,7 @@ pub(crate) fn write(
                 json!({
                     "from": from,
                     "relationship": "imports",
-                    "to": module_ids.get(&import.module).cloned().unwrap_or_else(|| format!("M:{:032x}", import.module.0)),
+                    "to": module_ids.get(&import.module).cloned().unwrap_or_else(|| format!("X:module:{:032x}", import.module.0)),
                     "source": {"start": import.span.start, "end": import.span.end},
                 })
             })
@@ -507,7 +509,7 @@ fn callee_identifier(
             .get(implementation)
             .cloned()
             .unwrap_or_else(|| format!("F:{}", def_identifier(*implementation))),
-        Callee::Constructor { type_def, .. } => format!("D:{}", def_identifier(*type_def)),
+        Callee::Constructor { type_def, .. } => format!("X:declaration:{}", def_identifier(*type_def)),
         Callee::Intrinsic(operation) => format!(
             "O:{:032x}:{:032x}",
             operation.dialect.0, operation.operation.0
@@ -790,7 +792,7 @@ fn type_identifier(types: &TypeContext, id: TypeId) -> String {
 }
 
 fn module_identifier(package: &str, path: &str, module_id: u128) -> String {
-    format!("M:{package}:{}@{module_id:032x}", module_label(path))
+    format!("X:module:{package}:{}@{module_id:032x}", module_label(path))
 }
 
 fn module_label(path: &str) -> String {

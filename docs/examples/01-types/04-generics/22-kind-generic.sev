@@ -1,4 +1,4 @@
-# K - Kind
+# T - Type (kind metadata)
 # Select the wider compiler kind while preserving its concrete kind type.
 
 trait KindTerm:
@@ -13,7 +13,7 @@ class IntegerKind: KindTerm
         return bits
 
 
-def wider_kind[K: KindTerm](left: K, right: K) -> K:
+def wider_kind[T: KindTerm](left: T, right: T) -> T:
     if left.width() >= right.width():
         return left
 

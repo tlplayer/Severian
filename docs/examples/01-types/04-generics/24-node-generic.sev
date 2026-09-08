@@ -1,4 +1,4 @@
-# N - Node
+# X - Any compiler term (node)
 # Traverse nodes without assuming a particular AST, HIR, MIR, or LIR node type.
 
 trait NodeTerm:
@@ -13,8 +13,8 @@ class SyntaxNode: NodeTerm
         return parent
 
 
-def root_nodes[N: NodeTerm](nodes: list[N]) -> list[N]:
-    roots: list[N] = []
+def root_nodes[X: NodeTerm](nodes: list[X]) -> list[X]:
+    roots: list[X] = []
 
     for node in nodes:
         if node.parent_id() == 0:

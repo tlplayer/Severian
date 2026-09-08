@@ -1,4 +1,4 @@
-# S - Statement
+# O - Operation (statement)
 # Execute a sequence of statements against compiler state.
 
 trait StatementTerm:
@@ -13,7 +13,7 @@ class AffineStatement: StatementTerm
         return state * scale + bias
 
 
-def execute_statements[S: StatementTerm](statements: list[S], initial: i64) -> i64:
+def execute_statements[O: StatementTerm](statements: list[O], initial: i64) -> i64:
     state := initial
 
     for statement in statements:

@@ -1,4 +1,4 @@
-# A - Argument
+# V - Value (argument)
 # Lower a method call by prepending its receiver while preserving argument type.
 
 trait ArgumentTerm:
@@ -12,8 +12,8 @@ class CallArgument: ArgumentTerm
         return id
 
 
-def prepend_receiver[A: ArgumentTerm](receiver: A, arguments: list[A]) -> list[A]:
-    lowered: list[A] = []
+def prepend_receiver[V: ArgumentTerm](receiver: V, arguments: list[V]) -> list[V]:
+    lowered: list[V] = []
     lowered.append(receiver)
 
     for argument in arguments:

@@ -1,13 +1,13 @@
 # Source lexer
 
-`Lx` denotes a lexeme: matched source text and its span. `To` denotes a token:
-the classified lexical object handed to the parser. `L` remains Literal and
-`Y` remains a syntactic/resolved Symbol. These are generic parameter conventions,
-not reserved parameter names.
+`Lx` (Lexeme) preserves matched source text and its span. `To` (Token) classifies that
+source for the parser. `L` remains Literal and `Y` remains a syntactic/resolved
+Symbol. Generic lexical APIs use `Lx` and `To` with their specific contracts; the
+letters are conventions, not reserved parameter names.
 
 ```text
-characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → CFG
-                                                        → O / I / B
+characters → Lx → To → parser → Y / L / Ex / O / X → G → CFG
+                                                 → O / B
 ```
 
 For `total += 1_024`, the lexemes retain `total`, `+=`, and `1_024`. The tokens
@@ -52,7 +52,7 @@ EOF has an empty lexeme at the end of the definition. The lexeme is
 never reconstructed from classification or a normalized value.
 
 `src/rule.sev` defines `LexemeInput`, `LexemeMatch`, and `LexicalRule`. A rule
-is the scanner that produces lexemes/tokens, rather than an `Lx` value itself.
+is the scanner that produces lexemes/tokens, rather than a `Lexeme` value itself.
 A rule's `scan` method returns either a match result or a diagnostic. The
 single result preserves decoded literal values and committed-prefix errors
 without scanning a string or number a second time. A result has:
@@ -108,7 +108,7 @@ offsets; they do not become runtime application classes.
 
 A relative source import can contribute a rule without changing the compiler
 binary. Its contract is the same `scan(input: LexemeInput, start: int)` used by
-the built-in lexical classes. `Lx` still denotes the resulting source lexeme,
+the built-in lexical classes. `Lexeme` still denotes the resulting source lexeme,
 not the rule implementation.
 
 ```sev

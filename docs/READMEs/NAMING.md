@@ -16,7 +16,9 @@ where its spelling is already widely recognized.
 Prefer one clear word when it conveys the meaning. Use `snake_case` when a word
 boundary removes ambiguity. Short conventional names remain valid for
 coordinates, indices, and generic types: `x`, `y`, `z`, `i`, `j`, `k`, `T`,
-`K`, and `V`.
+`KeyType`, and `ValueType`. Compiler-term generic symbols follow the
+[canonical vocabulary](../../sev_compiler/universal/README.md); ordinary generic
+parameters can use descriptive names.
 
 Fixed fields use ordinary member
 access, while a variable selects a field through the dynamic object API:
