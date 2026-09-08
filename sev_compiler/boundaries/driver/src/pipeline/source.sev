@@ -1,3 +1,4 @@
+import "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
 import lexer
 import diagnostics
@@ -9,9 +10,9 @@ import "../../../../transforms/mlir/src/ir/text.sev" as text
 import "../../../../frontend/modules/src/source.sev"
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".") -> string:
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir") -> string:
     files: list[source.SourceFile] = []
-    result ?= compile_source(input, include_tests, sysroot, files)
+    result ?= compile_source(input, include_tests, sysroot, files, emit)
     if result is string:
         return result
     if result is Diagnostic:
@@ -21,7 +22,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile]) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir") -> string | diagnostics.Diagnostic:
     registry = lexer.SyntaxRegistry([])
     parsed = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/grammar/contracts.sev")), "", [], false, files, registry)
     library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
@@ -41,5 +42,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         parsed.items.append(item)
     typed = semantic.analyze_callables(parsed, include_tests)
     lowered = mir.build_callables(typed)
+    if emit == "agent-ir":
+        return agent_ir.emit(lowered, files)
     program = mlir.lower_callables(lowered)
     return text.print_program(program)

@@ -241,6 +241,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                             return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
                     if precedence < 1 or precedence > 255:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be between 1 and 255", descriptor.span))
+                elif property.name in ["left", "right"]:
+                    if len(property.tokens) != 0 and token_word(property.tokens[0]) == "Body":
+                        form = "Body" if property.name == "left" else "ConditionBody"
+                        fixity = universal.Fixity.Prefix
                 elif property.name == "form":
                     if len(property.tokens) != 3 or token_word(property.tokens[0]) != "GrammarForm" or property.tokens[1].kind != Dot:
                         return error(diagnostics.diagnostic_at("E000103", "grammar form requires GrammarForm", descriptor.span))

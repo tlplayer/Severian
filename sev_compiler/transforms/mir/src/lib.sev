@@ -9,6 +9,4 @@ import "verify.sev"
 import "build/mod.sev"
 
 def empty_module() -> universal.Module:
-    result = universal.empty_module()
-    result.initializer_cfg = universal.empty_cfg(universal.TypeId(0))
-    return result
+    return universal.empty_module()

@@ -1,3 +1,11 @@
+import diagnostics
+import "block.sev"
+import "branch.sev"
+import "lazy.sev"
+import "effects.sev"
+import "control_flow.sev" as control_flow
+import source
+import "../operation/operation.sev"
 import "../id/compiler.sev"
 import "../literal/value.sev"
 import "../operator/kind.sev"
@@ -80,20 +88,56 @@ enum Terminator:
     Unreachable
 
 
-class BasicBlock:
-    id: BlockId
-    parameters: list[LocalId]
-    statements: list[CfgStatement]
-    terminator: Terminator
-
-
 class CfgBody:
-    entry: BlockId
+    entry: int
     blocks: list[BasicBlock]
-    locals: list[LocalDecl]
     return_type: TypeId
 
 
 def empty_cfg(return_type: TypeId) -> CfgBody:
-    entry = BlockId(0)
-    return CfgBody(entry, [BasicBlock(entry, [], [], Return(None))], [], return_type)
+    return CfgBody(0, [BasicBlock(0)], return_type)
+
+
+# Compiler-owned state. Source semantic execution receives a checked capability,
+# never an ordinary runtime value or a callable that can capture this object.
+class ExecutionContext:
+    body: CfgBody
+    cursor: list[int] = [0]
+
+
+def block(context: ExecutionContext) -> int:
+    index = int(len(context.body.blocks))
+    context.body.blocks.append(BasicBlock(index))
+    return index
+
+
+def at(context: ExecutionContext, target: int):
+    if target < 0 or target >= len(context.body.blocks):
+        throw Error("invalid CFG block handle")
+    context.cursor[0] = target
+
+
+def open(context: ExecutionContext) -> bool:
+    return context.body.blocks[context.cursor[0]].terminator == None
+
+
+def append(context: ExecutionContext, operation: Operation) -> bool | diagnostics.Diagnostic:
+    terminated ?= context.body.blocks[context.cursor[0]].terminator
+    if terminated != None:
+        return error(diagnostics.Diagnostic("E000230", "instruction after CFG terminator", terminated.span))
+    context.body.blocks[context.cursor[0]].operations.append(operation)
+    return true
+
+
+def terminate(context: ExecutionContext, exit: CfgExit, origin: CfgTerminator) -> bool | diagnostics.Diagnostic:
+    if not open(context):
+        return error(diagnostics.Diagnostic("E000230", "CFG block already terminated: second terminator", origin.span))
+    selected = context.body.blocks[context.cursor[0]]
+    selected.terminator = CfgTerminator(exit, origin.grammar, origin.span)
+    context.body.blocks[context.cursor[0]] = selected
+    return true
+
+
+def fallthrough(context: ExecutionContext, target: int, origin: CfgTerminator):
+    if open(context):
+        terminate(context, CfgExit.Jump(CfgEdge(target)), origin)

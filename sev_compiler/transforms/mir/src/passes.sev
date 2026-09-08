@@ -77,10 +77,8 @@ class PassManager:
             if metadata.kind == Module:
                 pass.run_module(module, analyses)
             else:
-                pass.run_function(module.initializer_cfg, analyses)
-                for function in module.functions:
-                    if function.cfg != None:
-                        pass.run_function(function.cfg, analyses)
+                for body in module.cfg_bodies:
+                    pass.run_function(body, analyses)
             analyses.invalidate_except(metadata.preserved_analyses)
             stage = metadata.produced_stage
         return stage

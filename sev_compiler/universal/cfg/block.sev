@@ -1,0 +1,12 @@
+import "../id/compiler.sev"
+import "../operation/operation.sev"
+import "branch.sev"
+
+
+class BasicBlock:
+    id: int
+    parameters: list[ValueId] = []
+    operations: list[Operation] = []
+    terminator: CfgTerminator | None = None
+
+

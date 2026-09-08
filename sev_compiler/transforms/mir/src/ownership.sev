@@ -1,122 +1,39 @@
 import universal
-import "cfg.sev"
-
-enum LoanKind:
-    Shared
-    Exclusive
+import diagnostics
+import "cfg.sev" as cfg
 
 
-class Loan:
-    place: universal.Place
-    kind: LoanKind
-    block: universal.BlockId
-
-
-enum OwnershipError:
-    UseAfterMove(local: universal.LocalId)
-    DoubleMove(local: universal.LocalId)
-    ConflictingLoan(local: universal.LocalId)
-    EscapingBorrow(local: universal.LocalId)
-    ResourceNotConsumed(local: universal.LocalId)
-    DoubleDrop(local: universal.LocalId)
+class ValueAlias:
+    source: universal.ValueId
+    target: universal.ValueId
 
 
 class OwnershipReport:
-    initialized: set[universal.LocalId]
-    moved: set[universal.LocalId]
-    loans: list[Loan]
-    escaped: set[universal.LocalId]
-    consumed_resources: set[universal.LocalId]
-    call_effects: map[universal.BlockId, universal.EffectSet]
+    storage: list[universal.ValueId] = []
+    aliases: list[ValueAlias] = []
 
 
-def inspect_operand(operand: universal.Operand, report: OwnershipReport, errors: list[OwnershipError]):
-    match operand:
-        case Copy:
-            if place.local not in report.initialized or place.local in report.moved:
-                errors.append(UseAfterMove(place.local))
-        case Move:
-            if place.local not in report.initialized or place.local in report.moved:
-                errors.append(UseAfterMove(place.local))
-            if place.local in report.moved:
-                errors.append(DoubleMove(place.local))
-            report.moved.add(place.local)
-
-
-def add_loan(place: universal.Place, kind: LoanKind, block: universal.BlockId, report: OwnershipReport, errors: list[OwnershipError]):
-    for loan in report.loans:
-        if loan.place.local == place.local and (loan.kind == Exclusive or kind == Exclusive):
-            errors.append(ConflictingLoan(place.local))
-            return
-    report.loans.append(Loan(place, kind, block))
-
-
-def inspect_rvalue(value: universal.Rvalue, block: universal.BlockId, report: OwnershipReport, errors: list[OwnershipError]):
-    match value:
-        case Use:
-            inspect_operand(operand, report, errors)
-        case Unary:
-            inspect_operand(operand, report, errors)
-        case Convert:
-            inspect_operand(operand, report, errors)
-        case Binary:
-            inspect_operand(left, report, errors)
-            inspect_operand(right, report, errors)
-        case BorrowShared:
-            add_loan(place, Shared, block, report, errors)
-        case BorrowExclusive:
-            add_loan(place, Exclusive, block, report, errors)
-        case Aggregate:
-            for field in fields:
-                inspect_operand(field, report, errors)
-
-
-def analyze_ownership(body: universal.CfgBody, types: universal.TypeContext) -> OwnershipReport | list[OwnershipError]:
-    report = OwnershipReport(set(), set(), [], set(), set(), {})
-    errors: list[OwnershipError] = []
-    for local in body.locals:
-        if local.argument:
-            report.initialized.add(local.id)
+# The callable frontend currently admits stack storage and SSA string buffers.
+# Record their aliases on the executable graph; buffer deallocation consumes
+# these same SSA edges in MLIR. General resource loans and cleanup are not yet
+# admitted by this frontend and must not use the former linear statement walk.
+def analyze_ownership(module: universal.Module, body: universal.CfgBody, parameters: list[universal.ValueId]) -> OwnershipReport | diagnostics.Diagnostic:
+    cfg.verify_availability(body, parameters)
+    report = OwnershipReport()
     for block in body.blocks:
-        for statement in block.statements:
-            match statement:
-                case Assign:
-                    inspect_rvalue(value, block.id, report, errors)
-                    report.initialized.add(place.local)
-                    report.moved.discard(place.local)
-                case Drop:
-                    if place.local not in report.initialized or place.local in report.consumed_resources:
-                        errors.append(DoubleDrop(place.local))
-                    report.initialized.discard(place.local)
-                    report.consumed_resources.add(place.local)
-                case StorageDead:
-                    report.initialized.discard(local)
-                case Assert:
-                    inspect_operand(condition, report, errors)
-                    if message != None:
-                        inspect_operand(message, report, errors)
-                case Operation:
-                    for operand in operands:
-                        inspect_operand(operand, report, errors)
-                    for result in results:
-                        report.initialized.add(result.local)
-    if len(errors) > 0:
-        return error(errors)
+        for operation in block.operations:
+            match operation:
+                case Allocate:
+                    report.storage.append(result)
+                case Alias:
+                    report.aliases.append(ValueAlias(value, result))
+                case _:
+                    pass
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in cfg.successors(terminal.exit):
+                index := 0
+                for argument in edge.arguments:
+                    report.aliases.append(ValueAlias(argument, body.blocks[edge.target].parameters[index]))
+                    index += 1
     return report
-
-
-def elaborate_drops(body: universal.CfgBody, types: universal.TypeContext):
-    resources: list[universal.LocalId] = []
-    for local in body.locals:
-        match types.kind(local.type_id):
-            case Resource:
-                resources.append(local.id)
-    for block in body.blocks:
-        match block.terminator:
-            case Return:
-                for local in resources.reversed():
-                    block.statements.append(Drop(universal.local_place(local)))
-            case Throw:
-                for local in resources.reversed():
-                    block.statements.append(Drop(universal.local_place(local)))
-

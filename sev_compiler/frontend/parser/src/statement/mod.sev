@@ -109,6 +109,11 @@ def parser_expect(parser: Parser, expected: lexer.TokenKind, message: string) ->
     token ?= parser_take(parser, expected)
     if token != None:
         return token
+    match parser_peek(parser).kind:
+        case SymbolToken:
+            return error(parser_fail(parser, "unregistered operator in this position: " + value))
+        case _:
+            pass
     return error(parser_fail(parser, message))
 
 def parser_separators(parser: Parser):
@@ -479,6 +484,15 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     return (universal.Block(statements, [], []), end)
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    for syntax in parser_peek(parser).syntaxes:
+        if syntax.grammar_form in ["Body", "ConditionBody"]:
+            start = parser_next(parser).span
+            operands: list[universal.Expression] = []
+            if syntax.grammar_form == "ConditionBody":
+                operands.append(parser_expression(parser, 0))
+            parser_expect(parser, Colon, "expected colon after grammar operands")
+            body = parser_indented_block(parser, syntax.grammar_name)
+            return universal.GrammarApply(syntax, operands, [body[0]], source.Span(start.source, start.start, body[1]), false)
     if parser_at_identifier(parser, "match"):
         return parser_match_statement(parser)
     if parser_at_identifier(parser, "while"):

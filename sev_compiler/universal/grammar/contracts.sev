@@ -1,6 +1,24 @@
 # Source grammar contracts loaded into the shared declaration environment.
 trait G:
-    pass
+    symbol: Y
+    arity: int | absent
+    precedence: int | absent
+    associativity: Associativity | absent
+    left: Operand | absent
+    right: Operand | absent
+    result: T | absent
+    evaluation: Evaluation
+    effects: Effects
+    conversions: Conversions
+    overflow: Overflow | absent
+    underflow: Underflow | absent
+    control_flow: ControlFlow | absent
+    short_circuit: bool | absent
+    const: bool
+    foldable: bool
+
+    def valid(left: Ex, right: Ex) -> bool
+    def semantic(left: Ex, right: Ex) -> X
 
 
 trait Positive: G:
@@ -169,6 +187,11 @@ trait LogicalAnd: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 2
     associativity: Associativity = Left
+    right: Operand = Lazy[bool]
+    short_circuit: bool = true
+
+    def semantic(left: bool, right: bool) -> bool:
+        return right if left else false
 
 
 trait LogicalOr: G:
@@ -176,3 +199,75 @@ trait LogicalOr: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 1
     associativity: Associativity = Left
+    right: Operand = Lazy[bool]
+    short_circuit: bool = true
+
+    def semantic(left: bool, right: bool) -> bool:
+        return true if left else right
+
+
+trait If: G:
+    symbol: Y = if
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    control_flow: ControlFlow = Branch
+
+    def semantic(condition: Ex, then_body: B, else_body: B):
+        value = lower(condition)
+        taken = cfg.block()
+        otherwise = cfg.block()
+        exit = cfg.block()
+        cfg.branch(value, taken, otherwise)
+        cfg.at(taken)
+        lower(then_body)
+        cfg.fallthrough(exit)
+        cfg.at(otherwise)
+        lower(else_body)
+        cfg.fallthrough(exit)
+        cfg.at(exit)
+
+
+trait While: G:
+    symbol: Y = while
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    control_flow: ControlFlow = Loop
+
+    def semantic(condition: Ex, body: B):
+        header = cfg.block()
+        execute = cfg.block()
+        exit = cfg.block()
+        cfg.goto(header)
+        cfg.at(header)
+        value = lower(condition)
+        cfg.branch(value, execute, exit)
+        cfg.begin_loop(header, exit)
+        cfg.at(execute)
+        lower(body)
+        cfg.fallthrough(header)
+        cfg.end_loop()
+        cfg.at(exit)
+
+
+trait Break: G:
+    control_flow: ControlFlow = Branch
+
+    def semantic():
+        exit = cfg.loop_exit()
+        cfg.goto(exit)
+
+
+trait Continue: G:
+    control_flow: ControlFlow = Branch
+
+    def semantic():
+        header = cfg.loop_header()
+        cfg.goto(header)
+
+
+trait Return: G:
+    control_flow: ControlFlow = Return
+
+    def semantic(value: Ex | absent):
+        result = lower(value)
+        cfg.return(result)

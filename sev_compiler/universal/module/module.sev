@@ -31,7 +31,9 @@ class Module:
     resolved_imports: list[ModuleId] = []
     bindings: list[Binding] = []
     initializer: Block = Block([], [], [])
+    # Preserve the seed record ABI; executable initializers occupy cfg_bodies[0].
     initializer_cfg: CfgBody | None = None
+    cfg_bodies: list[CfgBody] = []
     functions: list[FunctionDeclaration] = []
     generic_functions: list[FunctionDeclaration] = []
     entry: FunctionId | None = None

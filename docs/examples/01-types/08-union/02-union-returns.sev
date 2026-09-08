@@ -1,0 +1,14 @@
+
+test "Fixed point type collapse":
+    #When we zip a union we get a fixed point colpase if there is no conflict in implementation
+    number_union = float | int
+    # T | T makes a union type
+    assert(number_union is union)
+    # R | E
+
+    result_or_error = R | E
+    assert(result_or_error is union)
+
+
+
+

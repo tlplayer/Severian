@@ -160,13 +160,13 @@ def main():
         if name in {"example_math", "example_clamp", "scalar_functions"}:
             assert "__sev_scalar_" in text, "source functions must survive lowering"
         if name in {"example_clamp", "scalar_functions"}:
-            assert '"func.call"' in text and '"scf.if"' in text
+            assert '"func.call"' in text and '"cf.cond_br"' in text
         verified = ARTIFACTS / f"{name}.verified.mlir"
         run([opt, "--verify-each", emitted, "-o", verified])
         llvm_mlir = ARTIFACTS / f"{name}.llvm.mlir"
-        run([opt, emitted, "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
+        run([opt, emitted, "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
              "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm",
-             "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm",
+             "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm",
              "--reconcile-unrealized-casts", "-o", llvm_mlir])
         llvm_ir = ARTIFACTS / f"{name}.ll"
         run([translate, "--mlir-to-llvmir", llvm_mlir], output=llvm_ir)

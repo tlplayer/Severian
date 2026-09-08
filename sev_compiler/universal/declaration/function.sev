@@ -80,7 +80,9 @@ class FunctionDeclaration:
     owner_type: TypeId = TypeId(0)
     template: DefId | None = None
     type_arguments: list[TypeBinding] = []
-    # The seed record/list ABI requires this optional recursive payload last.
+    cfg_index: int = -1
+    # ABI sentinel for the seed record/list representation; never populated.
+    # Executable bodies are indexed in Module.cfg_bodies.
     cfg: CfgBody | None = None
 
 

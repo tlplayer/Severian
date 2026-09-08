@@ -1,0 +1,9 @@
+import "../expression/expression.sev"
+import "../statement/statement.sev"
+
+
+# These operands carry typed source without executing it. Only the semantic
+# evaluator can lower them using its active compiler context.
+enum LazyOperand:
+    ExpressionBody(expression: Expression)
+    StatementBody(body: Block)

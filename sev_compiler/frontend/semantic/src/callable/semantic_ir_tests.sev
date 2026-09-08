@@ -15,6 +15,17 @@ def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
     return lexer.scan(input, syntax)
 
 
+
+def callable_fixture_environment(module: universal.Module) -> universal.Module:
+    # HIR fixtures resolve control contracts explicitly, just as their syntax
+    # fixtures do. Native CFG tests exercise the executable source bodies.
+    input = source.SourceFile(source.SourceId(1), "control-contracts.sev", "trait G:\n    pass\ntrait If: G:\n    control_flow: ControlFlow = Branch\ntrait Return: G:\n    control_flow: ControlFlow = Return\n")
+    contracts = parser.parser_module(parser.Parser(lexer.scan(input)))
+    for item in contracts.items:
+        module.items.append(item)
+    return module
+
+
 def resolved_expression(expression: universal.Expression):
     assert(expression.type_id.index != 0)
     match expression.kind:
@@ -40,16 +51,14 @@ def resolved_block(block: universal.Block) -> int:
             case BindingStatement:
                 assert(binding.type_id.index != 0)
                 resolved_expression(binding.value)
-            case If:
-                assert(condition.type_id.index == 1)
-                resolved_expression(condition)
-                returns += resolved_block(then_block)
-                returns += resolved_block(else_block)
-            case Return:
-                expression ?= value
-                if expression != None:
-                    resolved_expression(expression)
-                returns += 1
+            case GrammarApply:
+                assert(syntax.definition.declaration.value != 0)
+                for operand in operands:
+                    resolved_expression(operand)
+                for body in bodies:
+                    returns += resolved_block(body)
+                if syntax.grammar_name == "Return":
+                    returns += 1
             case Assert:
                 resolved_expression(condition)
             case _:
@@ -76,7 +85,7 @@ test "parsed match produces typed HIR for all arms":
                         assert(false)
         case _:
             assert(false)
-    hir = semantic.analyze_callables(ast, true)
+    hir = semantic.analyze_callables(callable_fixture_environment(ast), true)
     assert(len(hir.functions) == 2)
     assert(len(hir.tests) == 1)
     for function in hir.functions:
@@ -134,17 +143,19 @@ test "operator grammar constraints retain ordinary generic parameter syntax":
 test "generic HIR retains required operator and concrete implementation identities":
     input = source.SourceFile(source.SourceId(0), "resolution.sev", "trait Addable:\n    operator +(other: Self) -> Self\n\nextend int:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addi, self, other)\n\nextend float:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addf, self, other)\n\ndef twice[T: Addable](value: T) -> T:\n    return value + value\n\ntest:\n    assert(twice(21) == 42)\n    assert(twice(2.5) == 5.0)\n")
     ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
-    hir = semantic.analyze_callables(ast, true)
-    assert(len(hir.traits) == 1)
+    hir = semantic.analyze_callables(callable_fixture_environment(ast), true)
+    assert(len(hir.traits) == 4)
     assert(len(hir.generic_functions) == 1)
     requirement = hir.traits[0].operators[0].definition
     assert(requirement.declaration.value != 0)
     generic_body ?= hir.generic_functions[0].body
     if generic_body != None:
         match generic_body.statements[0]:
-            case Return:
-                returned ?= value
-                if returned != None:
+            case GrammarApply:
+                assert(syntax.grammar_name == "Return")
+                assert(len(operands) == 1)
+                returned = operands[0]
+                if returned.type_id.index != 0:
                     match returned.kind:
                         case ResolvedCall:
                             match callee:
@@ -170,9 +181,11 @@ test "generic HIR retains required operator and concrete implementation identiti
             body ?= function.body
             if body != None:
                 match body.statements[0]:
-                    case Return:
-                        returned ?= value
-                        if returned != None:
+                    case GrammarApply:
+                        assert(syntax.grammar_name == "Return")
+                        assert(len(operands) == 1)
+                        returned = operands[0]
+                        if returned.type_id.index != 0:
                             assert(returned.type_id.index == function.result_type.index)
                             match returned.kind:
                                 case ResolvedCall:
@@ -197,7 +210,7 @@ import "../lib.sev" as package_analysis
 test "package and executable entries share type and member registration":
     input = source.SourceFile(source.SourceId(0), "package.sev", "type Count = int\nclass Box:\n    amount: Count\n    def get() -> Count:\n        return amount\n\ndef read(value: Box) -> Count:\n    return value.get()\n\ntest:\n    assert(read(Box(42)) == 42)\n")
     ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
-    program = package_analysis.analyze_tests(ast)
+    program = package_analysis.analyze_tests(callable_fixture_environment(ast))
     assert(len(program.modules) == 1)
     hir = program.modules[0]
     assert(hir.types[0].id.index == 64)

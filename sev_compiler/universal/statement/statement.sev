@@ -36,6 +36,7 @@ class MatchArm:
 
 
 enum Statement:
+    GrammarApply(syntax: OperatorSyntax, operands: list[Expression], bodies: list[Block], span: source.Span, exits: bool)
     BindingStatement(binding: Binding)
     ExpressionStatement(expression: Expression)
     Return(value: Expression | None, span: source.Span)

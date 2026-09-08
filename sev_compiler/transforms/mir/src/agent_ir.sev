@@ -1,0 +1,193 @@
+import universal
+import source
+import "cfg.sev" as cfg
+
+
+def quoted(value: string) -> string:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
+
+
+def identity(id: universal.DefId) -> string:
+    return quoted(string(id.package) + ":" + string(id.module) + ":" + string(id.declaration.value))
+
+
+def span_json(span: source.Span, files: list[source.SourceFile]) -> string:
+    path := ""
+    for file in files:
+        if file.id.index == span.source.index:
+            path = file.path
+    return "{\"path\":" + quoted(path) + ",\"start\":" + string(span.start) + ",\"end\":" + string(span.end) + "}"
+
+
+def metadata_value(expression: universal.Expression) -> string:
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case NoneValue:
+                    return "null"
+                case BooleanValue:
+                    return "true" if value else "false"
+                case IntegerValue:
+                    return spelling
+                case StringValue:
+                    return quoted(value)
+                case FloatValue:
+                    return quoted(spelling)
+                case CharacterValue:
+                    return string(value)
+                case _:
+                    return "null"
+        case Name:
+            return "null" if name == "absent" else quoted(name)
+        case SourceSymbol:
+            return quoted(spelling)
+        case _:
+            return "null"
+
+
+def values_json(values: list[universal.ValueId]) -> string:
+    output: list[string] = []
+    for value in values:
+        output.append(quoted(string(value.index)))
+    return "[" + output.join(",") + "]"
+
+
+def operation_kind(operation: universal.Operation) -> string:
+    match operation:
+        case Allocate:
+            return "Allocate"
+        case Constant:
+            return "Constant"
+        case Load:
+            return "Load"
+        case Store:
+            return "Store"
+        case Alias:
+            return "Alias"
+        case Call:
+            return "Call"
+        case Unary:
+            return "Unary"
+        case Binary:
+            return "Binary"
+        case FieldAddress:
+            return "FieldAddress"
+        case Assert:
+            return "Assert"
+        case _:
+            throw Error("noncanonical operation in Agent IR")
+
+
+def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[source.SourceFile]) -> string:
+    blocks: list[string] = []
+    for block in body.blocks:
+        operations: list[string] = []
+        for operation in block.operations:
+            operations.append(operation_json(operation))
+        terminal ?= block.terminator
+        if terminal != None:
+            kind := "Unreachable"
+            payload := ""
+            match terminal.exit:
+                case Jump:
+                    kind = "Branch"
+                case Conditional:
+                    kind = "ConditionalBranch"
+                    payload = ",\"condition\":" + quoted(string(condition.index))
+                case Finish:
+                    kind = "Return"
+                    returned ?= value
+                    payload = ",\"value\":null"
+                    if returned != None:
+                        payload = ",\"value\":" + quoted(string(returned.index))
+                case _:
+                    pass
+            edges: list[string] = []
+            for edge in cfg.successors(terminal.exit):
+                edges.append("{\"target\":" + quoted(string(edge.target)) + ",\"arguments\":" + values_json(edge.arguments) + "}")
+            terminator = "{\"kind\":" + quoted(kind) + payload + ",\"grammar\":" + identity(terminal.grammar) + ",\"source\":" + span_json(terminal.span, files) + ",\"successors\":[" + edges.join(",") + "]}"
+            blocks.append("{\"id\":" + quoted(string(block.id)) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"terminator\":" + terminator + "}")
+    return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
+
+
+def emit(module: universal.Module, files: list[source.SourceFile]) -> string:
+    definitions: list[string] = []
+    functions: list[string] = []
+    values: list[string] = []
+    for value in module.values:
+        values.append("{\"id\":" + quoted(string(value.id.index)) + ",\"type\":" + string(value.type_id.index) + "}")
+    for declaration in module.traits:
+        bases: list[string] = []
+        for base in declaration.bases:
+            name ?= universal.simple_type_name(base)
+            if name != None:
+                for parent in module.traits:
+                    if parent.name == name or parent.name == declaration.lookup + name:
+                        bases.append(identity(parent.definition))
+                        break
+        properties: list[string] = []
+        for property in declaration.properties:
+            value ?= property.default
+            if value != None:
+                properties.append(quoted(property.name) + ":" + metadata_value(value))
+        kind = "grammar" if declaration.grammar else "trait"
+        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"name\":" + quoted(declaration.name) + ",\"kind\":" + quoted(kind) + ",\"bases\":[" + bases.join(",") + "],\"metadata\":{" + properties.join(",") + "},\"source\":" + span_json(declaration.span, files) + "}")
+    for declaration in module.functions:
+        span := source.Span(source.SourceId(0), 0, 0)
+        declared ?= declaration.span
+        if declared != None:
+            span = declared
+        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"name\":" + quoted(declaration.name) + ",\"kind\":\"function\",\"bases\":[],\"source\":" + span_json(span, files) + "}")
+        if declaration.cfg_index >= 0:
+            functions.append(body_json(declaration.definition, module.cfg_bodies[declaration.cfg_index], files))
+    if len(module.cfg_bodies) != 0:
+        definition = universal.DefId(0, 0, universal.DeclarationId(0))
+        definitions.append("{\"id\":" + identity(definition) + ",\"name\":\"$initializer\",\"kind\":\"function\",\"bases\":[]}")
+        functions.append(body_json(definition, module.cfg_bodies[0], files))
+    return "{\"schema_version\":1,\"stage\":\"cfg\",\"definitions\":[" + definitions.join(",") + "],\"functions\":[" + functions.join(",") + "],\"values\":[" + values.join(",") + "]}"
+
+
+
+def operation_json(operation: universal.Operation) -> string:
+    fields := ""
+    operands: list[universal.ValueId] := []
+    results: list[universal.ValueId] = []
+    match operation:
+        case Allocate:
+            fields = ",\"type\":" + string(type_id.index)
+            results.append(result)
+        case Constant:
+            literal = universal.Expression(universal.LiteralValue(value), source.Span(source.SourceId(0), 0, 0))
+            fields = ",\"value\":" + metadata_value(literal)
+            results.append(result)
+        case Load:
+            operands.append(address)
+            results.append(result)
+        case Store:
+            operands.append(address)
+            operands.append(value)
+        case Alias:
+            operands.append(value)
+            results.append(result)
+        case FieldAddress:
+            operands.append(object)
+            results.append(result)
+            fields = ",\"owner\":" + string(owner.index) + ",\"field\":" + string(index)
+        case Call:
+            operands = arguments
+            results.append(result)
+            fields = ",\"function\":" + identity(universal.DefId(0, 0, universal.DeclarationId(function.value)))
+        case Unary:
+            operands.append(operand)
+            results.append(result)
+            fields = ",\"symbol\":" + quoted(operator.symbol) + ",\"grammar\":" + identity(operator.definition)
+        case Binary:
+            operands.append(left)
+            operands.append(right)
+            results.append(result)
+            fields = ",\"symbol\":" + quoted(operator.symbol) + ",\"grammar\":" + identity(operator.definition)
+        case Assert:
+            operands.append(condition)
+        case _:
+            pass
+    return "{\"kind\":" + quoted(operation_kind(operation)) + fields + ",\"operands\":" + values_json(operands) + ",\"results\":" + values_json(results) + "}"

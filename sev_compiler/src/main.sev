@@ -26,7 +26,7 @@ def main():
     while cursor < len(arguments):
         argument = arguments[cursor]
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler [run|build|test|check] FILE.sev [--emit mlir] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]")
+            print("usage: sev_compiler [run|build|test|check] FILE.sev [--emit mlir|agent-ir] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]")
             return
         if argument == "--":
             application = arguments[cursor + 1:]
@@ -50,12 +50,12 @@ def main():
         cursor += 1
     if input == "":
         throw Error("expected a .sev source file; use --help for usage")
-    if emit != "" and emit != "mlir":
+    if emit != "" and emit != "mlir" and emit != "agent-ir":
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
-    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot)
-    if emit == "mlir":
+    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot, emit)
+    if emit != "":
         if output == "":
             print(mlir)
         else:

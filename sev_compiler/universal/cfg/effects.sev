@@ -1,0 +1,18 @@
+enum Effects:
+    Pure
+    Read
+    Write
+    ReadWrite
+    Control
+
+
+enum Evaluation:
+    LeftToRight
+    RightToLeft
+    Lazy
+
+
+enum Conversions:
+    Exact
+    Implicit
+    Explicit

@@ -1,1 +1,338 @@
+import "../../../universal/cfg/cfg.sev"
 import universal
+import source
+import diagnostics
+
+
+def origin(module: universal.Module, name: string, span: source.Span) -> universal.CfgTerminator:
+    for definition in module.traits:
+        if definition.grammar and definition.name == name:
+            return universal.CfgTerminator(universal.CfgExit.Dead, definition.definition, span)
+    throw Error("missing source grammar contract " + name)
+
+
+def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
+    match exit:
+        case Jump:
+            return [edge]
+        case Conditional:
+            return [taken, otherwise]
+        case _:
+            return []
+
+
+def finish(module: universal.Module, context: ExecutionContext, span: source.Span, parameters: list[universal.ValueId] = []) -> bool | diagnostics.Diagnostic:
+    origin = origin(module, "Return", span)
+    if open(context):
+        terminate(context, universal.CfgExit.Finish(None) if context.body.return_type.index == 2 else universal.CfgExit.Dead, origin)
+    verify(module, context.body)
+    verify_availability(context.body, parameters)
+    prune_unreachable(context.body)
+    promote_storage(module, context.body)
+    return verify(module, context.body)
+
+
+def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnostics.Diagnostic:
+    if body.entry < 0 or body.entry >= len(body.blocks):
+        return error(diagnostics.Diagnostic("E000230", "CFG entry block does not exist", None))
+    block_index := 0
+    for selected in body.blocks:
+        if selected.id != block_index:
+            return error(diagnostics.Diagnostic("E000230", "CFG block identity mismatch", None))
+        block_index += 1
+        terminator ?= selected.terminator
+        if terminator == None:
+            return error(diagnostics.Diagnostic("E000230", "CFG block requires exactly one terminator", None))
+        if terminator != None:
+            resolved := false
+            for definition in module.traits:
+                if definition.grammar and definition.definition.module == terminator.grammar.module and definition.definition.declaration.value == terminator.grammar.declaration.value:
+                    resolved = true
+            if not resolved:
+                return error(diagnostics.Diagnostic("E000230", "CFG edge requires resolved grammar provenance", terminator.span))
+            match terminator.exit:
+                case Conditional:
+                    if module.values[condition.index].type_id.index != 1:
+                        return error(diagnostics.Diagnostic("E000230", "CFG branch requires bool", terminator.span))
+                case Finish:
+                    returned ?= value
+                    if returned != None:
+                        if module.values[returned.index].type_id.index != body.return_type.index:
+                            return error(diagnostics.Diagnostic("E000230", "CFG return type mismatch", terminator.span))
+                    elif body.return_type.index != 2:
+                        return error(diagnostics.Diagnostic("E000230", "CFG return requires a value", terminator.span))
+                case _:
+                    pass
+            for edge in successors(terminator.exit):
+                if edge.target < 0 or edge.target >= len(body.blocks):
+                    return error(diagnostics.Diagnostic("E000230", "CFG successor does not exist", terminator.span))
+                parameters = body.blocks[edge.target].parameters
+                if len(parameters) != len(edge.arguments):
+                    return error(diagnostics.Diagnostic("E000230", "CFG successor argument count mismatch", terminator.span))
+                index := 0
+                for argument in edge.arguments:
+                    if module.values[argument.index].type_id.index != module.values[parameters[index].index].type_id.index:
+                        return error(diagnostics.Diagnostic("E000230", "CFG successor argument type mismatch", terminator.span))
+                    index += 1
+    return true
+
+
+
+def value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId:
+    id = universal.ValueId(u32(len(module.values)))
+    module.values.append(universal.Value(id, type_id))
+    return id
+
+
+def promote_storage(module: universal.Module, body: universal.CfgBody):
+    slots: list[universal.ValueId] = []
+    initial: list[universal.ValueId] = []
+    prefix: list[universal.Operation] = []
+    for selected in body.blocks:
+        for operation in selected.operations:
+            match operation:
+                case Allocate:
+                    if type_id.index == 3:
+                        slots.append(result)
+                        empty = value(module, type_id)
+                        initial.append(empty)
+                        prefix.append(universal.Operation.Constant(universal.StringValue(""), empty))
+                    else:
+                        prefix.append(operation)
+                case _:
+                    pass
+    for selected in body.blocks:
+        current := initial[:]
+        if selected.id != body.entry:
+            current = []
+            for slot in slots:
+                parameter = value(module, universal.TypeId(3))
+                selected.parameters.append(parameter)
+                current.append(parameter)
+        operations: list[universal.Operation] := []
+        if selected.id == body.entry:
+            operations = prefix[:]
+        for operation in selected.operations:
+            retained := true
+            match operation:
+                case Allocate:
+                    retained = false
+                case Load:
+                    index := 0
+                    for slot in slots:
+                        if slot.index == address.index:
+                            operations.append(universal.Operation.Alias(current[index], result))
+                            retained = false
+                        index += 1
+                case Store:
+                    index := 0
+                    for slot in slots:
+                        if slot.index == address.index:
+                            current[index] = value
+                            retained = false
+                        index += 1
+                case _:
+                    pass
+            if retained:
+                operations.append(operation)
+        selected.operations = operations
+        body.blocks[selected.id] = selected
+        terminal ?= selected.terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                for item in current:
+                    edge.arguments.append(item)
+
+
+def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
+    match operation:
+        case Load:
+            return [address]
+        case Store:
+            return [address, value]
+        case Alias:
+            return [value]
+        case FieldAddress:
+            return [object]
+        case Call:
+            return arguments
+        case Unary:
+            return [operand]
+        case Binary:
+            return [left, right]
+        case Assert:
+            return [condition]
+        case _:
+            return []
+
+
+def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
+    match operation:
+        case Allocate:
+            return [result]
+        case Constant:
+            return [result]
+        case Load:
+            return [result]
+        case Alias:
+            return [result]
+        case FieldAddress:
+            return [result]
+        case Call:
+            return [result]
+        case Unary:
+            return [result]
+        case Binary:
+            return [result]
+        case _:
+            return []
+
+
+def dominators(body: universal.CfgBody) -> list[int]:
+    count = int(len(body.blocks))
+    result: list[int] = []
+    for row in range(count):
+        for column in range(count):
+            result.append(1 if row != body.entry or column == body.entry else 0)
+    changed := true
+    while changed:
+        changed = false
+        for index in range(count):
+            if index == body.entry:
+                continue
+            for member in range(count):
+                common := 1
+                found := false
+                for predecessor in range(count):
+                    terminal ?= body.blocks[predecessor].terminator
+                    if terminal != None:
+                        for edge in successors(terminal.exit):
+                            if edge.target == index:
+                                found = true
+                                if result[predecessor * count + member] == 0:
+                                    common = 0
+                if not found:
+                    common = 0
+                if member == index:
+                    common = 1
+                if common != result[index * count + member]:
+                    result[index * count + member] = common
+                    changed = true
+    return result
+
+
+def verify_inputs(values: list[universal.ValueId], available: list[int], span: source.Span) -> bool | diagnostics.Diagnostic:
+    for value in values:
+        if int(value.index) not in available:
+            return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
+    return true
+
+
+def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
+    dominance = dominators(body)
+    count = int(len(body.blocks))
+    for block in body.blocks:
+        available: list[int] = []
+        for parameter in parameters:
+            available.append(int(parameter.index))
+        for predecessor in range(count):
+            if dominance[block.id * count + predecessor] == 1:
+                for parameter in body.blocks[predecessor].parameters:
+                    available.append(int(parameter.index))
+                if predecessor != block.id:
+                    for operation in body.blocks[predecessor].operations:
+                        for result in operation_results(operation):
+                            available.append(int(result.index))
+        terminal ?= block.terminator
+        if terminal != None:
+            for operation in block.operations:
+                verify_inputs(operation_inputs(operation), available, terminal.span)
+                for result in operation_results(operation):
+                    if int(result.index) in available:
+                        return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", terminal.span))
+                    available.append(int(result.index))
+            inputs: list[universal.ValueId] = []
+            match terminal.exit:
+                case Conditional:
+                    inputs.append(condition)
+                case Finish:
+                    returned ?= value
+                    if returned != None:
+                        inputs.append(returned)
+                case _:
+                    pass
+            for edge in successors(terminal.exit):
+                for argument in edge.arguments:
+                    inputs.append(argument)
+            verify_inputs(inputs, available, terminal.span)
+    return true
+
+
+
+def prune_unreachable(body: universal.CfgBody):
+    constants: list[int] = []
+    booleans: list[bool] = []
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Constant:
+                    match value:
+                        case BooleanValue:
+                            constants.append(int(result.index))
+                            booleans.append(value)
+                        case _:
+                            pass
+                case _:
+                    pass
+    for block in body.blocks:
+        terminal ?= block.terminator
+        if terminal != None:
+            match terminal.exit:
+                case Conditional:
+                    index := 0
+                    for constant in constants:
+                        if constant == int(condition.index):
+                            edge = taken if booleans[index] else otherwise
+                            block.terminator = universal.CfgTerminator(universal.CfgExit.Jump(edge), terminal.grammar, terminal.span)
+                            body.blocks[block.id] = block
+                        index += 1
+                case _:
+                    pass
+    reachable = [body.entry]
+    cursor := 0
+    while cursor < len(reachable):
+        terminal ?= body.blocks[reachable[cursor]].terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                if edge.target not in reachable:
+                    reachable.append(edge.target)
+        cursor += 1
+    mapping: list[int] = []
+    next := 0
+    for block in body.blocks:
+        mapping.append(next if block.id in reachable else -1)
+        if block.id in reachable:
+            next += 1
+    retained: list[universal.BasicBlock] = []
+    for block in body.blocks:
+        if block.id not in reachable:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            exit := terminal.exit
+            match terminal.exit:
+                case Jump:
+                    exit = universal.CfgExit.Jump(universal.CfgEdge(mapping[edge.target], edge.arguments))
+                case Conditional:
+                    left = universal.CfgEdge(mapping[taken.target], taken.arguments)
+                    right = universal.CfgEdge(mapping[otherwise.target], otherwise.arguments)
+                    exit = universal.CfgExit.Conditional(condition, left, right)
+                case _:
+                    pass
+            block.terminator = universal.CfgTerminator(exit, terminal.grammar, terminal.span)
+        block.id = mapping[block.id]
+        retained.append(block)
+    body.entry = mapping[body.entry]
+    body.blocks.clear()
+    for block in retained:
+        body.blocks.append(block)

@@ -134,20 +134,6 @@ def lower_block(block: universal.Block, module: universal.Module, types: univers
                 if origin.location != None:
                     location = universal.AssertionLocation(origin.location.file, origin.location.line, origin.location.column, origin.location.expression)
                 operations.append(universal.LoweredAssert(universal.ValueId(condition.index), universal.ValueId(message.index) if message != None else None, location))
-            case If:
-                operations.append(universal.LoweredIf(universal.ValueId(condition.index), lower_block(then_block, module, types, target_spec), lower_block(else_block, module, types, target_spec)))
-            case Match:
-                selected: universal.MatchArm | None = None
-                subject_type = module.values[subject.index].type_id
-                for arm in arms:
-                    if arm.type_id == subject_type or arm.type_id == None:
-                        selected = arm
-                        break
-                if selected == None:
-                    return error(NonExhaustiveMatch(subject_type))
-                nested = lower_block(selected.body, module, types, target_spec)
-                for nested_operation in nested.lowered_operations:
-                    operations.append(nested_operation)
             case CompiledRegionCall:
                 inputs_lir: list[universal.ValueId] = []
                 outputs_lir: list[universal.ValueId] = []

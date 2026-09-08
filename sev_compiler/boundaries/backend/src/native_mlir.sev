@@ -25,7 +25,7 @@ def emit_native(mlir: string, output: string):
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
-    run_tool([opt, output + ".mlir", "--verify-each", "--buffer-deallocation-pipeline=private-function-dynamic-ownership", "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--reconcile-unrealized-casts", "-o", output + ".llvm.mlir"])
+    run_tool([opt, output + ".mlir", "--verify-each", "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership", "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", output + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", output + ".llvm.mlir", "-o", output + ".ll"])
     run_tool([clang, output + ".ll", "-o", output])
 

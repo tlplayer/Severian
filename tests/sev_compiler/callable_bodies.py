@@ -19,9 +19,9 @@ def main():
         run([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), "--verify-each", emitted, "-o", output.with_suffix(".verified.mlir")])
         lowered = output.with_suffix(".llvm.mlir")
         run([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), emitted,
-             "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
+             "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
              "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm",
-             "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm",
+             "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm",
              "--reconcile-unrealized-casts", "-o", lowered])
         llvm = output.with_suffix(".ll")
         run([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), "--mlir-to-llvmir", lowered], output=llvm)

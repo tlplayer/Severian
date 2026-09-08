@@ -99,7 +99,7 @@ class MigrationCase(unittest.TestCase):
                         "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
                         "--convert-bufferization-to-memref", "--convert-scf-to-cf",
                         "--convert-arith-to-llvm", "--convert-cf-to-llvm",
-                        "--finalize-memref-to-llvm", "--convert-func-to-llvm",
+                        "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm",
                         "--reconcile-unrealized-casts", "-o", lowered])
         output = self.succeeds([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"),
                                "--mlir-to-llvmir", lowered])

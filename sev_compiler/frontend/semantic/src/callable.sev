@@ -252,6 +252,9 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
 
 
 def callable_expression(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    path = callable_path(expression)
+    if path == "cfg" or path.starts_with("cfg.") or path == "lower":
+        return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
     result_type := expected
     kind := expression.kind
     match expression.kind:
@@ -373,6 +376,39 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                 return error(callable_diagnostic("conditional expressions require a value", expression.span))
             kind = universal.Conditional(test, then_typed, else_typed)
         case Binary:
+            for definition in state.declarations.traits:
+                if definition.grammar and definition.definition.module == operator.definition.module and definition.definition.declaration.value == operator.definition.declaration.value:
+                    lazy := false
+                    for property in definition.properties:
+                        if property.name == "short_circuit":
+                            supplied ?= property.default
+                            if supplied != None:
+                                match supplied.kind:
+                                    case LiteralValue:
+                                        match value:
+                                            case BooleanValue:
+                                                lazy = value
+                                            case _:
+                                                pass
+                                    case _:
+                                        pass
+                    if lazy:
+                        for method in definition.methods:
+                            if method.name == "semantic":
+                                body ?= method.body
+                                if body != None:
+                                    if len(body.statements) == 1 and len(method.parameters) == 2:
+                                        match body.statements[0]:
+                                            case Return:
+                                                returned ?= value
+                                                if returned != None:
+                                                    expanded = callable_semantic_expression(returned, [method.parameters[0].name, method.parameters[1].name], [left, right])
+                                                    expanded.span = expression.span
+                                                    expanded.grammar = definition.definition
+                                                    return callable_expression(state, expanded, expected)
+                                            case _:
+                                                pass
+                        return error(callable_diagnostic("lazy grammar requires an expression semantic body", expression.span))
             comparison = operators.scalar_comparison(operator.symbol)
             operand_type := universal.TypeId(0) if comparison else expected
             if operand_type.index == 0:
@@ -406,6 +442,8 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
             kind = universal.Binary(operator, lhs, rhs)
         case Call:
             name = callable_path(callee)
+            if name == "lower" or name.starts_with("cfg."):
+                return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
             if name == "mlir":
                 return callable_mlir(state, arguments, expression.span, expected)
             alias_type := universal.TypeId(0)
@@ -518,7 +556,7 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                     state.next_id[0] += 1
                     if expected.index != 0 and result_type.index != expected.index:
                         return error(callable_diagnostic("call result does not match its expected scalar type", expression.span))
-                    return universal.Expression(kind, expression.span, id, result_type)
+                    return universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar)
             for function in state.functions:
                 if function.name == state.namespace + name:
                     return error(callable_diagnostic("no overload accepts these arguments for " + name, expression.span))
@@ -529,7 +567,7 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
         return error(callable_diagnostic("expression does not match its expected scalar type", expression.span))
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
-    return universal.Expression(kind, expression.span, id, result_type)
+    return universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar)
 
 
 def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> universal.Binding | diagnostics.Diagnostic:
@@ -624,16 +662,28 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     returned_value = callable_expression(state, expression_value, result_type)
                 elif result_type.index != 2:
                     return error(callable_diagnostic("scalar function must return a value", span))
-                output.statements.append(universal.Return(returned_value, span))
+                operands: list[universal.Expression] = []
+                actual ?= returned_value
+                if actual != None:
+                    operands.append(actual)
+                output.statements.append(callable_control(state, "Return", operands, [], span, true))
                 returned = true
+            case GrammarApply:
+                resolved_operands: list[universal.Expression] = []
+                for operand in operands:
+                    resolved_operands.append(callable_expression(state, operand, universal.TypeId(0)))
+                resolved_bodies: list[universal.Block] = []
+                for body in bodies:
+                    resolved_bodies.append(callable_block(callable_scope(state), body.statements, result_type, false))
+                output.statements.append(universal.GrammarApply(syntax, resolved_operands, resolved_bodies, span, exits))
             case If:
-                resolved = callable_expression(state, condition, universal.TypeId(1))
+                resolved = callable_truth(state, condition)
                 then_state = callable_scope(state)
                 else_state = callable_scope(state)
                 then_typed = callable_block(then_state, then_block.statements, result_type, false)
                 else_typed = callable_block(else_state, else_block.statements, result_type, false)
-                output.statements.append(universal.If(resolved, then_typed, else_typed, span))
                 returned = callable_terminates(universal.Block([universal.If(resolved, then_typed, else_typed, span)]))
+                output.statements.append(callable_control(state, "If", [resolved], [then_typed, else_typed], span, returned))
             case Match:
                 expanded = matches.expand_match(subject, arms, span)
                 typed = callable_block(state, [expanded], result_type, false)
@@ -649,16 +699,16 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 local = callable_scope(state)
                 local.loop_depth += 1
                 typed = callable_block(local, body.statements, result_type, false)
-                output.statements.append(universal.While(resolved, typed, span))
+                output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("break outside a loop", span))
-                output.statements.append(statement)
+                output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
             case Continue:
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
-                output.statements.append(statement)
+                output.statements.append(callable_control(state, "Continue", [], [], span, true))
                 returned = true
             case _:
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
@@ -666,7 +716,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
     if complete and not returned:
         if result_type.index != 2:
             return error(callable_diagnostic("scalar function can reach its end without returning a value", None))
-        output.statements.append(universal.Return(None, source.Span(source.SourceId(0), 0, 0)))
+        output.statements.append(callable_control(state, "Return", [], [], source.Span(source.SourceId(0), 0, 0), true))
     return output
 
 
@@ -675,6 +725,8 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
         return error(callable_diagnostic("generic or decorated functions are outside the scalar bootstrap subset", declaration.span))
     operation = boundary.scalar_boundary(declaration, "mlir")
     symbol = boundary.scalar_boundary(declaration, "c")
+    if operation in ["cf.br", "cf.cond_br", "cf.switch", "func.return", "llvm.unreachable"]:
+        return error(callable_diagnostic("CFG terminators require a compiler context and grammar capability", declaration.span))
     if len(declaration.decorators) != 0:
         if len(declaration.decorators) != 1 or (operation == "" and symbol == ""):
             return error(callable_diagnostic("unsupported scalar boundary annotation", declaration.span))
@@ -1018,6 +1070,11 @@ def callable_terminates(block: universal.Block) -> bool:
                 return true
             case Continue:
                 return true
+            case GrammarApply:
+                if exits:
+                    return true
+                if len(bodies) == 2 and callable_terminates(bodies[0]) and callable_terminates(bodies[1]):
+                    return true
             case If:
                 match condition.kind:
                     case LiteralValue:
@@ -1108,7 +1165,7 @@ def callable_range(state: CallableAnalysis, name: string, iterable: universal.Ex
     local = callable_scope(state)
     local.loop_depth += 1
     loop_body = callable_block(local, statements, result_type, false)
-    output.statements.append(universal.While(callable_expression(state, condition, universal.TypeId(1)), loop_body, span))
+    output.statements.append(callable_control(state, "While", [callable_expression(state, condition, universal.TypeId(1))], [loop_body], span))
     return output
 
 
@@ -1670,3 +1727,46 @@ def callable_required_property(state: CallableAnalysis, receiver: universal.Expr
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
     return universal.Expression(universal.RequiredMember(receiver, requirement, name), span, id, result_type)
+
+
+
+def callable_truth(state: CallableAnalysis, expression: universal.Expression) -> universal.Expression | diagnostics.Diagnostic:
+    value = callable_expression(state, expression, universal.TypeId(0))
+    if value.type_id.index == 1:
+        return value
+    implementation = callable_operator(state, "if", [value.type_id], expression.span)
+    function ?= implementation.function
+    if function != None:
+        return callable_resolved_operator(state, function, [value], expression.span, universal.TypeId(1))
+    return error(callable_diagnostic("condition requires a truth protocol returning bool", expression.span))
+
+
+
+def callable_control(state: CallableAnalysis, name: string, operands: list[universal.Expression], bodies: list[universal.Block], span: source.Span, exits: bool = false) -> universal.Statement | diagnostics.Diagnostic:
+    definition ?= definitions.trait_named(state.declarations, name, "")
+    if definition != None:
+        if definition.grammar:
+            syntax = universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None, definition=definition.definition, grammar_name=definition.name)
+            return universal.GrammarApply(syntax, operands, bodies, span, exits)
+    return error(callable_diagnostic("missing source control grammar " + name, span))
+
+
+
+def callable_semantic_expression(expression: universal.Expression, names: list[string], operands: list[universal.Expression]) -> universal.Expression | diagnostics.Diagnostic:
+    match expression.kind:
+        case Name:
+            index := 0
+            for parameter in names:
+                if parameter == name:
+                    return operands[index]
+                index += 1
+        case LiteralValue:
+            return expression
+        case Conditional:
+            test = callable_semantic_expression(condition, names, operands)
+            taken = callable_semantic_expression(then_value, names, operands)
+            otherwise = callable_semantic_expression(else_value, names, operands)
+            return universal.Expression(universal.Conditional(test, taken,otherwise), expression.span)
+        case _:
+            pass
+    return error(callable_diagnostic("unsupported lazy semantic expression", expression.span))

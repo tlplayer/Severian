@@ -1,0 +1,22 @@
+import source
+import "../id/compiler.sev"
+
+
+class CfgEdge:
+    target: int
+    arguments: list[ValueId] = []
+
+
+enum CfgExit:
+    Jump(edge: CfgEdge)
+    Conditional(condition: ValueId, taken: CfgEdge, otherwise: CfgEdge)
+    Finish(value: ValueId | None)
+    Dead
+
+
+class CfgTerminator:
+    exit: CfgExit
+    grammar: DefId
+    span: source.Span
+
+
