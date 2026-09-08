@@ -9,6 +9,7 @@ import modules
 import ownership
 import parser
 import semantic
+import "../../../../frontend/semantic/src/definitions.sev" as semantic_definitions
 import source
 import target
 import universal
@@ -51,7 +52,7 @@ class Compiler:
     def analyze_source(source_file: source.SourceFile) -> universal.Program | CompileError:
         tokens = lexer.scan(source_file)
         module = parser.parse(tokens)
-        program = semantic.analyze(module, context.types)
+        program = semantic.analyze(module)
         ownership.validate(program)
         return program
 
@@ -61,7 +62,7 @@ class Compiler:
         for resolved in graph.modules:
             program = semantic.analyze_with_context(
                 resolved,
-                context.types,
+                semantic_definitions.SemanticDefinitions(),
                 semantic.AnalysisContext(semantic.Build, resolved.path),
             )
             for module in program.modules:

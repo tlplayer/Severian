@@ -1,0 +1,58 @@
+import source
+import "../declaration/function.sev"
+import "../operator/syntax.sev"
+
+
+trait G:
+    pass
+
+
+enum GrammarPrimitive:
+    LowerExpression
+    LowerBody
+    ApplyOperator
+    NewBlock
+    NewMerge
+    AtBlock
+    BranchBlocks
+    JumpBlock
+    FallthroughBlock
+    ReturnValue
+    UnreachablePath
+    BeginLoop
+    EndLoop
+    LoopHeader
+    LoopExit
+    BlockParameter
+    BooleanConstant
+    FinishGrammar
+
+
+enum GrammarSlotKind:
+    SourceExpression
+    SourceBody
+    RuntimeValue
+    BlockHandle
+    NoValue
+
+
+class GrammarInstruction:
+    primitive: GrammarPrimitive
+    arguments: list[int]
+    result: int
+    span: source.Span
+    boolean: bool = false
+
+
+class GrammarDeclaration:
+    name: string
+    parameters: list[FunctionParameter]
+    body: Block
+    span: source.Span
+    syntax: OperatorSyntax | None = None
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    program: list[GrammarInstruction] = []
+    slots: list[GrammarSlotKind] = []
+    protocols: list[string] = []
+    lookup: string = ""
+    result: TypeAnnotation | None = None

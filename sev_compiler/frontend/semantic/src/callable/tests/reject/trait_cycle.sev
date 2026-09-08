@@ -1,0 +1,2 @@
+trait First: Second
+trait Second: First

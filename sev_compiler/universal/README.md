@@ -98,3 +98,4 @@ K  Kind
 Y  Symbol
 N  Node
 X  Any compiler term ex: X: E | S | D | P | T...
+G Grammer Compiler CFG/bare metal ops/building

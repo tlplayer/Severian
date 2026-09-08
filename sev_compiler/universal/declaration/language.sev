@@ -60,6 +60,7 @@ class PropertyDeclaration:
     annotation: TypeAnnotation
     default: Expression | None
     span: source.Span
+    definition: DefId = DefId(0, 0, DeclarationId(0))
 
 
 class OperatorParameter:
@@ -73,6 +74,11 @@ class OperatorDeclaration:
     parameters: list[OperatorParameter]
     result: TypeAnnotation
     span: source.Span
+    type_parameters: list[string] = []
+    constraints: list[GenericConstraint] = []
+    body: Block | None = None
+    receiver: bool = true
+    definition: DefId = DefId(0, 0, DeclarationId(0))
 
 
 class TraitDeclaration:
@@ -87,6 +93,7 @@ class TraitDeclaration:
     methods: list[FunctionDeclaration] = []
     definition: DefId = DefId(0, 0, DeclarationId(0))
     lookup: string = ""
+    compiler_descriptor: bool = false
 
 
 enum CompilerExpectation:

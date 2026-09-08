@@ -1,3 +1,11 @@
+import "../id/compiler.sev"
+
+
+enum OperatorDomain:
+    ValueOperator
+    GrammarOperator
+
+
 enum Fixity:
     Prefix
     Infix
@@ -17,3 +25,7 @@ class OperatorSyntax:
     fixity: Fixity
     precedence: u8
     associativity: Associativity
+    domain: OperatorDomain = ValueOperator
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    grammar_name: string = ""
+    grammar_form: string = ""

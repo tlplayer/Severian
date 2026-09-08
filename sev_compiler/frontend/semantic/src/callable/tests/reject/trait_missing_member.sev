@@ -1,0 +1,5 @@
+trait Measured:
+    def measure() -> int
+
+class Box: Measured:
+    amount: int

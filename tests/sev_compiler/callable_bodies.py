@@ -27,7 +27,7 @@ def main():
         run([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), "--mlir-to-llvmir", lowered], output=llvm)
         run([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", output])
         actual = run([output])
-        expected = {"receivers": "r21r3receivers complete\n", "01_semantic_match": ""}.get(subject.stem, subject.stem + " complete\n")
+        expected = {"receivers": "r21r3receivers complete\n", "01_semantic_match": "", "02_trait_operator_resolution": ""}.get(subject.stem, subject.stem + " complete\n")
         assert actual.stdout == expected, repr(actual.stdout)
         if os.environ.get("SEVERIAN_SANITIZE") == "1":
             sanitized = output.with_name(output.name + "_asan")
@@ -38,6 +38,15 @@ def main():
 
     if not os.environ.get("SEVERIAN_CASE"):
         for name, diagnostic in {
+            "trait_duplicate_operator": "ambiguous operator implementation",
+            "trait_unknown": "unknown trait Missing",
+            "generic_conflict": "conflicting generic type arguments",
+            "trait_unsatisfied": "type does not satisfy trait Addable",
+            "trait_method_is_not_operator": "generic operator use requires an explicit trait capability",
+            "trait_missing_member": "class does not satisfy trait Measured",
+            "trait_wrong_result": "class does not satisfy trait Addable",
+            "trait_cycle": "cyclic trait inheritance",
+            "type_alias_cycle": "cyclic type alias",
             "owned_fields": "record string fields require aggregate ownership lowering",
             "recursive_records": "recursive value record requires indirection",
             "match_after_wildcard": "match arm after wildcard is unreachable",

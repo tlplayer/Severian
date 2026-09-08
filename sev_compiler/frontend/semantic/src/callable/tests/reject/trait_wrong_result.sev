@@ -1,0 +1,7 @@
+trait Addable:
+    operator +(other: Self) -> Self
+
+class Box: Addable:
+    amount: int
+    operator +(other: Self) -> int:
+        return amount + other.amount

@@ -10,6 +10,7 @@ class Expression:
     span: source.Span
     id: HirId = HirId(0)
     type_id: TypeId = TypeId(0)
+    grammar: DefId | None = None
 
 
 class CallArgument:
@@ -42,6 +43,7 @@ enum ExpressionKind:
     TypeName(value: Expression, name: string)
     RecordValue(fields: list[CallArgument])
     FieldReference(object: Expression, index: int)
+    RequiredMember(object: Expression, requirement: DefId, name: string)
 
 
 def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:

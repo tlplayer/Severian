@@ -6,6 +6,7 @@ import "../expression/expression.sev"
 import "../statement/statement.sev"
 import "../cfg/cfg.sev"
 import "../value/lowered.sev"
+import "../grammar/grammar.sev"
 
 
 enum Item:
@@ -17,6 +18,8 @@ enum Item:
     Type(declaration: TypeDeclaration)
     Record(declaration: RecordDeclaration)
     Test(declaration: TestDeclaration)
+    OperatorItem(declaration: OperatorDeclaration)
+    GrammarItem(declaration: GrammarDeclaration)
 
 
 class Module:
@@ -30,6 +33,7 @@ class Module:
     initializer: Block = Block([], [], [])
     initializer_cfg: CfgBody | None = None
     functions: list[FunctionDeclaration] = []
+    generic_functions: list[FunctionDeclaration] = []
     entry: FunctionId | None = None
     tests: list[TestDeclaration] = []
     types: list[TypeDeclaration] = []
@@ -38,6 +42,7 @@ class Module:
     records: list[RecordDeclaration] = []
     traits: list[TraitDeclaration] = []
     binding_values: list[tuple[BindingId, ValueId]] = []
+    grammars: list[GrammarDeclaration] = []
 
 
 class Program:

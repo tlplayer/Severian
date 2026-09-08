@@ -76,3 +76,117 @@ test "parsed match produces typed HIR for all arms":
             returns = resolved_block(body)
             if function.name == "classify":
                 assert(returns == 3)
+
+
+test "trait parser retains operators members and generic signatures":
+    input = source.SourceFile(source.SourceId(0), "traits.sev", "trait Arithmetic:\n    operator +(right: Self) -> Self\n    operator <<[LeftShift: Y, N: int](right: N) -> Self\n    operator +=(right: Self)\n    def measure() -> int\n\ntrait Derived: Arithmetic\n\nclass Number: Arithmetic:\n    amount: int\n    operator +(right: Self) -> Self:\n        return Number(amount + right.amount)\n")
+    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    assert(len(ast.items) == 3)
+    match ast.items[0]:
+        case Trait:
+            assert(len(declaration.operators) == 3)
+            assert(len(declaration.methods) == 1)
+            assert(declaration.operators[0].syntax.symbol == "+")
+            assert(declaration.operators[0].receiver)
+            assert(declaration.operators[0].body == None)
+            assert(len(declaration.operators[1].type_parameters) == 2)
+            assert(len(declaration.operators[1].constraints) == 2)
+            assert(declaration.operators[2].syntax.symbol == "+=")
+        case _:
+            assert(false)
+    match ast.items[2]:
+        case Record:
+            assert(len(declaration.traits) == 1)
+            assert(declaration.operators[0].body != None)
+        case _:
+            assert(false)
+
+
+test "generic HIR retains required operator and concrete implementation identities":
+    input = source.SourceFile(source.SourceId(0), "resolution.sev", "trait Addable:\n    operator +(other: Self) -> Self\n\nextend int:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addi, self, other)\n\nextend float:\n    operator +(other: Self) -> Self:\n        return mlir(arith.addf, self, other)\n\ndef twice[T: Addable](value: T) -> T:\n    return value + value\n\ntest:\n    assert(twice(21) == 42)\n    assert(twice(2.5) == 5.0)\n")
+    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    hir = semantic.analyze_callables(ast, true)
+    assert(len(hir.traits) == 1)
+    assert(len(hir.generic_functions) == 1)
+    requirement = hir.traits[0].operators[0].definition
+    assert(requirement.declaration.value != 0)
+    generic_body ?= hir.generic_functions[0].body
+    if generic_body != None:
+        match generic_body.statements[0]:
+            case Return:
+                returned ?= value
+                if returned != None:
+                    match returned.kind:
+                        case ResolvedCall:
+                            match callee:
+                                case Direct:
+                                    assert(function.module == requirement.module)
+                                    assert(function.declaration.value == requirement.declaration.value)
+                                case _:
+                                    assert(false)
+                        case _:
+                            assert(false)
+            case _:
+                assert(false)
+    else:
+        assert(false)
+    instances := 0
+    for function in hir.functions:
+        origin ?= function.template
+        if origin != None:
+            instances += 1
+            assert(len(function.type_arguments) == 1)
+            assert(function.result_type.index == function.type_arguments[0].type_id.index)
+            assert(function.result_type.index == 64 or function.result_type.index == 164)
+            body ?= function.body
+            if body != None:
+                match body.statements[0]:
+                    case Return:
+                        returned ?= value
+                        if returned != None:
+                            assert(returned.type_id.index == function.result_type.index)
+                            match returned.kind:
+                                case ResolvedCall:
+                                    # A concrete function identity replaces the
+                                    # trait's requirement identity before MIR.
+                                    match callee:
+                                        case Direct:
+                                            assert(function.module == 0)
+                                            assert(function.declaration.value != 0)
+                                        case _:
+                                            assert(false)
+                                case _:
+                                    assert(false)
+                    case _:
+                        assert(false)
+    assert(instances == 2)
+
+
+import "../lib.sev" as package_analysis
+
+
+test "package and executable entries share type and member registration":
+    input = source.SourceFile(source.SourceId(0), "package.sev", "type Count = int\nclass Box:\n    amount: Count\n    def get() -> Count:\n        return amount\n\ndef read(value: Box) -> Count:\n    return value.get()\n\ntest:\n    assert(read(Box(42)) == 42)\n")
+    ast = parser.parser_module(parser.Parser(lexer.scan(input)))
+    program = package_analysis.analyze_tests(ast)
+    assert(len(program.modules) == 1)
+    hir = program.modules[0]
+    assert(hir.types[0].id.index == 64)
+    assert(hir.records[0].type_id.index >= 1000)
+    assert(hir.records[0].definition.declaration.value != 0)
+    assert(len(hir.tests) == 1)
+    assert(len(hir.functions) == 3)
+
+
+test "callable specialization metadata survives list storage":
+    function = universal.FunctionDeclaration()
+    function.id = universal.FunctionId(449)
+    function.template = universal.DefId(0, 1, universal.DeclarationId(7))
+    function.type_arguments = [universal.TypeBinding(universal.GenericParamId(0), universal.TypeId(64))]
+    functions: list[universal.FunctionDeclaration] = []
+    functions.append(function)
+    stored = functions[0]
+    assert(stored.id.value == 449)
+    assert(len(stored.type_arguments) == 1)
+    assert(stored.type_arguments[0].type_id.index == 64)
+    assert(stored.template != None)

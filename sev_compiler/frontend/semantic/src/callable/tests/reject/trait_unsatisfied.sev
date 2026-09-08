@@ -1,0 +1,7 @@
+trait Addable:
+    operator +(other: Self) -> Self
+
+def twice[T: Addable](value: T) -> T:
+    return value + value
+
+assert(twice(true))

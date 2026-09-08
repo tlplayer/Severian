@@ -1,0 +1,7 @@
+trait Addable:
+    operator +(other: Self) -> Self
+
+def add[T: Addable](left: T, right: T) -> T:
+    return left + right
+
+assert(add(1, 2.0) == 3.0)

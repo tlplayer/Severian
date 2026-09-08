@@ -1,0 +1,26 @@
+trait Addable:
+    operator +(right: Self) -> Self
+
+class First:
+    amount: int
+
+class Second:
+    amount: int
+
+union Boxes:
+    First
+    Second
+
+class Boxes: Addable:
+    operator +(right: Boxes) -> Boxes:
+        return Self(amount + right.amount)
+
+type Alias = First
+
+def twice[T: Addable](value: T) -> T:
+    return value + value
+
+test "family behavior specializes for each declared member":
+    assert(twice(Alias(4)).amount == 8)
+    assert(twice(Second(5)).amount == 10)
+    print("families complete")

@@ -31,6 +31,11 @@ complete bodies. `transforms/mir/src/callable.sev` lowers calls and storage
 operations. `transforms/mlir/src/emit/callable.sev` uses the typed
 `MlirProgram` builder. Structural validation precedes terminal text printing.
 
+The target symbol/operator/grammar separation and exclusive grammar capability
+for CFG construction are specified in [GRAMMAR.md](GRAMMAR.md). The executable
+path still uses structured MIR; source grammar execution and CFG capability
+enforcement remain a separate migration.
+
 Supported input consists of integer/boolean bindings, signed `i8`, `i16`,
 `i32`, `i64` types (`int` defaults to `i64`), parentheses, unary `+`/`-`/`not`,
 binary `+`/`-`/`*`, integer comparisons, Boolean equality, and `assert(condition)`.
@@ -104,8 +109,8 @@ Unsupported declarations and expressions produce diagnostics. General
 collections, generic classes, fallible/enum values, nonliteral parameter
 defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
 outside this slice. Record string fields require aggregate ownership lowering
-and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver and
-generic semantic pipeline remain separate unfinished work.
+and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver remains unfinished; its semantic entry now delegates to the
+same declaration registration and callable analysis used by this executable.
 
 CLI lexer, parser, and semantic diagnostics retain their source file identity
 through imports and print their code, filename, line, column, source line, and
@@ -249,11 +254,48 @@ Every row above emits verified MLIR and runs natively. Build rows have their
 exact output checked by the acceptance runner; their integration-test blocks
 are not executed by the bootstrap test runner.
 
-Before adding further language or library surface, close the remaining generic
-pipeline gaps. Its statement and expression dispatch now diagnose unsupported
-constructs explicitly and retain lowered children. Generic loop/storage/member
-resolution, conditional type unification, and test body lowering still need
-implementation. This is separate from the executable callable path above.
+Trait requirements use explicit source operators:
+
+```sev
+trait Addable:
+    operator +(other: Self) -> Self
+
+def twice[T: Addable](value: T) -> T:
+    return value + value
+```
+
+A method named `add` does not implicitly declare `+`. Trait methods, properties,
+and inherited contracts are checked against registered members and operator
+signatures. Concrete classes and `extend` declarations supply operator bodies;
+`Self` resolves to the receiver type. Type aliases resolve before field/function
+signatures, and closed `union` families can share behavior through a class or
+extension declaration. Duplicate implementations, cyclic aliases/inheritance,
+missing members, incompatible results, and unsatisfied constraints are errors.
+
+The executable and `analyze_with_package_functions()` share
+[`definitions.sev`](frontend/semantic/src/definitions.sev) and callable body
+analysis. The package entry takes `SemanticDefinitions` as its environment,
+replacing the disconnected `TypeContext` prototype. Generic bodies are checked
+with symbolic parameters before calls are specialized. `Module.generic_functions`
+retains that HIR, including references to trait operator definitions; concrete
+instances retain their template identity and ordered type bindings; resolved calls
+carry those bindings as a `Substitution`. Their
+operator calls refer to concrete implementation definitions before MIR lowering.
+
+[`numeric/operators.sev`](universal/primitive/numeric/operators.sev) supplies
+source arithmetic implementations for the currently supported integer storage
+classes and `float`. Its `mlir(arith.addi, self, right)` / `mlir(arith.addf, self,
+right)` bodies become typed MLIR bindings through ordinary callable lowering.
+Constraint checking does not recognize numeric types or conventional method
+names. The existing scalar table remains the fallback for operations not yet
+migrated to source implementations.
+
+This is not yet the whole primitive library: the complete `int.sev` and
+`float.sev` still need conversion graphs, metadata evaluation, additional storage
+types, and richer MLIR attributes. Generic class layouts, generic trait/operator
+arguments, and predicate constraints remain unsupported. The parser retains
+operator generic parameters and bodies so these constructs cannot be mistaken
+for an empty trait contract.
 
 ```sh
 sev_compiler test --emit mlir \
@@ -314,7 +356,8 @@ Artifacts are retained in `target/acceptance` beneath this package.
 The shared structural type/interner/inference port lives in
 `universal/type/system.sev`, following Rust's `universal/src/type_system.rs`.
 Substitution bindings now carry `GenericParamId` and `TypeId` explicitly.
-The structural port is not connected to the compiler entry yet. The seed now
+The structural interner is not connected to the compiler entry yet; executable
+generics currently use the shared scalar/record identities and declaration environment. The seed now
 lowers instance method bodies through ordinary callable/HIR bodies, with
 receiver storage preserved across calls. Seed regressions live in
 [`method_bodies.rs`](../rust_compiler/boundaries/driver/tests/method_bodies.rs).
@@ -325,6 +368,11 @@ Set `SEVERIAN_SANITIZE=1` to check the emitted binaries with sanitizers.
 The adjacent structural type tests reach ownership checking but still fail
 on a moved value. Full bootstrap acceptance is not green: numeric macro
 conversion tests still report an expected scalar type mismatch.
-The existing scalar/macro path remains present during migration and is not a
-completed generic compiler implementation. Numeric-only macro enumeration is
+The callable suite also contains an existing nested-control-flow fixture using
+unsupported `//`; its expected totals assume an even-number test. The remaining
+callable cases, explicit trait/operator specializations, and rejection cases
+pass through the source compiler.
+The scalar/macro path remains present during migration; generic functions now
+use source trait requirements, while the broader compiler-term generic system
+is still incomplete. Numeric-only macro enumeration is
 not the final family/constraint design.

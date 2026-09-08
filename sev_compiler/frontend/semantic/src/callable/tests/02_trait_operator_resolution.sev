@@ -1,0 +1,11 @@
+trait Addable:
+    operator +(other: Self) -> Self
+
+
+def twice[T: Addable](value: T) -> T:
+    return value + value
+
+
+test "trait constraint resolves operator":
+    assert(twice(21) == 42)
+    assert(twice(2.5) == 5.0)

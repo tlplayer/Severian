@@ -1,0 +1,48 @@
+type Amount = int
+type Later = Amount
+
+trait Addable:
+    operator +(other: Self) -> Self
+
+trait Measured:
+    def measure() -> int
+
+trait Value: Addable + Measured:
+    property amount: int
+
+class Box: Value:
+    amount: Later
+
+    operator +(other: Self) -> Self:
+        return Box(amount + other.amount)
+
+    def measure() -> int:
+        return amount
+
+
+def twice[T: Addable](value: T) -> T:
+    temporary: T = value
+    return temporary + temporary
+
+
+def forward[T: Addable](value: T) -> T:
+    return twice(value)
+
+
+def measured[T: Measured](value: T) -> int:
+    return value.measure()
+
+
+def amount[T: Value](value: T) -> int:
+    return value.amount
+
+
+test "source implementations, aliases, members and specializations":
+    assert(twice(Box(21)).amount == 42)
+    assert(forward(Box(12)).amount == 24)
+    assert(measured(Box(9)) == 9)
+    assert(amount(Box(11)) == 11)
+    small: i8 = 7
+    assert(twice(small) == 14)
+    assert(twice(2.5) == 5.0)
+    print("traits complete")

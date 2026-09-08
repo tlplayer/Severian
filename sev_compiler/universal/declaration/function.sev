@@ -76,6 +76,11 @@ class FunctionDeclaration:
     constrained: bool = false
     constraints_supported: bool = true
     lookup: string | None = None
+    operator_syntax: OperatorSyntax | None = None
+    owner_type: TypeId = TypeId(0)
+    template: DefId | None = None
+    type_arguments: list[TypeBinding] = []
+    # The seed record/list ABI requires this optional recursive payload last.
     cfg: CfgBody | None = None
 
 
@@ -108,3 +113,7 @@ class RecordDeclaration:
     lookup: string = ""
     traits: list[TypeAnnotation] = []
     definition: DefId = DefId(0, 0, DeclarationId(0))
+    operators: list[OperatorDeclaration] = []
+    type_parameters: list[string] = []
+    constraints: list[GenericConstraint] = []
+    extension: bool = false

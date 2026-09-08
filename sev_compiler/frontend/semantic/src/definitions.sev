@@ -1,0 +1,230 @@
+import diagnostics
+import source
+import universal
+import "../../../universal/type/scalar.sev" as scalar
+
+
+# Shared declaration environment. AST declarations survive with resolved
+# identities; callable analysis and the package entry use the same environment.
+class SemanticDefinitions:
+    aliases: list[universal.TypeDeclaration] = []
+    traits: list[universal.TraitDeclaration] = []
+    implementations: list[universal.RecordDeclaration] = []
+    symbol_descriptors: list[universal.TraitDeclaration] = []
+
+
+def definition_id(name: string, ordinal: int) -> universal.DefId:
+    # Keep declaration identities disjoint from executable function ordinals.
+    return universal.DefId(0, 1, universal.DeclarationId(u128(ordinal + 1)))
+
+
+def trait_named(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.TraitDeclaration | None:
+    for declaration in definitions.traits:
+        if declaration.name == namespace + name:
+            return declaration
+    for declaration in definitions.traits:
+        if declaration.name == name:
+            return declaration
+    return None
+
+
+def alias_named(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.TypeDeclaration | None:
+    for declaration in definitions.aliases:
+        if declaration.name == namespace + name:
+            return declaration
+    for declaration in definitions.aliases:
+        if declaration.name == name:
+            return declaration
+    return None
+
+
+def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Named:
+            if len(arguments) != 0:
+                return error(diagnostics.diagnostic_at("E000205", "type arguments require a generic type declaration", annotation.span))
+            alias ?= alias_named(definitions, name, namespace)
+            if alias != None:
+                if alias.name in active:
+                    return error(diagnostics.diagnostic_at("E000205", "cyclic type alias " + alias.name, annotation.span))
+                if alias.id.index != 0:
+                    return alias.id
+                target ?= alias.definition
+                if target != None:
+                    match target.kind:
+                        case Union:
+                            # Family values still require a concrete member.
+                            return error(diagnostics.diagnostic_at("E000205", "family requires a concrete member: " + alias.name, annotation.span))
+                        case _:
+                            path = active[:]
+                            path.append(alias.name)
+                            return type_annotation(definitions, target, records, alias.lookup, path)
+            for record in records:
+                if record.name == namespace + name:
+                    return record.type_id
+            for record in records:
+                if record.name == name:
+                    return record.type_id
+            known ?= scalar.scalar_type_name(name)
+            if known != None:
+                return known
+            return error(diagnostics.diagnostic_at("E000205", "unknown type " + name, annotation.span))
+        case _:
+            return error(diagnostics.diagnostic_at("E000205", "a value requires one concrete type", annotation.span))
+
+
+def type_name(type_id: universal.TypeId, records: list[universal.RecordDeclaration]) -> string:
+    known ?= scalar.scalar_type(type_id)
+    if known != None:
+        return known.name
+    for record in records:
+        if record.type_id.index == type_id.index:
+            return record.name
+    return "$parameter$" + string(type_id.index)
+
+
+def replace_annotation(annotation: universal.TypeAnnotation, names: list[string], replacements: list[universal.TypeAnnotation]) -> universal.TypeAnnotation:
+    match annotation.kind:
+        case Named:
+            index := 0
+            for parameter in names:
+                if name == parameter and len(arguments) == 0:
+                    return replacements[index]
+                index += 1
+            replaced: list[universal.TypeAnnotation] = []
+            for argument in arguments:
+                replaced.append(replace_annotation(argument, names, replacements))
+            return universal.named_type(name, replaced, annotation.span)
+        case Union:
+            replaced: list[universal.TypeAnnotation] = []
+            for member in members:
+                replaced.append(replace_annotation(member, names, replacements))
+            return universal.TypeAnnotation(universal.Union(replaced), annotation.span)
+
+
+def inherited_traits(definitions: SemanticDefinitions, declaration: universal.TraitDeclaration, active: list[string] = []) -> list[universal.TraitDeclaration] | diagnostics.Diagnostic:
+    if declaration.name in active:
+        return error(diagnostics.diagnostic_at("E000212", "cyclic trait inheritance " + declaration.name, declaration.span))
+    result = [declaration]
+    path = active[:]
+    path.append(declaration.name)
+    for base in declaration.bases:
+        name ?= universal.simple_type_name(base)
+        if name == None:
+            return error(diagnostics.diagnostic_at("E000212", "trait base must name a registered trait", base.span))
+        if name != None:
+            parent ?= trait_named(definitions, name, declaration.lookup)
+            if parent == None:
+                return error(diagnostics.diagnostic_at("E000212", "unknown trait " + name, base.span))
+            if parent != None:
+                for inherited in inherited_traits(definitions, parent, path):
+                    found := false
+                    for previous in result:
+                        if previous.name == inherited.name:
+                            found = true
+                    if not found:
+                        result.append(inherited)
+    return result
+
+
+def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions()) -> SemanticDefinitions | diagnostics.Diagnostic:
+    definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:])
+    names: list[string] = []
+    ordinal := 0
+    for item in module.items:
+        match item:
+            case Trait:
+                if declaration.compiler_descriptor:
+                    definitions.symbol_descriptors.append(declaration)
+                    continue
+                trait_declaration := declaration
+                if trait_declaration.name in names:
+                    return error(diagnostics.diagnostic_at("E000212", "duplicate declaration " + trait_declaration.name, trait_declaration.span))
+                names.append(trait_declaration.name)
+                trait_declaration.definition = definition_id(trait_declaration.name, ordinal)
+                ordinal += 1
+                if len(trait_declaration.type_parameters) != 0 or len(trait_declaration.constraints) != 0:
+                    return error(diagnostics.diagnostic_at("E000212", "generic trait declarations require trait argument substitution", trait_declaration.span))
+                resolved_methods: list[universal.FunctionDeclaration] = []
+                resolved_operators: list[universal.OperatorDeclaration] = []
+                resolved_properties: list[universal.PropertyDeclaration] = []
+                for property in trait_declaration.properties:
+                    property.definition = definition_id(property.name, ordinal)
+                    ordinal += 1
+                    resolved_properties.append(property)
+                for method in trait_declaration.methods:
+                    method.definition = definition_id(method.name, ordinal)
+                    resolved_methods.append(method)
+                    ordinal += 1
+                for operation in trait_declaration.operators:
+                    operation.definition = definition_id(operation.syntax.symbol, ordinal)
+                    resolved_operators.append(operation)
+                    ordinal += 1
+                trait_declaration.properties = resolved_properties
+                trait_declaration.methods = resolved_methods
+                trait_declaration.operators = resolved_operators
+                definitions.traits.append(trait_declaration)
+            case Type:
+                if declaration.name in names:
+                    return error(diagnostics.diagnostic_at("E000205", "duplicate declaration " + declaration.name, declaration.span))
+                names.append(declaration.name)
+                if len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0 or declaration.definition == None:
+                    return error(diagnostics.diagnostic_at("E000205", "type declaration requires a concrete alias or closed family", declaration.span))
+                definitions.aliases.append(declaration)
+            case Record:
+                definitions.implementations.append(declaration)
+                if not declaration.extension:
+                    if declaration.name in names:
+                        # A family behavior declaration can share its family's name.
+                        family ?= alias_named(definitions, declaration.name, "")
+                        if family == None:
+                            return error(diagnostics.diagnostic_at("E000205", "duplicate declaration " + declaration.name, declaration.span))
+                    else:
+                        names.append(declaration.name)
+                ordinal += 1
+            case _:
+                pass
+    for declaration in definitions.traits:
+        inherited_traits(definitions, declaration)
+        member_names: list[string] = []
+        for method in declaration.methods:
+            if method.name in member_names:
+                return error(diagnostics.diagnostic_at("E000212", "duplicate trait member " + method.name, declaration.span))
+            member_names.append(method.name)
+        symbols: list[string] = []
+        for operation in declaration.operators:
+            key = operation.syntax.symbol + string(len(operation.parameters)) + string(operation.receiver)
+            if key in symbols:
+                return error(diagnostics.diagnostic_at("E000212", "duplicate trait operator " + operation.syntax.symbol, operation.span))
+            symbols.append(key)
+    module.traits = definitions.traits
+    module.types = definitions.aliases
+    return definitions
+
+
+def family_members(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> list[universal.TypeId] | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Union:
+            result: list[universal.TypeId] = []
+            for member in members:
+                for concrete in family_members(definitions, member, records, namespace, active):
+                    duplicate := false
+                    for previous in result:
+                        if previous.index == concrete.index:
+                            duplicate = true
+                    if not duplicate:
+                        result.append(concrete)
+            if len(result) == 0:
+                return error(diagnostics.diagnostic_at("E000205", "empty type family", annotation.span))
+            return result
+        case Named:
+            alias ?= alias_named(definitions, name, namespace)
+            if alias != None:
+                if alias.name in active:
+                    return error(diagnostics.diagnostic_at("E000205", "cyclic type family " + alias.name, annotation.span))
+                target ?= alias.definition
+                if target != None:
+                    path = active[:]
+                    path.append(alias.name)
+                    return family_members(definitions, target, records, alias.lookup, path)
+    return [type_annotation(definitions, annotation, records, namespace)]

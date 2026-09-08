@@ -1,0 +1,33 @@
+# Executable primitive operator definitions for the currently supported storage
+# types. These use the same operator/MLIR source contract as int.sev and float.sev.
+# Family membership is source data; generic constraint resolution has no numeric
+# type list and no method-name convention.
+union NativeInteger:
+    i8
+    i16
+    i32
+    i64
+    u8
+
+extend NativeInteger:
+    operator +(right: Self) -> Self:
+        return mlir(arith.addi, self, right)
+
+    operator -(right: Self) -> Self:
+        return mlir(arith.subi, self, right)
+
+    operator *(right: Self) -> Self:
+        return mlir(arith.muli, self, right)
+
+extend float:
+    operator +(right: Self) -> Self:
+        return mlir(arith.addf, self, right)
+
+    operator -(right: Self) -> Self:
+        return mlir(arith.subf, self, right)
+
+    operator *(right: Self) -> Self:
+        return mlir(arith.mulf, self, right)
+
+    operator /(right: Self) -> Self:
+        return mlir(arith.divf, self, right)

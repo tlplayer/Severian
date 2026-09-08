@@ -31,7 +31,7 @@ def main():
     directory = ARTIFACTS / "diagnostics"
     directory.mkdir(parents=True, exist_ok=True)
     check(compiler, directory, "syntax",
-          'test "syntax":\n    assert(1 // 2 == 0)\n',
+          'test "syntax":\n    assert(1 +* 2 == 0)\n',
           "E000120", "expected an expression", 2, 15)
     check(compiler, directory, "semantic",
           'test "semantic":\n    assert(1 % 2 == 0)\n',
@@ -40,10 +40,10 @@ def main():
           'test "lexer":\n    value = "λ\\q"\n',
           "E000101", "unsupported literal escape", 2, 13)
     check(compiler, directory, "unicode",
-          'test "unicode":\n    print("λ", 1 // 2)\n',
+          'test "unicode":\n    print("λ", 1 +* 2)\n',
           "E000120", "expected an expression", 2, 19)
     check(compiler, directory, "import_syntax",
-          'def broken() -> int:\n    return 1 // 2\n',
+          'def broken() -> int:\n    return 1 +* 2\n',
           "E000120", "expected an expression", 2, 15, imported=True)
     check(compiler, directory, "import_semantic",
           'def broken() -> int:\n    return unknown\n',

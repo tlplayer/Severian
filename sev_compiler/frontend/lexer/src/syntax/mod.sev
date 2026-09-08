@@ -1,0 +1,270 @@
+import source
+import diagnostics
+import universal
+import "../token/mod.sev"
+
+
+class LexicalSymbol:
+    spelling: string
+    kind: TokenKind
+
+
+class SyntaxProperty:
+    name: string
+    tokens: list[Token]
+
+
+class OperatorDescriptor:
+    name: string
+    bases: list[string]
+    properties: list[SyntaxProperty]
+    span: source.Span
+    resolved: bool = false
+    syntax: universal.OperatorSyntax | None = None
+    grammar: bool = false
+
+
+class SyntaxRegistry:
+    operators: list[universal.OperatorSyntax]
+    descriptors: list[OperatorDescriptor] = []
+    discovered: list[string] = []
+
+
+def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
+    # Only the declaration/structural bootstrap is closed. Value operations are
+    # supplied by registered source descriptors and use one open token category.
+    symbols = [LexicalSymbol("@", At), LexicalSymbol(":", Colon),
+        LexicalSymbol(":=", ColonEqual), LexicalSymbol("?=", QuestionEqual),
+        LexicalSymbol("=", Equal), LexicalSymbol("->", Arrow),
+        LexicalSymbol("(", LeftParen), LexicalSymbol(")", RightParen),
+        LexicalSymbol("[", LeftBracket), LexicalSymbol("]", RightBracket),
+        LexicalSymbol("{", LeftBrace), LexicalSymbol("}", RightBrace),
+        LexicalSymbol("|", Pipe), LexicalSymbol(",", Comma), LexicalSymbol(".", Dot),
+        LexicalSymbol("+=", PlusEqual), LexicalSymbol("-=", MinusEqual),
+        LexicalSymbol("*=", StarEqual), LexicalSymbol("/=", SlashEqual),
+        LexicalSymbol("%=", PercentEqual)]
+    for operation in operators:
+        characters = operation.symbol.characters()
+        if len(characters) == 0:
+            continue
+        first = characters[0]
+        if (first >= "a" and first <= "z") or (first >= "A" and first <= "Z") or first == "_":
+            continue
+        found := false
+        for previous in symbols:
+            if previous.spelling == operation.symbol:
+                found = true
+        if not found:
+            symbols.append(LexicalSymbol(operation.symbol, SymbolToken(operation.symbol)))
+    return symbols
+
+
+def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSymbol]) -> LexicalSymbol | None:
+    selected: LexicalSymbol | None := None
+    longest := 0
+    for symbol in symbols:
+        spelling = symbol.spelling.characters()
+        if len(spelling) <= longest or cursor + int(len(spelling)) > len(characters):
+            continue
+        index := 0
+        matches := true
+        for character in spelling:
+            if characters[cursor + index] != character:
+                matches = false
+            index += 1
+        if matches:
+            selected = symbol
+            longest = int(len(spelling))
+    return selected
+
+
+def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -> list[universal.OperatorSyntax]:
+    result: list[universal.OperatorSyntax] = []
+    for operation in operators:
+        if operation.symbol == symbol:
+            result.append(operation)
+    return result
+
+
+def token_word(token: Token) -> string:
+    match token.kind:
+        case Identifier:
+            return value
+        case _:
+            return ""
+
+
+def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry):
+    cursor := 0
+    depth := 0
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        word = token_word(token)
+        if depth == 0 and (word == "trait" or word == "class" or word == "grammar") and cursor + 1 < len(tokens):
+            name = token_word(tokens[cursor + 1])
+            cursor += 2
+            bases: list[string] = []
+            in_bases := false
+            while cursor < len(tokens) and tokens[cursor].kind != Newline and tokens[cursor].kind != Eof:
+                if tokens[cursor].kind == Colon:
+                    in_bases = true
+                elif in_bases and token_word(tokens[cursor]) != "":
+                    bases.append(token_word(tokens[cursor]))
+                cursor += 1
+            while cursor < len(tokens) and tokens[cursor].kind == Newline:
+                cursor += 1
+            properties: list[SyntaxProperty] = []
+            if cursor < len(tokens) and tokens[cursor].kind == Indent:
+                cursor += 1
+                nested := 1
+                line_start := true
+                while cursor < len(tokens) and nested > 0:
+                    current = tokens[cursor]
+                    if current.kind == Indent:
+                        nested += 1
+                    elif current.kind == Dedent:
+                        nested -= 1
+                    if nested == 1 and line_start:
+                        property_cursor := cursor
+                        if token_word(current) == "property":
+                            property_cursor += 1
+                        if property_cursor + 1 < len(tokens) and (tokens[property_cursor + 1].kind == Colon or tokens[property_cursor + 1].kind == Equal):
+                            property_name = token_word(tokens[property_cursor])
+                            property_cursor += 1
+                            while property_cursor < len(tokens) and tokens[property_cursor].kind != Equal and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
+                                property_cursor += 1
+                            if property_cursor < len(tokens) and tokens[property_cursor].kind == Equal:
+                                property_cursor += 1
+                                values: list[Token] = []
+                                while property_cursor < len(tokens) and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
+                                    values.append(tokens[property_cursor])
+                                    property_cursor += 1
+                                properties.append(SyntaxProperty(property_name, values))
+                    line_start = current.kind == Newline or current.kind == Dedent
+                    cursor += 1
+            registry.descriptors.append(OperatorDescriptor(name, bases, properties, token.span, grammar=word == "grammar"))
+            continue
+        if token.kind == Indent:
+            depth += 1
+        elif token.kind == Dedent:
+            depth -= 1
+        cursor += 1
+
+
+def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.OperatorSyntax, span: source.Span) -> unit | diagnostics.Diagnostic:
+    if syntax.symbol == "":
+        return error(diagnostics.diagnostic_at("E000103", "operator descriptor requires a nonempty symbol", span))
+    for character in syntax.symbol.characters():
+        if character == " " or character == "\n" or character == "\t" or character == "#" or character == "\"" or character == "'":
+            return error(diagnostics.diagnostic_at("E000103", "operator symbol contains a reserved lexical character", span))
+    index := 0
+    for previous in registry.operators:
+        if previous.symbol == syntax.symbol and previous.fixity == syntax.fixity:
+            if previous.precedence != syntax.precedence or previous.associativity != syntax.associativity:
+                return error(diagnostics.diagnostic_at("E000103", "conflicting operator syntax " + syntax.symbol, span))
+            if previous.definition.declaration.value == 0:
+                registry.operators[index] = syntax
+            return
+        index += 1
+    registry.operators.append(syntax)
+
+
+def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics.Diagnostic:
+    progress := true
+    while progress:
+        progress = false
+        index := 0
+        for descriptor in registry.descriptors:
+            if descriptor.resolved:
+                index += 1
+                continue
+            eligible := descriptor.grammar or descriptor.name == "operator" or descriptor.name == "Operator"
+            inherited: universal.OperatorSyntax | None := None
+            for base in descriptor.bases:
+                if base == "operator" or base == "Operator":
+                    eligible = true
+                for parent in registry.descriptors:
+                    if parent.name == base and parent.resolved:
+                        eligible = true
+                        if parent.syntax != None:
+                            inherited = parent.syntax
+            if not eligible:
+                index += 1
+                continue
+            symbol := descriptor.name if descriptor.grammar else ""
+            form := ""
+            fixity := universal.Fixity.Infix
+            precedence := 0
+            associativity := universal.Associativity.Left
+            base_syntax ?= inherited
+            if base_syntax != None:
+                symbol = base_syntax.symbol
+                fixity = base_syntax.fixity
+                precedence = int(base_syntax.precedence)
+                associativity = base_syntax.associativity
+            fields: list[string] = []
+            for property in descriptor.properties:
+                if property.name in fields:
+                    return error(diagnostics.diagnostic_at("E000103", "duplicate operator syntax property " + property.name, descriptor.span))
+                fields.append(property.name)
+                if property.name == "symbol":
+                    if len(property.tokens) != 1:
+                        return error(diagnostics.diagnostic_at("E000103", "operator symbol must be a constant string", descriptor.span))
+                    match property.tokens[0].kind:
+                        case String:
+                            symbol = value
+                        case _:
+                            return error(diagnostics.diagnostic_at("E000103", "operator symbol must be a constant string", descriptor.span))
+                elif property.name == "precedence":
+                    if len(property.tokens) != 1:
+                        return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
+                    match property.tokens[0].kind:
+                        case Integer:
+                            precedence = int(value)
+                        case _:
+                            return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
+                    if precedence < 1 or precedence > 255:
+                        return error(diagnostics.diagnostic_at("E000103", "operator precedence must be between 1 and 255", descriptor.span))
+                elif property.name == "form":
+                    if len(property.tokens) != 3 or token_word(property.tokens[0]) != "GrammarForm" or property.tokens[1].kind != Dot:
+                        return error(diagnostics.diagnostic_at("E000103", "grammar form requires GrammarForm", descriptor.span))
+                    form = token_word(property.tokens[2])
+                    if form != "Infix" and form != "Prefix" and form != "Postfix":
+                        fixity = universal.Fixity.Prefix
+                    elif form == "Prefix":
+                        fixity = universal.Fixity.Prefix
+                    elif form == "Postfix":
+                        fixity = universal.Fixity.Postfix
+                elif property.name == "fixity" or property.name == "associativity":
+                    if len(property.tokens) != 3 or property.tokens[1].kind != Dot:
+                        return error(diagnostics.diagnostic_at("E000103", "operator form must name an enum member", descriptor.span))
+                    member = token_word(property.tokens[2])
+                    if property.name == "fixity":
+                        if token_word(property.tokens[0]) != "Fixity":
+                            return error(diagnostics.diagnostic_at("E000103", "operator fixity requires Fixity", descriptor.span))
+                        if member == "Prefix":
+                            fixity = universal.Fixity.Prefix
+                        elif member == "Postfix":
+                            fixity = universal.Fixity.Postfix
+                        elif member != "Infix":
+                            return error(diagnostics.diagnostic_at("E000103", "unknown operator fixity", descriptor.span))
+                    else:
+                        if token_word(property.tokens[0]) != "Associativity":
+                            return error(diagnostics.diagnostic_at("E000103", "operator associativity requires Associativity", descriptor.span))
+                        if member == "Right":
+                            associativity = universal.Associativity.Right
+                        elif member == "None":
+                            associativity = universal.Associativity.None
+                        elif member != "Left":
+                            return error(diagnostics.diagnostic_at("E000103", "unknown operator associativity", descriptor.span))
+            descriptor.resolved = true
+            if symbol != "":
+                if precedence == 0 and (form == "" or form == "Infix" or form == "Prefix" or form == "Postfix"):
+                    return error(diagnostics.diagnostic_at("E000103", "operator descriptor requires precedence", descriptor.span))
+                identity = universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
+                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form)
+                register_operator_syntax(registry, syntax, descriptor.span)
+                descriptor.syntax = syntax
+            registry.descriptors[index] = descriptor
+            progress = true
+            index += 1

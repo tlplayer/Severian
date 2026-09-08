@@ -1,0 +1,8 @@
+class Box:
+    amount: int
+    operator +(right: Self) -> Self:
+        return Box(amount + right.amount)
+
+extend Box:
+    operator +(right: Self) -> Self:
+        return Box(self.amount + right.amount)

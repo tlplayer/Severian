@@ -1,4 +1,5 @@
 import source
+import universal
 
 enum TokenKind:
     Identifier(value: string)
@@ -7,28 +8,17 @@ enum TokenKind:
     Character(value: u32)
     String(value: string)
     FormattedString(value: string)
+    SymbolToken(value: string)
     At
     Colon
     ColonEqual
     QuestionEqual
     Equal
-    Plus
     PlusEqual
-    Minus
     MinusEqual
-    Star
     StarEqual
-    Slash
     SlashEqual
-    Percent
     PercentEqual
-    Power
-    EqualEqual
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
     Arrow
     LeftParen
     RightParen
@@ -48,3 +38,5 @@ enum TokenKind:
 class Token:
     kind: TokenKind
     span: source.Span
+    syntaxes: list[universal.OperatorSyntax] = []
+    descriptor: bool = false

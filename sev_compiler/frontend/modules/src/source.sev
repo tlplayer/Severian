@@ -32,17 +32,58 @@ def parent_path(path: string) -> string:
     return components[:int(len(components)) - 1].join("/")
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile]) -> universal.Module | diagnostics.Diagnostic:
+def registered_source(input: source.SourceFile, files: list[source.SourceFile]) -> source.SourceFile:
     path = normalized_path(input.path)
-    if path in active:
-        throw Error("cyclic source import: " + path)
-    if len(active) >= 64:
-        throw Error("source import depth exceeds 64 modules")
-    stack = active[:]
-    stack.append(path)
+    for file in files:
+        if file.path == path:
+            return file
     registered = source.SourceFile(source.SourceId(u32(len(files))), path, input.text)
     files.append(registered)
-    parsed = macros.parse_module(lexer.scan(registered))
+    return registered
+
+
+def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> unit | diagnostics.Diagnostic:
+    file = registered_source(input, files)
+    if file.path in active:
+        return error(diagnostics.diagnostic("E000120", "cyclic source import: " + file.path))
+    if file.path in registry.discovered:
+        return
+    if len(active) >= 64:
+        return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
+    stack = active[:]
+    stack.append(file.path)
+    tokens = lexer.scan_tokens(file, registry.operators, true)
+    depth := 0
+    index := 0
+    for token in tokens:
+        if token.kind == lexer.TokenKind.Indent:
+            depth += 1
+        elif token.kind == lexer.TokenKind.Dedent:
+            depth -= 1
+        if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
+            match tokens[index + 1].kind:
+                case String:
+                    child = normalized_path(parent_path(file.path) + "/" + value)
+                    discover_source_syntax(source.load(child), stack, files, registry)
+                case _:
+                    pass
+        index += 1
+    lexer.discover_operator_descriptors(tokens, registry)
+    registry.discovered.append(file.path)
+
+
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> universal.Module | diagnostics.Diagnostic:
+    path = normalized_path(input.path)
+    if path in active:
+        return error(diagnostics.diagnostic("E000120", "cyclic source import: " + path))
+    if len(active) >= 64:
+        return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
+    stack = active[:]
+    stack.append(path)
+    discover_source_syntax(input, [], files, registry)
+    lexer.resolve_operator_descriptors(registry)
+    registered = registered_source(input, files)
+    parsed = macros.parse_module(lexer.scan_registered(registered, registry))
     result = universal.empty_module()
     aliases: list[string] = []
     for item in parsed.items:
@@ -51,22 +92,22 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 match declaration.subject:
                     case Locator:
                         if locator.starts_with("/"):
-                            throw Error("bootstrap imports require a relative source locator")
+                            return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
                         if declaration.source_name != None:
-                            throw Error("selective imports are not supported by bootstrap source loading")
+                            return error(diagnostics.diagnostic("E000120", "selective imports are not supported by bootstrap source loading"))
                         alias ?= declaration.alias
                         child_prefix := prefix
                         if alias != None:
                             if alias in aliases:
-                                throw Error("duplicate import alias: " + alias)
+                                return error(diagnostics.diagnostic("E000120", "duplicate import alias: " + alias))
                             aliases.append(alias)
                             child_prefix += alias + "."
                         child_path = normalized_path(parent_path(path) + "/" + locator)
-                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files)
+                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case _:
-                        throw Error("bootstrap imports require a relative source locator")
+                        return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
             case Trait:
                 trait_declaration := declaration
                 trait_declaration.name = prefix + declaration.name
@@ -79,7 +120,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 result.items.append(universal.Type(type_declaration))
             case Record:
                 record_declaration := declaration
-                record_declaration.name = prefix + declaration.name
+                record_declaration.name = declaration.name if declaration.extension else prefix + declaration.name
                 record_declaration.lookup = prefix
                 result.items.append(universal.Record(record_declaration))
             case Function:
@@ -95,19 +136,19 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
             case BindingItem:
                 if not root:
                     if binding.mutable or binding.update:
-                        throw Error("imported globals must be immutable literals")
+                        return error(diagnostics.diagnostic("E000120", "imported globals must be immutable literals"))
                     match binding.value.kind:
                         case LiteralValue:
                             constant := binding
                             constant.name = prefix + binding.name
                             result.items.append(universal.BindingItem(constant))
                         case _:
-                            throw Error("imported globals must be immutable literals")
+                            return error(diagnostics.diagnostic("E000120", "imported globals must be immutable literals"))
                 else:
                     result.items.append(item)
             case ExpressionItem:
                 if not root:
-                    throw Error("imported modules cannot execute module initializers")
+                    return error(diagnostics.diagnostic("E000120", "imported modules cannot execute module initializers"))
                 result.items.append(item)
             case _:
                 result.items.append(item)

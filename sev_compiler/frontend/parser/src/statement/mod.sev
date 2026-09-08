@@ -5,7 +5,7 @@ import source
 import universal
 from universal import CompilerExpectation
 
-def formatted_string_expression(value: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
+def formatted_string_expression(value: string, span: source.Span, syntaxes: list[universal.OperatorSyntax]) -> universal.Expression | diagnostics.Diagnostic:
     characters = value.characters()
     cursor := 0
     literal := ""
@@ -45,7 +45,7 @@ def formatted_string_expression(value: string, span: source.Span) -> universal.E
         if len(expression_source) == 0:
             return error(diagnostics.Diagnostic("E000113", "formatted string interpolation may not be empty", span))
         interpolation = source.SourceFile(span.source, "<formatted-string>", expression_source)
-        interpolation_tokens = lexer.scan(interpolation)
+        interpolation_tokens = lexer.scan(interpolation, syntaxes)
         expression_parser = Parser(interpolation_tokens)
         parsed_expression = parser_expression(expression_parser, 0)
         parser_separators(expression_parser)
@@ -130,11 +130,21 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
             result.items.append(universal.Import(parser_import_declaration(parser)))
         elif parser_at_identifier(parser, "trait"):
             result.items.append(universal.Trait(parser_trait_declaration(parser, [])))
+        elif parser_at_identifier(parser, "grammar"):
+            result.items.append(universal.GrammarItem(parser_grammar_declaration(parser)))
+        elif parser_at_identifier(parser, "operator"):
+            operation = parser_operator_declaration(parser)
+            operation.receiver = false
+            result.items.append(universal.OperatorItem(operation))
         elif parser_at_identifier(parser, "def"):
             result.items.append(universal.Function(parser_function_declaration(parser, [])))
         elif parser_at_identifier(parser, "class"):
             result.items.append(universal.Record(parser_record_declaration(parser)))
-        elif parser_at_identifier(parser, "type"):
+        elif parser_at_identifier(parser, "extend"):
+            result.items.append(universal.Record(parser_record_declaration(parser, true)))
+        elif parser_at_identifier(parser, "union"):
+            result.items.append(universal.Type(parser_family_declaration(parser)))
+        elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and parser.tokens[parser.cursor[0] + 1].kind != LeftParen:
             result.items.append(universal.Type(parser_type_declaration(parser, [])))
         elif parser_at_identifier(parser, "test"):
             result.items.append(universal.Test(parser_test_declaration(parser)))
@@ -253,7 +263,7 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
     parameters: list[universal.FunctionParameter] = []
     keyword_only := false
     while not parser_at_simple(parser, RightParen):
-        variadic = parser_take(parser, Star) != None
+        variadic = parser_take(parser, SymbolToken("*")) != None
         if variadic:
             if keyword_only:
                 return error(parser_fail(parser, "only one variadic parameter is supported"))
@@ -298,29 +308,38 @@ def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator
     return universal.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start))
 
 def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TraitDeclaration | diagnostics.Diagnostic:
-    start = parser_next(parser).span
+    start_token = parser_next(parser)
+    start = start_token.span
     name = parser_identifier(parser, "expected a trait name")[0]
     generic_parts = parser_type_parameters(parser)
-    parameters = generic_parts[0]
     constraints := generic_parts[1]
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
     bases: list[universal.TypeAnnotation] = []
-    if parser_take(parser, Colon) != None and not parser_at_simple(parser, Newline):
+    parser_expect(parser, Colon, "expected trait bases or body")
+    if not parser_at_simple(parser, Newline):
         while true:
             bases.append(parser_type_annotation(parser))
-            if parser_take(parser, Plus) == None:
+            if parser_take(parser, SymbolToken("+")) == None:
                 break
-        parser_expect(parser, Colon, "expected colon before trait body")
+        parser_take(parser, Colon)
     properties: list[universal.PropertyDeclaration] = []
     operators: list[universal.OperatorDeclaration] = []
-    if parser_at_simple(parser, Newline):
-        parser_expect(parser, Newline, "expected trait body")
-        parser_expect(parser, Indent, "expected indented trait body")
+    methods: list[universal.FunctionDeclaration] = []
+    parser_separators(parser)
+    if parser_take(parser, Indent) != None:
         parser_separators(parser)
-        while not parser_at_simple(parser, Dedent):
-            if parser_at_identifier(parser, "property"):
-                property_start = parser_next(parser).span
+        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+            if parser_at_identifier(parser, "def"):
+                methods.append(parser_function_declaration(parser, []))
+            elif parser_at_identifier(parser, "operator"):
+                operators.append(parser_operator_declaration(parser))
+            elif parser_at_identifier(parser, "pass"):
+                parser_next(parser)
+            elif parser_at_identifier(parser, "property") or (parser.cursor[0] + 1 < len(parser.tokens) and parser.tokens[parser.cursor[0] + 1].kind == Colon):
+                property_start = parser_peek(parser).span
+                if parser_at_identifier(parser, "property"):
+                    parser_next(parser)
                 property_name = parser_identifier(parser, "expected property name")[0]
                 parser_expect(parser, Colon, "expected property type")
                 annotation = parser_type_annotation(parser)
@@ -329,10 +348,95 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
                     default = parser_expression(parser, 0)
                 properties.append(universal.PropertyDeclaration(property_name, annotation, default, property_start))
             else:
-                parser_next(parser)
+                # A bare type in a trait body is an inherited contract.
+                bases.append(parser_type_annotation(parser))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of trait")
-    return universal.TraitDeclaration(decorators, name, parameters, constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start))
+    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor)
+
+
+def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    token = parser_next(parser)
+    symbol := ""
+    syntax := universal.operator_syntax(universal.Add())
+    if len(token.syntaxes) != 0:
+        syntax = token.syntaxes[0]
+        symbol = syntax.symbol
+    else:
+        match token.kind:
+            case Identifier:
+                symbol = value
+            case SymbolToken:
+                symbol = value
+            case _:
+                return error(parser_fail(parser, "expected a registered operator symbol"))
+    syntax = universal.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity)
+    grammar_domain := false
+    if parser.cursor[0] + 2 < len(parser.tokens) and parser_at_simple(parser, LeftBracket) and lexer.token_word(parser.tokens[parser.cursor[0] + 1]) == "G" and parser.tokens[parser.cursor[0] + 2].kind == RightBracket:
+        grammar_domain = true
+        parser_next(parser)
+        parser_next(parser)
+        parser_next(parser)
+    generic_parts = parser_type_parameters(parser)
+    if grammar_domain:
+        syntax.domain = universal.OperatorDomain.GrammarOperator
+        syntax.grammar_name = symbol
+    type_parameters: list[string] = []
+    operator_constraints: list[universal.GenericConstraint] = []
+    for generic_name in generic_parts[0]:
+        grammar_binding := false
+        for constraint in generic_parts[1]:
+            match constraint:
+                case Parameter:
+                    bound_name ?= universal.simple_type_name(bound)
+                    if bound_name == "G":
+                        if generic_name == parameter:
+                            if syntax.grammar_name != "":
+                                return error(parser_fail(parser, "operator requires one grammar binding"))
+                            syntax.domain = universal.OperatorDomain.GrammarOperator
+                            syntax.grammar_name = generic_name
+                            grammar_binding = true
+                case _:
+                    pass
+        if not grammar_binding:
+            type_parameters.append(generic_name)
+    for constraint in generic_parts[1]:
+        match constraint:
+            case Parameter:
+                bound_name ?= universal.simple_type_name(bound)
+                if bound_name != "G":
+                    operator_constraints.append(constraint)
+            case _:
+                operator_constraints.append(constraint)
+    parser_expect(parser, LeftParen, "expected operator parameters")
+    parameters: list[universal.OperatorParameter] = []
+    while not parser_at_simple(parser, RightParen):
+        parameter = parser_identifier(parser, "expected operator parameter")
+        annotation := universal.named_type("Self", [], parameter[1])
+        if parser_take(parser, Colon) != None:
+            annotation = parser_type_annotation(parser)
+        elif parameter[0] != "self":
+            return error(parser_fail(parser, "expected operator parameter type"))
+        parameters.append(universal.OperatorParameter(parameter[0], annotation, parameter[1]))
+        if parser_take(parser, Comma) == None:
+            break
+    close = parser_expect(parser, RightParen, "expected closing operator parenthesis")
+    result := universal.named_type("unit", [], close.span)
+    if parser_take(parser, Arrow) != None:
+        result = parser_type_annotation(parser)
+    constraints = operator_constraints
+    for constraint in parser_declaration_constraints(parser):
+        constraints.append(constraint)
+    body: universal.Block | None := None
+    if parser_take(parser, Colon) != None:
+        body = parser_indented_block(parser, "operator")[0]
+    receiver := len(parameters) < 2
+    if len(parameters) == 1 and parameters[0].name == "self":
+        syntax = universal.OperatorSyntax(symbol, universal.Fixity.Prefix, 10, universal.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
+        receiver = false
+    return universal.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver)
+
 
 def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
@@ -556,9 +660,9 @@ def parser_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostic
 def parse_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
     left := parser_unary(parser)
     while true:
-        if not is_binary_operator(parser_peek(parser).kind):
+        if not is_binary_operator(parser_peek(parser)):
             break
-        operator = binary_operator(parser_peek(parser).kind)
+        operator = binary_operator(parser_peek(parser))
         operator_precedence = precedence(operator)
         if operator_precedence < minimum:
             break
@@ -581,15 +685,7 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
 
 def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
     token = parser_peek(parser)
-    operator: universal.OperatorSyntax | None := None
-    if token.kind == Plus:
-        operator = universal.operator_syntax(universal.Positive())
-    elif token.kind == Minus:
-        operator = universal.operator_syntax(universal.Negative())
-    elif parser_at_identifier(parser, "not"):
-        operator = universal.operator_syntax(universal.Not())
-    elif parser_at_identifier(parser, "move"):
-        operator = universal.operator_syntax(universal.Move())
+    operator = token_operator(token, universal.Fixity.Prefix)
     selected ?= operator
     if selected != None:
         parser_next(parser)
@@ -643,7 +739,7 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
         case String:
             return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
         case FormattedString:
-            return formatted_string_expression(value, token.span)
+            return formatted_string_expression(value, token.span, token.syntaxes)
         case LeftParen:
             value = parse_expression(parser, 0)
             parser_expect(parser, RightParen, "expected closing parenthesis")
@@ -667,6 +763,9 @@ def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnost
 
 def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
     name = parser_identifier(parser, "expected a type name")
+    qualified := name[0]
+    while parser_take(parser, Dot) != None:
+        qualified += "." + parser_identifier(parser, "expected qualified type name")[0]
     arguments: list[universal.TypeAnnotation] = []
     end := name[1].end
     if parser_take(parser, LeftBracket) != None:
@@ -675,54 +774,25 @@ def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics
             if parser_take(parser, Comma) == None:
                 break
         end = parser_expect(parser, RightBracket, "expected closing type bracket").span.end
-    return universal.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
+    return universal.named_type(qualified, arguments, source.Span(name[1].source, name[1].start, end))
 
 
-def is_binary_operator(kind: lexer.TokenKind) -> bool:
-    match kind:
-        case Identifier:
-            return value == "in" or value == "and" or value == "or"
-        case _:
-            pass
-    return kind == Plus or kind == Minus or kind == Star or kind == Slash or kind == Percent or kind == Power or kind == EqualEqual or kind == NotEqual or kind == Less or kind == LessEqual or kind == Greater or kind == GreaterEqual
+def token_operator(token: lexer.Token, fixity: universal.Fixity) -> universal.OperatorSyntax | None:
+    for syntax in token.syntaxes:
+        if syntax.fixity == fixity and (syntax.grammar_form == "" or syntax.grammar_form == "Infix" or syntax.grammar_form == "Prefix" or syntax.grammar_form == "Postfix"):
+            return syntax
+    return None
 
 
-def binary_operator(kind: lexer.TokenKind) -> universal.OperatorSyntax:
-    match kind:
-        case Identifier:
-            if value == "in":
-                return universal.operator_syntax(universal.Contains())
-            if value == "and":
-                return universal.operator_syntax(universal.LogicalAnd())
-            return universal.operator_syntax(universal.LogicalOr())
-        case _:
-            pass
-    if kind == Plus:
-        return universal.operator_syntax(universal.Add())
-    if kind == Minus:
-        return universal.operator_syntax(universal.Subtract())
-    if kind == Star:
-        return universal.operator_syntax(universal.Multiply())
-    if kind == Slash:
-        return universal.operator_syntax(universal.Divide())
-    if kind == Percent:
-        return universal.operator_syntax(universal.Remainder())
-    if kind == Power:
-        return universal.operator_syntax(universal.Power())
-    if kind == EqualEqual:
-        return universal.operator_syntax(universal.Equal())
-    if kind == NotEqual:
-        return universal.operator_syntax(universal.NotEqual())
-    if kind == Less:
-        return universal.operator_syntax(universal.Less())
-    if kind == LessEqual:
-        return universal.operator_syntax(universal.LessEqual())
-    if kind == Greater:
-        return universal.operator_syntax(universal.Greater())
-    if kind == GreaterEqual:
-        return universal.operator_syntax(universal.GreaterEqual())
-    # Callers prove the token is binary with `is_binary_operator` first.
-    return universal.operator_syntax(universal.Add())
+def is_binary_operator(token: lexer.Token) -> bool:
+    return token_operator(token, universal.Fixity.Infix) != None
+
+
+def binary_operator(token: lexer.Token) -> universal.OperatorSyntax:
+    syntax ?= token_operator(token, universal.Fixity.Infix)
+    if syntax != None:
+        return syntax
+    throw Error("token has no registered infix operator")
 
 
 def precedence(operator: universal.OperatorSyntax) -> int:
@@ -733,28 +803,72 @@ def parse(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnosti
     return parser_module(Parser(tokens))
 
 
-def parser_record_declaration(parser: Parser) -> universal.RecordDeclaration | diagnostics.Diagnostic:
+def parser_record_declaration(parser: Parser, extension: bool = false) -> universal.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a class name")[0]
+    generic_parts = parser_type_parameters(parser)
     parser_expect(parser, Colon, "expected colon after class name")
-    parser_expect(parser, Newline, "expected newline after class")
+    traits: list[universal.TypeAnnotation] = []
+    if not parser_at_simple(parser, Newline):
+        while true:
+            traits.append(parser_type_annotation(parser))
+            if parser_take(parser, SymbolToken("+")) == None:
+                break
+        parser_take(parser, Colon)
     parser_separators(parser)
-    parser_expect(parser, Indent, "expected class body")
     fields: list[universal.FunctionParameter] = []
     methods: list[universal.FunctionDeclaration] = []
+    operators: list[universal.OperatorDeclaration] = []
+    if parser_take(parser, Indent) != None:
+        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+            if parser_at_identifier(parser, "def"):
+                methods.append(parser_function_declaration(parser, []))
+            elif parser_at_identifier(parser, "operator"):
+                operators.append(parser_operator_declaration(parser))
+            elif parser_at_identifier(parser, "trait"):
+                parser_next(parser)
+                traits.append(parser_type_annotation(parser))
+            elif parser_at_identifier(parser, "pass"):
+                parser_next(parser)
+            else:
+                field = parser_identifier(parser, "expected a field or method")
+                parser_expect(parser, Colon, "expected field annotation")
+                annotation = parser_type_annotation(parser)
+                default: universal.Expression | None := None
+                if parser_take(parser, Equal) != None:
+                    default = parser_expression(parser, 0)
+                fields.append(universal.FunctionParameter(field[0], annotation, default, field[1]))
+            parser_separators(parser)
+        parser_expect(parser, Dedent, "expected end of class")
+    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=generic_parts[0], constraints=generic_parts[1], extension=extension)
+
+
+def parser_family_declaration(parser: Parser) -> universal.TypeDeclaration | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    name = parser_identifier(parser, "expected family name")[0]
+    parser_expect(parser, Colon, "expected family body")
+    parser_expect(parser, Newline, "expected family members")
+    parser_expect(parser, Indent, "expected indented family")
+    members: list[universal.TypeAnnotation] = []
+    parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
-        if parser_at_identifier(parser, "def"):
-            methods.append(parser_function_declaration(parser, []))
-        elif parser_at_identifier(parser, "pass"):
-            parser_next(parser)
-        else:
-            field = parser_identifier(parser, "expected a field or method")
-            parser_expect(parser, Colon, "expected field annotation")
-            annotation = parser_type_annotation(parser)
-            default: universal.Expression | None := None
-            if parser_take(parser, Equal) != None:
-                default = parser_expression(parser, 0)
-            fields.append(universal.FunctionParameter(field[0], annotation, default, field[1]))
+        members.append(parser_type_annotation(parser))
         parser_separators(parser)
-    end = parser_expect(parser, Dedent, "expected end of class").span.end
-    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, end))
+    parser_expect(parser, Dedent, "expected end of family")
+    return universal.TypeDeclaration([], name, [], [], universal.TypeAnnotation(universal.Union(members), start), start)
+
+
+def parser_grammar_declaration(parser: Parser) -> universal.GrammarDeclaration | diagnostics.Diagnostic:
+    start = parser_peek(parser)
+    declaration = parser_function_declaration(parser, [])
+    if len(declaration.type_parameters) != 1 or declaration.type_parameters[0] != "G" or len(declaration.constraints) != 0:
+        return error(parser_fail(parser, "grammar declaration requires [G]"))
+    body ?= declaration.body
+    if body == None:
+        return error(parser_fail(parser, "grammar requires a lowering body"))
+    if len(start.syntaxes) != 1:
+        return error(parser_fail(parser, "grammar requires registered symbol and form metadata"))
+    if body != None:
+        syntax = start.syntaxes[0]
+        return universal.GrammarDeclaration(declaration.name, declaration.parameters, body, start.span, syntax=syntax, definition=syntax.definition, result=declaration.result)
+    return error(parser_fail(parser, "grammar requires a lowering body"))

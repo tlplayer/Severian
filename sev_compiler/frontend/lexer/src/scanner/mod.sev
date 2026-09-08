@@ -1,5 +1,7 @@
 import source
 import diagnostics
+import universal
+import "../syntax/mod.sev"
 import "../token/mod.sev"
 import "../../../../universal/primitive/char/encoding.sev" as utf8
 
@@ -95,76 +97,9 @@ def block_string(raw: string) -> string:
     return result.join("\n")
 
 
-def punctuation(character: string, following: string | None) -> tuple[TokenKind, int] | None:
-    if character == "@":
-        return (TokenKind.At, 1)
-    if character == ",":
-        return (TokenKind.Comma, 1)
-    if character == ".":
-        return (TokenKind.Dot, 1)
-    if character == "(":
-        return (TokenKind.LeftParen, 1)
-    if character == ")":
-        return (TokenKind.RightParen, 1)
-    if character == "[":
-        return (TokenKind.LeftBracket, 1)
-    if character == "]":
-        return (TokenKind.RightBracket, 1)
-    if character == "{":
-        return (TokenKind.LeftBrace, 1)
-    if character == "}":
-        return (TokenKind.RightBrace, 1)
-    if character == "|":
-        return (TokenKind.Pipe, 1)
-    if character == ":" and following == "=":
-        return (TokenKind.ColonEqual, 2)
-    if character == ":":
-        return (TokenKind.Colon, 1)
-    if character == "?" and following == "=":
-        return (TokenKind.QuestionEqual, 2)
-    if character == "+" and following == "=":
-        return (TokenKind.PlusEqual, 2)
-    if character == "+":
-        return (TokenKind.Plus, 1)
-    if character == "-" and following == ">":
-        return (TokenKind.Arrow, 2)
-    if character == "-" and following == "=":
-        return (TokenKind.MinusEqual, 2)
-    if character == "-":
-        return (TokenKind.Minus, 1)
-    if character == "*" and following == "*":
-        return (TokenKind.Power, 2)
-    if character == "*" and following == "=":
-        return (TokenKind.StarEqual, 2)
-    if character == "*":
-        return (TokenKind.Star, 1)
-    if character == "/" and following == "=":
-        return (TokenKind.SlashEqual, 2)
-    if character == "/":
-        return (TokenKind.Slash, 1)
-    if character == "%" and following == "=":
-        return (TokenKind.PercentEqual, 2)
-    if character == "%":
-        return (TokenKind.Percent, 1)
-    if character == "=" and following == "=":
-        return (TokenKind.EqualEqual, 2)
-    if character == "=":
-        return (TokenKind.Equal, 1)
-    if character == "!" and following == "=":
-        return (TokenKind.NotEqual, 2)
-    if character == "<" and following == "=":
-        return (TokenKind.LessEqual, 2)
-    if character == "<":
-        return (TokenKind.Less, 1)
-    if character == ">" and following == "=":
-        return (TokenKind.GreaterEqual, 2)
-    if character == ">":
-        return (TokenKind.Greater, 1)
-    return None
-
-
-def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
+def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
     characters = file.text.characters()
+    symbols = lexical_symbols(syntaxes)
     cursor := 0
     line_start := true
     indents: list[int] = [0]
@@ -211,15 +146,13 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 cursor += 1
             continue
 
-        following: string | None := None
-        if cursor + 1 < len(characters):
-            following = characters[cursor + 1]
-        symbol = punctuation(character, following)
+        symbol = match_symbol(characters, cursor, symbols)
         leading_fraction = character == "." and cursor + 1 < len(characters) and is_digit(characters[cursor + 1])
         if not leading_fraction:
             if symbol != None:
-                tokens.append(make_token(file, symbol[0], start, start + symbol[1]))
-                cursor += symbol[1]
+                width = int(len(symbol.spelling.characters()))
+                tokens.append(Token(symbol.kind, source.Span(file.id, u32(start), u32(start + width)), symbol_syntaxes(syntaxes, symbol.spelling)))
+                cursor += width
                 continue
 
         formatted = character == "f" and cursor + 1 < len(characters) and characters[cursor + 1] == "\""
@@ -263,7 +196,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                 tokens.append(make_token(file, TokenKind.Character(literal_codepoint(value)), start, cursor))
             elif formatted:
                 kind: TokenKind = TokenKind.FormattedString(value)
-                tokens.append(make_token(file, kind, start, cursor))
+                tokens.append(Token(kind, source.Span(file.id, u32(start), u32(cursor)), syntaxes))
             else:
                 kind: TokenKind = TokenKind.String(value)
                 tokens.append(make_token(file, kind, start, cursor))
@@ -305,13 +238,42 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             cursor += 1
             while cursor < len(characters) and (is_alphanumeric(characters[cursor]) or characters[cursor] == "_"):
                 cursor += 1
-            tokens.append(make_token(file, TokenKind.Identifier(characters[start:cursor].join("")), start, cursor))
+            word = characters[start:cursor].join("")
+            tokens.append(Token(TokenKind.Identifier(word), source.Span(file.id, u32(start), u32(cursor)), symbol_syntaxes(syntaxes, word)))
             continue
 
+        if discovery:
+            tokens.append(make_token(file, TokenKind.SymbolToken(character), start, start + 1))
+            cursor += 1
+            continue
         return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), source.Span(file.id, u32(start), u32(start + 1))))
 
     while len(indents) > 1:
         indents.pop()
         tokens.append(make_token(file, TokenKind.Dedent, cursor, cursor))
     tokens.append(make_token(file, TokenKind.Eof, cursor, cursor))
+    return tokens
+
+
+def scan(file: source.SourceFile, operators: list[universal.OperatorSyntax] = []) -> list[Token] | diagnostics.Diagnostic:
+    registry = SyntaxRegistry(operators[:])
+    discover_operator_descriptors(scan_tokens(file, registry.operators, true), registry)
+    resolve_operator_descriptors(registry)
+    return scan_registered(file, registry)
+
+
+def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[Token] | diagnostics.Diagnostic:
+    tokens = scan_tokens(file, registry.operators)
+    for descriptor in registry.descriptors:
+        if descriptor.resolved and descriptor.span.source.index == file.id.index:
+            index := 0
+            for token in tokens:
+                if token.span.start == descriptor.span.start:
+                    token.descriptor = true
+                    syntax ?= descriptor.syntax
+                    if descriptor.grammar:
+                        if syntax != None:
+                            token.syntaxes = [syntax]
+                    tokens[index] = token
+                index += 1
     return tokens

@@ -275,7 +275,7 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
             definition = macro_definition(input)
             for previous in definitions:
                 if previous.name == definition.name:
-                    throw Error("duplicate enumerative macro " + definition.name)
+                    return error(diagnostics.diagnostic_at("E000120", "duplicate enumerative macro " + definition.name, parser.parser_peek(input).span))
             definitions.append(definition)
             continue
         invocation := false
@@ -283,7 +283,7 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
             for definition in definitions:
                 if parser.parser_at_identifier(input, definition.name):
                     if definition.name in invoked:
-                        throw Error("duplicate macro expansion " + definition.name)
+                        return error(diagnostics.diagnostic_at("E000120", "duplicate macro expansion " + definition.name, parser.parser_peek(input).span))
                     invoked.append(definition.name)
                     parser.parser_next(input)
                     parser.parser_expect(input, LeftBracket, "expected macro family arguments")
@@ -292,7 +292,7 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
                         if index > 0:
                             parser.parser_expect(input, Comma, "expected macro family separator")
                         if macro_identifier(input) != family:
-                            throw Error("macro argument must name its constrained family")
+                            return error(diagnostics.diagnostic_at("E000120", "macro argument must name its constrained family", parser.parser_peek(input).span))
                         index += 1
                     parser.parser_expect(input, RightBracket, "expected end of macro family arguments")
                     parser.parser_expect(input, LeftParen, "expected macro invocation")
