@@ -1,7 +1,0 @@
-# Character equality has no scalar operator implementation yet.
-def invalid(value: char) -> int:
-    match value:
-        case 'λ':
-            return 1
-        case _:
-            return 0

@@ -14,6 +14,22 @@ test "match survives parser to semantic":
     assert(classify(99) == 30)
 
 
+# Previously reject/match_equality.sev: character equality now resolves through
+# the source primitive operator implementation.
+def classify_character(value: char) -> int:
+    match value:
+        case 'λ':
+            return 1
+        case _:
+            return 0
+
+
+test "character match uses source scalar equality":
+    assert(classify_character('λ') == 1)
+    assert(classify_character('a') == 0)
+    assert(classify_character('😀') == 0)
+
+
 
 def classify_sum(limit: int) -> int:
     total := 0

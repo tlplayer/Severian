@@ -149,6 +149,17 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 else:
                     result.items.append(item)
             case ExpressionItem:
+                # Standalone string literals document modules. Their contents
+                # are data, including examples that are not declarations.
+                match expression.kind:
+                    case LiteralValue:
+                        match value:
+                            case StringValue:
+                                continue
+                            case _:
+                                pass
+                    case _:
+                        pass
                 if not root:
                     return error(diagnostics.diagnostic("E000120", "imported modules cannot execute module initializers"))
                 result.items.append(item)

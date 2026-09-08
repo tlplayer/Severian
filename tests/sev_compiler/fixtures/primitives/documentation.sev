@@ -1,0 +1,11 @@
+'''
+A module example: class Fictional:
+    value: Missing
+'''
+test:
+    value = '''
+        λ
+        text
+    '''
+    assert(value == "λ\ntext\n")
+    assert('λ' == 'λ')

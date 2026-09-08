@@ -2,6 +2,9 @@
 # types. These use the same operator/MLIR source contract as int.sev and float.sev.
 # Family membership is source data; generic constraint resolution has no numeric
 # type list and no method-name convention.
+import "../char/utf8.sev" as primitive_character
+import "../string/core.sev" as primitive_string
+
 union NativeInteger:
     i8
     i16
@@ -15,13 +18,59 @@ union NativeSignedInteger:
     i32
     i64
 
-extend NativeSignedInteger:
-    operator %[G:Remainder](right: Self) -> Self:
-        return mlir(arith.remsi, self, right)
+# Exceptional integer arithmetic is checked in source before reaching MLIR.
+# / truncates toward zero; // rounds down; % retains the dividend's sign.
+# The bootstrap failure boundary is assert until typed errors are available.
+-> integer_division[T: integer_type]() with integer_type in int:
+    @mlir("arith.divsi")
+    def __signed_divide(left: integer_type, right: integer_type) -> integer_type
 
-extend u8:
-    operator %[G:Remainder](right: Self) -> Self:
-        return mlir(arith.remui, self, right)
+    @mlir("arith.remsi")
+    def __signed_remainder(left: integer_type, right: integer_type) -> integer_type
+
+    @mlir("arith.divui")
+    def __unsigned_divide(left: integer_type, right: integer_type) -> integer_type
+
+    @mlir("arith.remui")
+    def __unsigned_remainder(left: integer_type, right: integer_type) -> integer_type
+
+    operator /[G:Divide](self: integer_type, right: integer_type) -> integer_type:
+        assert(right != 0)
+        if integer_type.signed:
+            assert(not (self == integer_type.min and right == -1))
+            return __signed_divide(self, right)
+        return __unsigned_divide(self, right)
+
+    operator //[G:FloorDivide](self: integer_type, right: integer_type) -> integer_type:
+        assert(right != 0)
+        if integer_type.signed:
+            assert(not (self == integer_type.min and right == -1))
+            quotient = __signed_divide(self, right)
+            remainder = __signed_remainder(self, right)
+            if remainder != 0 and ((self < 0) != (right < 0)):
+                return quotient - 1
+            return quotient
+        return __unsigned_divide(self, right)
+
+    operator %[G:Remainder](self: integer_type, right: integer_type) -> integer_type:
+        assert(right != 0)
+        if integer_type.signed:
+            if right == -1:
+                return 0
+            return __signed_remainder(self, right)
+        return __unsigned_remainder(self, right)
+
+    test "integer quotient and remainder":
+        assert(integer_type(7) / integer_type(3) == integer_type(2))
+        assert(integer_type(7) // integer_type(3) == integer_type(2))
+        assert(integer_type(7) % integer_type(3) == integer_type(1))
+        if integer_type.signed:
+            assert(integer_type(-7) / integer_type(3) == integer_type(-2))
+            assert(integer_type(-7) // integer_type(3) == integer_type(-3))
+            assert(integer_type(-7) % integer_type(3) == integer_type(-1))
+            assert(integer_type(integer_type.min) % integer_type(-1) == integer_type(0))
+
+integer_division[int]()
 
 extend NativeInteger:
     operator +[G:Add](right: Self) -> Self:
@@ -45,3 +94,56 @@ extend float:
 
     operator /[G:Divide](right: Self) -> Self:
         return mlir(arith.divf, self, right)
+
+
+# Characters order by their scalar value, independently of UTF-8 byte width.
+extend char:
+    operator ==[G:Equal](right: Self) -> bool:
+        return primitive_character.codepoint(self) == primitive_character.codepoint(right)
+
+    operator !=[G:NotEqual](right: Self) -> bool:
+        return primitive_character.codepoint(self) != primitive_character.codepoint(right)
+
+    operator <[G:Less](right: Self) -> bool:
+        return primitive_character.codepoint(self) < primitive_character.codepoint(right)
+
+    operator <=[G:LessEqual](right: Self) -> bool:
+        return primitive_character.codepoint(self) <= primitive_character.codepoint(right)
+
+    operator >[G:Greater](right: Self) -> bool:
+        return primitive_character.codepoint(self) > primitive_character.codepoint(right)
+
+    operator >=[G:GreaterEqual](right: Self) -> bool:
+        return primitive_character.codepoint(self) >= primitive_character.codepoint(right)
+
+
+test "character equality and scalar order":
+    assert('λ' == 'λ')
+    assert('a' != 'λ')
+    assert('a' < 'λ')
+    assert('λ' <= 'λ')
+    assert('😀' > '中')
+    assert('中' >= 'λ')
+    assert(not ('λ' < 'a'))
+
+
+# Keep text operations in the ordinary operator registry as well. Compound
+# assignment requires a resolved callable and evaluates its place only once.
+extend string:
+    operator +[G:Add](right: Self) -> Self:
+        return primitive_string.concat(self, right)
+
+    operator ==[G:Equal](right: Self) -> bool:
+        return primitive_string.equal(self, right)
+
+    operator !=[G:NotEqual](right: Self) -> bool:
+        return not primitive_string.equal(self, right)
+
+
+test "string compound addition preserves the previous view":
+    value := "λ"
+    before = value
+    value += "😀"
+    assert(value == "λ😀")
+    assert(before == "λ")
+    assert(value != before)

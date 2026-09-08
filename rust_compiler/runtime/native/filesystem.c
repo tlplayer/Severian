@@ -14,6 +14,11 @@ static _Thread_local char sev_join_buffer[SEV_PATH_CAPACITY];
 static _Thread_local char sev_basename_buffer[SEV_PATH_CAPACITY];
 static _Thread_local char sev_dirname_buffer[SEV_PATH_CAPACITY];
 static _Thread_local char sev_extension_buffer[SEV_PATH_CAPACITY];
+static _Thread_local char sev_cwd_buffer[SEV_PATH_CAPACITY];
+
+const char *__sev_process_current_directory(void) {
+    return getcwd(sev_cwd_buffer, sizeof(sev_cwd_buffer)) == NULL ? "" : sev_cwd_buffer;
+}
 void *__sev_list_create(void);
 void __sev_list_push_bool(void *storage, _Bool value);
 void __sev_list_push_ptr(void *storage, const char *value);

@@ -1,0 +1,5 @@
+def identity(value: i128) -> i128:
+    return value
+
+test:
+    assert(identity(42) == 42)

@@ -52,7 +52,6 @@ def main():
             "match_after_wildcard": "match arm after wildcard is unreachable",
             "match_pattern": "match supports only literal and wildcard patterns",
             "match_type": "a boolean cannot initialize an integer",
-            "match_equality": "unsupported scalar binary operator ==",
             "match_return": "scalar function can reach its end without returning a value",
             "match_scope": "unknown name local",
             "match_missing_case": "expected case before match pattern",

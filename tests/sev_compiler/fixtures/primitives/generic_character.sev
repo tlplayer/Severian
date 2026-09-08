@@ -1,0 +1,5 @@
+def identity(value: char[u8]) -> char[u8]:
+    return value
+
+test:
+    assert(identity(char[u8](65)).codepoint() == 65)

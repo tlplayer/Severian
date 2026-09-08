@@ -1,0 +1,6 @@
+class Label:
+    value: string
+
+test:
+    label = Label("λ" + "text")
+    assert(label.value == "λtext")

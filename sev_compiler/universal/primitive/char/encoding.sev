@@ -41,12 +41,36 @@ test "UTF-8 widths change at scalar boundaries":
 
 
 def decode_two(first: int, second: int) -> int:
+    assert(first >= 194 and first <= 223)
+    assert(second >= 128 and second <= 191)
     return (first - 192) * 64 + second - 128
 
 
 def decode_three(first: int, second: int, third: int) -> int:
-    return (first - 224) * 4096 + (second - 128) * 64 + third - 128
+    assert(first >= 224 and first <= 239)
+    assert(second >= 128 and second <= 191)
+    assert(third >= 128 and third <= 191)
+    decoded = (first - 224) * 4096 + (second - 128) * 64 + third - 128
+    assert(decoded >= 2048 and valid(decoded))
+    return decoded
 
 
 def decode_four(first: int, second: int, third: int, fourth: int) -> int:
-    return (first - 240) * 262144 + (second - 128) * 4096 + (third - 128) * 64 + fourth - 128
+    assert(first >= 240 and first <= 244)
+    assert(second >= 128 and second <= 191)
+    assert(third >= 128 and third <= 191)
+    assert(fourth >= 128 and fourth <= 191)
+    decoded = (first - 240) * 262144 + (second - 128) * 4096 + (third - 128) * 64 + fourth - 128
+    assert(decoded >= 65536 and valid(decoded))
+    return decoded
+
+
+test "UTF-8 decoding checks scalar encoding boundaries":
+    assert(decode_two(194, 128) == 128)
+    assert(decode_two(223, 191) == 2047)
+    assert(decode_three(224, 160, 128) == 2048)
+    assert(decode_three(237, 159, 191) == 55295)
+    assert(decode_three(238, 128, 128) == 57344)
+    assert(decode_three(239, 191, 191) == 65535)
+    assert(decode_four(240, 144, 128, 128) == 65536)
+    assert(decode_four(244, 143, 191, 191) == 1114111)

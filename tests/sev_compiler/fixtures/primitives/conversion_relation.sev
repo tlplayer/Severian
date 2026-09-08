@@ -1,0 +1,9 @@
+class Wrapped:
+    value: int
+
+    operator <=>(self, T) -> T:
+        self -> int:
+            return self.value
+
+test:
+    assert(int(Wrapped(42)) == 42)

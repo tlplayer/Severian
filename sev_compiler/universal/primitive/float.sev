@@ -270,7 +270,7 @@ Formatting and parsing remain ordinary library behavior because they are not
 single MLIR primitive operations.
 '''
 
-class float: Float:
+class float: Floating:
 
     operator if(self) -> bool:
         return mlir(arith.cmpf, "une", self, self(0.0))

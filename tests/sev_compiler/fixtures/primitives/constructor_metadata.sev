@@ -1,0 +1,8 @@
+import "../../../../sev_compiler/universal/type/conversion.sev"
+
+class Wrapped:
+    constructors: list[Constructor] = :conversions
+    value: int
+
+test:
+    assert(Wrapped(42).value == 42)

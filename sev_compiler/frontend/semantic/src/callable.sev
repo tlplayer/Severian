@@ -198,12 +198,21 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     for function in state.functions:
         if function.name == instance_name:
             return CallableSelection(function, bound.arguments)
-    if len(state.functions) >= 512:
+    if callable_specialization_count(state) >= 512:
         return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup)
     signature = callable_signature(instance, int(len(state.functions)))
+    signature.pack_specialization = true
     state.functions.append(signature)
     return CallableSelection(signature, bound.arguments)
+
+
+def callable_specialization_count(state: CallableAnalysis) -> int:
+    count := 0
+    for function in state.functions:
+        if function.template != None or function.pack_specialization:
+            count += 1
+    return count
 
 
 def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableOptionalSelection | diagnostics.Diagnostic:
@@ -1790,7 +1799,7 @@ def callable_select_generic(state: CallableAnalysis, name: string, arguments: li
         if symbolic:
             signature.definition = template.definition
         else:
-            if len(state.functions) >= 1024:
+            if callable_specialization_count(state) >= 1024:
                 return error(diagnostics.diagnostic("E000219", "specialization limit exceeded"))
             state.functions.append(signature)
         return CallableOptionalSelection(CallableSelection(signature, bound.arguments))

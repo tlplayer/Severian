@@ -1,0 +1,2742 @@
+{
+  "schema_version": 1,
+  "compilers": {
+    "/home/tplayer/Documents/Severian/target/debug/sev": "ed306d921cc828fc245071addd6aac9e12f935acdab00379ed568c689f16378f",
+    "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler": "5398e630eff29bc12942ad56d388a3e46aa46291c1e340628292c51c6938f593"
+  },
+  "files": [
+    {
+      "file": "sev_compiler/universal/primitive/array.sev",
+      "sha256": "35c6ffe3632e1ee4f6375445f22add500ab23717ab1e140c9bc9ceec254aff64",
+      "artifacts": "sev_compiler__universal__primitive__array.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__array.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected colon after parameter\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev:84:17\n   |\n84 |     def len(self) -> usize\n   |                 ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__array.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected colon after parameter\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev:84:17\n   |\n84 |     def len(self) -> usize\n   |                 ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__array.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected colon after parameter\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev:84:17\n   |\n84 |     def len(self) -> usize\n   |                 ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 48,
+      "api_declarations": 25,
+      "parsed_tests": 19
+    },
+    {
+      "file": "sev_compiler/universal/primitive/bool.sev",
+      "sha256": "3409bf1c3c8d217766179ffa0d99aa68ef47b14dcb93180871c95c1416beafce",
+      "artifacts": "sev_compiler__universal__primitive__bool.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__bool.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character `\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev:326:1\n    |\n326 | ````sev\n    | ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__bool.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character `\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev:326:1\n    |\n326 | ````sev\n    | ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__bool.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character `\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev:326:1\n    |\n326 | ````sev\n    | ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 60,
+      "api_declarations": 49,
+      "parsed_tests": 7
+    },
+    {
+      "file": "sev_compiler/universal/primitive/char/encoding.sev",
+      "sha256": "b5fdc84200b21b76ff7d79fbead6f480ff440992dec01cd593151feb30758c2a",
+      "artifacts": "sev_compiler__universal__primitive__char__encoding.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__encoding.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__encoding.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__encoding.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/encoding.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__encoding.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "parsed_nodes": 8,
+      "api_declarations": 5,
+      "parsed_tests": 3,
+      "all_expanded_definitions": 505,
+      "expanded_definitions": 25
+    },
+    {
+      "file": "sev_compiler/universal/primitive/char/utf8.sev",
+      "sha256": "b5fcb7fa8800d914723d8121d76747097103d6352faaafe5934f5c5d8ce462b2",
+      "artifacts": "sev_compiler__universal__primitive__char__utf8.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__utf8.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__utf8.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__utf8.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char/utf8.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char__utf8.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "parsed_nodes": 2,
+      "api_declarations": 1,
+      "parsed_tests": 1,
+      "all_expanded_definitions": 504,
+      "expanded_definitions": 5
+    },
+    {
+      "file": "sev_compiler/universal/primitive/char.sev",
+      "sha256": "0105a72ad83da3de99a6bada57c71028fa160cdd1e74a1de994be7df2e6d45bd",
+      "artifacts": "sev_compiler__universal__primitive__char.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev:161:14\n    |\n161 |         self ~> char[u8] with T is u32:\n    |              ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev:161:14\n    |\n161 |         self ~> char[u8] with T is u32:\n    |              ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__char.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev:161:14\n    |\n161 |         self ~> char[u8] with T is u32:\n    |              ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 33,
+      "api_declarations": 23,
+      "parsed_tests": 10
+    },
+    {
+      "file": "sev_compiler/universal/primitive/collections.sev",
+      "sha256": "98bc07bc719219dee1838231d3b545bed62c4b0e977f33f12224e146310eaa95",
+      "artifacts": "sev_compiler__universal__primitive__collections.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__collections.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:12:5\n     |\n  12 |     @mlir(\"memref.alloc\", operand_segments=\"1,0\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:13:9\n     |\n  13 |     def allocate(size: index) -> list[element]\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:15:5\n     |\n  15 |     @mlir(\"memref.load\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:16:9\n     |\n  16 |     def load(values: list[element], position: index) -> element\n     |         ^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:18:5\n     |\n  18 |     @mlir(\"memref.store\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:12:5\n     |\n  12 |     @mlir(\"memref.alloc\", operand_segments=\"1,0\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:13:9\n     |\n  13 |     def allocate(size: index) -> list[element]\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:15:5\n     |\n  15 |     @mlir(\"memref.load\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:16:9\n     |\n  16 |     def load(values: list[element], position: index) -> element\n     |         ^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:18:5\n     |\n  18 |     @mlir(\"memref.store\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__collections.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__collections.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__collections.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "inventory_error": "seed parsing failed; use expanded source IR where available",
+      "all_expanded_definitions": 498,
+      "expanded_definitions": 82
+    },
+    {
+      "file": "sev_compiler/universal/primitive/float.sev",
+      "sha256": "721aa28bd2feec2eb510125cbb3595189d20c37ade22a4ce7bd3197f7150b02c",
+      "artifacts": "sev_compiler__universal__primitive__float.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__float.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev:537:18\n    |\n537 |             self ~> target_float with (\n    |                  ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__float.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev:537:18\n    |\n537 |             self ~> target_float with (\n    |                  ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__float.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev:537:18\n    |\n537 |             self ~> target_float with (\n    |                  ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 189,
+      "api_declarations": 170,
+      "parsed_tests": 19
+    },
+    {
+      "file": "sev_compiler/universal/primitive/int.sev",
+      "sha256": "9f34ee517bfce9370c20a65c4b67e95205696b2ae572ce6d02f92f3ac53bd3da",
+      "artifacts": "sev_compiler__universal__primitive__int.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__int.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev:600:18\n    |\n600 |             self ~> target_int with self.min < target_int.min or self.max > target_int.max:\n    |                  ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__int.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev:600:18\n    |\n600 |             self ~> target_int with self.min < target_int.min or self.max > target_int.max:\n    |                  ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__int.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev:600:18\n    |\n600 |             self ~> target_int with self.min < target_int.min or self.max > target_int.max:\n    |                  ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 237,
+      "api_declarations": 218,
+      "parsed_tests": 19
+    },
+    {
+      "file": "sev_compiler/universal/primitive/numeric/conversion.sev",
+      "sha256": "79595841574e0721bbf3c6fe25122ba0d016b68dc6bfae8c09d865a3b96fe9ec",
+      "artifacts": "sev_compiler__universal__primitive__numeric__conversion.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__conversion.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:6:5\n     |\n   6 |     @mlir(\"arith.extsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:7:9\n     |\n   7 |     def __signed(value: source_int) -> target_int\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:9:5\n     |\n   9 |     @mlir(\"arith.extui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:10:9\n     |\n  10 |     def __unsigned(value: source_int) -> target_int\n     |         ^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:12:5\n     |\n  12 |     @mlir(\"arith.trunci\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:6:5\n     |\n   6 |     @mlir(\"arith.extsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:7:9\n     |\n   7 |     def __signed(value: source_int) -> target_int\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:9:5\n     |\n   9 |     @mlir(\"arith.extui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:10:9\n     |\n  10 |     def __unsigned(value: source_int) -> target_int\n     |         ^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:12:5\n     |\n  12 |     @mlir(\"arith.trunci\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__conversion.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__conversion.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__conversion.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "inventory_error": "seed parsing failed; use expanded source IR where available",
+      "all_expanded_definitions": 537,
+      "expanded_definitions": 158
+    },
+    {
+      "file": "sev_compiler/universal/primitive/numeric/operators.sev",
+      "sha256": "6c916b262e1cb3b9bdf9ed8b7e4b5630dccd014e9c25586cad95c04ee99baa7d",
+      "artifacts": "sev_compiler__universal__primitive__numeric__operators.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__operators.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:25:5\n     |\n  25 |     @mlir(\"arith.divsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:26:9\n     |\n  26 |     def __signed_divide(left: integer_type, right: integer_type) -> integer_type\n     |         ^^^^^^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:28:5\n     |\n  28 |     @mlir(\"arith.remsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:29:9\n     |\n  29 |     def __signed_remainder(left: integer_type, right: integer_type) -> integer_type\n     |         ^^^^^^^^^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:31:5\n     |\n  31 |     @mlir(\"arith.divui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:25:5\n     |\n  25 |     @mlir(\"arith.divsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:26:9\n     |\n  26 |     def __signed_divide(left: integer_type, right: integer_type) -> integer_type\n     |         ^^^^^^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:28:5\n     |\n  28 |     @mlir(\"arith.remsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:29:9\n     |\n  29 |     def __signed_remainder(left: integer_type, right: integer_type) -> integer_type\n     |         ^^^^^^^^^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:31:5\n     |\n  31 |     @mlir(\"arith.divui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__operators.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__operators.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__numeric__operators.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "inventory_error": "seed parsing failed; use expanded source IR where available",
+      "all_expanded_definitions": 504,
+      "expanded_definitions": 82
+    },
+    {
+      "file": "sev_compiler/universal/primitive/pointer.sev",
+      "sha256": "52e09c82e26dfe48fbb3f13142b059d666f13cdaf9b3efe40cf9626c5da420b9",
+      "artifacts": "sev_compiler__universal__primitive__pointer.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__pointer.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev:80:19\n   |\n80 | enum AddressSpace:\n   |                   ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__pointer.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev:80:19\n   |\n80 | enum AddressSpace:\n   |                   ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__pointer.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev:80:19\n   |\n80 | enum AddressSpace:\n   |                   ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 25,
+      "api_declarations": 23,
+      "parsed_tests": 0
+    },
+    {
+      "file": "sev_compiler/universal/primitive/primitive.sev",
+      "sha256": "e848eaa1ec474dae0e511f284d5602f035fc5290634346d83daa82dc7397fb71",
+      "artifacts": "sev_compiler__universal__primitive__primitive.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__primitive.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev:3:24\n  |\n3 | enum PrimitiveCategory:\n  |                        ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__primitive.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev:3:24\n  |\n3 | enum PrimitiveCategory:\n  |                        ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__primitive.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev:3:24\n  |\n3 | enum PrimitiveCategory:\n  |                        ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 40,
+      "api_declarations": 40,
+      "parsed_tests": 0
+    },
+    {
+      "file": "sev_compiler/universal/primitive/slice.sev",
+      "sha256": "aa3f1c6188a9b1bf8acbc76218e186c148197e7fb9b3cf5454d798cb45be0a4e",
+      "artifacts": "sev_compiler__universal__primitive__slice.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__slice.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev:77:15\n   |\n77 |     operator [](index: usize) -> T\n   |               ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__slice.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev:77:15\n   |\n77 |     operator [](index: usize) -> T\n   |               ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__slice.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev:77:15\n   |\n77 |     operator [](index: usize) -> T\n   |               ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 52,
+      "api_declarations": 27,
+      "parsed_tests": 22
+    },
+    {
+      "file": "sev_compiler/universal/primitive/string/core.sev",
+      "sha256": "d4abfa6bd1c287dd668b381480ba99f6360b346084c19682efd259caae83d125",
+      "artifacts": "sev_compiler__universal__primitive__string__core.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__core.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000204: unknown type `index`\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev:8:43\n     |\n   8 | def __dimension(value: string, dimension: index) -> index\n     |                                           ^^^^^\n"
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__core.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__core.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__core.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "parsed_nodes": 26,
+      "api_declarations": 10,
+      "parsed_tests": 4,
+      "all_expanded_definitions": 529,
+      "expanded_definitions": 88
+    },
+    {
+      "file": "sev_compiler/universal/primitive/string/format.sev",
+      "sha256": "25f166892b991026dcc1c12cff2f1b366f20f86d743c3a9f367d8fee17fd2f34",
+      "artifacts": "sev_compiler__universal__primitive__string__format.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__format.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000701: invalid external interface declaration: UnknownType(\"native_ptr\")\n"
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__format.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__format.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/format.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string__format.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "parsed_nodes": 34,
+      "api_declarations": 10,
+      "parsed_tests": 4,
+      "all_expanded_definitions": 559,
+      "expanded_definitions": 60
+    },
+    {
+      "file": "sev_compiler/universal/primitive/string.sev",
+      "sha256": "840950c51222a2ee4419447b6640bb51fb3460c62c5c9b48dd8f352247881f2b",
+      "artifacts": "sev_compiler__universal__primitive__string.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000218: class `string` does not implement required method `String.upper`\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:280:1\n     |\n 280 | class string: String:\n     | ^\n"
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:961:15\n    |\n961 |         bytes ~> self:\n    |               ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:961:15\n    |\n961 |         bytes ~> self:\n    |               ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/sev_compiler__universal__primitive__string.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000100: unexpected character ~\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:961:15\n    |\n961 |         bytes ~> self:\n    |               ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 90,
+      "api_declarations": 57,
+      "parsed_tests": 24
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/constant_parameter.sev",
+      "sha256": "41a1206e7bfebe567844bc4f713b1c33000ed1e8afd08beddedf426e503bfe27",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__constant_parameter.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constant_parameter.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected closing subscript bracket\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev:5:22\n  |\n5 |     value = Fixed[int, 2](42)\n  |                      ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constant_parameter.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected closing subscript bracket\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev:5:22\n  |\n5 |     value = Fixed[int, 2](42)\n  |                      ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constant_parameter.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected closing subscript bracket\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constant_parameter.sev:5:22\n  |\n5 |     value = Fixed[int, 2](42)\n  |                      ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 3,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/constructor_metadata.sev",
+      "sha256": "fa6ede213fedb9eee989e923060d86570ae404e613a50cbec051fc1d3a19c036",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__constructor_metadata.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constructor_metadata.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected an expression\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev:4:39\n  |\n4 |     constructors: list[Constructor] = :conversions\n  |                                       ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constructor_metadata.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected an expression\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev:4:39\n  |\n4 |     constructors: list[Constructor] = :conversions\n  |                                       ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__constructor_metadata.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected an expression\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/constructor_metadata.sev:4:39\n  |\n4 |     constructors: list[Constructor] = :conversions\n  |                                       ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 4,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/conversion_relation.sev",
+      "sha256": "75b7e20481a8a3893abd37ec2fb02bcc85217f41713f3e037c0ac366b4ec6ac9",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__conversion_relation.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__conversion_relation.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev:4:16\n  |\n4 |     operator <=>(self, T) -> T:\n  |                ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__conversion_relation.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev:4:16\n  |\n4 |     operator <=>(self, T) -> T:\n  |                ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__conversion_relation.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected operator parameters\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/conversion_relation.sev:4:16\n  |\n4 |     operator <=>(self, T) -> T:\n  |                ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 4,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/documentation.sev",
+      "sha256": "9d7cff04103828148504ed00be371f22fdd85055c2d4e21314d6d7f1b3750aac",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__documentation.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__documentation.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_tests": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__documentation.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "agent_ir": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__documentation.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "native": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/documentation.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__documentation.sev/tests.exe"
+          ],
+          "stdout": "native.stdout",
+          "stderr": "native.stderr",
+          "stdout_text": "",
+          "stderr_text": "warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]\n1 warning generated.\n"
+        }
+      },
+      "parsed_nodes": 1,
+      "api_declarations": 0,
+      "parsed_tests": 1,
+      "all_expanded_definitions": 498,
+      "expanded_definitions": 0
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/enum.sev",
+      "sha256": "3d75d36af144bd1dd7a3e632c9488ada79ca721d10f1988aedd4f8bb71fdefdd",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__enum.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__enum.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev:1:11\n  |\n1 | enum Kind:\n  |           ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__enum.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev:1:11\n  |\n1 | enum Kind:\n  |           ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__enum.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/enum.sev:1:11\n  |\n1 | enum Kind:\n  |           ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 4,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/fallible_outcome.sev",
+      "sha256": "4fe2d90a471ed1cb617fe5e89e0a0c8d8f9ca14e348e16d1b0b3aa7727a7d9a2",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__fallible_outcome.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__fallible_outcome.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000204: primitive declaration `Failure` has no compiler-owned type to complete\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev:1:1\n     |\n   1 | class Failure: Error:\n     | ^\n"
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable error\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev:6:16\n  |\n6 |         return error(Failure(1))\n  |                ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__fallible_outcome.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable error\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev:6:16\n  |\n6 |         return error(Failure(1))\n  |                ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__fallible_outcome.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable error\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/fallible_outcome.sev:6:16\n  |\n6 |         return error(Failure(1))\n  |                ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 4,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/float_storage.sev",
+      "sha256": "ba6fa20cc0d228de873a5970187a745792ec130a00ba0605c63d23f052d1855d",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__float_storage.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__float_storage.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type f32\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev:1:21\n  |\n1 | def identity(value: f32) -> f32:\n  |                     ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__float_storage.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type f32\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev:1:21\n  |\n1 | def identity(value: f32) -> f32:\n  |                     ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__float_storage.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type f32\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/float_storage.sev:1:21\n  |\n1 | def identity(value: f32) -> f32:\n  |                     ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 2,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/generic_character.sev",
+      "sha256": "647ed2963d1acd6689901ac7383e60c70a9f219208115d9d94a0a909108f7dbc",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__generic_character.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_character.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000204: this source type form is not yet supported by universal resolution\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev:1:21\n     |\n   1 | def identity(value: char[u8]) -> char[u8]:\n     |                     ^^^^^^^^\n"
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable .codepoint\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev:5:12\n  |\n5 |     assert(identity(char[u8](65)).codepoint() == 65)\n  |            ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_character.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable .codepoint\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev:5:12\n  |\n5 |     assert(identity(char[u8](65)).codepoint() == 65)\n  |            ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_character.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: unknown callable .codepoint\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_character.sev:5:12\n  |\n5 |     assert(identity(char[u8](65)).codepoint() == 65)\n  |            ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 2,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/generic_record.sev",
+      "sha256": "8c9ef64f3ce4eafc0320a34f90e03adff8a09fdba0e5bc0b04a100a0e4fdc1d3",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__generic_record.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_record.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: generic record layout is not implemented\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev:1:1\n  |\n1 | class Box[T]:\n  | ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_record.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: generic record layout is not implemented\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev:1:1\n  |\n1 | class Box[T]:\n  | ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__generic_record.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: generic record layout is not implemented\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/generic_record.sev:1:1\n  |\n1 | class Box[T]:\n  | ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 3,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/owned_field.sev",
+      "sha256": "3415300f673da4fcd3fb026094b9757d293d20215ca5e1b95fbf4fcd87346c1f",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__owned_field.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__owned_field.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: record string fields require aggregate ownership lowering\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev:2:5\n  |\n2 |     value: string\n  |     ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__owned_field.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: record string fields require aggregate ownership lowering\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev:2:5\n  |\n2 |     value: string\n  |     ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__owned_field.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000200: record string fields require aggregate ownership lowering\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/owned_field.sev:2:5\n  |\n2 |     value: string\n  |     ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 3,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    },
+    {
+      "file": "tests/sev_compiler/fixtures/primitives/wide_integer.sev",
+      "sha256": "0e501bc05468900bce48fc1949ec20900a8de656ac763730c7b9d762fc5eb1bc",
+      "artifacts": "tests__sev_compiler__fixtures__primitives__wide_integer.sev",
+      "stages": {
+        "seed_parse": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "build",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev",
+            "--emit",
+            "ast",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__wide_integer.sev/seed.ast"
+          ],
+          "stdout": "seed_parse.stdout",
+          "stderr": "seed_parse.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "seed_check": {
+          "status": "pass",
+          "exit": 0,
+          "command": [
+            "/home/tplayer/Documents/Severian/target/debug/sev",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev"
+          ],
+          "stdout": "seed_check.stdout",
+          "stderr": "seed_check.stderr",
+          "stdout_text": "",
+          "stderr_text": ""
+        },
+        "source_check": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "check",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian"
+          ],
+          "stdout": "source_check.stdout",
+          "stderr": "source_check.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type i128\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev:1:21\n  |\n1 | def identity(value: i128) -> i128:\n  |                     ^\n"
+        },
+        "source_tests": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "mlir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__wide_integer.sev/tests.mlir"
+          ],
+          "stdout": "source_tests.stdout",
+          "stderr": "source_tests.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type i128\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev:1:21\n  |\n1 | def identity(value: i128) -> i128:\n  |                     ^\n"
+        },
+        "agent_ir": {
+          "status": "fail",
+          "exit": 1,
+          "command": [
+            "/home/tplayer/Documents/Severian/sev_compiler/target/host/dev/bin/sev_compiler",
+            "test",
+            "/home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev",
+            "--sysroot",
+            "/home/tplayer/Documents/Severian",
+            "--emit",
+            "agent-ir",
+            "-o",
+            "/home/tplayer/Documents/Severian/sev_compiler/target/primitive-ledger/tests__sev_compiler__fixtures__primitives__wide_integer.sev/agent.json"
+          ],
+          "stdout": "agent_ir.stdout",
+          "stderr": "agent_ir.stderr",
+          "stdout_text": "",
+          "stderr_text": "error: E000205: unknown type i128\n --> /home/tplayer/Documents/Severian/tests/sev_compiler/fixtures/primitives/wide_integer.sev:1:21\n  |\n1 | def identity(value: i128) -> i128:\n  |                     ^\n"
+        },
+        "native": {
+          "status": "blocked",
+          "reason": "source test compilation failed"
+        }
+      },
+      "parsed_nodes": 2,
+      "api_declarations": 0,
+      "parsed_tests": 1
+    }
+  ]
+}

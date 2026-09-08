@@ -1,5 +1,6 @@
 import "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
+import process
 import lexer
 import diagnostics
 from diagnostics import Diagnostic
@@ -24,25 +25,33 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
 
 def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir") -> string | diagnostics.Diagnostic:
     registry = lexer.SyntaxRegistry([])
-    parsed = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/grammar/contracts.sev")), "", [], false, files, registry)
-    library_path = normalized_path(sysroot + "/library/system/io/src/text.sev")
-    library = load_source_module(source.load(library_path), "", [], false, files, registry)
-    for item in library.items:
-        parsed.items.append(item)
-    numeric = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/conversion.sev")), "numeric.", [], false, files, registry)
-    for item in numeric.items:
-        parsed.items.append(item)
-    primitive_operators = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/numeric/operators.sev")), "", [], false, files, registry)
-    for item in primitive_operators.items:
-        parsed.items.append(item)
-    collections = load_source_module(source.load(normalized_path(sysroot + "/sev_compiler/universal/primitive/collections.sev")), "", [], false, files, registry)
-    for item in collections.items:
-        parsed.items.append(item)
+    working_directory = process.current_directory()
+    if working_directory == "":
+        return error(diagnostics.diagnostic("E000120", "could not resolve the current source directory"))
+    root = normalized_path(sysroot if sysroot.starts_with("/") else working_directory + "/" + sysroot)
+    subject_path = normalized_path(input.path if input.path.starts_with("/") else working_directory + "/" + input.path)
+    subject_loaded := false
+    parsed = load_source_module(source.load(root + "/sev_compiler/universal/grammar/contracts.sev"), "", [], false, files, registry)
+    providers = ["/library/system/io/src/text.sev", "/sev_compiler/universal/primitive/numeric/conversion.sev", "/sev_compiler/universal/primitive/numeric/operators.sev", "/sev_compiler/universal/primitive/collections.sev"]
+    namespaces = ["", "numeric.", "", ""]
+    provider_index := 0
+    for provider in providers:
+        provider_path = root + provider
+        is_subject = provider_path == subject_path
+        library = load_source_module(input if is_subject else source.load(provider_path), namespaces[provider_index], [], is_subject, files, registry)
+        for item in library.items:
+            parsed.items.append(item)
+        subject_loaded = subject_loaded or is_subject
+        provider_index += 1
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
-    application = load_source_module(input, "__subject." if include_tests else "", [], true, files, registry)
-    for item in application.items:
-        parsed.items.append(item)
+    # A direct provider keeps its original namespace and declaration identity.
+    # Loading it again under a test namespace duplicates scalar extensions and
+    # makes otherwise valid operator implementations ambiguous.
+    if not subject_loaded:
+        application = load_source_module(input, "__subject." if include_tests else "", [], true, files, registry)
+        for item in application.items:
+            parsed.items.append(item)
     typed = semantic.analyze_callables(parsed, include_tests)
     lowered = mir.build_callables(typed)
     if emit == "agent-ir":

@@ -56,12 +56,12 @@ class StringLexeme: LexicalRule
             if formatted:
                 cursor += 1
             quote = characters[cursor]
-            block = quote == "\"" and cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
+            block = cursor + 2 < len(characters) and characters[cursor + 1] == quote and characters[cursor + 2] == quote
             cursor += 3 if block else 1
             content_start = cursor
             value := ""
             if block:
-                while cursor + 2 < len(characters) and not (characters[cursor] == "\"" and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""):
+                while cursor + 2 < len(characters) and not (characters[cursor] == quote and characters[cursor + 1] == quote and characters[cursor + 2] == quote):
                     cursor += 1
                 if cursor + 2 >= len(characters):
                     return error(diagnostics.Diagnostic("E000101", "unterminated block string literal", lexeme_span(input, start, cursor)))
@@ -86,7 +86,7 @@ class StringLexeme: LexicalRule
                 if cursor >= len(characters):
                     return error(diagnostics.Diagnostic("E000101", "unterminated string literal", lexeme_span(input, start, cursor)))
                 cursor += 1
-            if quote == "'":
+            if quote == "'" and not block:
                 if len(value.characters()) != 1:
                     return error(diagnostics.Diagnostic("E000101", "character literal requires one Unicode scalar", lexeme_span(input, start, cursor)))
                 return LexemeMatch(cursor, TokenKind.Character, value=value)
@@ -97,4 +97,3 @@ class StringLexeme: LexicalRule
                 kind: TokenKind = TokenKind.String
                 return LexemeMatch(cursor, kind, value=value)
         return LexemeMatch(start, None, false)
-

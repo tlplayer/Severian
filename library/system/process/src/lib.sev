@@ -13,3 +13,7 @@ def wait(process: int) -> int
 # Materialized by the runtime from the process entry boundary. The semantic
 # layer lowers this list-valued native surface without exposing its storage.
 def arguments() -> list[string]
+
+# Hosted working-directory boundary; an empty result indicates an OS failure.
+@c(symbol = "__sev_process_current_directory")
+def current_directory() -> string

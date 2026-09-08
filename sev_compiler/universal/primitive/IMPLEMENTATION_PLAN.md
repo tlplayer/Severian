@@ -1,6 +1,6 @@
 # Primitive implementation plan
 
-Status: proposed implementation sequence, based on source inspection on 2026-09-08. This document does not mark existing declarations as implemented merely because they have bodies. No compiler validation was run for this planning change.
+Status: implementation in progress. The [capability ledger](CAPABILITIES.md) records measured compiler boundaries, exact baseline diagnostics, naming/provider decisions, and implemented slices of P1/P2/P4/P6/P7. No full milestone is complete; existing bodies and successful seed checks do not establish native API coverage.
 
 The objective is to make every type and public operation in this directory executable through the Severian source compiler, with behavior defined in `.sev`. The companion [collections plan](../collections/IMPLEMENTATION_PLAN.md) builds on these milestones. Full string completion crosses that boundary because `String.split` returns `list[string]`.
 

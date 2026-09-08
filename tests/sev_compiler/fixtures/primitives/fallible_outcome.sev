@@ -1,0 +1,10 @@
+class Failure: Error:
+    code: int
+
+def checked(value: int) -> int | Failure:
+    if value == 0:
+        return error(Failure(1))
+    return value
+
+test:
+    assert(checked(42) == 42)

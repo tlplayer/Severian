@@ -460,7 +460,7 @@ class int: Integer:
         return 0
 
     def hash(self) -> u64:
-        return hash(self.to_ne_bytes())
+        return hash(self.native_endian())
 
     def print(self) -> string:
         return string.from_integer(self, base=10)
@@ -511,8 +511,8 @@ class int: Integer:
 
     def native_endian(self) -> bytes[int.bits / 8]:
         if target.endian == Endian.Little:
-            return self.to_le_bytes()
-        return self.to_be_bytes()
+            return self.little_endian()
+        return self.big_endian()
 
 
 extend [int: signed_int] int:

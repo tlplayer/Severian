@@ -6,10 +6,6 @@ import "../operator/trait/bitwise.sev"
 import "../operator/trait/ordered.sev"
 
 
-trait Truth:
-    operator if(self) -> bool
-    operator else(self) -> bool
-
 '''
 # `bool`
 
@@ -136,7 +132,7 @@ trait Hash:
 
 
 trait Print:
-    def Print(self) -> string
+    def print(self) -> string
 
 
 trait ConstParam:

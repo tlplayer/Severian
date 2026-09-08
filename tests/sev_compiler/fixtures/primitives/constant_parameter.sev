@@ -1,0 +1,6 @@
+class Fixed[T, N: usize]:
+    value: T
+
+test:
+    value = Fixed[int, 2](42)
+    assert(value.value == 42)

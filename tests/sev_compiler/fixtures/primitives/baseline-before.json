@@ -1,0 +1,290 @@
+[
+  {
+    "file": "sev_compiler/universal/primitive/array.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/array.sev:2:1\n  |\n2 | '''\n  | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/bool.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/bool.sev:13:1\n   |\n13 | '''\n   | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/char/encoding.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/char/utf8.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/char.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/char.sev:7:1\n  |\n7 | '''\n  | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/collections.sev",
+    "seed_parse": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:12:5\n     |\n  12 |     @mlir(\"memref.alloc\", operand_segments=\"1,0\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:13:9\n     |\n  13 |     def allocate(size: index) -> list[element]\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:15:5\n     |\n  15 |     @mlir(\"memref.load\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:16:9\n     |\n  16 |     def load(values: list[element], position: index) -> element\n     |         ^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:18:5\n     |\n  18 |     @mlir(\"memref.store\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:12:5\n     |\n  12 |     @mlir(\"memref.alloc\", operand_segments=\"1,0\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:13:9\n     |\n  13 |     def allocate(size: index) -> list[element]\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:15:5\n     |\n  15 |     @mlir(\"memref.load\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:16:9\n     |\n  16 |     def load(values: list[element], position: index) -> element\n     |         ^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:18:5\n     |\n  18 |     @mlir(\"memref.store\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000212: ambiguous operator implementation if\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/collections.sev:100:1\n    |\n100 | operator if[G:If](self: string) -> bool:\n    | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/float.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/float.sev:8:1\n  |\n8 | '''\n  | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/int.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/int.sev:9:1\n  |\n9 | '''\n  | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/numeric/conversion.sev",
+    "seed_parse": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:6:5\n     |\n   6 |     @mlir(\"arith.extsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:7:9\n     |\n   7 |     def __signed(value: source_int) -> target_int\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:9:5\n     |\n   9 |     @mlir(\"arith.extui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:10:9\n     |\n  10 |     def __unsigned(value: source_int) -> target_int\n     |         ^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:12:5\n     |\n  12 |     @mlir(\"arith.trunci\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:6:5\n     |\n   6 |     @mlir(\"arith.extsi\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n note: additional diagnostics omitted after 5 errors\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:7:9\n     |\n   7 |     def __signed(value: source_int) -> target_int\n     |         ^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:9:5\n     |\n   9 |     @mlir(\"arith.extui\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n\nE000112: expected a newline after function statement\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:10:9\n     |\n  10 |     def __unsigned(value: source_int) -> target_int\n     |         ^^^^^^^^^^\n\nE000111: expected a literal or binding name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:12:5\n     |\n  12 |     @mlir(\"arith.trunci\")\n     |     ^ an expression must start here\n note: expressions may start with a literal, binding name, `(`, or list literal\n help: check for a missing expression or an extra delimiter\n"
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000200: compiler test expectation failed\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/conversion.sev:169:5\n    |\n169 |     accept:\n    |     ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/numeric/operators.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000204: cannot extend unknown type `NativeSignedInteger`\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:18:8\n     |\n  18 | extend NativeSignedInteger:\n     |        ^^^^^^^^^^^^^^^^^^^\n"
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000212: ambiguous operator implementation %\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/numeric/operators.sev:19:5\n   |\n19 |     operator %[G:Remainder](right: Self) -> Self:\n   |     ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/pointer.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000102: inconsistent indentation\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/pointer.sev:24:1\n   |\n24 |     pointer[T]\n   | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/primitive.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000120: expected a type name\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/primitive.sev:3:24\n  |\n3 | enum PrimitiveCategory:\n  |                        ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/slice.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000101: character literal requires one Unicode scalar\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/slice.sev:4:1\n  |\n4 | '''\n  | ^\n"
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/string/core.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000204: unknown type `index`\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string/core.sev:8:43\n     |\n   8 | def __dimension(value: string, dimension: index) -> index\n     |                                           ^^^^^\n"
+    },
+    "source_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/string/format.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000701: invalid external interface declaration: UnknownType(\"native_ptr\")\n"
+    },
+    "source_check": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  {
+    "file": "sev_compiler/universal/primitive/string.sev",
+    "seed_parse": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "seed_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000218: class `string` does not implement required method `String.upper`\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:280:1\n     |\n 280 | class string: String:\n     | ^\n"
+    },
+    "source_check": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: E000102: inconsistent indentation\n --> /home/tplayer/Documents/Severian/sev_compiler/universal/primitive/string.sev:58:1\n   |\n58 |    string\n   | ^\n"
+    }
+  }
+]

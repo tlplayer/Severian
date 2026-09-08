@@ -1,0 +1,6 @@
+class Box[T]:
+    value: T
+
+test:
+    box = Box[int](42)
+    assert(box.value == 42)
