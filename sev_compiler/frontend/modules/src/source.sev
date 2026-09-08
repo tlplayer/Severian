@@ -52,7 +52,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
     stack = active[:]
     stack.append(file.path)
-    tokens = lexer.scan_tokens(file, registry.operators, true)
+    tokens = lexer.scan_bootstrap(file)
     depth := 0
     index := 0
     for token in tokens:

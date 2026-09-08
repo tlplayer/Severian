@@ -1,0 +1,27 @@
+import diagnostics
+import "token/mod.sev"
+import "lexeme.sev"
+
+
+def is_digit(character: string) -> bool:
+    return character >= "0" and character <= "9"
+
+
+def is_alphabetic(character: string) -> bool:
+    return (character >= "a" and character <= "z") or (character >= "A" and character <= "Z")
+
+
+def is_alphanumeric(character: string) -> bool:
+    return is_alphabetic(character) or is_digit(character)
+
+
+class IdentifierLexeme: Lexeme
+    def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+        characters = input.characters
+        character = characters[start]
+        if not is_alphabetic(character) and character != "_":
+            return LexemeMatch(start, None, false)
+        cursor := start + 1
+        while cursor < len(characters) and (is_alphanumeric(characters[cursor]) or characters[cursor] == "_"):
+            cursor += 1
+        return LexemeMatch(cursor, TokenKind.Identifier(characters[start:cursor].join("")))

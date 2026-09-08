@@ -41,6 +41,20 @@ behavior, derive an operator by appending `"="`, or infer mutation from a
 compiler naming convention. A binding such as
 `operator %=[G:RemainderAssign]` must resolve an actual source contract.
 
+## Lexical layer
+
+`Lx` identifies a lexical rule; `L` remains Literal. Characters pass through
+`Lx` to symbols (`Y`), literals, identifiers, and structural tokens before
+`G` supplies grammar behavior. Operators contribute `Y` spellings to one
+longest-match symbol rule rather than implementing character scanners.
+
+The [source lexer](frontend/lexer/README.md) separates lexical contracts,
+identifiers, numbers, strings, trivia, symbols, and indentation from grammar
+registration. It has an explicit bootstrap discovery entry followed by normal
+registered scanning. Arbitrary imported `Lx` body execution and precompiled
+lexer packages remain a later migration; source `G`/`Y` registration is already
+executable.
+
 ## Definition hierarchy
 
 `Y` identifies an interned source symbol. `O` identifies a value operation and
@@ -167,7 +181,7 @@ provenance rather than pretending those edges appeared in source syntax.
 ## Implementation sequence and acceptance
 
 1. **Register source symbols and operation descriptors.** Replace
-   `frontend/lexer/src/scanner/mod.sev:punctuation` and the parser's operator
+   the former `frontend/lexer/src/scanner/mod.sev:punctuation` and the parser's operator
    switch with shared registered metadata from `universal/operator/kind.sev`
    and grammar declarations. Keep a small bootstrap lexer for declaration
    headers, identifiers, literals, comments, indentation, and delimiters.

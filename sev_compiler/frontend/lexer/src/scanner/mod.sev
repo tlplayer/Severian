@@ -1,105 +1,30 @@
 import source
 import diagnostics
+from diagnostics import Diagnostic
 import universal
-import "../syntax/mod.sev"
 import "../token/mod.sev"
-import "../../../../universal/primitive/char/encoding.sev" as utf8
+import "../lexer.sev"
+import "../indentation.sev"
+import "../syntax/mod.sev"
 
 
-def literal_escape(value: string) -> string | None:
-    if value == "n":
-        return "\n"
-    if value == "r":
-        return "\r"
-    if value == "t":
-        return "\t"
-    if value == "\\" or value == "\"" or value == "'":
-        return value
-    return None
+def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int) -> Token:
+    return Token(kind, lexeme_span(input, start, end))
 
 
-def literal_codepoint(value: string) -> u32:
-    bytes = value.bytes()
-    if len(bytes) == 1:
-        return u32(bytes[0])
-    if len(bytes) == 2:
-        return u32(utf8.decode_two(int(bytes[0]), int(bytes[1])))
-    if len(bytes) == 3:
-        return u32(utf8.decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2])))
-    return u32(utf8.decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3])))
-
-def make_token(file: source.SourceFile, kind: TokenKind, start: int, end: int) -> Token:
-    return Token(kind, source.Span(file.id, u32(start), u32(end)))
-
-
-def indentation_width(line: string) -> int:
-    width := 0
-    for character in line.characters():
-        if character == " ":
-            width += 1
-        elif character == "\t":
-            width += 4
-        else:
-            break
-    return width
-
-
-def strip_indentation(line: string, width: int) -> string:
-    consumed := 0
-    offset := 0
-    characters = line.characters()
-    while offset < len(characters) and consumed < width:
-        if characters[offset] == " ":
-            consumed += 1
-        elif characters[offset] == "\t":
-            consumed += 4
-        else:
-            break
-        offset += 1
-    return characters[offset:].join("")
-
-
-def contains_non_whitespace(line: string) -> bool:
-    for character in line.characters():
-        if character != " " and character != "\t" and character != "\r":
-            return true
-    return false
-
-
-def is_digit(character: string) -> bool:
-    return character >= "0" and character <= "9"
-
-
-def is_alphabetic(character: string) -> bool:
-    return (character >= "a" and character <= "z") or (character >= "A" and character <= "Z")
-
-
-def is_alphanumeric(character: string) -> bool:
-    return is_alphabetic(character) or is_digit(character)
-
-
-def block_string(raw: string) -> string:
-    content := raw
-    if content.starts_with("\n"):
-        content = content[1:]
-    lines = content.split("\n")
-    common := -1
-    for line in lines:
-        if contains_non_whitespace(line):
-            width = indentation_width(line)
-            if common < 0 or width < common:
-                common = width
-    if common < 0:
-        common = 0
-    result: list[string] = []
-    for line in lines:
-        result.append(strip_indentation(line, common))
-    return result.join("\n")
+def scan_bootstrap(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
+    return scan_with(file, StandardLexemes(lexical_symbols([])), [], true)
 
 
 def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
-    characters = file.text.characters()
-    symbols = lexical_symbols(syntaxes)
+    if discovery:
+        return scan_bootstrap(file)
+    return scan_with(file, StandardLexemes(lexical_symbols(syntaxes)), syntaxes)
+
+
+def scan_with[Lx: Lexeme](file: source.SourceFile, rule: Lx, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
+    input = lexeme_input(file)
+    characters = input.characters
     cursor := 0
     line_start := true
     indents: list[int] = [0]
@@ -116,148 +41,55 @@ def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax
                 while cursor < len(characters) and characters[cursor] != "\n":
                     cursor += 1
                 if cursor < len(characters):
-                    tokens.append(make_token(file, TokenKind.Newline, cursor, cursor + 1))
+                    tokens.append(make_token(input, TokenKind.Newline, cursor, cursor + 1))
                     cursor += 1
                 continue
             width = indentation_width(characters[start:cursor].join(""))
             if width > indents[-1]:
                 indents.append(width)
-                tokens.append(make_token(file, TokenKind.Indent, start, cursor))
+                tokens.append(make_token(input, TokenKind.Indent, start, cursor))
             elif width < indents[-1]:
                 while width < indents[-1]:
                     indents.pop()
-                    tokens.append(make_token(file, TokenKind.Dedent, start, cursor))
+                    tokens.append(make_token(input, TokenKind.Dedent, start, cursor))
                 if width != indents[-1]:
-                    return error(diagnostics.Diagnostic("E000102", "inconsistent indentation", source.Span(file.id, u32(start), u32(cursor))))
+                    return error(diagnostics.Diagnostic("E000102", "inconsistent indentation", lexeme_span(input, start, cursor)))
             line_start = false
 
         start = cursor
         character = characters[cursor]
-        if character == " " or character == "\t" or character == "\r":
-            cursor += 1
-            continue
-        if character == "\n" or character == ";":
-            tokens.append(make_token(file, TokenKind.Newline, cursor, cursor + 1))
-            cursor += 1
-            line_start = character == "\n"
-            continue
-        if character == "#":
-            while cursor < len(characters) and characters[cursor] != "\n":
-                cursor += 1
-            continue
-
-        symbol = match_symbol(characters, cursor, symbols)
-        leading_fraction = character == "." and cursor + 1 < len(characters) and is_digit(characters[cursor + 1])
-        if not leading_fraction:
-            if symbol != None:
-                width = int(len(symbol.spelling.characters()))
-                tokens.append(Token(symbol.kind, source.Span(file.id, u32(start), u32(start + width)), symbol_syntaxes(syntaxes, symbol.spelling)))
-                cursor += width
-                continue
-
-        formatted = character == "f" and cursor + 1 < len(characters) and characters[cursor + 1] == "\""
-        if character == "\"" or character == "'" or formatted:
-            if formatted:
-                cursor += 1
-            quote = characters[cursor]
-            block = quote == "\"" and cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
-            cursor += 3 if block else 1
-            content_start = cursor
-            value := ""
-            if block:
-                while cursor + 2 < len(characters) and not (characters[cursor] == "\"" and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""):
-                    cursor += 1
-                if cursor + 2 >= len(characters):
-                    return error(diagnostics.Diagnostic("E000101", "unterminated block string literal", source.Span(file.id, u32(start), u32(cursor))))
-                value = block_string(characters[content_start:cursor].join(""))
-                cursor += 3
-            else:
-                while cursor < len(characters) and characters[cursor] != quote:
-                    if characters[cursor] == "\n":
-                        return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
-                    if characters[cursor] == "\\":
-                        cursor += 1
-                        if cursor >= len(characters):
-                            return error(diagnostics.Diagnostic("E000101", "unterminated escape", source.Span(file.id, u32(start), u32(cursor))))
-                        escaped ?= literal_escape(characters[cursor])
-                        if escaped != None:
-                            value += escaped
-                        else:
-                            return error(diagnostics.Diagnostic("E000101", "unsupported literal escape", source.Span(file.id, u32(start), u32(cursor + 1))))
-                    else:
-                        value += characters[cursor]
-                    cursor += 1
-                if cursor >= len(characters):
-                    return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
-                cursor += 1
-            if quote == "'":
-                if len(value.characters()) != 1:
-                    return error(diagnostics.Diagnostic("E000101", "character literal requires one Unicode scalar", source.Span(file.id, u32(start), u32(cursor))))
-                tokens.append(make_token(file, TokenKind.Character(literal_codepoint(value)), start, cursor))
-            elif formatted:
-                kind: TokenKind = TokenKind.FormattedString(value)
-                tokens.append(Token(kind, source.Span(file.id, u32(start), u32(cursor)), syntaxes))
-            else:
-                kind: TokenKind = TokenKind.String(value)
-                tokens.append(make_token(file, kind, start, cursor))
-            continue
-
-        if is_digit(character) or leading_fraction:
-            cursor += 1
-            while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
-                cursor += 1
-            floating := cursor + 1 < len(characters) and characters[cursor] == "." and is_digit(characters[cursor + 1])
-            if floating:
-                cursor += 1
-                while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
-                    cursor += 1
-            if leading_fraction:
-                floating = true
-            if cursor < len(characters) and (characters[cursor] == "e" or characters[cursor] == "E"):
-                floating = true
-                cursor += 1
-                if cursor < len(characters) and (characters[cursor] == "+" or characters[cursor] == "-"):
-                    cursor += 1
-                exponent_start = cursor
-                while cursor < len(characters) and is_digit(characters[cursor]):
-                    cursor += 1
-                if cursor == exponent_start:
-                    return error(diagnostics.Diagnostic("E000101", "floating exponent requires digits", source.Span(file.id, u32(start), u32(cursor))))
-            spelling := characters[start:cursor].join("").replace("_", "")
-            if leading_fraction:
-                spelling = "0" + spelling
-            if floating and "." not in spelling:
-                spelling = spelling.replace("e", ".0e").replace("E", ".0E")
-            if floating:
-                tokens.append(make_token(file, TokenKind.Float(spelling), start, cursor))
-            else:
-                tokens.append(make_token(file, TokenKind.Integer(spelling), start, cursor))
-            continue
-
-        if is_alphabetic(character) or character == "_":
-            cursor += 1
-            while cursor < len(characters) and (is_alphanumeric(characters[cursor]) or characters[cursor] == "_"):
-                cursor += 1
-            word = characters[start:cursor].join("")
-            tokens.append(Token(TokenKind.Identifier(word), source.Span(file.id, u32(start), u32(cursor)), symbol_syntaxes(syntaxes, word)))
+        result = lex(rule, input, start)
+        if result.matched:
+            cursor = result.end
+            kind ?= result.kind
+            if kind != None:
+                metadata := symbol_syntaxes(syntaxes, characters[start:cursor].join(""))
+                match kind:
+                    case FormattedString:
+                        metadata = syntaxes
+                    case _:
+                        pass
+                tokens.append(Token(kind, lexeme_span(input, start, cursor), metadata))
+                if kind == TokenKind.Newline:
+                    line_start = character == "\n"
             continue
 
         if discovery:
-            tokens.append(make_token(file, TokenKind.SymbolToken(character), start, start + 1))
+            tokens.append(make_token(input, TokenKind.SymbolToken(character), start, start + 1))
             cursor += 1
             continue
-        return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), source.Span(file.id, u32(start), u32(start + 1))))
+        return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), lexeme_span(input, start, start + 1)))
 
     while len(indents) > 1:
         indents.pop()
-        tokens.append(make_token(file, TokenKind.Dedent, cursor, cursor))
-    tokens.append(make_token(file, TokenKind.Eof, cursor, cursor))
+        tokens.append(make_token(input, TokenKind.Dedent, cursor, cursor))
+    tokens.append(make_token(input, TokenKind.Eof, cursor, cursor))
     return tokens
 
 
 def scan(file: source.SourceFile, operators: list[universal.OperatorSyntax] = []) -> list[Token] | diagnostics.Diagnostic:
     registry = SyntaxRegistry(operators[:])
-    discover_operator_descriptors(scan_tokens(file, registry.operators, true), registry)
+    discover_operator_descriptors(scan_bootstrap(file), registry)
     resolve_operator_descriptors(registry)
     return scan_registered(file, registry)
 
@@ -278,3 +110,91 @@ def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[T
                     tokens[index] = token
                 index += 1
     return tokens
+
+
+test "lexical classes preserve numeric forms and identifier boundaries":
+    input = source.virtual_source("lexemes.sev", "12 12.5 .5 1_024 2e-3 foo_2 fuse_count")
+    tokens = scan_tokens(input, [])
+    assert(tokens[0].kind == TokenKind.Integer("12"))
+    assert(tokens[1].kind == TokenKind.Float("12.5"))
+    assert(tokens[2].kind == TokenKind.Float("0.5"))
+    assert(tokens[3].kind == TokenKind.Integer("1024"))
+    assert(tokens[4].kind == TokenKind.Float("2.0e-3"))
+    assert(tokens[5].kind == TokenKind.Identifier("foo_2"))
+    assert(tokens[6].kind == TokenKind.Identifier("fuse_count"))
+    assert(tokens[7].kind == TokenKind.Eof)
+
+
+test "one symbol rule matches the longest registered spelling":
+    operators = [universal.operator_syntax(universal.Add()),
+        universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left),
+        universal.OperatorSyntax("+==", universal.Fixity.Infix, 1, universal.Associativity.Left),
+        universal.OperatorSyntax("|>", universal.Fixity.Infix, 7, universal.Associativity.Left),
+        universal.OperatorSyntax("fuse", universal.Fixity.Infix, 7, universal.Associativity.Left)]
+    input = source.virtual_source("symbols.sev", "+== += + |> fuse fuse_count")
+    tokens = scan_tokens(input, operators)
+    assert(tokens[0].kind == TokenKind.SymbolToken("+=="))
+    assert(tokens[1].kind == TokenKind.SymbolToken("+="))
+    assert(tokens[2].kind == TokenKind.SymbolToken("+"))
+    assert(tokens[3].kind == TokenKind.SymbolToken("|>"))
+    assert(len(tokens[4].syntaxes) == 1)
+    assert(len(tokens[5].syntaxes) == 0)
+    assert(tokens[3].span.start == 9)
+    assert(tokens[3].span.end == 11)
+
+
+test "bootstrap discovery does not activate value symbols":
+    input = source.virtual_source("bootstrap.sev", "|> +==")
+    tokens = scan_bootstrap(input)
+    assert(tokens[0].kind == TokenKind.Pipe)
+    assert(tokens[1].kind == TokenKind.SymbolToken(">"))
+    assert(tokens[2].kind == TokenKind.SymbolToken("+"))
+    assert(tokens[3].kind == TokenKind.Equal)
+    assert(tokens[4].kind == TokenKind.Equal)
+    for token in tokens:
+        assert(len(token.syntaxes) == 0)
+
+
+test "strings characters and interpolation retain decoding and syntax":
+    input = source.virtual_source("strings.sev", "\"hi\\n\" 'λ' f\"{1 + 2}\" \"\"\"\n    block\n    text\n\"\"\"")
+    operators = [universal.operator_syntax(universal.Add())]
+    tokens = scan_tokens(input, operators)
+    assert(tokens[0].kind == TokenKind.String("hi\n"))
+    assert(tokens[1].kind == TokenKind.Character(955))
+    assert(tokens[2].kind == TokenKind.FormattedString("{1 + 2}"))
+    assert(len(tokens[2].syntaxes) == 1)
+    assert(tokens[3].kind == TokenKind.String("block\ntext\n"))
+
+
+test "comments blank lines and indentation share structural state":
+    input = source.virtual_source("indent.sev", "root\n    # comment\n    first; second\n\nlast")
+    tokens = scan_tokens(input, [])
+    assert(tokens[0].kind == TokenKind.Identifier("root"))
+    assert(tokens[1].kind == TokenKind.Newline)
+    assert(tokens[2].kind == TokenKind.Newline)
+    assert(tokens[3].kind == TokenKind.Indent)
+    assert(tokens[4].kind == TokenKind.Identifier("first"))
+    assert(tokens[5].kind == TokenKind.Newline)
+    assert(tokens[6].kind == TokenKind.Identifier("second"))
+    assert(tokens[7].kind == TokenKind.Newline)
+    assert(tokens[8].kind == TokenKind.Newline)
+    assert(tokens[9].kind == TokenKind.Dedent)
+    assert(tokens[10].kind == TokenKind.Identifier("last"))
+    assert(tokens[11].kind == TokenKind.Eof)
+
+
+def expect_lexical_error(text: string, code: string):
+    result ?= scan_tokens(source.virtual_source("invalid.sev", text), [])
+    if result is Diagnostic:
+        assert(result.code == code)
+    else:
+        assert(false)
+
+
+test "committed literal prefixes preserve diagnostics":
+    expect_lexical_error("1e+", "E000101")
+    expect_lexical_error("\"unterminated", "E000101")
+    expect_lexical_error("\"\\q\"", "E000101")
+    expect_lexical_error("'ab'", "E000101")
+    expect_lexical_error("a\n    b\n  c", "E000102")
+    expect_lexical_error("$", "E000100")

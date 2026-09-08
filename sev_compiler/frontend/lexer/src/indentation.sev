@@ -1,0 +1,34 @@
+def indentation_width(line: string) -> int:
+    width := 0
+    for character in line.characters():
+        if character == " ":
+            width += 1
+        elif character == "\t":
+            width += 4
+        else:
+            break
+    return width
+
+
+def strip_indentation(line: string, width: int) -> string:
+    consumed := 0
+    offset := 0
+    characters = line.characters()
+    while offset < len(characters) and consumed < width:
+        if characters[offset] == " ":
+            consumed += 1
+        elif characters[offset] == "\t":
+            consumed += 4
+        else:
+            break
+        offset += 1
+    return characters[offset:].join("")
+
+
+def contains_non_whitespace(line: string) -> bool:
+    for character in line.characters():
+        if character != " " and character != "\t" and character != "\r":
+            return true
+    return false
+
+

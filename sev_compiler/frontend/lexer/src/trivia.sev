@@ -1,0 +1,19 @@
+import diagnostics
+import "token/mod.sev"
+import "lexeme.sev"
+
+
+class TriviaLexeme: Lexeme
+    def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+        characters = input.characters
+        character = characters[start]
+        if character == " " or character == "\t" or character == "\r":
+            return LexemeMatch(start + 1, None)
+        if character == "\n" or character == ";":
+            return LexemeMatch(start + 1, TokenKind.Newline)
+        if character == "#":
+            cursor := start
+            while cursor < len(characters) and characters[cursor] != "\n":
+                cursor += 1
+            return LexemeMatch(cursor, None)
+        return LexemeMatch(start, None, false)

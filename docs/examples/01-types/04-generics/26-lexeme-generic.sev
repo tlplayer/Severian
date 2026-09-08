@@ -1,0 +1,32 @@
+# Lx - Lexeme / lexical rule. L remains Literal.
+# A lexical rule consumes characters and produces a compiler term.
+
+class LexicalTerm:
+    start: int
+    end: int
+    value: int
+
+
+trait Lexeme:
+    def scan(source: string, offset: int) -> LexicalTerm
+
+
+class DecimalLexeme: Lexeme
+    def scan(source: string, offset: int) -> LexicalTerm:
+        characters = source.characters()
+        end := offset
+        while end < len(characters) and characters[end] >= "0" and characters[end] <= "9":
+            end += 1
+        assert(end > offset)
+        return LexicalTerm(offset, end, int(characters[offset:end].join("")))
+
+
+def lex[Lx: Lexeme](rule: Lx, source: string, offset: int) -> LexicalTerm:
+    return rule.scan(source, offset)
+
+
+test:
+    term = lex(DecimalLexeme(), "x42 trailing", 1)
+    assert(term.start == 1)
+    assert(term.end == 3)
+    assert(term.value == 42)

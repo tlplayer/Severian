@@ -4,11 +4,6 @@ import universal
 import "../token/mod.sev"
 
 
-class LexicalSymbol:
-    spelling: string
-    kind: TokenKind
-
-
 class SyntaxProperty:
     name: string
     tokens: list[Token]
@@ -28,51 +23,6 @@ class SyntaxRegistry:
     operators: list[universal.OperatorSyntax]
     descriptors: list[OperatorDescriptor] = []
     discovered: list[string] = []
-
-
-def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
-    # Only the declaration/structural bootstrap is closed. Value operations are
-    # supplied by registered source descriptors and use one open token category.
-    symbols = [LexicalSymbol("@", At), LexicalSymbol(":", Colon),
-        LexicalSymbol(":=", ColonEqual), LexicalSymbol("?=", QuestionEqual),
-        LexicalSymbol("=", Equal), LexicalSymbol("->", Arrow),
-        LexicalSymbol("(", LeftParen), LexicalSymbol(")", RightParen),
-        LexicalSymbol("[", LeftBracket), LexicalSymbol("]", RightBracket),
-        LexicalSymbol("{", LeftBrace), LexicalSymbol("}", RightBrace),
-        LexicalSymbol("|", Pipe), LexicalSymbol(",", Comma), LexicalSymbol(".", Dot)]
-    for operation in operators:
-        characters = operation.symbol.characters()
-        if len(characters) == 0:
-            continue
-        first = characters[0]
-        if (first >= "a" and first <= "z") or (first >= "A" and first <= "Z") or first == "_":
-            continue
-        found := false
-        for previous in symbols:
-            if previous.spelling == operation.symbol:
-                found = true
-        if not found:
-            symbols.append(LexicalSymbol(operation.symbol, SymbolToken(operation.symbol)))
-    return symbols
-
-
-def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSymbol]) -> LexicalSymbol | None:
-    selected: LexicalSymbol | None := None
-    longest := 0
-    for symbol in symbols:
-        spelling = symbol.spelling.characters()
-        if len(spelling) <= longest or cursor + int(len(spelling)) > len(characters):
-            continue
-        index := 0
-        matches := true
-        for character in spelling:
-            if characters[cursor + index] != character:
-                matches = false
-            index += 1
-        if matches:
-            selected = symbol
-            longest = int(len(spelling))
-    return selected
 
 
 def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -> list[universal.OperatorSyntax]:

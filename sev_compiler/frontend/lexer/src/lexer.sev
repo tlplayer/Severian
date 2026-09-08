@@ -1,0 +1,62 @@
+import source
+import diagnostics
+import "token/mod.sev"
+import "lexeme.sev"
+import "identifier.sev"
+import "number.sev"
+import "string.sev"
+import "symbol.sev"
+import "trivia.sev"
+
+
+# The seed specializes this composition; it cannot store trait objects yet.
+# Every spelling supplied by G/Y still uses the same longest-match rule.
+class StandardLexemes: Lexeme
+    symbols: list[LexicalSymbol]
+
+    def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+        trivia = lex(TriviaLexeme(), input, start)
+        if trivia.matched:
+            return trivia
+        characters = input.characters
+        leading_fraction = characters[start] == "." and start + 1 < len(characters) and is_digit(characters[start + 1])
+        if not leading_fraction:
+            symbol = lex(SymbolLexeme(symbols), input, start)
+            if symbol.matched:
+                return symbol
+        literal = lex(StringLexeme(), input, start)
+        if literal.matched:
+            return literal
+        number = lex(NumericLexeme(), input, start)
+        if number.matched:
+            return number
+        identifier = lex(IdentifierLexeme(), input, start)
+        if identifier.matched:
+            return identifier
+        return LexemeMatch(start, None, false)
+
+
+def lex[Lx: Lexeme](rule: Lx, input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+    if start < 0 or start >= len(input.characters):
+        return LexemeMatch(start, None, false)
+    result = rule.scan(input, start)
+    if result.matched:
+        if result.end <= start or result.end > len(input.characters):
+            return error(diagnostics.Diagnostic("E000104", "lexical rule must consume a nonempty source range", lexeme_span(input, start, start)))
+    return result
+
+
+test "generic lexical rule entry preserves concrete token values":
+    input = lexeme_input(source.virtual_source("generic.sev", "42 name"))
+    number = lex(NumericLexeme(), input, 0)
+    assert(number.matched)
+    if number.matched:
+        assert(number.end == 2)
+        assert(number.kind == TokenKind.Integer("42"))
+    identifier = lex(IdentifierLexeme(), input, 3)
+    assert(identifier.matched)
+    if identifier.matched:
+        assert(identifier.end == 7)
+        assert(identifier.kind == TokenKind.Identifier("name"))
+    assert(not lex(NumericLexeme(), input, 3).matched)
+    assert(not lex(IdentifierLexeme(), input, 7).matched)

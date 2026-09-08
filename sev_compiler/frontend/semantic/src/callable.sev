@@ -1094,6 +1094,10 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 module.initializer.statements.append(universal.BindingStatement(resolved))
             case ExpressionItem:
                 module.initializer.statements.append(callable_expression_statement(state, expression))
+            case OperatorItem:
+                # Top-level operators were registered with their callable
+                # bodies above; they do not execute as module initializers.
+                pass
             case Function:
                 pass
             case Record:

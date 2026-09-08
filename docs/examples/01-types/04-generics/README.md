@@ -26,6 +26,7 @@ Each example performs a compiler operation. The generic term is transformed, exe
 | `S` | Statement | Execute a statement sequence | `11-statement-generic.sev` |
 | `D` | Declaration | Bind declarations to symbols | `12-declaration-generic.sev` |
 | `P` | Pattern | Select a matching pattern | `13-pattern-generic.sev` |
+| `Lx` | Lexeme | Consume source into a lexical term | `26-lexeme-generic.sev` |
 | `L` | Literal | Fold literal values | `14-literal-generic.sev` |
 | `O` | Operation | Execute operation semantics | `15-operation-generic.sev` |
 | `I` | Instruction | Remove no-op instructions | `16-instruction-generic.sev` |
@@ -39,7 +40,7 @@ Each example performs a compiler operation. The generic term is transformed, exe
 | `N` | Node | Traverse nodes across IR levels | `24-node-generic.sev` |
 | `X` | Any compiler term | Run a category-independent pass | `25-compiler-term-generic.sev` |
 
-`E` is Error; `Ex` is Expression. `O` executes semantic behavior; `Y` identifies the resolved symbol that refers to behavior. `X` is the umbrella compiler-term parameter, conceptually `X: E | S | D | P | T | ...`.
+`Lx` is Lexeme; `L` is Literal. Lexical rules precede `Y` symbols and `G` grammar behavior. `E` is Error; `Ex` is Expression. `O` executes semantic behavior; `Y` identifies the resolved symbol that refers to behavior. `X` is the umbrella compiler-term parameter, conceptually `X: E | S | D | P | T | ...`.
 
 ## Generative callables
 
