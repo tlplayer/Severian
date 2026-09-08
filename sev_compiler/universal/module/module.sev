@@ -36,6 +36,7 @@ class Module:
     values: list[Value] = []
     globals: list[ValueId] = []
     records: list[RecordDeclaration] = []
+    traits: list[TraitDeclaration] = []
     binding_values: list[tuple[BindingId, ValueId]] = []
 
 

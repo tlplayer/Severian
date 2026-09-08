@@ -106,3 +106,5 @@ class RecordDeclaration:
     span: source.Span
     type_id: TypeId = TypeId(0)
     lookup: string = ""
+    traits: list[TypeAnnotation] = []
+    definition: DefId = DefId(0, 0, DeclarationId(0))

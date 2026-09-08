@@ -52,6 +52,7 @@ class TypeDeclaration:
     span: source.Span
     id: TypeId = TypeId(0)
     interface: InterfaceId | None = None
+    lookup: string = ""
 
 
 class PropertyDeclaration:
@@ -83,6 +84,9 @@ class TraitDeclaration:
     properties: list[PropertyDeclaration]
     operators: list[OperatorDeclaration]
     span: source.Span
+    methods: list[FunctionDeclaration] = []
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    lookup: string = ""
 
 
 enum CompilerExpectation:

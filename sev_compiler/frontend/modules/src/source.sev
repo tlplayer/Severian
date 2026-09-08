@@ -67,6 +67,16 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             result.items.append(child_item)
                     case _:
                         throw Error("bootstrap imports require a relative source locator")
+            case Trait:
+                trait_declaration := declaration
+                trait_declaration.name = prefix + declaration.name
+                trait_declaration.lookup = prefix
+                result.items.append(universal.Trait(trait_declaration))
+            case Type:
+                type_declaration := declaration
+                type_declaration.name = prefix + declaration.name
+                type_declaration.lookup = prefix
+                result.items.append(universal.Type(type_declaration))
             case Record:
                 record_declaration := declaration
                 record_declaration.name = prefix + declaration.name
