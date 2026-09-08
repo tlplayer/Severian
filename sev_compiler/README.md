@@ -75,9 +75,10 @@ Compiler-language regression inputs live next to scalar semantic analysis in
 the external MLIR/native toolchain and stdout/diagnostic checks; test bodies
 do not need separate files to keep them out of builds.
 
-The [source lexer](frontend/lexer/README.md) separates `Lx` lexical rules from
-`Y` symbol matching and `G` descriptor registration. Its built-in rules are
-compiled from Severian; loading arbitrary imported `Lx` rule bodies at compiler
+The [source lexer](frontend/lexer/README.md) represents matched source as `Lx`
+lexemes and classified parser input as `To` tokens, before `Y` symbols and `G`
+descriptor registration. Its built-in rules are
+compiled from Severian; loading arbitrary imported lexical-rule bodies at compiler
 runtime remains unfinished.
 
 The executable loads syntax from `universal/grammar/contracts.sev` and discovers

@@ -1,6 +1,6 @@
 import diagnostics
 import "token/mod.sev"
-import "lexeme.sev"
+import "rule.sev"
 
 
 def is_digit(character: string) -> bool:
@@ -15,7 +15,7 @@ def is_alphanumeric(character: string) -> bool:
     return is_alphabetic(character) or is_digit(character)
 
 
-class IdentifierLexeme: Lexeme
+class IdentifierLexeme: LexicalRule
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         characters = input.characters
         character = characters[start]

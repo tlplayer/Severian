@@ -43,17 +43,23 @@ compiler naming convention. A binding such as
 
 ## Lexical layer
 
-`Lx` identifies a lexical rule; `L` remains Literal. Characters pass through
-`Lx` to symbols (`Y`), literals, identifiers, and structural tokens before
-`G` supplies grammar behavior. Operators contribute `Y` spellings to one
-longest-match symbol rule rather than implementing character scanners.
+`Lx` identifies matched source text and its span; `To` identifies the
+classified lexical object handed to the parser. `L` remains Literal and `Y`
+remains a syntactic/resolved symbol. A symbol token can refer to `Y`; identifiers,
+literals, newlines, indentation, and EOF are tokens too.
 
-The [source lexer](frontend/lexer/README.md) separates lexical contracts,
-identifiers, numbers, strings, trivia, symbols, and indentation from grammar
-registration. It has an explicit bootstrap discovery entry followed by normal
-registered scanning. Arbitrary imported `Lx` body execution and precompiled
-lexer packages remain a later migration; source `G`/`Y` registration is already
-executable.
+```text
+characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → CFG
+```
+
+The [source lexer](frontend/lexer/README.md) separates `LexicalRule` scanners
+from `Lexeme` values and the `TokenTerm` contract. Tokens retain their original
+lexemes separately from decoded or normalized payloads. Operators contribute
+`Y` spellings to one longest-match symbol rule.
+
+Bootstrap discovery precedes normal registered scanning. Arbitrary imported
+lexical-rule execution and precompiled lexer packages remain a later migration;
+source `G`/`Y` registration is already executable.
 
 ## Definition hierarchy
 

@@ -1,17 +1,38 @@
 # Source lexer
 
-`Lx` denotes a lexeme rule, before `Y` (symbol identity) and `G` (grammar
-behavior). `L` continues to mean Literal. These are generic parameter
-conventions, not reserved parameter names.
+`Lx` denotes a lexeme: matched source text and its span. `To` denotes a token:
+the classified lexical object handed to the parser. `L` remains Literal and
+`Y` remains a syntactic/resolved Symbol. These are generic parameter conventions,
+not reserved parameter names.
 
 ```text
-characters → Lx → Y / literal / identifier / structural token
-               → G → O / CFG semantics → I → B
+characters → Lx → To → parser → Y / L / Ex / S / D / P / ... → G → CFG
+                                                        → O / I / B
 ```
+
+For `total += 1_024`, the lexemes retain `total`, `+=`, and `1_024`. The tokens
+classify them as identifier, symbol, and integer. The integer payload is `1024`;
+its original spelling remains `1_024`. The symbol token carries the registered
+syntax used to resolve `Y` and `G:AddAssign`. A token is not itself a `Y`.
 
 ## Executable layers
 
-`src/lexeme.sev` defines `LexemeInput`, `LexemeMatch`, and the `Lexeme` trait.
+`src/lexeme.sev` defines the `LexemeTerm` contract and concrete `Lexeme` value
+(`text`, `span`). `src/token/mod.sev` defines `TokenTerm` (`lexeme`, `span`) and
+the concrete parser `Token`, whose `TokenKind` carries category-specific payloads.
+`checked_token[To: TokenTerm](token: To) -> To` validates lexical origin while
+preserving the concrete token type. `token_from_lexeme` constructs parser tokens
+through that generic entry. The two spans agree, including source identity.
+
+Lexer-created tokens retain exact matched text, including literal quotes,
+escapes, separators, and indentation. EOF and EOF dedents have empty lexemes
+and zero-width spans. Macro replacement tokens retain the original token's
+lexeme as their source origin while changing the classified payload; the macro
+EOF has an empty lexeme at the end of the definition. Token classification is
+not used to reconstruct source spelling.
+
+`src/rule.sev` defines `LexemeInput`, `LexemeMatch`, and `LexicalRule`. A rule
+is the scanner that produces lexemes/tokens, rather than an `Lx` value itself.
 A rule's `scan` method returns either a match result or a diagnostic. The
 single result preserves decoded literal values and committed-prefix errors
 without scanning a string or number a second time. A result has:
@@ -21,7 +42,7 @@ without scanning a string or number a second time. A result has:
 - `matched = true`, a token kind: consume input and emit that compiler term.
 
 `end` is an exclusive character offset. The source compiler currently uses
-character offsets for spans and diagnostic rendering. `lex[Lx: Lexeme]` in
+character offsets for spans and diagnostic rendering. `lex[Rule: LexicalRule]` in
 `src/lexer.sev` validates progress and bounds for every successful match.
 
 `IdentifierLexeme`, `NumericLexeme`, `StringLexeme`, `SymbolLexeme`, and
@@ -52,13 +73,13 @@ literal implementations, including formatted and block strings, so it can
 walk existing compiler definitions without another independent scanner.
 
 The Rust seed compiles these Severian rules into the source compiler. It does
-not yet support a heterogeneous `list[Lexeme]`. The rule composition is
+not yet support a heterogeneous `list[LexicalRule]`. The rule composition is
 therefore statically specialized. The generic dispatcher lives with the
 concrete rule imports because the seed also cannot specialize an imported
 generic for a caller-only record type. This limitation must be fixed before
 arbitrary external rules can use the shared generic entry point.
 
-Importing arbitrary `Lx` implementations into an already-built compiler is
+Importing arbitrary lexical-rule implementations into an already-built compiler is
 **not implemented**. It requires discovery and validation of lexical contracts,
 a compiler-time execution or precompiled-package mechanism for rule bodies,
 and a registry that retains definition identity. Keep that work separate from
@@ -78,6 +99,7 @@ From the repository root:
 ```sh
 target/debug/sev test sev_compiler/frontend/lexer
 target/debug/sev test docs/examples/01-types/04-generics/26-lexeme-generic.sev
+target/debug/sev test docs/examples/01-types/04-generics/27-token-generic.sev
 cd sev_compiler
 ../target/debug/sev build
 cd ..

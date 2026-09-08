@@ -1,5 +1,6 @@
 import source
 import universal
+import "../lexeme.sev"
 
 enum TokenKind:
     Identifier(value: string)
@@ -30,9 +31,33 @@ enum TokenKind:
     Eof
 
 
-class Token:
+# To is the classified lexical object handed to the parser. Its original
+# spelling remains available even when its literal payload is normalized.
+trait TokenTerm:
+    property lexeme: Lexeme
+    property span: source.Span
+
+
+class Token: TokenTerm
     kind: TokenKind
     span: source.Span
+    lexeme: Lexeme
     syntaxes: list[universal.OperatorSyntax] = []
     descriptor: bool = false
     grammar: bool = false
+
+
+def validate_token_origin(span: source.Span, lexeme: Lexeme):
+    assert(span.source.index == lexeme.span.source.index)
+    assert(span.start == lexeme.span.start)
+    assert(span.end == lexeme.span.end)
+    assert(span.start <= span.end)
+
+
+def checked_token[To: TokenTerm](token: To) -> To:
+    validate_token_origin(token.span, token.lexeme)
+    return token
+
+
+def token_from_lexeme(kind: TokenKind, lexeme: Lexeme) -> Token:
+    return checked_token(Token(kind, lexeme.span, lexeme))

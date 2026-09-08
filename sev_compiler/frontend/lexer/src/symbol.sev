@@ -1,7 +1,7 @@
 import diagnostics
 import "token/mod.sev"
 import universal
-import "lexeme.sev"
+import "rule.sev"
 
 
 class LexicalSymbol:
@@ -54,7 +54,7 @@ def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSym
     return selected
 
 
-class SymbolLexeme: Lexeme
+class SymbolLexeme: LexicalRule
     symbols: list[LexicalSymbol]
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:

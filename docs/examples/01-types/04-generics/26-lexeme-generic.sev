@@ -1,32 +1,32 @@
-# Lx - Lexeme / lexical rule. L remains Literal.
-# A lexical rule consumes characters and produces a compiler term.
+# Lx - Lexeme: matched source text and span. L remains Literal.
+# Classification into a token is a separate step.
 
-class LexicalTerm:
+class Span:
     start: int
     end: int
-    value: int
 
 
-trait Lexeme:
-    def scan(source: string, offset: int) -> LexicalTerm
+trait LexemeTerm:
+    property text: string
+    property span: Span
 
 
-class DecimalLexeme: Lexeme
-    def scan(source: string, offset: int) -> LexicalTerm:
-        characters = source.characters()
-        end := offset
-        while end < len(characters) and characters[end] >= "0" and characters[end] <= "9":
-            end += 1
-        assert(end > offset)
-        return LexicalTerm(offset, end, int(characters[offset:end].join("")))
+class SourceLexeme: LexemeTerm
+    text: string
+    span: Span
 
 
-def lex[Lx: Lexeme](rule: Lx, source: string, offset: int) -> LexicalTerm:
-    return rule.scan(source, offset)
+def span_contains(span: Span, offset: int) -> bool:
+    return span.start <= offset and offset < span.end
+
+
+def contains[Lx: LexemeTerm](lexeme: Lx, offset: int) -> bool:
+    return span_contains(lexeme.span, offset)
 
 
 test:
-    term = lex(DecimalLexeme(), "x42 trailing", 1)
-    assert(term.start == 1)
-    assert(term.end == 3)
-    assert(term.value == 42)
+    lexeme = SourceLexeme("1_024", Span(7, 12))
+    assert(contains(lexeme, 7))
+    assert(contains(lexeme, 11))
+    assert(not contains(lexeme, 12))
+    assert(lexeme.text == "1_024")

@@ -91,13 +91,13 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
     return ScalarMacro(name, bindings, families, tokens, functions)
 
 
-def macro_property(type: scalar.ScalarType, name: string, span: source.Span) -> lexer.Token:
+def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) -> lexer.Token:
     if name == "id":
-        return lexer.Token(lexer.Integer("" + string(type.id.index)), span)
+        return lexer.token_from_lexeme(lexer.Integer("" + string(type.id.index)), lexeme)
     if name == "bits":
-        return lexer.Token(lexer.Integer("" + string(type.bits)), span)
+        return lexer.token_from_lexeme(lexer.Integer("" + string(type.bits)), lexeme)
     if name == "signed":
-        return lexer.Token(lexer.Identifier("false" if type.id.index == 108 else "true"), span)
+        return lexer.token_from_lexeme(lexer.Identifier("false" if type.id.index == 108 else "true"), lexeme)
     if type.representation == "float":
         throw Error("unsupported floating type property " + name)
     lower := "0"
@@ -114,13 +114,13 @@ def macro_property(type: scalar.ScalarType, name: string, span: source.Span) -> 
             upper = "" + string(limit)
             maximum = "" + string(limit - 1)
     if name == "min":
-        return lexer.Token(lexer.Integer(lower), span)
+        return lexer.token_from_lexeme(lexer.Integer(lower), lexeme)
     if name == "max":
-        return lexer.Token(lexer.Integer(maximum), span)
+        return lexer.token_from_lexeme(lexer.Integer(maximum), lexeme)
     if name == "min_float":
-        return lexer.Token(lexer.Float(lower + ".0"), span)
+        return lexer.token_from_lexeme(lexer.Float(lower + ".0"), lexeme)
     if name == "upper_float":
-        return lexer.Token(lexer.Float(upper + ".0"), span)
+        return lexer.token_from_lexeme(lexer.Float(upper + ".0"), lexeme)
     throw Error("unsupported scalar type property " + name)
 
 
@@ -217,21 +217,23 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                 index := 0
                 for binding in definition.bindings:
                     if value == binding:
-                        replacement = lexer.Token(lexer.Identifier(types[index].name), token.span)
+                        replacement = lexer.token_from_lexeme(lexer.Identifier(types[index].name), token.lexeme)
                         if cursor + 1 < len(definition.tokens) and definition.tokens[cursor].kind == Dot:
                             match definition.tokens[cursor + 1].kind:
                                 case Identifier:
-                                    replacement = macro_property(types[index], value, token.span)
+                                    replacement = macro_property(types[index], value, token.lexeme)
                                 case _:
                                     throw Error("expected scalar type property")
                             cursor += 2
                     index += 1
                 if value in definition.functions:
-                    replacement = lexer.Token(lexer.Identifier(value + suffix), token.span)
+                    replacement = lexer.token_from_lexeme(lexer.Identifier(value + suffix), token.lexeme)
             case _:
                 pass
         tokens.append(replacement)
-    tokens.append(lexer.Token(Eof, definition.tokens[-1].span))
+    end = definition.tokens[-1].span
+    eof_span = source.Span(end.source, end.end, end.end)
+    tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", eof_span)))
     expanded = parser.parse(tokens)
     for item in expanded.items:
         match item:

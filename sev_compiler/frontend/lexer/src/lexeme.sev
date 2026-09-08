@@ -1,31 +1,12 @@
 import source
-import diagnostics
-import "token/mod.sev"
 
 
-class LexemeInput:
-    file: source.SourceFile
-    characters: list[string]
+# Lx describes matched source, independently of its token classification.
+trait LexemeTerm:
+    property text: string
+    property span: source.Span
 
 
-def lexeme_input(file: source.SourceFile) -> LexemeInput:
-    return LexemeInput(file, file.text.characters())
-
-
-def lexeme_span(input: LexemeInput, start: int, end: int) -> source.Span:
-    # Source spans currently use character offsets throughout the source
-    # compiler (including diagnostic rendering and interpolation).
-    return source.Span(input.file.id, u32(start), u32(end))
-
-
-class LexemeMatch:
-    end: int
-    kind: TokenKind | None
-    matched: bool = true
-
-
-# Lx is the lexical-rule parameter; L remains Literal. Rules only recognize
-# characters and produce token values. Grammar and CFG behavior belong to G.
-trait Lexeme:
-    def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic
-
+class Lexeme: LexemeTerm
+    text: string
+    span: source.Span

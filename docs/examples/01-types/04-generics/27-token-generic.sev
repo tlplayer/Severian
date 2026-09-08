@@ -1,0 +1,48 @@
+# To - Token: a classified lexical object, preserving its matched lexeme.
+# Y remains a symbol; a token need not represent a symbol.
+
+class Span:
+    start: int
+    end: int
+
+
+class Lexeme:
+    text: string
+    span: Span
+
+
+trait Token:
+    property lexeme: Lexeme
+    property span: Span
+
+
+class IntegerToken: Token
+    lexeme: Lexeme
+    span: Span
+    value: int
+
+
+class IdentifierToken: Token
+    lexeme: Lexeme
+    span: Span
+    name: string
+
+
+def validate_origin(span: Span, lexeme: Lexeme):
+    assert(span.start == lexeme.span.start)
+    assert(span.end == lexeme.span.end)
+    assert(span.start <= span.end)
+
+
+def checked_token[To: Token](token: To) -> To:
+    validate_origin(token.span, token.lexeme)
+    return token
+
+
+test:
+    integer = checked_token(IntegerToken(Lexeme("1_024", Span(9, 14)), Span(9, 14), 1024))
+    identifier = checked_token(IdentifierToken(Lexeme("total", Span(0, 5)), Span(0, 5), "total"))
+    assert(integer.value == 1024)
+    assert(integer.lexeme.text == "1_024")
+    assert(identifier.name == "total")
+    assert(identifier.lexeme.text == "total")

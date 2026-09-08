@@ -1,7 +1,7 @@
 import source
 import diagnostics
 import "token/mod.sev"
-import "lexeme.sev"
+import "rule.sev"
 import "identifier.sev"
 import "number.sev"
 import "string.sev"
@@ -11,7 +11,7 @@ import "trivia.sev"
 
 # The seed specializes this composition; it cannot store trait objects yet.
 # Every spelling supplied by G/Y still uses the same longest-match rule.
-class StandardLexemes: Lexeme
+class StandardLexemes: LexicalRule
     symbols: list[LexicalSymbol]
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
@@ -36,7 +36,7 @@ class StandardLexemes: Lexeme
         return LexemeMatch(start, None, false)
 
 
-def lex[Lx: Lexeme](rule: Lx, input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+def lex[Rule: LexicalRule](rule: Rule, input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
     if start < 0 or start >= len(input.characters):
         return LexemeMatch(start, None, false)
     result = rule.scan(input, start)

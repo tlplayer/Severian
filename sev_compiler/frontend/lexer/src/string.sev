@@ -1,6 +1,6 @@
 import diagnostics
 import "token/mod.sev"
-import "lexeme.sev"
+import "rule.sev"
 import "indentation.sev"
 import "../../../universal/primitive/char/encoding.sev" as utf8
 
@@ -46,7 +46,7 @@ def block_string(raw: string) -> string:
     return result.join("\n")
 
 
-class StringLexeme: Lexeme
+class StringLexeme: LexicalRule
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         characters = input.characters
         character = characters[start]
