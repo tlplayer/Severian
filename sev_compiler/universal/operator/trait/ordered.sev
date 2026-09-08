@@ -1,0 +1,12 @@
+import "equatable.sev"
+
+
+# A total order compatible with equality. Partially ordered values (such as
+# unrestricted IEEE floats containing NaN) need an explicit total-order wrapper.
+trait Ordered:
+    Equatable
+
+    operator <(right: Self) -> bool
+    operator <=(right: Self) -> bool
+    operator >(right: Self) -> bool
+    operator >=(right: Self) -> bool

@@ -1,3 +1,4 @@
+import "../operator/trait/ordered.sev"
 import "../primitive/primitive.sev"
 import "list.sev"
 
@@ -160,11 +161,9 @@ class heap[T: Ordered + Copy + Default]:
     def __sift_down(self, start: usize):
         index := start
 
-        while true:
+        while index < length // 2:
+            # Only parents have children; this also bounds index * 2 + 2.
             left := __left(index)
-
-            if left >= length:
-                break
 
             right := __right(index)
             smallest := left
@@ -255,3 +254,19 @@ test with compiler "heap requires an ordered element type":
             id: usize
 
         values := heap[Packet]()
+
+
+test "heap empty replacement and duplicate minima":
+    values := heap[i32]()
+    assert(values.push_pop(3) == 3)
+    assert(values.len() == 0)
+    _, found := values.replace(3)
+    assert(not found)
+    values.push(3)
+    values.push(3)
+    for index in range(3):
+        value, found := values.pop()
+        assert(found)
+        assert(value == 3)
+    _, found = values.pop()
+    assert(not found)

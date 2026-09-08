@@ -1,123 +1,587 @@
-"""
-# `btree[K, V]`
-
-Shared ordered storage for `map[K, V]` and `set[T]`.
-
-A B-tree stores multiple keys per node so lookup, insertion, removal, and
-ordered traversal require fewer allocations and less pointer chasing than a
-node-per-element balanced tree.
-
-This is an implementation type. Public collection APIs should normally expose
-`map[K, V](...)` or `set[T](...)` rather than require callers to manipulate
-B-tree nodes.
-
-## Complexity
-
-| operation       | complexity |
-|----------------|------------|
-| search         | O(log n)   |
-| insert         | O(log n)   |
-| remove         | O(log n)   |
-| first / last   | O(log n)   |
-| lower_bound    | O(log n)   |
-| upper_bound    | O(log n)   |
-| ordered walk   | O(n)       |
-
-The node width is an implementation parameter and does not change collection
-semantics.
-"""
+import "../operator/trait/ordered.sev"
+import "list.sev"
+import "map.sev"
 
 
-class btree_node[K, V, N]:
-    keys: array[K, N]
-    values: array[V, N]
-    children: array[ptr[btree_node[K, V, N]], N + 1]
+'''
+Ordered B-tree with minimum degree 8 by default (15 keys per node).
+The degree constructor permits smaller trees for invariant testing.
+
+Nodes are addressed by stable arena indices, not pointers into growing lists.
+Keys, values and child indices occupy parallel fixed-width arena rows. This
+keeps the bootstrap provider within Copy + Default storage: node metadata is a
+copyable record, and only the tree owns allocations. Released rows are reused.
+No owning value is copied as part of moving a node. Arbitrary owned elements
+still require the primitive initialized-slot and destruction implementation.
+
+Lookup, insertion, deletion and bounds are O(log n) for a fixed degree;
+iteration is O(n), using an explicit O(height) stack. Range is [start, stop).
+Read results are bootstrap copies; mutation requires exclusive access.
+Ordered keys must have equality compatible with their total order.
+'''
+
+
+class btree_node:
+    trait Copy
+    trait Default
+
     count: usize
     leaf: bool
 
+    def btree_node():
+        count = 0
+        leaf = true
 
-class btree[K, V]:
-    root: ptr[btree_node[K, V]]
-    count: usize
+    def default() -> Self:
+        return btree_node()
 
-    def btree() -> btree[K, V]:
-        ...
 
-    def get(self, key: K) -> V | None:
-        ...
+class btree[K: Ordered + Equatable + Copy + Default, V: Copy + Default]:
+    trait Map[K, V]
+    trait MapIndex[K, V]
 
-    def insert(self, key: K, value: V) -> V | None:
-        """
-        Insert `key -> value`.
+    __nodes: list[btree_node]
+    __keys: list[K]
+    __values: list[V]
+    __children: list[usize]
+    __free: list[usize]
+    __degree: usize
+    __width: usize
+    root: usize
+    length: usize
 
-        Returns the previous value when `key` already existed, otherwise None.
-        """
-        ...
+    def btree():
+        __nodes = list[btree_node]()
+        __keys = list[K]()
+        __values = list[V]()
+        __children = list[usize]()
+        __free = list[usize]()
+        __degree = 8
+        __width = 15
+        root = 0
+        length = 0
 
-    def remove(self, key: K) -> V | None:
-        ...
+    def btree(minimum_degree: usize):
+        # Traversal uses two positions per key plus one final child.
+        if minimum_degree < 2 or minimum_degree > collection_limit() // 4:
+            throw ValueError("B-tree minimum degree is outside the supported range")
+        __nodes = list[btree_node]()
+        __keys = list[K]()
+        __values = list[V]()
+        __children = list[usize]()
+        __free = list[usize]()
+        __degree = minimum_degree
+        __width = minimum_degree * 2 - 1
+        root = 0
+        length = 0
 
-    def first(self) -> tuple[K, V] | None:
-        ...
+    operator if(self) -> self.length != 0
+    operator else(self) -> self.length == 0
 
-    def last(self) -> tuple[K, V] | None:
-        ...
-
-    def lower_bound(self, key: K) -> tuple[K, V] | None:
-        ...
-
-    def upper_bound(self, key: K) -> tuple[K, V] | None:
-        ...
-
-    def range(self, start: K, stop: K) -> iterator[tuple[K, V]]:
-        ...
-
-    def clear(self):
-        ...
+    def len(self) -> usize:
+        return self.length
 
     def empty(self) -> bool:
-        return count == 0
+        return self.length == 0
+
+    def __key(self, node: usize, index: usize) -> K:
+        return self.__keys[node * self.__width + index]
+
+    def __value(self, node: usize, index: usize) -> V:
+        return self.__values[node * self.__width + index]
+
+    def __put(self, node: usize, index: usize, key: K, value: V):
+        self.__keys[node * self.__width + index] = key
+        self.__values[node * self.__width + index] = value
+
+    def __child(self, node: usize, index: usize) -> usize:
+        return self.__children[node * (self.__width + 1) + index]
+
+    def __set_child(self, node: usize, index: usize, child: usize):
+        self.__children[node * (self.__width + 1) + index] = child
+
+    def __set_count(self, node: usize, occupied: usize):
+        metadata := self.__nodes[node]
+        metadata.count = occupied
+        self.__nodes[node] = metadata
+
+    def __allocate(self, leaf: bool) -> usize:
+        node, reused := self.__free.pop()
+        if not reused:
+            node = self.__nodes.len()
+            self.__nodes.reserve(1)
+            self.__keys.reserve(self.__width)
+            self.__values.reserve(self.__width)
+            self.__children.reserve(self.__width + 1)
+            # Ensure releasing any allocated row needs no allocation.
+            self.__free.reserve(node + 1 - self.__free.len())
+            self.__nodes.append(btree_node())
+            index := usize(0)
+            while index < self.__width:
+                self.__keys.append(K.default())
+                self.__values.append(V.default())
+                index += 1
+            index := usize(0)
+            while index < self.__width + 1:
+                self.__children.append(0)
+                index += 1
+        metadata := btree_node()
+        metadata.leaf = leaf
+        self.__nodes[node] = metadata
+        return node
+
+    def __release(self, node: usize):
+        index := usize(0)
+        while index < self.__width:
+            self.__put(node, index, K.default(), V.default())
+            index += 1
+        index := usize(0)
+        while index < self.__width + 1:
+            self.__set_child(node, index, 0)
+            index += 1
+        self.__nodes[node] = btree_node()
+        self.__free.append(node)
+
+    def __position(self, node: usize, key: K) -> usize:
+        index := usize(0)
+        while index < self.__nodes[node].count and self.__key(node, index) < key:
+            index += 1
+        return index
+
+    def __locate(self, key: K) -> (usize, usize, bool):
+        if self.length == 0:
+            return (0, 0, false)
+        node := self.root
+        while true:
+            index := self.__position(node, key)
+            if index < self.__nodes[node].count and self.__key(node, index) == key:
+                return (node, index, true)
+            if self.__nodes[node].leaf:
+                return (0, 0, false)
+            node = self.__child(node, index)
+
+    def get(self, key: K) -> (V, bool):
+        node, index, found := self.__locate(key)
+        if not found:
+            return (V.default(), false)
+        return (self.__value(node, index), true)
+
+    def get_key(self, key: K) -> (K, bool):
+        node, index, found := self.__locate(key)
+        if not found:
+            return (key, false)
+        return (self.__key(node, index), true)
+
+    def contains(self, key: K) -> bool:
+        _, _, found := self.__locate(key)
+        return found
+
+    operator [](key: K) -> V:
+        value, found := self.get(key)
+        if not found:
+            throw KeyError("B-tree key is not present")
+        return value
+
+    operator []=(key: K, value: V):
+        self.insert(key, value)
+
+    def set(self, key: K, value: V):
+        self.insert(key, value)
+
+    def replace(self, key: K, value: V) -> (V, bool):
+        return self.insert(key, value)
+
+    def insert(self, key: K, value: V) -> (V, bool):
+        node, index, found := self.__locate(key)
+        if found:
+            previous := self.__value(node, index)
+            # Retain the original representative of an equal key.
+            self.__put(node, index, self.__key(node, index), value)
+            return (previous, true)
+        new_count := collection_size(self.length, 1)
+        if self.length == 0:
+            self.root = self.__allocate(true)
+        if self.__nodes[self.root].count == self.__width:
+            old_root := self.root
+            self.root = self.__allocate(false)
+            self.__set_child(self.root, 0, old_root)
+            self.__split_child(self.root, 0)
+        self.__insert_non_full(self.root, key, value)
+        self.length = new_count
+        return (V.default(), false)
+
+    def __split_child(self, parent: usize, index: usize):
+        left := self.__child(parent, index)
+        right := self.__allocate(self.__nodes[left].leaf)
+        middle := self.__degree - 1
+        offset := usize(0)
+        while offset < middle:
+            self.__put(right, offset, self.__key(left, offset + self.__degree), self.__value(left, offset + self.__degree))
+            offset += 1
+        if not self.__nodes[left].leaf:
+            offset := usize(0)
+            while offset < self.__degree:
+                self.__set_child(right, offset, self.__child(left, offset + self.__degree))
+                offset += 1
+        occupied := self.__nodes[parent].count
+        cursor := occupied
+        while cursor > index:
+            self.__set_child(parent, cursor + 1, self.__child(parent, cursor))
+            self.__put(parent, cursor, self.__key(parent, cursor - 1), self.__value(parent, cursor - 1))
+            cursor -= 1
+        self.__set_child(parent, index + 1, right)
+        self.__put(parent, index, self.__key(left, middle), self.__value(left, middle))
+        self.__set_count(parent, occupied + 1)
+        self.__set_count(left, middle)
+        self.__set_count(right, middle)
+        offset := middle
+        while offset < self.__width:
+            self.__put(left, offset, K.default(), V.default())
+            offset += 1
+
+    def __insert_non_full(self, start: usize, key: K, value: V):
+        node := start
+        while not self.__nodes[node].leaf:
+            index := self.__position(node, key)
+            child := self.__child(node, index)
+            if self.__nodes[child].count == self.__width:
+                self.__split_child(node, index)
+                if self.__key(node, index) < key:
+                    index += 1
+            node = self.__child(node, index)
+        index := self.__position(node, key)
+        cursor := self.__nodes[node].count
+        while cursor > index:
+            self.__put(node, cursor, self.__key(node, cursor - 1), self.__value(node, cursor - 1))
+            cursor -= 1
+        self.__put(node, index, key, value)
+        self.__set_count(node, self.__nodes[node].count + 1)
+
+    def __extreme(self, start: usize, last: bool) -> (K, V):
+        node := start
+        while not self.__nodes[node].leaf:
+            index := usize(0)
+            if last:
+                index = self.__nodes[node].count
+            node = self.__child(node, index)
+        index := usize(0)
+        if last:
+            index = self.__nodes[node].count - 1
+        return (self.__key(node, index), self.__value(node, index))
+
+    def first(self) -> (K, V, bool):
+        if self.length == 0:
+            return (K.default(), V.default(), false)
+        key, value := self.__extreme(self.root, false)
+        return (key, value, true)
+
+    def last(self) -> (K, V, bool):
+        if self.length == 0:
+            return (K.default(), V.default(), false)
+        key, value := self.__extreme(self.root, true)
+        return (key, value, true)
+
+    def __bound(self, key: K, strict: bool) -> (K, V, bool):
+        if self.length == 0:
+            return (K.default(), V.default(), false)
+        node := self.root
+        candidate := K.default()
+        value := V.default()
+        found := false
+        while true:
+            index := self.__position(node, key)
+            if strict and index < self.__nodes[node].count and self.__key(node, index) == key:
+                index += 1
+            if index < self.__nodes[node].count:
+                candidate = self.__key(node, index)
+                value = self.__value(node, index)
+                found = true
+            if self.__nodes[node].leaf:
+                return (candidate, value, found)
+            node = self.__child(node, index)
+
+    def lower_bound(self, key: K) -> (K, V, bool):
+        return self.__bound(key, false)
+
+    def upper_bound(self, key: K) -> (K, V, bool):
+        return self.__bound(key, true)
+
+    def remove(self, key: K) -> (V, bool):
+        previous, found := self.get(key)
+        if not found:
+            return (V.default(), false)
+        self.__delete(self.root, key)
+        self.length -= 1
+        if self.__nodes[self.root].count == 0:
+            old_root := self.root
+            if self.__nodes[old_root].leaf:
+                self.root = 0
+            else:
+                self.root = self.__child(old_root, 0)
+            self.__release(old_root)
+        return (previous, true)
+
+    def __delete(self, node: usize, key: K):
+        index := self.__position(node, key)
+        occupied := self.__nodes[node].count
+        if index < occupied and self.__key(node, index) == key:
+            if self.__nodes[node].leaf:
+                cursor := index
+                while cursor + 1 < occupied:
+                    self.__put(node, cursor, self.__key(node, cursor + 1), self.__value(node, cursor + 1))
+                    cursor += 1
+                self.__put(node, occupied - 1, K.default(), V.default())
+                self.__set_count(node, occupied - 1)
+                return
+            left := self.__child(node, index)
+            right := self.__child(node, index + 1)
+            if self.__nodes[left].count >= self.__degree:
+                replacement, value := self.__extreme(left, true)
+                self.__put(node, index, replacement, value)
+                self.__delete(left, replacement)
+            elif self.__nodes[right].count >= self.__degree:
+                replacement, value := self.__extreme(right, false)
+                self.__put(node, index, replacement, value)
+                self.__delete(right, replacement)
+            else:
+                self.__merge_children(node, index)
+                self.__delete(left, key)
+            return
+        if self.__nodes[node].leaf:
+            return
+        child := self.__child(node, index)
+        if self.__nodes[child].count < self.__degree:
+            index = self.__rebalance(node, index)
+        self.__delete(self.__child(node, index), key)
+
+    def __rebalance(self, parent: usize, index: usize) -> usize:
+        if index > 0 and self.__nodes[self.__child(parent, index - 1)].count >= self.__degree:
+            self.__borrow_left(parent, index)
+        elif index < self.__nodes[parent].count and self.__nodes[self.__child(parent, index + 1)].count >= self.__degree:
+            self.__borrow_right(parent, index)
+        elif index < self.__nodes[parent].count:
+            self.__merge_children(parent, index)
+        else:
+            self.__merge_children(parent, index - 1)
+            return index - 1
+        return index
+
+    def __borrow_left(self, parent: usize, index: usize):
+        node := self.__child(parent, index)
+        left := self.__child(parent, index - 1)
+        occupied := self.__nodes[node].count
+        sibling_length := self.__nodes[left].count
+        cursor := occupied
+        while cursor > 0:
+            self.__put(node, cursor, self.__key(node, cursor - 1), self.__value(node, cursor - 1))
+            cursor -= 1
+        if not self.__nodes[node].leaf:
+            cursor = occupied + 1
+            while cursor > 0:
+                self.__set_child(node, cursor, self.__child(node, cursor - 1))
+                cursor -= 1
+            self.__set_child(node, 0, self.__child(left, sibling_length))
+        self.__put(node, 0, self.__key(parent, index - 1), self.__value(parent, index - 1))
+        self.__put(parent, index - 1, self.__key(left, sibling_length - 1), self.__value(left, sibling_length - 1))
+        self.__put(left, sibling_length - 1, K.default(), V.default())
+        self.__set_count(node, occupied + 1)
+        self.__set_count(left, sibling_length - 1)
+
+    def __borrow_right(self, parent: usize, index: usize):
+        node := self.__child(parent, index)
+        right := self.__child(parent, index + 1)
+        occupied := self.__nodes[node].count
+        sibling_length := self.__nodes[right].count
+        self.__put(node, occupied, self.__key(parent, index), self.__value(parent, index))
+        if not self.__nodes[node].leaf:
+            self.__set_child(node, occupied + 1, self.__child(right, 0))
+            cursor := usize(0)
+            while cursor < sibling_length:
+                self.__set_child(right, cursor, self.__child(right, cursor + 1))
+                cursor += 1
+        self.__put(parent, index, self.__key(right, 0), self.__value(right, 0))
+        cursor := usize(0)
+        while cursor < sibling_length - 1:
+            self.__put(right, cursor, self.__key(right, cursor + 1), self.__value(right, cursor + 1))
+            cursor += 1
+        self.__put(right, sibling_length - 1, K.default(), V.default())
+        self.__set_count(node, occupied + 1)
+        self.__set_count(right, sibling_length - 1)
+
+    def __merge_children(self, parent: usize, index: usize):
+        left := self.__child(parent, index)
+        right := self.__child(parent, index + 1)
+        left_length := self.__nodes[left].count
+        right_length := self.__nodes[right].count
+        self.__put(left, left_length, self.__key(parent, index), self.__value(parent, index))
+        cursor := usize(0)
+        while cursor < right_length:
+            self.__put(left, left_length + 1 + cursor, self.__key(right, cursor), self.__value(right, cursor))
+            cursor += 1
+        if not self.__nodes[left].leaf:
+            cursor := usize(0)
+            while cursor < right_length + 1:
+                self.__set_child(left, left_length + 1 + cursor, self.__child(right, cursor))
+                cursor += 1
+        occupied := self.__nodes[parent].count
+        cursor := index
+        while cursor + 1 < occupied:
+            self.__put(parent, cursor, self.__key(parent, cursor + 1), self.__value(parent, cursor + 1))
+            self.__set_child(parent, cursor + 1, self.__child(parent, cursor + 2))
+            cursor += 1
+        self.__put(parent, occupied - 1, K.default(), V.default())
+        self.__set_child(parent, occupied, 0)
+        self.__set_count(parent, occupied - 1)
+        self.__set_count(left, left_length + right_length + 1)
+        self.__release(right)
+
+    def items(self) -> Iterator[(K, V)]:
+        if self.length == 0:
+            return
+        nodes := list[usize]()
+        positions := list[usize]()
+        nodes.append(self.root)
+        positions.append(0)
+        while nodes.len() != 0:
+            top := nodes.len() - 1
+            node := nodes[top]
+            position := positions[top]
+            occupied := self.__nodes[node].count
+            if self.__nodes[node].leaf:
+                if position < occupied:
+                    positions[top] = position + 1
+                    yield (self.__key(node, position), self.__value(node, position))
+                else:
+                    nodes.pop()
+                    positions.pop()
+            elif position > occupied * 2:
+                nodes.pop()
+                positions.pop()
+            elif position % 2 == 0:
+                positions[top] = position + 1
+                nodes.append(self.__child(node, position // 2))
+                positions.append(0)
+            else:
+                positions[top] = position + 1
+                yield (self.__key(node, position // 2), self.__value(node, position // 2))
+
+    def keys(self) -> Iterator[K]:
+        for key, value in self.items():
+            yield key
+
+    def values(self) -> Iterator[V]:
+        for key, value in self.items():
+            yield value
+
+    def range(self, start: K, stop: K) -> Iterator[(K, V)]:
+        # Seek to the first eligible path, then traverse only intersecting nodes.
+        if self.length == 0 or not start < stop:
+            return
+        nodes := list[usize]()
+        positions := list[usize]()
+        node := self.root
+        while true:
+            index := self.__position(node, start)
+            nodes.append(node)
+            if self.__nodes[node].leaf:
+                positions.append(index)
+                break
+            positions.append(index * 2 + 1)
+            node = self.__child(node, index)
+        while nodes.len() != 0:
+            top := nodes.len() - 1
+            node = nodes[top]
+            position := positions[top]
+            occupied := self.__nodes[node].count
+            if self.__nodes[node].leaf:
+                if position < occupied:
+                    key := self.__key(node, position)
+                    if not key < stop:
+                        return
+                    positions[top] = position + 1
+                    yield (key, self.__value(node, position))
+                else:
+                    nodes.pop()
+                    positions.pop()
+            elif position > occupied * 2:
+                nodes.pop()
+                positions.pop()
+            elif position % 2 == 0:
+                positions[top] = position + 1
+                nodes.append(self.__child(node, position // 2))
+                positions.append(0)
+            else:
+                key := self.__key(node, position // 2)
+                if not key < stop:
+                    return
+                positions[top] = position + 1
+                yield (key, self.__value(node, position // 2))
+
+    def copy(self) -> btree[K, V]:
+        result := btree[K, V](self.__degree)
+        for key, value in self.items():
+            result.insert(key, value)
+        return result
+
+    def clear(self):
+        self.__nodes.clear()
+        self.__keys.clear()
+        self.__values.clear()
+        self.__children.clear()
+        self.__free.clear()
+        self.root = 0
+        self.length = 0
+
+test "btree splits replaces rebalances and contracts its root":
+    values := btree[i32, i32](2)
+    for index in range(120):
+        key := i32((index * 37) % 120)
+        _, replaced := values.insert(key, key * 10)
+        assert(not replaced)
+    assert(values.len() == 120)
+    for index in range(120):
+        value, found := values.get(i32(index))
+        assert(found)
+        assert(value == i32(index) * 10)
+    previous, replaced := values.insert(42, 7)
+    assert(replaced)
+    assert(previous == 420)
+    assert(values.len() == 120)
+    for index in range(120):
+        key := i32((index * 53) % 120)
+        _, found := values.remove(key)
+        assert(found)
+        assert(values.len() == usize(119 - index))
+    assert(values.empty())
+    values.insert(9, 90)
+    assert(values[9] == 90)
 
 
-"""
-## Internal operations
-
-These operations are part of the bootstrap surface for the B-tree
-implementation. They are not public collection operations.
-"""
-
-
-def search[K, V](tree: borrow btree[K, V], key: K) -> tuple[V, bool]:
-    ...
-
-
-def split_child[K, V](
-    tree: borrow btree[K, V],
-    parent: borrow btree_node[K, V],
-    index: usize,
-):
-    ...
-
-
-def insert_non_full[K, V](
-    tree: borrow btree[K, V],
-    node: borrow btree_node[K, V],
-    key: K,
-    value: V,
-) -> V | None:
-    ...
-
-
-def merge_children[K, V](
-    tree: borrow btree[K, V],
-    parent: borrow btree_node[K, V],
-    index: usize,
-):
-    ...
-
-
-def rebalance[K, V](
-    tree: borrow btree[K, V],
-    node: borrow btree_node[K, V],
-):
-    ...
+test "btree bounds ranges and copy preserve ordered semantics":
+    values := btree[i32, i32](2)
+    for index in range(20):
+        values.set(i32(index * 2), i32(index))
+    key, value, found := values.lower_bound(11)
+    assert(found)
+    assert(key == 12)
+    assert(value == 6)
+    key, value, found = values.upper_bound(12)
+    assert(found)
+    assert(key == 14)
+    observed := i32(10)
+    for key, value in values.range(9, 19):
+        assert(key == observed)
+        observed += 2
+    assert(observed == 20)
+    copied := values.copy()
+    copied.clear()
+    assert(values.len() == 20)
+    assert(copied.len() == 0)
+    key, value, found = values.first()
+    assert(found)
+    assert(key == 0)
+    key, value, found = values.last()
+    assert(found)
+    assert(key == 38)
+    _, _, found = values.upper_bound(38)
+    assert(not found)

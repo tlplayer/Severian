@@ -54,6 +54,7 @@ trait VectorScalar:
     Copy
     Default
 
+    # default() must be the additive identity (zero), including custom scalars.
     operator +(right: Self) -> Self
     operator -(right: Self) -> Self
     operator *(right: Self) -> Self
@@ -258,7 +259,8 @@ test "vector reductions are explicit":
 
 test "vector map preserves lane count while changing scalar type":
     values := vector[i32, 3](array[i32, 3]([1, 2, 3]))
-    doubled := values.map(lambda value: value * 2)
+    operation = lambda value: f64(value) * 2.0
+    doubled := values.map(operation)
 
     assert(doubled.len() == 3)
     assert(doubled[0] == 2)
@@ -277,3 +279,15 @@ test with compiler "vector does not have implicit truth":
 
         if values:
             pass
+
+
+test "vector empty reductions and copy independence":
+    empty := vector[i32, 0]()
+    assert(empty.len() == 0)
+    assert(empty.sum() == 0)
+    assert(empty.dot(empty) == 0)
+    values := vector[i32, 1](array[i32, 1]([7]))
+    copied := values.copy()
+    copied[0] = 9
+    assert(values[0] == 7)
+    assert(values.length_squared() == 49)

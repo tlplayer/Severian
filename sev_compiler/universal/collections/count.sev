@@ -139,13 +139,16 @@ class count[T: Hash + Equatable + Copy + Default]:
 
         current, found := __counts.get(value)
 
+        # Validate the aggregate before changing any entry or counter.
+        new_total := collection_size(total_count, amount)
+
         if found:
             __counts[value] = current + amount
         else:
             __counts[value] = amount
             unique += 1
 
-        total_count += amount
+        total_count = new_total
 
 
     def subtract(self, value: T, amount: usize = 1) -> usize:
@@ -284,3 +287,16 @@ test with compiler "count keys require hash and equality":
             value: i32
 
         values := count[Unkeyed]()
+
+
+test "count overflow leaves both frequencies and totals unchanged":
+    values := count[i32]()
+    values.add(1, collection_limit())
+    throws(values.add(1))
+    throws(values.add(2))
+    assert(values.len() == 1)
+    assert(values.total() == collection_limit())
+    assert(values[1] == collection_limit())
+    assert(values[2] == 0)
+    values.add(2, 0)
+    assert(values.len() == 1)

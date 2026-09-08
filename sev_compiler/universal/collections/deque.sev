@@ -1,4 +1,5 @@
 import "../primitive/primitive.sev"
+import "storage.sev"
 
 
 '''
@@ -116,7 +117,10 @@ class deque[T: Copy + Default]:
         if capacity == 0:
             return 0
 
-        return (__head + index) % capacity
+        tail := capacity - __head
+        if index >= tail:
+            return index - tail
+        return __head + index
 
 
     operator [](index: usize) -> T:
@@ -144,15 +148,12 @@ class deque[T: Copy + Default]:
 
 
     def reserve(self, additional: usize):
-        required := length + additional
+        required := collection_size(length, additional)
 
         if required <= capacity:
             return
 
-        new_capacity := max(usize(4), capacity)
-
-        while new_capacity < required:
-            new_capacity *= 2
+        new_capacity := collection_capacity(capacity, required)
 
         unsafe:
             replacement := allocate[T](new_capacity)
@@ -176,7 +177,10 @@ class deque[T: Copy + Default]:
         if length == 0:
             __head = 0
         else:
-            __head = (__head + capacity - 1) % capacity
+            if __head == 0:
+                __head = capacity - 1
+            else:
+                __head -= 1
 
         unsafe:
             __memory[__head] = value
@@ -352,3 +356,21 @@ test with compiler "deque element type is invariant":
     reject:
         ints := deque[i32]()
         floats: deque[f32] = ints
+
+
+test "deque growth normalizes a wrapped full buffer":
+    values := deque[i32](3)
+    values.push_back(1)
+    values.push_back(2)
+    values.push_back(3)
+    values.pop_front()
+    values.push_back(4)
+    values.push_back(5)
+    assert(values.len() == 4)
+    assert(values[0] == 2)
+    assert(values[3] == 5)
+    copied := values.copy()
+    values.clear()
+    assert(copied[0] == 2)
+    values.push_front(9)
+    assert(values[0] == 9)

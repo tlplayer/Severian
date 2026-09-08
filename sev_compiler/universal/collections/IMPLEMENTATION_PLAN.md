@@ -1,6 +1,6 @@
 # Collections implementation plan
 
-Status: proposed implementation sequence, based on source inspection on 2026-09-08. No implementation or compiler validation is claimed by this planning change.
+Status: bootstrap source algorithms have been implemented; see [CAPABILITIES.md](CAPABILITIES.md) for coverage, API decisions, validation and outstanding language dependencies. C0–C9 are not complete. The present-state inventory below records the original 2026-09-08 planning baseline.
 
 This plan follows the [primitive plan](../primitive/IMPLEMENTATION_PLAN.md). Generic layouts and contract dispatch (P1), scalar operations (P2), memory/ownership (P5), and arrays/slices/ranges/iteration (P6) are prerequisites. Core strings (P7) enable realistic keyed and owned-element tests. Full string completion (P8) then consumes `list[string]`.
 

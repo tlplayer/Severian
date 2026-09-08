@@ -1,56 +1,17 @@
 import "btree.sev"
+import "dict.sev"
 
 
-"""
-# `set[T]`
-
-A collection of unique values.
-
-`set[T]` is ordered by default. Its default storage is a B-tree, so iteration
-is deterministic and sorted by `T`.
-
-The storage implementation is selected through the constructor instead of
-creating public types such as `hash_set[T]` or `ordered_set[T]`.
-
-```sev
-a = set[int](8, 2, 5)
-b = set[int]( 8, 2, 5, BTree)
-c = set[int]( 8, 2, 5, Hash)
-```
-
-`a` and `b` use the default ordered B-tree representation.
-
-A specialization may change storage behavior, but the value remains a
-`set[int]`; callers do not need a second collection type.
-
-## Default behavior
-
-```sev
-values = set[int](8, 2, 5)
-
-for value in values:
-    print(value)
-
-# 2
-# 5
-# 8
-```
-
-## Complexity: default B-tree specialization
-
-| operation       | complexity |
-|----------------|------------|
-| add            | O(log n)   |
-| get            | O(log n)   |
-| remove         | O(log n)   |
-| first / last   | O(log n)   |
-| lower_bound    | O(log n)   |
-| upper_bound    | O(log n)   |
-| iteration      | O(n)       |
-
-Use `size(values)` for element count. `values.size()` remains the byte-size of
-the collection object.
-"""
+'''
+set[T] owns one representative per equality class, with a bool payload.
+BTree is the default, with sorted iteration; Hash iterates in insertion order.
+Construct with set[T](values...) or set[T](set_storage.Hash, values...). Runtime
+selection requires Ordered + Hash + Equatable; bootstrap storage also needs
+Copy + Default. Equal additions retain the original representative.
+Algebra preserves the left provider. Absence returns (value, found).
+Hash bounds/extremes scan in O(n); sorted half-open ranges use a temporary tree
+in O(n log n). BTree bounds/extremes cost O(log n). Use size(s) or s.len().
+'''
 
 
 enum set_storage:
@@ -58,205 +19,253 @@ enum set_storage:
     Hash
 
 
-class set[T]:
+class set[T: Ordered + Hash + Equatable + Copy + Default]:
     storage: set_storage
-    tree: btree[T, T]
+    tree: btree[T, bool]
+    table: dict[T, bool]
     count: usize
 
-    def set() -> set[T]:
-        return set[T](BTree)
-
-    def set(values: T...,storage: set_storage) -> set[T]:
-        result = set[T](BTree)
-        for value in values:
-            result.add(value)
-        return result
-
-    def set( values: T...,storage: set_storage) -> set[T]:
-        result: set[T]
-        result.storage = storage
-
-        for value in values:
-            result.add(value)
-
-        return result
-
-    def add(self, value: T) -> tuple[T, bool]:
-        """
-        Add `value`.
-
-        Returns `(value, true)` when inserted and `(existing, false)` when the
-        set already contained an equivalent value.
-        """
-        previous = tree.insert(value, value)
-
-        match previous:
-            None:
-                count += 1
-                return (value, true)
-            existing:
-                return (existing, false)
-
-    def get(self, value: T) -> tuple[T, bool]:
-        """
-        Return the stored value and whether it exists.
-
-        This keeps lookup useful for canonicalized/interned values instead of
-        exposing a separate `is_*` operation.
-        """
-        found = tree.get(value)
-
-        match found:
-            None:
-                return (value, false)
-            existing:
-                return (existing, true)
-
-    def remove(self, value: T) -> tuple[T, bool]:
-        removed = tree.remove(value)
-
-        match removed:
-            None:
-                return (value, false)
-            existing:
-                count -= 1
-                return (existing, true)
-
-    def first(self) -> T | None:
-        item = tree.first()
-
-        match item:
-            None:
-                return None
-            pair:
-                return pair[0]
-
-    def last(self) -> T | None:
-        item = tree.last()
-
-        match item:
-            None:
-                return None
-            pair:
-                return pair[0]
-
-    def lower_bound(self, value: T) -> T | None:
-        item = tree.lower_bound(value)
-
-        match item:
-            None:
-                return None
-            pair:
-                return pair[0]
-
-    def upper_bound(self, value: T) -> T | None:
-        item = tree.upper_bound(value)
-
-        match item:
-            None:
-                return None
-            pair:
-                return pair[0]
-
-    def pop_first(self) -> T | None:
-        value = self.first()
-
-        match value:
-            None:
-                return None
-            existing:
-                self.remove(existing)
-                return existing
-
-    def pop_last(self) -> T | None:
-        value = self.last()
-
-        match value:
-            None:
-                return None
-            existing:
-                self.remove(existing)
-                return existing
-
-    def range(self, start: T, stop: T) -> iterator[T]:
-        for key, value in tree.range(start, stop):
-            yield value
-
-    def clear(self):
-        tree.clear()
+    def set(values: T...):
+        storage = set_storage.BTree
+        tree = btree[T, bool]()
+        table = dict[T, bool]()
         count = 0
+        for value in values:
+            self.add(value)
+
+    def set(provider: set_storage, values: T...):
+        storage = provider
+        tree = btree[T, bool]()
+        table = dict[T, bool]()
+        count = 0
+        for value in values:
+            self.add(value)
+
+    operator if(self) -> self.count != 0
+    operator else(self) -> self.count == 0
+
+    def len(self) -> usize:
+        return self.count
 
     def empty(self) -> bool:
-        return count == 0
+        return self.count == 0
+
+    def contains(self, value: T) -> bool:
+        _, found := self.get(value)
+        return found
+
+    def get(self, value: T) -> (T, bool):
+        if self.storage == set_storage.BTree:
+            return self.tree.get_key(value)
+        return self.table.get_key(value)
+
+    def add(self, value: T) -> (T, bool):
+        existing, found := self.get(value)
+        if found:
+            return (existing, false)
+        new_count := collection_size(self.count, 1)
+        if self.storage == set_storage.BTree:
+            self.tree.insert(value, true)
+        else:
+            self.table.set(value, true)
+        self.count = new_count
+        return (value, true)
+
+    def remove(self, value: T) -> (T, bool):
+        existing, found := self.get(value)
+        if not found:
+            return (value, false)
+        if self.storage == set_storage.BTree:
+            self.tree.remove(value)
+        else:
+            self.table.remove(value)
+        self.count -= 1
+        return (existing, true)
+
+    def first(self) -> (T, bool):
+        if self.storage == set_storage.BTree:
+            key, _, found := self.tree.first()
+            return (key, found)
+        result := T.default()
+        found := false
+        for key in self.table.keys():
+            if not found or key < result:
+                result = key
+                found = true
+        return (result, found)
+
+    def last(self) -> (T, bool):
+        if self.storage == set_storage.BTree:
+            key, _, found := self.tree.last()
+            return (key, found)
+        result := T.default()
+        found := false
+        for key in self.table.keys():
+            if not found or result < key:
+                result = key
+                found = true
+        return (result, found)
+
+    def lower_bound(self, value: T) -> (T, bool):
+        if self.storage == set_storage.BTree:
+            key, _, found := self.tree.lower_bound(value)
+            return (key, found)
+        result := T.default()
+        found := false
+        for key in self.table.keys():
+            if not key < value and (not found or key < result):
+                result = key
+                found = true
+        return (result, found)
+
+    def upper_bound(self, value: T) -> (T, bool):
+        if self.storage == set_storage.BTree:
+            key, _, found := self.tree.upper_bound(value)
+            return (key, found)
+        result := T.default()
+        found := false
+        for key in self.table.keys():
+            if value < key and (not found or key < result):
+                result = key
+                found = true
+        return (result, found)
+
+    def pop_first(self) -> (T, bool):
+        value, found := self.first()
+        if found:
+            self.remove(value)
+        return (value, found)
+
+    def pop_last(self) -> (T, bool):
+        value, found := self.last()
+        if found:
+            self.remove(value)
+        return (value, found)
+
+    def iter(self) -> Iterator[T]:
+        if self.storage == set_storage.BTree:
+            for key in self.tree.keys():
+                yield key
+        else:
+            for key in self.table.keys():
+                yield key
+
+    def range(self, start: T, stop: T) -> Iterator[T]:
+        if self.storage == set_storage.BTree:
+            for key, value in self.tree.range(start, stop):
+                yield key
+        else:
+            ordered := btree[T, bool]()
+            for key in self.table.keys():
+                if not key < start and key < stop:
+                    ordered.insert(key, true)
+            for key in ordered.keys():
+                yield key
+
+    def copy(self) -> set[T]:
+        result := set[T](self.storage)
+        for value in self.iter():
+            result.add(value)
+        return result
+
+    def clear(self):
+        self.tree.clear()
+        self.table.clear()
+        self.count = 0
 
 
-def size[T](values: view set[T]) -> usize:
+def size[T: Ordered + Hash + Equatable + Copy + Default](values: borrow set[T]) -> usize:
     return values.count
 
 
-"""
-## Set algebra
-"""
-
-
-def union[T](left: view set[T], right: view set[T]) -> set[T]:
-    result = set[T]()
-
-    for value in left:
+def union[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> set[T]:
+    result := left.copy()
+    for value in right.iter():
         result.add(value)
-
-    for value in right:
-        result.add(value)
-
     return result
 
 
-def intersection[T](left: view set[T], right: view set[T]) -> set[T]:
-    result = set[T]()
-
-    for value in left:
-        _, exists = right.get(value)
-        if exists:
+def intersection[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> set[T]:
+    result := set[T](left.storage)
+    for value in left.iter():
+        if right.contains(value):
             result.add(value)
-
     return result
 
 
-def difference[T](left: view set[T], right: view set[T]) -> set[T]:
-    result = set[T]()
-
-    for value in left:
-        _, exists = right.get(value)
-        if not exists:
+def difference[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> set[T]:
+    result := set[T](left.storage)
+    for value in left.iter():
+        if not right.contains(value):
             result.add(value)
-
     return result
 
 
-def symmetric_difference[T](left: view set[T], right: view set[T]) -> set[T]:
-    return union(
-        difference(left, right),
-        difference(right, left),
-    )
+def symmetric_difference[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> set[T]:
+    result := difference(left, right)
+    for value in right.iter():
+        if not left.contains(value):
+            result.add(value)
+    return result
 
 
-def subset[T](left: view set[T], right: view set[T]) -> bool:
-    for value in left:
-        _, exists = right.get(value)
-        if not exists:
+def subset[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> bool:
+    for value in left.iter():
+        if not right.contains(value):
             return false
-
     return true
 
 
-def superset[T](left: view set[T], right: view set[T]) -> bool:
+def superset[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> bool:
     return subset(right, left)
 
 
-def disjoint[T](left: view set[T], right: view set[T]) -> bool:
-    for value in left:
-        _, exists = right.get(value)
-        if exists:
+def disjoint[T: Ordered + Hash + Equatable + Copy + Default](left: borrow set[T], right: borrow set[T]) -> bool:
+    for value in left.iter():
+        if right.contains(value):
             return false
-
     return true
+
+
+test "set providers retain membership and select iteration order":
+    ordered := set[i32](9, 1, 5, 3, 5)
+    hashed := set[i32](set_storage.Hash, 9, 1, 5, 3, 5)
+    assert(ordered.len() == 4)
+    assert(hashed.len() == 4)
+    observed := list[i32]()
+    for value in ordered.iter():
+        observed.append(value)
+    assert(observed[0] == 1)
+    assert(observed[3] == 9)
+    observed.clear()
+    for value in hashed.iter():
+        observed.append(value)
+    assert(observed[0] == 9)
+    assert(observed[3] == 3)
+    _, inserted := hashed.add(9)
+    assert(not inserted)
+    value, found := hashed.lower_bound(4)
+    assert(found)
+    assert(value == 5)
+    value, found = hashed.pop_last()
+    assert(found)
+    assert(value == 9)
+    assert(not hashed.contains(9))
+
+
+test "set algebra preserves left provider for mixed operands":
+    left := set[i32](set_storage.Hash, 3, 1, 5)
+    right := set[i32](2, 3, 5)
+    combined := union(borrow left, borrow right)
+    assert(combined.storage == set_storage.Hash)
+    assert(combined.len() == 4)
+    common := intersection(borrow left, borrow right)
+    assert(common.len() == 2)
+    assert(common.contains(3))
+    distinct := symmetric_difference(borrow left, borrow right)
+    assert(distinct.len() == 2)
+    assert(distinct.contains(1))
+    assert(distinct.contains(2))
+    assert(subset(borrow common, borrow left))
+    assert(superset(borrow right, borrow common))
+    assert(disjoint(borrow distinct, borrow common))

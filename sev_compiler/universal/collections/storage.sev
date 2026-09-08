@@ -1,0 +1,39 @@
+import "../primitive/primitive.sev"
+import "../primitive/bool.sev"
+import "../primitive/int.sev"
+
+
+# Explicit lossy conversion produces all bits set at the target's pointer width.
+# This avoids relying on static-field lookup of the canonical integer family.
+def collection_limit() -> usize:
+    return usize(-1, lossy)
+
+
+# Shared slot-count arithmetic. The allocator must also check count * sizeof(T).
+def collection_size(length: usize, additional: usize) -> usize:
+    if additional > collection_limit() - length:
+        throw ValueError("collection size exceeds usize")
+    return length + additional
+
+
+def collection_capacity(current: usize, required: usize) -> usize:
+    if required <= current:
+        return current
+    result := current
+    if result < 4:
+        result = 4
+    while result < required:
+        if result > collection_limit() // 2:
+            return required
+        result *= 2
+    return result
+
+
+test "collection capacity grows geometrically without overflowing":
+    assert(collection_size(4, 5) == 9)
+    assert(collection_size(collection_limit(), 0) == collection_limit())
+    assert(collection_capacity(0, 0) == 0)
+    assert(collection_capacity(0, 1) == 4)
+    assert(collection_capacity(8, 9) == 16)
+    assert(collection_capacity(collection_limit() // 2 + 1, collection_limit()) == collection_limit())
+    throws(collection_size(collection_limit(), 1))

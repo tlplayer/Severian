@@ -1,10 +1,9 @@
+import "../operator/trait/equatable.sev"
 import "../primitive/primitive.sev"
 
 
 '''
 # `Map[K, V]`
-
-The implementation is a B-Tree underneath
 
 `Map` is the semantic contract for keyed Severian collections. It is intentionally
 a trait rather than a second concrete hash container beside `dict[K, V]`.
@@ -19,7 +18,7 @@ V    mapped value type
 Key requirements:
 
 ```text
-K: Hash + Equatable
+K: Equatable
 ```
 
 Concrete implementations may add bootstrap/storage constraints. The mapping
@@ -31,8 +30,8 @@ iteration, ownership, and truth behavior.
 A map contains at most one value for an equality class of keys.
 
 ```text
-hash(left) == hash(right) is required when left == right
-hash equality alone never proves key equality
+left == right identifies the same key
+Hash providers additionally require equal keys to have equal hashes
 ```
 
 ## Ownership
@@ -65,7 +64,14 @@ not hardcode map operations independently of this contract.
 '''
 
 
-trait Map[K: Hash + Equatable, V]:
+class KeyError: Error
+    message: string
+
+    def KeyError(value: string):
+        message = value
+
+
+trait Map[K: Equatable, V]:
     Truth
 
     property length: usize
@@ -107,7 +113,7 @@ encoding an implicit default value into lookup.
 '''
 
 
-trait MapIndex[K: Hash + Equatable, V]:
+trait MapIndex[K: Equatable, V]:
     operator [](key: K) -> V
     operator []=(key: K, value: V)
 
@@ -120,7 +126,7 @@ implementations such as `dict[K, V]`.
 '''
 
 
-def mapping_size[K: Hash + Equatable, V, M: Map[K, V]](values: M) -> usize:
+def mapping_size[K: Equatable, V, M: Map[K, V]](values: M) -> usize:
     return values.len()
 
 

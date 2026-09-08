@@ -29,14 +29,15 @@ K: Copy + Default
 V: Copy + Default
 ```
 
-The reference bootstrap implementation below uses parallel `list` storage and a
-linear key probe. That is deliberate: this file establishes language semantics,
-ownership, type parameters, operators, and compiler behavior without requiring a
-second compiler-owned hash-table implementation.
-
-The production provider may replace the O(n) probe with an open-addressed or
-Swiss-table-style hash representation. It must preserve the contract in this
-file, including insertion order.
+Open-addressed buckets index stable entry slots; a doubly linked sequence of
+slot indices preserves insertion order independently of hashing. Bucket 0 is
+empty, 1 is a tombstone, and n + 2 references slot n. Order links use n + 1
+with zero as the endpoint. Removed slots are reused without moving live entries.
+Rehashing preserves order and cached hashes. At most half the buckets are live;
+tombstones are periodically discarded. Lookup, insertion and removal are
+amortized O(1) for well-distributed hashes, O(n) under adversarial collisions.
+Iteration costs O(length), even after many deletions. Stored keys must keep
+stable equality and hashes, with equal keys producing equal hashes.
 
 ## Semantics
 
@@ -73,149 +74,240 @@ class dict[K: Hash + Equatable + Copy + Default, V: Copy + Default]:
 
     __keys: list[K]
     __values: list[V]
+    __hashes: list[u64]
+    __next: list[usize]
+    __previous: list[usize]
+    __free: list[usize]
+    __buckets: list[usize]
+    __head: usize
+    __tail: usize
+    __used: usize
     length: usize
     capacity: usize
-
 
     def dict():
         __keys = list[K]()
         __values = list[V]()
+        __hashes = list[u64]()
+        __next = list[usize]()
+        __previous = list[usize]()
+        __free = list[usize]()
+        __buckets = list[usize]()
+        __head = 0
+        __tail = 0
+        __used = 0
         length = 0
         capacity = 0
-
 
     operator if(self) -> self.length != 0
     operator else(self) -> self.length == 0
 
-
     def len(self) -> usize:
-        return length
-
+        return self.length
 
     def cap(self) -> usize:
-        return capacity
-
+        return self.capacity
 
     def reserve(self, additional: usize):
-        __keys.reserve(additional)
-        __values.reserve(additional)
-        capacity = min(__keys.cap(), __values.cap())
+        required := collection_size(self.length, additional)
+        if required > (collection_limit() - 2) // 2:
+            throw ValueError("dictionary capacity exceeds bucket index range")
+        # Slots retain their indices across deletions; reuse free slots first.
+        extra := usize(0)
+        if additional > self.__free.len():
+            extra = additional - self.__free.len()
+        self.__keys.reserve(extra)
+        self.__values.reserve(extra)
+        self.__hashes.reserve(extra)
+        self.__next.reserve(extra)
+        self.__previous.reserve(extra)
+        slots := collection_size(self.__keys.len(), extra)
+        self.__free.reserve(slots - self.__free.len())
+        bucket_count := collection_capacity(self.__buckets.len(), required * 2)
+        if bucket_count != self.__buckets.len():
+            self.__rehash(bucket_count)
+        # Leave a quarter-table budget for tombstones. Rehashing at half
+        # occupancy would rebuild on almost every remove/insert near capacity.
+        elif self.__used >= self.__buckets.len() - self.__buckets.len() // 4:
+            self.__rehash(bucket_count)
+        self.capacity = min(self.__keys.cap(), self.__values.cap())
+        self.capacity = min(self.capacity, self.__hashes.cap())
+        self.capacity = min(self.capacity, self.__next.cap())
+        self.capacity = min(self.capacity, self.__previous.cap())
+        self.capacity = min(self.capacity, self.__buckets.len() // 2)
 
+    def __rehash(self, bucket_count: usize):
+        replacement := list[usize]()
+        replacement.reserve(bucket_count)
+        for index in range(bucket_count):
+            replacement.append(0)
+        entry := self.__head
+        while entry != 0:
+            slot := entry - 1
+            bucket := usize(self.__hashes[slot] % u64(bucket_count))
+            while replacement[bucket] != 0:
+                bucket = (bucket + 1) % bucket_count
+            replacement[bucket] = slot + 2
+            entry = self.__next[slot]
+        self.__buckets = move replacement
+        self.__used = self.length
 
-    def __find_index(self, key: K) -> (usize, bool):
-        for index in range(length):
-            if __keys[index] == key:
-                return (index, true)
-
-        return (0, false)
-
+    def __probe(self, key: K, hash_value: u64) -> (usize, bool):
+        if self.__buckets.len() == 0:
+            return (0, false)
+        bucket := usize(hash_value % u64(self.__buckets.len()))
+        tombstone := usize(0)
+        has_tombstone := false
+        for attempt in range(self.__buckets.len()):
+            entry := self.__buckets[bucket]
+            if entry == 0:
+                if has_tombstone:
+                    return (tombstone, false)
+                return (bucket, false)
+            if entry == 1:
+                if not has_tombstone:
+                    tombstone = bucket
+                    has_tombstone = true
+            elif self.__hashes[entry - 2] == hash_value and self.__keys[entry - 2] == key:
+                return (bucket, true)
+            bucket = (bucket + 1) % self.__buckets.len()
+        # At most half the buckets are live; this path can only reuse a tombstone.
+        assert(has_tombstone)
+        return (tombstone, false)
 
     def contains(self, key: K) -> bool:
-        _, found := __find_index(key)
+        _, found := self.__probe(key, key.hash())
         return found
 
-
     def get(self, key: K) -> (V, bool):
-        index, found := __find_index(key)
-
+        bucket, found := self.__probe(key, key.hash())
         if not found:
             return (V.default(), false)
+        return (self.__values[self.__buckets[bucket] - 2], true)
 
-        return (__values[index], true)
-
+    def get_key(self, key: K) -> (K, bool):
+        bucket, found := self.__probe(key, key.hash())
+        if not found:
+            return (key, false)
+        return (self.__keys[self.__buckets[bucket] - 2], true)
 
     operator [](key: K) -> V:
-        value, found := get(key)
-
+        value, found := self.get(key)
         if not found:
             throw KeyError("dictionary key is not present")
-
         return value
-
 
     operator []=(key: K, value: V):
-        set(key, value)
-
+        self.set(key, value)
 
     def set(self, key: K, value: V):
-        index, found := __find_index(key)
-
-        if found:
-            __values[index] = value
-            return
-
-        __keys.append(key)
-        __values.append(value)
-        length += 1
-        capacity = min(__keys.cap(), __values.cap())
-
+        self.replace(key, value)
 
     def replace(self, key: K, value: V) -> (V, bool):
-        index, found := __find_index(key)
-
-        if not found:
-            set(key, value)
-            return (V.default(), false)
-
-        previous := __values[index]
-        __values[index] = value
-        return (previous, true)
-
+        hash_value := key.hash()
+        bucket, found := self.__probe(key, hash_value)
+        if found:
+            slot := self.__buckets[bucket] - 2
+            previous := self.__values[slot]
+            self.__values[slot] = value
+            return (previous, true)
+        self.reserve(1)
+        bucket, found = self.__probe(key, hash_value)
+        slot, reused := self.__free.pop()
+        if reused:
+            self.__keys[slot] = key
+            self.__values[slot] = value
+            self.__hashes[slot] = hash_value
+            self.__previous[slot] = self.__tail
+            self.__next[slot] = 0
+        else:
+            slot = self.__keys.len()
+            self.__keys.append(key)
+            self.__values.append(value)
+            self.__hashes.append(hash_value)
+            self.__previous.append(self.__tail)
+            self.__next.append(0)
+        if self.__tail == 0:
+            self.__head = slot + 1
+        else:
+            self.__next[self.__tail - 1] = slot + 1
+        self.__tail = slot + 1
+        if self.__buckets[bucket] == 0:
+            self.__used += 1
+        self.__buckets[bucket] = slot + 2
+        self.length += 1
+        return (V.default(), false)
 
     def set_default(self, key: K, value: V) -> V:
-        current, found := get(key)
-
+        current, found := self.get(key)
         if found:
             return current
-
-        set(key, value)
+        self.set(key, value)
         return value
 
-
     def remove(self, key: K) -> (V, bool):
-        index, found := __find_index(key)
-
+        bucket, found := self.__probe(key, key.hash())
         if not found:
             return (V.default(), false)
-
-        _, key_ok := __keys.pop(index)
-        value, value_ok := __values.pop(index)
-
-        assert(key_ok)
-        assert(value_ok)
-
-        length -= 1
+        slot := self.__buckets[bucket] - 2
+        value := self.__values[slot]
+        previous := self.__previous[slot]
+        following := self.__next[slot]
+        if previous == 0:
+            self.__head = following
+        else:
+            self.__next[previous - 1] = following
+        if following == 0:
+            self.__tail = previous
+        else:
+            self.__previous[following - 1] = previous
+        self.__keys[slot] = K.default()
+        self.__values[slot] = V.default()
+        self.__hashes[slot] = 0
+        self.__next[slot] = 0
+        self.__previous[slot] = 0
+        self.__buckets[bucket] = 1
+        self.__free.append(slot)
+        self.length -= 1
         return (value, true)
 
-
     def clear(self):
-        __keys.clear()
-        __values.clear()
-        length = 0
-
+        self.__keys.clear()
+        self.__values.clear()
+        self.__hashes.clear()
+        self.__next.clear()
+        self.__previous.clear()
+        self.__free.clear()
+        for index in range(self.__buckets.len()):
+            self.__buckets[index] = 0
+        self.__head = 0
+        self.__tail = 0
+        self.__used = 0
+        self.length = 0
 
     def keys(self) -> Iterator[K]:
-        for index in range(length):
-            yield __keys[index]
-
+        entry := self.__head
+        while entry != 0:
+            yield self.__keys[entry - 1]
+            entry = self.__next[entry - 1]
 
     def values(self) -> Iterator[V]:
-        for index in range(length):
-            yield __values[index]
-
+        entry := self.__head
+        while entry != 0:
+            yield self.__values[entry - 1]
+            entry = self.__next[entry - 1]
 
     def items(self) -> Iterator[(K, V)]:
-        for index in range(length):
-            yield (__keys[index], __values[index])
-
+        entry := self.__head
+        while entry != 0:
+            yield (self.__keys[entry - 1], self.__values[entry - 1])
+            entry = self.__next[entry - 1]
 
     def copy(self) -> dict[K, V]:
         result := dict[K, V]()
-        result.reserve(length)
-
-        for key, value in items():
+        result.reserve(self.length)
+        for key, value in self.items():
             result.set(key, value)
-
         return result
 
 
@@ -308,3 +400,25 @@ test with compiler "dict key requires hash and equality":
             value: i32
 
         values := dict[Unkeyed, i32]()
+
+
+test "dict rehash removal and reinsertion preserve order":
+    values := dict[i32, i32]()
+    for key in range(80):
+        values.set(i32(key), i32(key * 10))
+    for key in range(40):
+        removed, found := values.remove(i32(key))
+        assert(found)
+        assert(removed == i32(key * 10))
+    values.reserve(100)
+    for key in range(40):
+        values.set(i32(key), i32(key))
+    expected := i32(40)
+    for key in values.keys():
+        assert(key == expected % 80)
+        expected += 1
+    assert(expected == 120)
+    copied := values.copy()
+    copied.clear()
+    assert(values.len() == 80)
+    assert(copied.len() == 0)

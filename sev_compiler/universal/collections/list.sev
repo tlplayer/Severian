@@ -1,6 +1,7 @@
 import "../primitive/primitive.sev"
 import "../primitive/array.sev"
 import "../primitive/slice.sev"
+import "storage.sev"
 
 
 '''
@@ -211,15 +212,12 @@ class list[T: Copy + Default]:
 
 
     def reserve(self, additional: usize):
-        required := length + additional
+        required := collection_size(length, additional)
 
         if required <= capacity:
             return
 
-        new_capacity := max(usize(4), capacity)
-
-        while new_capacity < required:
-            new_capacity *= 2
+        new_capacity := collection_capacity(capacity, required)
 
         __grow(new_capacity)
 
@@ -258,11 +256,13 @@ class list[T: Copy + Default]:
         if incoming == 0:
             return
 
+        # Snapshot before reserve: values can alias our allocation.
+        snapshot := list[T](values)
         reserve(incoming)
 
         for index in range(incoming):
             unsafe:
-                __memory[length + index] = values[index]
+                __memory[length + index] = snapshot[index]
 
         length += incoming
 
@@ -485,3 +485,26 @@ test with compiler "bootstrap list requires copy default elements":
                 release(handle)
 
         values := list[Resource]()
+
+
+test "list copy owns independent storage and empty removals are absent":
+    values := list[i32]()
+    _, found := values.pop()
+    assert(not found)
+    values.append(1)
+    values.append(2)
+    copied := values.copy()
+    copied[0] = 9
+    assert(values[0] == 1)
+    values.clear()
+    assert(copied.len() == 2)
+    _, found = copied.pop(2)
+    assert(not found)
+
+
+test "list reserve rejects overflow before changing shape":
+    values := list[i32]()
+    values.append(1)
+    throws(values.reserve(collection_limit()))
+    assert(values.len() == 1)
+    assert(values[0] == 1)
