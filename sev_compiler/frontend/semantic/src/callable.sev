@@ -69,6 +69,9 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             for constant in state.constants:
                 if constant.name == state.namespace + name or constant.name == name:
                     return constant.type_id
+            field ?= callable_implicit_field(state, name, expression.span)
+            if field != None:
+                return callable_hint(state, field)
         case Call:
             variant = callable_tagged_selection(state, callee)
             if variant.record != -1:
@@ -96,8 +99,7 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                     return target
             template ?= definitions.record_template(state.declarations, name, state.namespace)
             if template != None:
-                if template.type_pack != "":
-                    return callable_expression(state, expression, universal.TypeId(0)).type_id
+                return callable_expression(state, expression, universal.TypeId(0)).type_id
             constructed = callable_constructor_type(state, callee)
             if constructed.index != 0:
                 return constructed
@@ -822,6 +824,14 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             target ?= scalar.scalar_type_name(name)
             if target != None:
                 if conversions.scalar_numeric(target):
+                    if len(arguments) == 1 and arguments[0].name == None:
+                        operand = callable_expression(state, arguments[0].value, universal.TypeId(0))
+                        selected = callable_operator(state, name, [operand.type_id], expression.span)
+                        conversion ?= selected.function
+                        if conversion != None:
+                            if conversion.result_type.index != target.index:
+                                return error(callable_diagnostic("conversion operator must return its declared target type", expression.span))
+                            return callable_resolved_operator(state, conversion, [operand], expression.span, expected)
                     if len(arguments) < 1 or len(arguments) > 2:
                         return error(callable_diagnostic("numeric conversion requires a value and optional mode", expression.span))
                     if arguments[0].name != None:
@@ -1324,8 +1334,6 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         for variant in universal.outcome_variants(outcome):
                             if variant.index == 7:
                                 resolved_field.default = universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), field.span)
-            if resolved_field.type_id.index == 3:
-                return error(callable_diagnostic("record string fields require aggregate ownership lowering", field.span))
             if resolved_field.type_id.index == 2:
                 return error(callable_diagnostic("unit cannot be stored in a record field", field.span))
             resolved_fields.append(resolved_field)
@@ -2708,14 +2716,35 @@ def callable_infer_field_pack(state: CallableAnalysis, callee: universal.Express
             pass
     template ?= selected
     if template != None:
-        if template.type_pack == "":
-            return universal.TypeId(0)
         if name in state.names:
             return error(callable_diagnostic("binding is not callable: " + name, callee.span))
         contextual ?= definitions.record_instance(state.declarations, expected)
         if contextual != None:
             if contextual.template.module == template.definition.module and contextual.template.declaration.value == template.definition.declaration.value:
                 return expected
+        if template.type_pack == "":
+            for method in template.methods:
+                if method.name == template.name.split(".")[-1]:
+                    return error(callable_diagnostic("custom constructors require explicit generic type arguments", callee.span))
+            bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=template.fields), arguments)
+            if bound.message != "":
+                return error(callable_diagnostic(bound.message, callee.span))
+            actuals: list[universal.TypeId] = []
+            for parameter in template.type_parameters:
+                actuals.append(universal.TypeId(0))
+            for argument in bound.arguments:
+                for field in template.fields:
+                    if argument.name == field.name:
+                        actual = callable_expression(state, argument.value, universal.TypeId(0))
+                        callable_infer_annotation(state, field.annotation, actual.type_id, template.type_parameters, actuals, template.lookup)
+            annotations: list[universal.TypeAnnotation] = []
+            for actual in actuals:
+                if actual.index == 0:
+                    return error(callable_diagnostic("record type parameter cannot be inferred", callee.span))
+                annotations.append(universal.named_type(definitions.type_name(actual, state.records), [], callee.span))
+            resolved = definitions.instantiate_record(state.declarations, template, annotations, state.records, state.namespace, callee.span)
+            callable_record_layout(state.records, resolved, [])
+            return resolved
         if len(template.type_parameters) != 1 or len(template.fields) != 1 or not template.fields[0].variadic:
             return error(callable_diagnostic("inferred aggregate construction requires one field pack", callee.span))
         annotations: list[universal.TypeAnnotation] = []

@@ -137,7 +137,7 @@ the supplied callable to `...values`. Delimited grammar and field packs are
 shared mechanisms, also usable by other source classes. Tuples lower as ordinary
 records, with constant indexing and slicing; their string operator is source
 code. Empty, singleton, heterogeneous scalar, and nested tuples are supported.
-The existing restriction on owned string and buffer fields also applies here.
+Owned string and buffer elements in variadic field packs remain unsupported.
 Run `python3 tests/sev_compiler/tuples.py -v` against the built source compiler
 to check the tuple example, expression helpers, and shared pack behavior.
 
@@ -160,8 +160,8 @@ Nonliteral patterns and arms after a wildcard produce deliberate diagnostics.
 Unsupported declarations and expressions produce diagnostics. General
 collections, constant-generic classes, fallible/enum values, nonliteral parameter
 defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
-outside this slice. Record string fields require aggregate ownership lowering
-and are rejected; recursive value records require indirection. This executable does not yet compile itself. The broader driver remains unfinished; its semantic entry now delegates to the
+outside this slice, apart from the source-defined string-to-integer conversion.
+Recursive value records require indirection. This executable does not yet compile itself. The broader driver remains unfinished; its semantic entry now delegates to the
 same declaration registration and callable analysis used by this executable.
 
 CLI lexer, parser, and semantic diagnostics retain their source file identity
@@ -318,10 +318,30 @@ O(n); existing aliases retain the previous buffer when that binding is replaced.
 Generic extension receiver types are inferred through aliases and record
 applications. Buffer receiver bodies are expanded at the call site before SSA
 promotion, preserving allocation lifetimes across assignments, returns, and
-loops. Recursive buffer receiver calls and replacement of buffer fields inside
-records remain diagnosed until their reference ABI and aggregate ownership are
-supported. The gate also checks source-provider renaming, keyword evaluation
+loops. Recursive buffer receiver calls remain diagnosed until their reference
+ABI is supported. The gate also checks source-provider renaming, keyword evaluation
 order, AddressSanitizer results, and balanced allocations.
+
+`python3 tests/sev_compiler/owned_records.py` checks the unchanged boxed generic,
+lexeme, and token examples (`04`, `26`, and `27`). Ordinary records can contain
+strings, buffers, and nested records. Lowering decomposes their storage into
+field slots and expands calls with owned record parameters or results before
+CFG promotion, keeping allocations visible to MLIR's ownership analysis.
+Record assignment copies field values; field mutation through a parameter
+updates the caller's record. Replacing a string or buffer field preserves the
+previous value in existing record copies. Generic record constructor arguments
+can infer type parameters from declared fields.
+
+The same gate checks branches, loops, returned records, AddressSanitizer, and
+balanced allocations. Recursive owned record calls, whole-parameter rebinding,
+foreign owned record boundaries, custom destructors, and buffers of owned
+records still require further ownership lowering. Tagged records keep inactive
+payload fields initialized, allowing optional owned fields to use the same
+storage and lifetime handling.
+String replacement and string-to-integer conversion are ordinary source
+implementations in `universal/primitive/string/methods.sev`; conversion calls
+resolve the declared operator. Integer parsing accepts signed decimal text and
+ASCII surrounding whitespace, and traps on invalid input or overflow.
 
 The acceptance runner uses these existing files unchanged:
 

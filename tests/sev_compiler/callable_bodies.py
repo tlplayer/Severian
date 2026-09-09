@@ -25,13 +25,13 @@ def main():
              "--reconcile-unrealized-casts", "-o", lowered])
         llvm = output.with_suffix(".ll")
         run([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), "--mlir-to-llvmir", lowered], output=llvm)
-        run([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", output])
+        run([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", output, "-lm"])
         actual = run([output])
-        expected = {"receivers": "r21r3receivers complete\n", "01_semantic_match": "", "02_trait_operator_resolution": ""}.get(subject.stem, subject.stem + " complete\n")
+        expected = {"owned_fields": "", "receivers": "r21r3receivers complete\n", "01_semantic_match": "", "02_trait_operator_resolution": ""}.get(subject.stem, subject.stem + " complete\n")
         assert actual.stdout == expected, repr(actual.stdout)
         if os.environ.get("SEVERIAN_SANITIZE") == "1":
             sanitized = output.with_name(output.name + "_asan")
-            run([tool("SEVERIAN_CLANG", "clang-21"), "-fsanitize=address", llvm, "-o", sanitized])
+            run([tool("SEVERIAN_CLANG", "clang-21"), "-fsanitize=address", llvm, "-o", sanitized, "-lm"])
             checked = run([sanitized])
             assert checked.stdout == expected, repr(checked.stdout)
         print(f"PASS: {subject.stem} (Severian compiler -> MLIR -> native)", flush=True)
@@ -47,7 +47,6 @@ def main():
             "trait_wrong_result": "class does not satisfy trait Addable",
             "trait_cycle": "cyclic trait inheritance",
             "type_alias_cycle": "cyclic type alias",
-            "owned_fields": "record string fields require aggregate ownership lowering",
             "recursive_records": "recursive value record requires indirection",
             "match_after_wildcard": "match arm after wildcard is unreachable",
             "match_pattern": "match supports only literal and wildcard patterns",

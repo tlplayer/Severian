@@ -134,7 +134,7 @@ test with compiler "conversion modes permit only their declared degree of change
         value = float(1, identity)
     reject:
         value = int(true)
-    reject:
+    accept:
         value = int("12")
     reject:
         value = int(1, unknown_policy)

@@ -7,6 +7,7 @@ import "../statement/statement.sev"
 
 enum Operation:
     Coverage(point: CoveragePoint)
+    # Accepts a tagged aggregate or its decomposed integer tag.
     IsVariant(value: ValueId, variant: int, result: ValueId)
     Constant(value: LiteralValue, result: ValueId)
     Unary(operator: OperatorSyntax, operand: ValueId, result: ValueId)

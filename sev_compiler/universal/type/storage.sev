@@ -16,6 +16,19 @@ def indirect_value(id: TypeId, records: list[RecordDeclaration]) -> bool:
     return id.index >= 1000 and buffer_element(id, records).index == 0
 
 
+def owned_record(id: TypeId, records: list[RecordDeclaration], active: list[int] = []) -> bool:
+    if not indirect_value(id, records) or int(id.index) in active:
+        return false
+    path = active[:]
+    path.append(int(id.index))
+    for record in records:
+        if record.type_id.index == id.index:
+            for field in record.fields:
+                if field.type_id.index == 3 or buffer_element(field.type_id, records).index != 0 or owned_record(field.type_id, records, path):
+                    return true
+    return false
+
+
 def copy_storage(id: TypeId, records: list[RecordDeclaration], active: list[int] = []) -> bool:
     if id.index == 2:
         return false

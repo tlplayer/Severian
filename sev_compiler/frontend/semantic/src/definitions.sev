@@ -486,8 +486,6 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
             continue
         annotation = replace_annotation(field.annotation, template.type_parameters, replacements)
         type_id = type_annotation(definitions, annotation, records, template.lookup)
-        if type_id.index == 3:
-            return error(diagnostics.diagnostic_at("E000205", "record string fields require aggregate ownership lowering", field.span))
         if type_id.index == 2:
             return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
         fields.append(universal.FunctionParameter(field.name, annotation, field.default, field.span, type_id=type_id))

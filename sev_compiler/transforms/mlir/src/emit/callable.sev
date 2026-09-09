@@ -54,9 +54,11 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
         match operation:
             case IsVariant:
                 input = callable_mlir_value(module, value)
-                tag = builder_new_value(builder, integer_type(64))
-                positions = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(64), [], [integer_attribute(0, integer_type(64))])
-                builder_create_operation(builder, operation_name("llvm", "extractvalue"), [input], [tag], [MlirNamedAttribute("position", positions)])
+                tag := input
+                if module.values[value.index].type_id.index != 64:
+                    tag = builder_new_value(builder, integer_type(64))
+                    positions = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(64), [], [integer_attribute(0, integer_type(64))])
+                    builder_create_operation(builder, operation_name("llvm", "extractvalue"), [input], [tag], [MlirNamedAttribute("position", positions)])
                 expected = builder_new_value(builder, integer_type(64))
                 builder_constant(builder, expected, integer_attribute(variant, expected.type_id))
                 builder_binary(builder, callable_mlir_value(module, result), operation_name("arith", "cmpi"), tag, expected, [MlirNamedAttribute("predicate", integer_attribute(0, integer_type(64)))])

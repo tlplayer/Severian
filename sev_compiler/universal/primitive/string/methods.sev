@@ -63,3 +63,89 @@ extend string:
 
     def upper() -> string:
         return __upper_ascii(self)
+
+    def replace(needle: string, replacement: string) -> string:
+        size = text.byte_count(self)
+        width = text.byte_count(needle)
+        extra = text.byte_count(replacement)
+        matches := 0
+        position := 0
+        while position <= size:
+            if width == 0 or __matches(self, needle, position):
+                assert(matches < 9223372036854775807)
+                matches += 1
+                if width != 0:
+                    position += width
+                    continue
+            if position == size:
+                break
+            position = text.__offset(self, 1, position) if width == 0 else position + 1
+        remaining = size - matches * width
+        if extra != 0:
+            assert(matches <= (9223372036854775807 - remaining) / extra)
+        result = text.__allocate(text.__index(remaining + matches * extra))
+        position = 0
+        output := 0
+        while position <= size:
+            if width == 0 or __matches(self, needle, position):
+                offset := 0
+                while offset < extra:
+                    text.__store(text.__load(replacement, text.__index(offset)), result, text.__index(output))
+                    output += 1
+                    offset += 1
+                if width != 0:
+                    position += width
+                    continue
+            if position == size:
+                break
+            count = text.__offset(self, 1, position) - position if width == 0 else 1
+            offset := 0
+            while offset < count:
+                text.__store(text.__load(self, text.__index(position)), result, text.__index(output))
+                position += 1
+                output += 1
+                offset += 1
+        return result
+
+
+def __matches(value: string, needle: string, position: int) -> bool:
+    count = text.byte_count(needle)
+    if position > text.byte_count(value) - count:
+        return false
+    offset := 0
+    while offset < count:
+        if text.byte_at(value, position + offset) != text.byte_at(needle, offset):
+            return false
+        offset += 1
+    return true
+
+
+def __space(value: int) -> bool:
+    return value == 32 or (value >= 9 and value <= 13)
+
+
+operator int(value: string) -> int:
+    first := 0
+    last := text.byte_count(value)
+    while first < last and __space(text.byte_at(value, first)):
+        first += 1
+    while last > first and __space(text.byte_at(value, last - 1)):
+        last -= 1
+    assert(first < last)
+    sign = text.byte_at(value, first)
+    negative = sign == 45
+    if sign == 43 or negative:
+        first += 1
+    assert(first < last)
+    limit = -9223372036854775808 if negative else -9223372036854775807
+    result := 0
+    position := first
+    while position < last:
+        digit = text.byte_at(value, position) - 48
+        assert(digit >= 0 and digit <= 9)
+        assert(result >= limit / 10)
+        result *= 10
+        assert(result >= limit + digit)
+        result -= digit
+        position += 1
+    return result if negative else -result

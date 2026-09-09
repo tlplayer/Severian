@@ -3,6 +3,7 @@ import source
 import diagnostics
 import "cfg.sev" as cfg
 import "ownership.sev" as ownership
+import "aggregate.sev" as aggregate
 import "../../../universal/type/storage.sev" as storage_types
 import "../../../universal/declaration/scalar.sev" as boundary
 
@@ -13,6 +14,8 @@ class CallableMirScope:
     update_operands: list[universal.ValueId] = []
     return_target: int = -1
     inline_functions: list[int] = []
+    aggregates: aggregate.AggregateStorage = aggregate.AggregateStorage()
+    borrowed_records: list[int] = []
 
 
 def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
@@ -25,7 +28,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
     match expression.kind:
         case Evaluate:
             evaluated = mir_expression(module, context, scope, value)
-            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions), body)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records), body)
         case UpdateOperand:
             return scope.update_operands[index]
         case ListValue:
@@ -40,22 +43,31 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             else:
                 exemplar = mir_value(module, storage_types.buffer_element(expression.type_id, module.records))
                 cfg.append(context, universal.Operation.Constant(universal.NoneValue(), exemplar))
-            local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar], scope.return_target, scope.inline_functions)
+            local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
             result = mir_expression(module, context, local, construction)
             position := 0
             for value in elements_values:
                 index = mir_value(module, universal.TypeId(64))
                 cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(position)), index))
-                local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions)
+                local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
                 mir_expression(module, context, local, storage)
                 position += 1
             return result
         case IndexReference:
             receiver = mir_expression(module, context, scope, object)
             offset = mir_expression(module, context, scope, index)
-            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset], scope.return_target, scope.inline_functions), access)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records), access)
         case OutcomeValue:
             payload = mir_expression(module, context, scope, value)
+            if storage_types.owned_record(expression.type_id, module.records):
+                handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
+                aggregate.initialize(module, context, scope.aggregates, handle, expression.type_id)
+                members = aggregate.fields(scope.aggregates, handle)
+                tag = mir_value(module, universal.TypeId(64))
+                cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(variant)), tag))
+                cfg.append(context, universal.Operation.Store(members[0], tag))
+                aggregate.store(module, context, scope.aggregates, members[variant + 1], payload)
+                return handle
             address = mir_value(module, universal.TypeId(5))
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             empty = mir_value(module, expression.type_id)
@@ -74,9 +86,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             return result
         case OutcomeTest:
             input = mir_expression(module, context, scope, value)
-            result = mir_value(module, universal.TypeId(1))
-            cfg.append(context, universal.Operation.IsVariant(input, variant, result))
-            return result
+            return aggregate.test_variant(module, context, scope.aggregates, input, variant)
         case OutcomeUnwrap:
             origin = cfg.origin(module, "Outcome", expression.span)
             syntax = universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None, definition=origin.grammar)
@@ -88,15 +98,24 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             return result
         case BindingReference:
             address = callable_mir_place(module, context, scope, expression)
-            result = mir_value(module, expression.type_id)
-            cfg.append(context, universal.Operation.Load(address, result))
-            return result
+            return aggregate.load(module, context, address, expression.type_id)
         case FieldReference:
             address = callable_mir_place(module, context, scope, expression)
-            result = mir_value(module, expression.type_id)
-            cfg.append(context, universal.Operation.Load(address, result))
-            return result
+            return aggregate.load(module, context, address, expression.type_id)
         case RecordValue:
+            if storage_types.owned_record(expression.type_id, module.records):
+                handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
+                members = aggregate.fields(scope.aggregates, handle)
+                for argument in fields:
+                    value = mir_expression(module, context, scope, argument.value)
+                    for record in module.records:
+                        if record.type_id.index == expression.type_id.index:
+                            index := 0
+                            for field in record.fields:
+                                if argument.name == field.name:
+                                    aggregate.store(module, context, scope.aggregates, members[index], value)
+                                index += 1
+                return handle
             address = mir_value(module, universal.TypeId(5))
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             for argument in fields:
@@ -146,7 +165,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
                     for declaration in module.functions:
                         if declaration.id.value == function.declaration.value:
                             native = boundary.scalar_boundary(declaration, "mlir") != ""
-                            if declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0:
+                            if aggregate.signature(declaration, module.records) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0):
                                 return callable_inline_receiver(module, context, scope, declaration, arguments, expression.span)
                     evaluated: list[universal.ValueId] = []
                     for argument in arguments:
@@ -181,24 +200,22 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
 def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], span: source.Span) -> universal.ValueId | diagnostics.Diagnostic:
     identity = int(function.id.value)
     if identity in scope.inline_functions:
+        if aggregate.signature(function, module.records):
+            return error(diagnostics.Diagnostic("E000230", "recursive owned aggregate calls require a reference ABI", span))
         return error(diagnostics.Diagnostic("E000230", "recursive buffer receiver methods require a reference ABI", span))
+    if boundary.scalar_boundary(function, "mlir") != "" or function.body == None:
+        return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", span))
     continuation = cfg.block(context)
-    result = mir_value(module, function.result_type)
+    result := mir_value(module, function.result_type)
     if function.result_type.index != 2:
-        context.body.blocks[continuation].parameters.append(result)
-    local = CallableMirScope(return_target=continuation, inline_functions=scope.inline_functions[:])
+        result = aggregate.parameter(module, context, scope.aggregates, function.result_type, continuation)
+    local = CallableMirScope(return_target=continuation, inline_functions=scope.inline_functions[:], aggregates=scope.aggregates)
     local.inline_functions.append(identity)
     # Arguments have been bound to parameters by semantic analysis. Evaluate
     # each once before entering the callee, including aliased value arguments.
     evaluated: list[universal.ValueId] = []
     for argument in arguments:
-        receiver = argument.name == function.parameters[0].name
-        if receiver:
-            match argument.value.kind:
-                case FieldReference:
-                    return error(diagnostics.Diagnostic("E000230", "buffer field replacement requires aggregate ownership lowering", span))
-                case _:
-                    pass
+        receiver = function.extension and storage_types.buffer_element(function.parameter_types[0], module.records).index != 0 and argument.name == function.parameters[0].name
         if receiver or storage_types.indirect_value(argument.value.type_id, module.records):
             evaluated.append(callable_mir_place(module, context, scope, argument.value))
         else:
@@ -208,8 +225,11 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
         argument_index := 0
         for argument in arguments:
             if argument.name == parameter.name:
-                if index == 0:
+                receiver = function.extension and index == 0 and storage_types.buffer_element(parameter.type_id, module.records).index != 0
+                if receiver or storage_types.owned_record(parameter.type_id, module.records):
                     local.bindings.append(evaluated[argument_index])
+                    if storage_types.owned_record(parameter.type_id, module.records):
+                        local.borrowed_records.append(index)
                 else:
                     type_id = universal.TypeId(5) if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
                     cell = mir_value(module, universal.TypeId(5))
@@ -240,6 +260,16 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
         match statement:
             case BindingStatement:
                 value := mir_expression(module, context, scope, binding.value)
+                if storage_types.owned_record(binding.type_id, module.records):
+                    if binding.update:
+                        if int(binding.id.index) in scope.borrowed_records:
+                            return error(diagnostics.Diagnostic("E000230", "owned aggregate parameter rebinding requires a reference ABI", binding.span))
+                        aggregate.store(module, context, scope.aggregates, scope.bindings[binding.id.index], value)
+                    else:
+                        destination = aggregate.allocate(module, context, scope.aggregates, binding.type_id)
+                        aggregate.store(module, context, scope.aggregates, destination, value)
+                        scope.bindings.append(destination)
+                    continue
                 if storage_types.indirect_value(binding.type_id, module.records):
                     address = mir_value(module, universal.TypeId(5))
                     cfg.append(context, universal.Operation.Allocate(binding.type_id, address))
@@ -276,6 +306,10 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
     module.globals = scope.bindings
     functions: list[universal.FunctionDeclaration] = []
     for function in module.functions:
+        if aggregate.signature(function, module.records):
+            if function.body == None or boundary.scalar_boundary(function, "mlir") != "":
+                return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
+            continue
         local = CallableMirScope()
         context = cfg.ExecutionContext(universal.empty_cfg(function.result_type))
         for type_id in function.parameter_types:
@@ -305,6 +339,8 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
 def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
         case BindingReference:
+            if storage_types.owned_record(expression.type_id, module.records):
+                return scope.bindings[binding.index]
             if storage_types.indirect_value(expression.type_id, module.records):
                 address = mir_value(module, universal.TypeId(5))
                 cfg.append(context, universal.Operation.Load(scope.bindings[binding.index], address))
@@ -312,11 +348,15 @@ def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, 
             return scope.bindings[binding.index]
         case FieldReference:
             base = callable_mir_place(module, context, scope, object)
+            if storage_types.owned_record(object.type_id, module.records):
+                return aggregate.fields(scope.aggregates, base)[index]
             result = mir_value(module, universal.TypeId(5))
             cfg.append(context, universal.Operation.FieldAddress(base, object.type_id, index, result))
             return result
         case _:
             value = mir_expression(module, context, scope, expression)
+            if storage_types.owned_record(expression.type_id, module.records):
+                return value
             address = mir_value(module, universal.TypeId(5))
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             cfg.append(context, universal.Operation.Store(address, value))
@@ -391,6 +431,9 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                         match operand:
                             case ExpressionBody:
                                 match expression.kind:
+                                    case BindingReference:
+                                        if storage_types.owned_record(expression.type_id, module.records) and int(binding.index) in scope.borrowed_records:
+                                            return error(diagnostics.Diagnostic("E000230", "owned aggregate parameter rebinding requires a reference ABI", expression.span))
                                     case IndexReference:
                                         receiver = mir_expression(module, frame.context, scope, object)
                                         offset = mir_expression(module, frame.context, scope, index)
@@ -407,12 +450,10 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
             if name == "load" and len(inputs) == 1:
                 match inputs[0]:
                     case IndexedHandle:
-                        local = CallableMirScope(scope.bindings, scope.loops, [receiver, index], scope.return_target, scope.inline_functions)
+                        local = CallableMirScope(scope.bindings, scope.loops, [receiver, index], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
                         return RuntimeValue(mir_expression(module, frame.context, local, access))
                     case PlaceHandle:
-                        result = mir_value(module, type_id)
-                        cfg.append(frame.context, universal.Operation.Load(address, result))
-                        return RuntimeValue(result)
+                        return RuntimeValue(aggregate.load(module, frame.context, address, type_id))
                     case _:
                         return error(diagnostics.Diagnostic("E000231", "load requires a place", expression.span))
             if name == "store" and len(inputs) == 2:
@@ -421,14 +462,14 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     case IndexedHandle:
                         implementation ?= storage
                         if implementation != None:
-                            local = CallableMirScope(scope.bindings, scope.loops, [receiver, index, value], scope.return_target, scope.inline_functions)
+                            local = CallableMirScope(scope.bindings, scope.loops, [receiver, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
                             mir_expression(module, frame.context, local, implementation)
                             return Nothing
                         return error(diagnostics.Diagnostic("E000231", "indexed storage is not writable", expression.span))
                     case PlaceHandle:
                         if module.values[value.index].type_id.index != type_id.index:
                             return error(diagnostics.Diagnostic("E000231", "place store type mismatch", expression.span))
-                        cfg.append(frame.context, universal.Operation.Store(address, value))
+                        aggregate.store(module, frame.context, scope.aggregates, address, value)
                         return Nothing
                     case _:
                         return error(diagnostics.Diagnostic("E000231", "store requires a place", expression.span))
@@ -439,7 +480,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     case SourceOperand:
                         match operand:
                             case ExpressionBody:
-                                local = CallableMirScope(scope.bindings, scope.loops, [previous, right], scope.return_target, scope.inline_functions)
+                                local = CallableMirScope(scope.bindings, scope.loops, [previous, right], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
                                 return RuntimeValue(mir_expression(module, frame.context, local, expression))
                             case _:
                                 pass
@@ -469,13 +510,13 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
             if name == "cfg.parameter" and len(inputs) == 2:
                 target = semantic_block(inputs[0], expression.span)
                 exemplar = semantic_runtime(inputs[1], expression.span)
-                parameter = mir_value(module, module.values[exemplar.index].type_id)
-                frame.context.body.blocks[target].parameters.append(parameter)
+                parameter = aggregate.parameter(module, frame.context, scope.aggregates, module.values[exemplar.index].type_id, target)
                 return RuntimeValue(parameter)
             if name == "cfg.goto" and len(inputs) >= 1:
                 edge_arguments: list[universal.ValueId] = []
                 for input in inputs[1:]:
-                    edge_arguments.append(semantic_runtime(input, expression.span))
+                    for value in aggregate.values(module, frame.context, scope.aggregates, semantic_runtime(input, expression.span)):
+                        edge_arguments.append(value)
                 cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(semantic_block(inputs[0], expression.span), edge_arguments)), frame.origin)
                 return Nothing
             if name == "cfg.branch" and len(inputs) == 3:
@@ -488,8 +529,22 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                 return Nothing
             if name == "cfg.throw" and len(inputs) == 1:
                 raised = semantic_runtime(inputs[0], expression.span)
-                if scope.return_target >= 0:
-                    cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(scope.return_target, [raised])), frame.origin)
+                if scope.return_target >= 0 and len(frame.context.body.blocks[scope.return_target].parameters) != 0:
+                    cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(scope.return_target, aggregate.values(module, frame.context, scope.aggregates, raised))), frame.origin)
+                elif storage_types.owned_record(module.values[raised.index].type_id, module.records):
+                    # An unhandled outcome has no return boundary. Terminate
+                    # here without letting its lowering-only handle escape.
+                    failed = mir_value(module, universal.TypeId(1))
+                    cfg.append(frame.context, universal.Operation.Constant(universal.BooleanValue(false), failed))
+                    cfg.append(frame.context, universal.Operation.Assert(failed, None, universal.AssertionOrigin(0, 0, 0, None)))
+                    # Keep one return form for the ownership pass. The assert
+                    # always traps, so this continuation cannot execute.
+                    if scope.return_target >= 0:
+                        cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(scope.return_target, [])), frame.origin)
+                    elif frame.context.body.return_type.index == 2:
+                        cfg.terminate(frame.context, universal.CfgExit.Finish(None), frame.origin)
+                    else:
+                        return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", expression.span))
                 else:
                     cfg.terminate(frame.context, universal.CfgExit.Raise(raised), frame.origin)
                 return Nothing
@@ -502,9 +557,10 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                         for variant in universal.outcome_variants(record):
                             if variant.index == frame.result_type.index:
                                 if name == "outcome.success":
-                                    result = mir_value(module, universal.TypeId(1))
-                                    cfg.append(frame.context, universal.Operation.IsVariant(input, index, result))
-                                    return RuntimeValue(result)
+                                    return RuntimeValue(aggregate.test_variant(module, frame.context, scope.aggregates, input, index))
+                                if storage_types.owned_record(type_id, module.records):
+                                    field = aggregate.fields(scope.aggregates, input)[index + 1]
+                                    return RuntimeValue(aggregate.load(module, frame.context, field, variant))
                                 address = mir_value(module, universal.TypeId(5))
                                 cfg.append(frame.context, universal.Operation.Allocate(type_id, address))
                                 cfg.append(frame.context, universal.Operation.Store(address, input))
@@ -522,7 +578,8 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     match inputs[0]:
                         case RuntimeValue:
                             returned = value
-                            inline_arguments.append(value)
+                            for returned_field in aggregate.values(module, frame.context, scope.aggregates, value):
+                                inline_arguments.append(returned_field)
                         case Nothing:
                             pass
                         case _:
@@ -541,7 +598,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                             case StatementBody:
                                 if not cfg.open(frame.context):
                                     return error(diagnostics.Diagnostic("E000230", "body lowering after CFG terminator", frame.origin.span))
-                                mir_block(module, frame.context, body, CallableMirScope(scope.bindings[:], scope.loops, return_target=scope.return_target, inline_functions=scope.inline_functions))
+                                mir_block(module, frame.context, body, CallableMirScope(scope.bindings[:], scope.loops, return_target=scope.return_target, inline_functions=scope.inline_functions, aggregates=scope.aggregates, borrowed_records=scope.borrowed_records))
                                 return Nothing
                     case Nothing:
                         return Nothing

@@ -54,6 +54,7 @@ def main():
         print("PASS: canonical scalar list (seed native)", flush=True)
         constructor_gates(directory)
         accepted = {
+            "generic_owned_field": "class Box[T]:\n    value: T\nBox[string](\"owned\")\n",
             "direct_macro": """-> identity[T: int]():
     def identity(value: T) -> T:
         return value
@@ -144,7 +145,6 @@ assert(unwrap(Box[float](2.5)) == 2.5)
             "unknown_family": ("-> bad[T: Missing]():\n    def value(input: T) -> T:\n        return input\n", "unsupported scalar macro family Missing"),
             "generic_conflict": ("class Box[T]:\n    value: T\ndef same[T](left: Box[T], right: Box[T]) -> T:\n    return left.value\nsame(Box[int](1), Box[float](2.0))\n", "conflicting generic type arguments"),
             "record_arity": ("class Box[T]:\n    value: T\nvalue: Box = 1\n", "type argument count mismatch"),
-            "generic_owned_field": ("class Box[T]:\n    value: T\nBox[string](\"owned\")\n", "record string fields require aggregate ownership lowering"),
             "generic_recursion": ("class Box[T]:\n    value: Box[T]\nvalue: Box[int] = Box[int]()\n", "recursive value record requires indirection"),
         }
         for name, (source, diagnostic) in rejected.items():

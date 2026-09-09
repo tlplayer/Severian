@@ -234,12 +234,17 @@ class ListGrowth(MigrationCase):
             def bad(values: list[int]):
                 values.recursive()
         ''', r"recursive buffer receiver methods require a reference ABI")
-        self.rejects('''
+        self.native('''
             class Holder:
                 values: list[int]
-            def bad(holder: Holder):
-                holder.values.append(1)
-        ''', r"buffer field replacement requires aggregate ownership lowering")
+            def append(holder: Holder):
+                holder.values.append(2)
+            test:
+                holder = Holder([1])
+                append(holder)
+                assert(holder.values[0] == 1)
+                assert(holder.values[1] == 2)
+        ''')
 
 
 if __name__ == "__main__":

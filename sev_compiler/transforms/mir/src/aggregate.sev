@@ -1,0 +1,145 @@
+import universal
+import diagnostics
+import "cfg.sev" as cfg
+import "../../../universal/type/storage.sev" as storage
+
+
+class AggregatePlace:
+    value: universal.ValueId
+    fields: list[universal.ValueId]
+
+
+class AggregateStorage:
+    places: list[AggregatePlace] = []
+
+
+# Owned records are decomposed into ordinary field slots before CFG promotion.
+# The aggregate handle exists only during lowering; executable operations and
+# edges contain the field values, keeping memref ownership visible to MLIR.
+def fields(state: AggregateStorage, value: universal.ValueId) -> list[universal.ValueId]:
+    for place in state.places:
+        if place.value.index == value.index:
+            return place.fields
+    throw Error("missing decomposed aggregate storage")
+
+
+def allocate(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
+    if not storage.owned_record(type_id, module.records):
+        address = cfg.value(module, universal.TypeId(5))
+        # A join can receive fields from either predecessor. Its slots must
+        # dominate both paths even before the general storage promotion pass.
+        context.body.blocks[context.body.entry].operations.append(universal.Operation.Allocate(type_id, address))
+        return address
+    handle = cfg.value(module, type_id)
+    members: list[universal.ValueId] = []
+    for record in module.records:
+        if record.type_id.index == type_id.index:
+            for method in record.methods:
+                if method.name == "drop":
+                    return error(diagnostics.Diagnostic("E000230", "custom aggregate destructors require effect cleanup lowering", record.span))
+            for field in record.fields:
+                members.append(allocate(module, context, state, field.type_id))
+    state.places.append(AggregatePlace(handle, members))
+    return handle
+
+
+def load(module: universal.Module, context: cfg.ExecutionContext, address: universal.ValueId, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
+    if storage.owned_record(type_id, module.records):
+        return address
+    result = cfg.value(module, type_id)
+    cfg.append(context, universal.Operation.Load(address, result))
+    return result
+
+
+def initialize(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, address: universal.ValueId, type_id: universal.TypeId):
+    if not storage.owned_record(type_id, module.records):
+        value = cfg.value(module, type_id)
+        cfg.append(context, universal.Operation.Constant(universal.NoneValue(), value))
+        cfg.append(context, universal.Operation.Store(address, value))
+        return
+    members = fields(state, address)
+    for record in module.records:
+        if record.type_id.index == type_id.index:
+            index := 0
+            for field in record.fields:
+                initialize(module, context, state, members[index], field.type_id)
+                index += 1
+
+
+def test_variant(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, value: universal.ValueId, variant: int) -> universal.ValueId | diagnostics.Diagnostic:
+    input := value
+    if storage.owned_record(module.values[value.index].type_id, module.records):
+        input = load(module, context, fields(state, value)[0], universal.TypeId(64))
+    result = cfg.value(module, universal.TypeId(1))
+    cfg.append(context, universal.Operation.IsVariant(input, variant, result))
+    return result
+
+
+def store(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, address: universal.ValueId, value: universal.ValueId) -> unit | diagnostics.Diagnostic:
+    type_id = module.values[value.index].type_id
+    if not storage.owned_record(type_id, module.records):
+        cfg.append(context, universal.Operation.Store(address, value))
+        return
+    # Snapshot all leaves before writing, including overlapping projections.
+    snapshots = values(module, context, state, value)
+    write_values(module, context, state, address, snapshots, [0])
+
+
+def values(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, value: universal.ValueId) -> list[universal.ValueId] | diagnostics.Diagnostic:
+    type_id = module.values[value.index].type_id
+    if not storage.owned_record(type_id, module.records):
+        return [value]
+    result: list[universal.ValueId] = []
+    members = fields(state, value)
+    for record in module.records:
+        if record.type_id.index == type_id.index:
+            index := 0
+            for field in record.fields:
+                member = load(module, context, members[index], field.type_id)
+                for leaf in values(module, context, state, member):
+                    result.append(leaf)
+                index += 1
+    return result
+
+
+def write_values(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, address: universal.ValueId, values: list[universal.ValueId], cursor: list[int]) -> unit | diagnostics.Diagnostic:
+    if not storage.owned_record(module.values[address.index].type_id, module.records):
+        cfg.append(context, universal.Operation.Store(address, values[cursor[0]]))
+        cursor[0] += 1
+        return
+    for field in fields(state, address):
+        write_values(module, context, state, field, values, cursor)
+
+
+def parameter(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, type_id: universal.TypeId, target: int) -> universal.ValueId | diagnostics.Diagnostic:
+    if not storage.owned_record(type_id, module.records):
+        result = cfg.value(module, type_id)
+        context.body.blocks[target].parameters.append(result)
+        return result
+    result = allocate(module, context, state, type_id)
+    parameter_fields(module, context, state, result, type_id, target)
+    return result
+
+
+def parameter_fields(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, address: universal.ValueId, type_id: universal.TypeId, target: int) -> unit | diagnostics.Diagnostic:
+    if not storage.owned_record(type_id, module.records):
+        value = cfg.value(module, type_id)
+        context.body.blocks[target].parameters.append(value)
+        context.body.blocks[target].operations.append(universal.Operation.Store(address, value))
+        return
+    members = fields(state, address)
+    for record in module.records:
+        if record.type_id.index == type_id.index:
+            index := 0
+            for field in record.fields:
+                parameter_fields(module, context, state, members[index], field.type_id, target)
+                index += 1
+
+
+def signature(function: universal.FunctionDeclaration, records: list[universal.RecordDeclaration]) -> bool:
+    if storage.owned_record(function.result_type, records):
+        return true
+    for type_id in function.parameter_types:
+        if storage.owned_record(type_id, records):
+            return true
+    return false
