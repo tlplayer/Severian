@@ -16,6 +16,7 @@ trait G:
     short_circuit: bool | absent
     const: bool
     foldable: bool
+    operations: {T: ScalarOperation}
 
     def valid(left: Ex, right: Ex) -> bool
     def semantic(left: Ex, right: Ex) -> X
@@ -26,6 +27,10 @@ trait Positive: G:
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index: ScalarOperation("addi"),
+        float: ScalarOperation("addf"),
+    }
 
 
 trait Negative: G:
@@ -33,6 +38,10 @@ trait Negative: G:
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index: ScalarOperation("subi"),
+        float: ScalarOperation("negf", direct=true),
+    }
 
 
 trait Not: G:
@@ -40,6 +49,9 @@ trait Not: G:
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
+    operations: {T: ScalarOperation} = {
+        bool: ScalarOperation("xori", identity=1),
+    }
 
 
 trait Bang: G:
@@ -47,6 +59,9 @@ trait Bang: G:
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
+    operations: {T: ScalarOperation} = {
+        bool: ScalarOperation("xori", identity=1),
+    }
 
 
 trait Copy: G:
@@ -54,6 +69,7 @@ trait Copy: G:
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
+    operations: {T: ScalarOperation} = {}
 
 
 trait Move: G:
@@ -103,6 +119,10 @@ trait Add: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Left
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index: ScalarOperation("addi"),
+        float: ScalarOperation("addf"),
+    }
 
 
 trait Subtract: G:
@@ -110,6 +130,10 @@ trait Subtract: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Left
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index: ScalarOperation("subi"),
+        float: ScalarOperation("subf"),
+    }
 
 
 trait Multiply: G:
@@ -117,6 +141,10 @@ trait Multiply: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Left
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index: ScalarOperation("muli"),
+        float: ScalarOperation("mulf"),
+    }
 
 
 trait Divide: G:
@@ -124,6 +152,9 @@ trait Divide: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Left
+    operations: {T: ScalarOperation} = {
+        float: ScalarOperation("divf"),
+    }
 
 
 trait FloorDivide: G:
@@ -152,6 +183,10 @@ trait Equal: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index | bool: ScalarOperation("cmpi", predicate=0),
+        float: ScalarOperation("cmpf", predicate=1),
+    }
 
 
 trait NotEqual: G:
@@ -159,6 +194,10 @@ trait NotEqual: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | u8 | index | bool: ScalarOperation("cmpi", predicate=1),
+        float: ScalarOperation("cmpf", predicate=13),
+    }
 
 
 trait Less: G:
@@ -166,6 +205,11 @@ trait Less: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=2),
+        u8: ScalarOperation("cmpi", predicate=6),
+        float: ScalarOperation("cmpf", predicate=4),
+    }
 
 
 trait LessEqual: G:
@@ -173,6 +217,11 @@ trait LessEqual: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=3),
+        u8: ScalarOperation("cmpi", predicate=7),
+        float: ScalarOperation("cmpf", predicate=5),
+    }
 
 
 trait Greater: G:
@@ -180,6 +229,11 @@ trait Greater: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=4),
+        u8: ScalarOperation("cmpi", predicate=8),
+        float: ScalarOperation("cmpf", predicate=2),
+    }
 
 
 trait GreaterEqual: G:
@@ -187,6 +241,11 @@ trait GreaterEqual: G:
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
+    operations: {T: ScalarOperation} = {
+        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=5),
+        u8: ScalarOperation("cmpi", predicate=9),
+        float: ScalarOperation("cmpf", predicate=3),
+    }
 
 
 trait Contains: G:

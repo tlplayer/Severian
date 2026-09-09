@@ -1,4 +1,5 @@
 import "../id/compiler.sev"
+import "scalar.sev"
 
 
 enum OperatorDomain:
@@ -29,3 +30,4 @@ class OperatorSyntax:
     definition: DefId = DefId(0, 0, DeclarationId(0))
     grammar_name: string = ""
     grammar_form: string = ""
+    scalar_operation: ScalarOperation | None = None

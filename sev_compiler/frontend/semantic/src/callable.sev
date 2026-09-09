@@ -3,7 +3,7 @@ from diagnostics import Diagnostic
 import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
-import "../../../universal/operator/scalar.sev" as operators
+import "grammar_scalar.sev" as grammar_scalar
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
 import "definitions.sev" as definitions
@@ -95,7 +95,7 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
         case Slice:
             return callable_hint(state, object)
         case Binary:
-            if operators.scalar_comparison(operator.symbol):
+            if grammar_scalar.comparison(state.declarations, operator.symbol):
                 return universal.TypeId(1)
             return conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
         case LiteralValue:
@@ -460,10 +460,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             function ?= implementation.function
             if function != None:
                 return callable_resolved_operator(state, function, [resolved], expression.span, expected)
-            selected ?= operators.scalar_operation(operator.symbol, 1, result_type.index == 1, scalar.scalar_representation(result_type))
-            if selected == None or result_type.index == 2 or result_type.index == 3 or result_type.index == 132:
-                return error(callable_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
-            kind = universal.Unary(operator, resolved)
+            return error(callable_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
         case Conditional:
             test = callable_expression(state, condition, universal.TypeId(1))
             branch_type := expected
@@ -529,7 +526,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                             case _:
                                                 pass
                         return error(callable_diagnostic("lazy grammar requires an expression semantic body", expression.span))
-            comparison = operators.scalar_comparison(operator.symbol) or operator.symbol == "in"
+            comparison = grammar_scalar.comparison(state.declarations, operator.symbol) or operator.symbol == "in"
             operand_type := universal.TypeId(0) if comparison else expected
             if operand_type.index == 0:
                 operand_type = conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
@@ -541,25 +538,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return callable_resolved_operator(state, registered, [lhs, rhs], expression.span, expected)
             if lhs.type_id.index >= 1000:
                 return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol, expression.span))
-            known_type ?= scalar.scalar_type(lhs.type_id)
-            if known_type != None:
-                implementation ?= operators.scalar_callable_operation(operator.symbol, known_type.name)
-                if implementation != None:
-                    for function in state.functions:
-                        if function.name == implementation.callable:
-                            operands: list[universal.CallArgument] = [universal.CallArgument(None, lhs, lhs.span), universal.CallArgument(None, rhs, rhs.span)]
-                            resolved_kind: universal.ExpressionKind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), operands)
-                            if expected.index != 0 and expected.index != function.result_type.index:
-                                return error(callable_diagnostic("operator result does not match its expected scalar type", expression.span))
-                            id = universal.HirId(u32(state.next_id[0]))
-                            state.next_id[0] += 1
-                            return universal.Expression(resolved_kind, expression.span, id, function.result_type)
-                    return error(callable_diagnostic("missing source operator implementation " + implementation.callable, expression.span))
-            selected ?= operators.scalar_operation(operator.symbol, 2, lhs.type_id.index == 1, scalar.scalar_representation(lhs.type_id))
-            if selected == None or lhs.type_id.index == 2 or lhs.type_id.index == 3 or lhs.type_id.index == 132:
-                return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
-            result_type = universal.TypeId(1) if comparison else lhs.type_id
-            kind = universal.Binary(operator, lhs, rhs)
+            return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
         case Call:
             name = callable_path(callee)
             if name == "lower" or name.starts_with("cfg."):
@@ -1021,6 +1000,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case _:
                 pass
     callable_register_aliases(state)
+    grammar_scalar.resolve(state.declarations, state.records)
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
             continue
@@ -1597,6 +1577,23 @@ def callable_operator(state: CallableAnalysis, symbol: string, operands: list[un
                 if selected != None:
                     return error(diagnostics.diagnostic_at("E000212", "ambiguous operator implementation " + symbol, span))
                 selected = function
+    if selected == None and (len(operands) == 1 or len(operands) == 2):
+        homogeneous := true
+        for operand in operands:
+            if operand.index != operands[0].index:
+                homogeneous = false
+        if homogeneous:
+            lookup = grammar_scalar.lookup(state.declarations, symbol, int(len(operands)), operands[0])
+            syntax ?= lookup.syntax
+            if syntax != None:
+                operation ?= syntax.scalar_operation
+                if operation != None:
+                    parameters: list[universal.FunctionParameter] = []
+                    for index in range(int(len(operands))):
+                        annotation = universal.named_type(definitions.type_name(operands[index], state.records), [], span)
+                        parameters.append(universal.FunctionParameter("operand" + string(index), annotation, None, span, type_id=operands[index]))
+                    result_type = universal.TypeId(1) if operation.predicate >= 0 else operands[0]
+                    selected = universal.FunctionDeclaration(parameters=parameters, parameter_types=operands, result_type=result_type, operator_syntax=syntax, definition=syntax.definition)
     return CallableOptionalFunction(selected)
 
 
@@ -1605,6 +1602,15 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
         return error(diagnostics.diagnostic_at("E000212", "operator or member argument count mismatch", span))
     if expected.index != 0 and expected.index != function.result_type.index:
         return error(diagnostics.diagnostic_at("E000212", "operator result does not match expected type", span))
+    scalar_syntax ?= function.operator_syntax
+    if scalar_syntax != None:
+        if scalar_syntax.scalar_operation != None:
+            kind: universal.ExpressionKind = universal.Unary(scalar_syntax, operands[0])
+            if len(operands) == 2:
+                kind = universal.Binary(scalar_syntax, operands[0], operands[1])
+            id = universal.HirId(u32(state.next_id[0]))
+            state.next_id[0] += 1
+            return universal.Expression(kind, span, id, function.result_type)
     arguments: list[universal.CallArgument] = []
     index := 0
     for operand in operands:

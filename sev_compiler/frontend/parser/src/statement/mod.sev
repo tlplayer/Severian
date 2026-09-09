@@ -805,6 +805,17 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 break
         end = parser_expect_symbol(parser, "]", "expected closing list bracket").span.end
         return universal.Expression(universal.ListLiteral(elements), source.Span(token.span.source, token.span.start, end))
+    if lexer.token_is_symbol(token, "{"):
+        keys: list[universal.Expression] = []
+        values: list[universal.Expression] = []
+        while not parser_at_symbol(parser, "}"):
+            keys.append(parse_expression(parser, 0))
+            parser_expect_symbol(parser, ":", "expected colon after map key")
+            values.append(parse_expression(parser, 0))
+            if parser_take_symbol(parser, ",") == None:
+                break
+        end = parser_expect_symbol(parser, "}", "expected closing map brace").span.end
+        return universal.Expression(universal.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "("):
         expression = parse_expression(parser, 0)
         parser_expect_symbol(parser, ")", "expected closing parenthesis")
@@ -825,6 +836,13 @@ def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnost
 
 
 def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    if parser_at_symbol(parser, "{"):
+        start = parser_next(parser).span
+        key = parse_type_annotation(parser)
+        parser_expect_symbol(parser, ":", "expected colon in map type")
+        value = parse_type_annotation(parser)
+        end = parser_expect_symbol(parser, "}", "expected closing map type brace").span.end
+        return universal.named_type("map", [key, value], source.Span(start.source, start.start, end))
     name = parser_identifier(parser, "expected a type name")
     qualified := name[0]
     while parser_take_symbol(parser, ".") != None:

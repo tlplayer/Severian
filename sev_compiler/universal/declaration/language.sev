@@ -96,6 +96,8 @@ class TraitDeclaration:
     lookup: string = ""
     compiler_descriptor: bool = false
     grammar: bool = false
+    scalar_operations: list[ScalarOperation] = []
+    scalar_syntax: OperatorSyntax | None = None
 
 
 enum CompilerExpectation:

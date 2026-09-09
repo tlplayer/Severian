@@ -1,6 +1,5 @@
 import universal
 import "../../../../universal/type/scalar.sev" as scalar
-import "../../../../universal/operator/scalar.sev" as operators
 import "../ir/lib.sev"
 import "strings.sev"
 import "../../../../universal/declaration/scalar.sev" as boundary
@@ -100,13 +99,16 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
             case Unary:
                 input = callable_mlir_value(module, operand)
                 output = callable_mlir_value(module, result)
-                selected ?= operators.scalar_operation(operator.symbol, 1, module.values[operand.index].type_id.index == 1, scalar.scalar_representation(module.values[operand.index].type_id))
+                selected ?= operator.scalar_operation
                 if selected != None:
                     if selected.direct:
                         builder_create_operation(builder, operation_name("arith", selected.mnemonic), [input], [output])
                     else:
                         identity = builder_new_value(builder, input.type_id)
-                        builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
+                        if scalar.scalar_representation(module.values[operand.index].type_id) == "float":
+                            builder_constant(builder, identity, MlirAttributeValue(FloatLiteralAttributeKind, string(selected.identity) + ".0", 0, false, input.type_id, []))
+                        else:
+                            builder_constant(builder, identity, integer_attribute(selected.identity, input.type_id))
                         builder_binary(builder, output, operation_name("arith", selected.mnemonic), identity, input)
                 else:
                     throw Error("scalar MIR has an unregistered unary operation")
@@ -114,14 +116,11 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                 lhs = callable_mlir_value(module, left)
                 rhs = callable_mlir_value(module, right)
                 output = callable_mlir_value(module, result)
-                selected ?= operators.scalar_operation(operator.symbol, 2, module.values[left.index].type_id.index == 1, scalar.scalar_representation(module.values[left.index].type_id))
+                selected ?= operator.scalar_operation
                 if selected != None:
                     attributes: list[MlirNamedAttribute] = []
                     if selected.predicate >= 0:
-                        predicate := selected.predicate
-                        if module.values[left.index].type_id.index == 108 and predicate >= 2:
-                            predicate += 4
-                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64))))
+                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(selected.predicate, integer_type(64))))
                     builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
                 else:
                     throw Error("scalar MIR has an unregistered binary operation")

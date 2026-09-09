@@ -72,28 +72,7 @@ union NativeSignedInteger:
 
 integer_division[int]()
 
-extend NativeInteger:
-    operator +[G:Add](right: Self) -> Self:
-        return mlir(arith.addi, self, right)
-
-    operator -[G:Subtract](right: Self) -> Self:
-        return mlir(arith.subi, self, right)
-
-    operator *[G:Multiply](right: Self) -> Self:
-        return mlir(arith.muli, self, right)
-
-extend float:
-    operator +[G:Add](right: Self) -> Self:
-        return mlir(arith.addf, self, right)
-
-    operator -[G:Subtract](right: Self) -> Self:
-        return mlir(arith.subf, self, right)
-
-    operator *[G:Multiply](right: Self) -> Self:
-        return mlir(arith.mulf, self, right)
-
-    operator /[G:Divide](right: Self) -> Self:
-        return mlir(arith.divf, self, right)
+# Scalar arithmetic lowering is declared on the source G traits.
 
 
 # Characters order by their scalar value, independently of UTF-8 byte width.

@@ -1,0 +1,172 @@
+import diagnostics
+import universal
+import "definitions.sev" as definitions
+import "../../../universal/type/scalar.sev" as scalar
+
+
+def path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return path(object) + "." + name
+        case _:
+            return ""
+
+
+def key_type(expression: universal.Expression) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    match expression.kind:
+        case Binary:
+            if operator.symbol == "|":
+                return universal.TypeAnnotation(universal.Union([key_type(left), key_type(right)]), expression.span)
+        case _:
+            pass
+    name = path(expression)
+    if name == "":
+        return error(diagnostics.diagnostic_at("E000212", "scalar operation map keys must be types", expression.span))
+    return universal.named_type(name, [], expression.span)
+
+
+def descriptor(expression: universal.Expression) -> universal.ScalarOperation | diagnostics.Diagnostic:
+    result = universal.ScalarOperation("")
+    match expression.kind:
+        case Call:
+            if path(callee) != "ScalarOperation":
+                return error(diagnostics.diagnostic_at("E000212", "expected ScalarOperation in grammar map", expression.span))
+            fields = ["mnemonic", "predicate", "identity", "direct"]
+            seen: list[string] = []
+            positional := 0
+            keyword := false
+            for argument in arguments:
+                name := ""
+                supplied ?= argument.name
+                if supplied != None:
+                    name = supplied
+                    keyword = true
+                else:
+                    if keyword or positional >= len(fields):
+                        return error(diagnostics.diagnostic_at("E000212", "invalid ScalarOperation arguments", argument.span))
+                    name = fields[positional]
+                    positional += 1
+                if name not in fields or name in seen:
+                    return error(diagnostics.diagnostic_at("E000212", "unknown or duplicate ScalarOperation field " + name, argument.span))
+                seen.append(name)
+                accepted := false
+                match argument.value.kind:
+                    case LiteralValue:
+                        match value:
+                            case StringValue:
+                                if name == "mnemonic" and value != "":
+                                    result.mnemonic = value
+                                    accepted = true
+                            case IntegerValue:
+                                if name == "predicate":
+                                    result.predicate = int(spelling)
+                                    accepted = true
+                                elif name == "identity":
+                                    result.identity = int(spelling)
+                                    accepted = true
+                            case BooleanValue:
+                                if name == "direct":
+                                    result.direct = value
+                                    accepted = true
+                            case _:
+                                pass
+                    case _:
+                        pass
+                if not accepted:
+                    return error(diagnostics.diagnostic_at("E000212", "invalid literal for ScalarOperation." + name, argument.span))
+            if result.mnemonic != "":
+                return result
+        case _:
+            pass
+    return error(diagnostics.diagnostic_at("E000212", "grammar map requires ScalarOperation with a mnemonic", expression.span))
+
+
+def resolve(environment: definitions.SemanticDefinitions, records: list[universal.RecordDeclaration]) -> unit | diagnostics.Diagnostic:
+    ordinal := 0
+    for declaration in environment.traits:
+        if declaration.grammar:
+            syntax = universal.OperatorSyntax("", universal.Fixity.Infix, 0, universal.Associativity.None, domain=universal.OperatorDomain.GrammarOperator, definition=declaration.definition, grammar_name=declaration.name)
+            properties: list[string] = []
+            operations: list[universal.ScalarOperation] = []
+            for inherited in definitions.inherited_traits(environment, declaration):
+                for property in inherited.properties:
+                    if property.name in properties:
+                        continue
+                    supplied ?= property.default
+                    if supplied == None:
+                        continue
+                    if supplied != None:
+                        properties.append(property.name)
+                        if property.name == "symbol":
+                            match supplied.kind:
+                                case SourceSymbol:
+                                    syntax.symbol = spelling
+                                case _:
+                                    pass
+                        elif property.name == "fixity":
+                            if path(supplied).split(".")[-1] == "Prefix":
+                                syntax.fixity = universal.Fixity.Prefix
+                        elif property.name == "operations":
+                            match property.annotation.kind:
+                                case Named:
+                                    if name != "map" or len(arguments) != 2:
+                                        return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
+                                    if universal.simple_type_name(arguments[0]) != "T" or universal.simple_type_name(arguments[1]) != "ScalarOperation":
+                                        return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
+                                case _:
+                                    return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
+                            match supplied.kind:
+                                case MapLiteral:
+                                    entry := 0
+                                    for key in keys:
+                                        operation = descriptor(values[entry])
+                                        for operand in definitions.family_members(environment, key_type(key), records, inherited.lookup):
+                                            known ?= scalar.scalar_type(operand)
+                                            if known == None:
+                                                return error(diagnostics.diagnostic_at("E000212", "scalar operation key requires a scalar type", key.span))
+                                            for previous in operations:
+                                                if previous.operand_type.index == operand.index:
+                                                    return error(diagnostics.diagnostic_at("E000212", "duplicate scalar operation type key", key.span))
+                                            operations.append(universal.ScalarOperation(operation.mnemonic, operation.predicate, operation.identity, operation.direct, operand))
+                                        entry += 1
+                                case _:
+                                    return error(diagnostics.diagnostic_at("E000212", "grammar operations require a map literal", supplied.span))
+            if "operations" in properties:
+                if syntax.symbol == "":
+                    return error(diagnostics.diagnostic_at("E000212", "scalar operation grammar requires a symbol", declaration.span))
+                declaration.scalar_syntax = syntax
+                declaration.scalar_operations = operations
+                environment.traits[ordinal] = declaration
+        ordinal += 1
+
+
+class Selection:
+    syntax: universal.OperatorSyntax | None = None
+
+
+def lookup(environment: definitions.SemanticDefinitions, symbol: string, arity: int, operand: universal.TypeId) -> Selection | diagnostics.Diagnostic:
+    selected: universal.OperatorSyntax | None := None
+    for declaration in environment.traits:
+        syntax ?= declaration.scalar_syntax
+        if syntax != None:
+            count = 1 if syntax.fixity == universal.Fixity.Prefix else 2
+            if syntax.symbol == symbol and count == arity:
+                for operation in declaration.scalar_operations:
+                    if operation.operand_type.index == operand.index:
+                        if selected != None:
+                            return error(diagnostics.diagnostic_at("E000212", "ambiguous scalar grammar operation " + symbol, declaration.span))
+                        selected = universal.OperatorSyntax(syntax.symbol, syntax.fixity, syntax.precedence, syntax.associativity, domain=syntax.domain, definition=syntax.definition, grammar_name=syntax.grammar_name, scalar_operation=operation)
+    return Selection(selected)
+
+
+def comparison(environment: definitions.SemanticDefinitions, symbol: string) -> bool:
+    for declaration in environment.traits:
+        syntax ?= declaration.scalar_syntax
+        if syntax != None:
+            if syntax.symbol == symbol and syntax.fixity == universal.Fixity.Infix:
+                for operation in declaration.scalar_operations:
+                    if operation.predicate >= 0:
+                        return true
+    return false
