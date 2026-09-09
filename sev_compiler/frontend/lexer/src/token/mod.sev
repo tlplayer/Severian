@@ -61,6 +61,18 @@ def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = No
 def token_number(token: Token) -> string:
     # Numeric spelling becomes a literal payload at the parser boundary.
     spelling := string(token).replace("_", "")
+    if spelling.starts_with("0x") or spelling.starts_with("0X"):
+        value := 0
+        for character in spelling[2:].upper().characters():
+            digit := 0
+            for candidate in "0123456789ABCDEF".characters():
+                if candidate == character:
+                    break
+                digit += 1
+            if value > (9223372036854775807 - digit) / 16:
+                throw Error("hexadecimal literal is outside signed integer storage")
+            value = value * 16 + digit
+        return string(value)
     if token.kind == TokenKind.Float:
         if spelling.starts_with("."):
             spelling = "0" + spelling

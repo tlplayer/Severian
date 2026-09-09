@@ -1,0 +1,35 @@
+# Monotonic wall-clock measurements for source test policies (hosted POSIX).
+@c(symbol="clock_gettime")
+def __clock_gettime(clock: i32, result: native_ptr) -> i32
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __address(value: buffer[int]) -> index
+
+@mlir("arith.index_cast")
+def __integer(value: index) -> int
+
+@mlir("llvm.inttoptr")
+def __pointer(value: int) -> native_ptr
+
+
+def begin() -> int:
+    storage = [0, 0]
+    assert(__clock_gettime(1, __pointer(__integer(__address(storage)))) == 0)
+    return storage[0] * 1000000000 + storage[1]
+
+
+def ready(context: int) -> int:
+    return context
+
+
+def before(context: int) -> int:
+    return begin()
+
+
+def after(context: int):
+    elapsed = begin() - context
+    print("profile:", elapsed, "ns")
+
+
+def finish(context: int):
+    pass

@@ -11,6 +11,21 @@ class NumericLexeme: LexicalRule
         character = characters[start]
         cursor := start
         leading_fraction = character == "." and cursor + 1 < len(characters) and is_digit(characters[cursor + 1])
+        if character == "0" and cursor + 1 < len(characters) and characters[cursor + 1] in ["x", "X"]:
+            cursor += 2
+            digits := 0
+            while cursor < len(characters):
+                digit = characters[cursor]
+                if digit == "_":
+                    cursor += 1
+                    continue
+                if not is_digit(digit) and digit not in ["a", "b", "c", "d", "e", "f", "A", "B", "C", "D", "E", "F"]:
+                    break
+                digits += 1
+                cursor += 1
+            if digits == 0:
+                return error(diagnostics.Diagnostic("E000101", "hexadecimal literal requires digits", lexeme_span(input, start, cursor)))
+            return LexemeMatch(cursor, TokenKind.Integer)
         if is_digit(character) or leading_fraction:
             cursor += 1
             while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
@@ -34,4 +49,3 @@ class NumericLexeme: LexicalRule
                     return error(diagnostics.Diagnostic("E000101", "floating exponent requires digits", lexeme_span(input, start, cursor)))
             return LexemeMatch(cursor, TokenKind.Float if floating else TokenKind.Integer)
         return LexemeMatch(start, None, false)
-

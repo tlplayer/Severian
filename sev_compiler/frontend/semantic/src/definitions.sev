@@ -105,10 +105,10 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     return record.type_id
             successes := 0
             for variant in variants:
-                if not error_conformance(definitions, records, variant):
+                if int(variant.index) not in [6, 7] and not error_conformance(definitions, records, variant):
                     successes += 1
             if successes != 1 or len(variants) < 2:
-                return error(diagnostics.diagnostic_at("E000205", "typed outcome requires one success type and Error variants", annotation.span))
+                return error(diagnostics.diagnostic_at("E000205", "typed outcome requires one success type and missing or Error variants", annotation.span))
             fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.TypeId(64))]
             index := 0
             for variant in variants:

@@ -1,0 +1,266 @@
+# Dimensioned literal constructors and arithmetic are ordinary source declarations.
+# Canonical amounts use bits, nanoseconds, Celsius, hertz, volts, and watts.
+
+
+class DataSize:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return DataSize(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Duration:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Duration(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Temperature:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Temperature(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Frequency:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Frequency(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Voltage:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Voltage(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Wattage:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Wattage(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class DataRate:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return DataRate(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+operator /[G:Divide](self: DataSize, other: Duration) -> DataRate:
+    return DataRate(self.amount / other.amount)
+
+
+operator /[G:Divide](self: int, other: Duration) -> Frequency:
+    return Frequency(float(self) * 1000000000.0 / other.amount)
+
+
+def literal_b(value: float) -> DataSize:
+    return DataSize(value * 1.0)
+
+
+def literal_B(value: float) -> DataSize:
+    return DataSize(value * 8.0)
+
+
+def literal_KB(value: float) -> DataSize:
+    return DataSize(value * 8000.0)
+
+
+def literal_MB(value: float) -> DataSize:
+    return DataSize(value * 8000000.0)
+
+
+def literal_GB(value: float) -> DataSize:
+    return DataSize(value * 8000000000.0)
+
+
+def literal_TB(value: float) -> DataSize:
+    return DataSize(value * 8000000000000.0)
+
+
+def literal_KiB(value: float) -> DataSize:
+    return DataSize(value * 8192.0)
+
+
+def literal_MiB(value: float) -> DataSize:
+    return DataSize(value * 8388608.0)
+
+
+def literal_GiB(value: float) -> DataSize:
+    return DataSize(value * 8589934592.0)
+
+
+def literal_TiB(value: float) -> DataSize:
+    return DataSize(value * 8796093022208.0)
+
+
+def literal_ns(value: float) -> Duration:
+    return Duration(value * 1.0)
+
+
+def literal_us(value: float) -> Duration:
+    return Duration(value * 1000.0)
+
+
+def literal_ms(value: float) -> Duration:
+    return Duration(value * 1000000.0)
+
+
+def literal_s(value: float) -> Duration:
+    return Duration(value * 1000000000.0)
+
+
+def literal_min(value: float) -> Duration:
+    return Duration(value * 60000000000.0)
+
+
+def literal_hr(value: float) -> Duration:
+    return Duration(value * 3600000000000.0)
+
+
+def literal_day(value: float) -> Duration:
+    return Duration(value * 86400000000000.0)
+
+
+def literal_Hz(value: float) -> Frequency:
+    return Frequency(value * 1.0)
+
+
+def literal_kHz(value: float) -> Frequency:
+    return Frequency(value * 1000.0)
+
+
+def literal_MHz(value: float) -> Frequency:
+    return Frequency(value * 1000000.0)
+
+
+def literal_GHz(value: float) -> Frequency:
+    return Frequency(value * 1000000000.0)
+
+
+def literal_V(value: float) -> Voltage:
+    return Voltage(value * 1.0)
+
+
+def literal_mV(value: float) -> Voltage:
+    return Voltage(value * 0.001)
+
+
+def literal_W(value: float) -> Wattage:
+    return Wattage(value * 1.0)
+
+
+def literal_C(value: float) -> Temperature:
+    return Temperature(value * 1.0)
+
+
+def literal_F(value: float) -> Temperature:
+    return Temperature((value - 32.0) * 5.0 / 9.0)
+
+
+def literal_K(value: float) -> Temperature:
+    return Temperature(value - 273.15)
+
+
+def literal_pct(value: float) -> float:
+    return value / 100.0
+
+
+def data_size(bytes: int) -> DataSize:
+    return DataSize(float(bytes) * 8.0)

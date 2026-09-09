@@ -88,6 +88,8 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                             builder_create_operation(builder, operation_name("memref", "alloc"), [size], [output], [MlirNamedAttribute("operandSegmentSizes", sizes)])
                         else:
                             builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
+                    case AbsentValue:
+                        builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [output])
                     case StringValue:
                         string_literal(builder, value, output)
                     case CharacterValue:
