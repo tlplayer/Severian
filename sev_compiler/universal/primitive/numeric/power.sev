@@ -6,7 +6,7 @@ operator **[G:Power](left: float, right: float) -> float:
     return __power(left, right)
 
 
--> integer_power[T: NativeInteger]():
+-> integer_power[T: int]():
     def power(base: T, exponent: T) -> T:
         assert(exponent >= 0)
         result: T := 1
@@ -23,4 +23,4 @@ operator **[G:Power](left: float, right: float) -> float:
     operator **[G:Power](left: T, right: T) -> T:
         return power(left, right)
 
-integer_power[NativeInteger]()
+integer_power[int]()

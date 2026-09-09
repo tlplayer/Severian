@@ -6,6 +6,152 @@ from migration import MigrationCase, ROOT
 
 
 class TypeSemantics(MigrationCase):
+    def test_enum_examples(self):
+        for name in ("01-enum-basics", "02-enum-payloads"):
+            with self.subTest(example=name):
+                path = ROOT / f"docs/examples/01-types/05-enums/{name}.sev"
+                self.native(path.read_text())
+
+    def test_enum_payloads_and_match_scopes(self):
+        self.native('''
+            enum Choice:
+                Empty
+                Number(value: int)
+                Pair(left: int, right: int)
+            def total(choice: Choice) -> int:
+                match choice:
+                    case Empty:
+                        return 0
+                    case Number:
+                        return value
+                    case Pair:
+                        return left + right
+            test:
+                assert(total(Choice.Empty) == 0)
+                assert(total(Number(42)) == 42)
+                assert(total(Choice.Pair(right=22, left=20)) == 42)
+                Empty = 7
+                assert(Empty == 7)
+            test with compiler:
+                reject:
+                    value = Number(true)
+                reject:
+                    def incomplete(choice: Choice) -> int:
+                        match choice:
+                            case Empty:
+                                return 0
+                reject:
+                    def duplicate(choice: Choice) -> int:
+                        match choice:
+                            case Empty:
+                                return 0
+                            case Empty:
+                                return 1
+                            case _:
+                                return 2
+                reject:
+                    choice = Number(42)
+                    match choice:
+                        case Number:
+                            assert(value == 42)
+                        case _:
+                            pass
+                    assert(value == 42)
+        ''')
+
+    def test_enum_evaluation_order_and_nominal_identity(self):
+        self.native('''
+            enum Item:
+                Pair(left: int, right: int)
+                Empty
+            def mark(value: int) -> int:
+                print(value)
+                return value
+            def make() -> Item:
+                print(1)
+                return Item.Pair(right=mark(2), left=mark(3))
+            test:
+                match make():
+                    case Pair:
+                        assert(left == 3)
+                        assert(right == 2)
+                    case Empty:
+                        assert(false)
+        ''', expected="1\n2\n3\n")
+        self.rejects('''
+            enum First:
+                Value
+            enum Second:
+                Value
+            def wrong() -> First:
+                return Second.Value
+        ''', "enum variant does not match expected type")
+        self.rejects('''
+            enum First:
+                Value
+            enum Second:
+                Value
+            def ambiguous():
+                value = Value
+        ''', "ambiguous enum variant")
+
+    def test_additive_extension_example(self):
+        path = ROOT / "docs/examples/01-types/07-extend/01-basic-extend.sev"
+        self.native(path.read_text())
+        self.rejects('''
+            class Counter:
+                value: int
+                def get() -> int:
+                    return value
+            extend Counter:
+                def get() -> int:
+                    return 0
+        ''', "extension cannot replace existing member get")
+
+    def test_compiler_cases_compile_declarations_in_isolation(self):
+        self.native('''
+            test with compiler:
+                accept:
+                    class Box:
+                        value: int
+                    box = Box(42)
+                    assert(box.value == 42)
+                reject:
+                    class Box:
+                        value: int
+                    box = Box(true)
+                accept:
+                    class Box:
+                        value: bool
+                    box = Box(true)
+                    assert(box.value)
+        ''')
+
+    def test_list_size_and_named_source_operator(self):
+        path = ROOT / "docs/examples/01-types/04-generics/17-block-generic.sev"
+        self.native(path.read_text())
+        self.native('''
+            operator doubled(value: int) -> int:
+                return value + value
+            test:
+                assert(doubled(21) == 42)
+                assert(len([1, 2, 3]) == 3)
+                assert(size([1, 2, 3]) == 3)
+        ''')
+
+    def test_none_return_and_drawable_example(self):
+        path = ROOT / "docs/examples/01-types/03-traits/01-point-drawable.sev"
+        self.native(path.read_text())
+        self.native('''
+            def implicit() -> None:
+                pass
+            def explicit() -> None:
+                return
+            test:
+                assert(implicit() is None)
+                assert(explicit() is None)
+        ''')
+
     def test_unsigned_widths_and_full_u64_range(self):
         self.native('''
             test:
@@ -24,6 +170,18 @@ class TypeSemantics(MigrationCase):
         ''')
         self.rejects('test:\n    value: u64 = 18446744073709551616\n', "outside u64")
         self.rejects('test:\n    value: u64 = -1\n', "outside u64")
+
+    def test_unsigned_lists_keep_element_types(self):
+        self.native('''
+            test:
+                empty: list[u64] = []
+                assert(size(empty) == 0)
+                values: list[u64] := [18446744073709551615, 42]
+                assert(values[0] > 9223372036854775807)
+                values = [1, 2, 3]
+                assert(size(values) == 3)
+                assert(values[2] == 3)
+        ''')
 
     def test_unsigned_generic_examples(self):
         for name in ("06-type-generic", "22-kind-generic", "25-compiler-term-generic"):

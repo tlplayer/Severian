@@ -39,6 +39,12 @@ def __list_size(value: index) -> int
     def count(values: list[T]) -> int:
         return __list_size(dimension(values, 0))
 
+    operator size(values: list[T]) -> int:
+        return count(values)
+
+    operator len(values: list[T]) -> int:
+        return count(values)
+
     @mlir("memref.extract_aligned_pointer_as_index")
     def address(values: list[T]) -> index
 

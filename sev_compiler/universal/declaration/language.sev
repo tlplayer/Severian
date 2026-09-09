@@ -110,6 +110,8 @@ class CompilerTestCase:
     diagnostic_name: string | None
     body: Block
     span: source.Span
+    declarations: list[Item] = []
+    parse_error: string = ""
 
 
 enum TestMode:
