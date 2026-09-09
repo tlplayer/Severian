@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod callable;
+mod constructor;
 mod package;
 mod queries;
 
@@ -260,6 +261,7 @@ pub(crate) fn analyze_with_package_functions(
         allow_qualified_function_suffix: false,
         active_function_name: None,
         active_receiver: None,
+        active_constructor: false,
         method_instances: BTreeMap::new(),
         pending_methods: Vec::new(),
         signatures: BTreeMap::new(),
@@ -452,11 +454,13 @@ pub(crate) fn analyze_with_package_functions(
     }
     let mut module = Module::default();
     let mut expected_throw_functions = BTreeSet::new();
-    for test in ast.items.iter().filter_map(|item| match item {
-        severian_ast::Item::Test(test) => Some(test),
-        _ => None,
-    }) {
-        collect_expected_throw_functions(&test.body, &mut expected_throw_functions);
+    if context.mode == AnalysisMode::Test {
+        for test in ast.items.iter().filter_map(|item| match item {
+            severian_ast::Item::Test(test) => Some(test),
+            _ => None,
+        }) {
+            collect_expected_throw_functions(&test.body, &mut expected_throw_functions);
+        }
     }
 
     for declaration in ast.items.iter().filter_map(|item| match item {
@@ -746,6 +750,7 @@ pub(crate) fn analyze_with_package_functions(
             &globals,
             &global_values,
             BTreeMap::new(),
+            None,
         )?;
         if function.name == "main" {
             let arguments_type = analyzer
@@ -911,10 +916,14 @@ pub(crate) fn analyze_with_package_functions(
     }
     let mut next_method = 0;
     while next_method < analyzer.pending_methods.len() {
-        let (ast_method, mut function, owner, aliases) =
+        let (ast_method, mut function, owner, aliases, constructor) =
             analyzer.pending_methods[next_method].clone();
         next_method += 1;
-        analyzer.active_receiver = Some((function.parameters[0].binding, owner));
+        analyzer.active_receiver = if constructor {
+            None
+        } else {
+            Some((function.parameters[0].binding, owner.clone()))
+        };
         analyzer.lower_callable_body(
             &ast_method,
             &mut function,
@@ -922,6 +931,7 @@ pub(crate) fn analyze_with_package_functions(
             &globals,
             &global_values,
             aliases,
+            constructor.then_some(&owner),
         )?;
         analyzer.active_receiver = None;
         module.functions.push(function);
@@ -944,6 +954,7 @@ pub(crate) fn analyze_with_package_functions(
             if analyzer
                 .class_instances_by_type
                 .contains_key(&parameter.contract.ty)
+                && analyzer.types.primitive(parameter.contract.ty).is_none()
                 && effect != ParameterEffect::Move
             {
                 parameter
@@ -1402,12 +1413,14 @@ struct Analyzer<'a> {
     allow_qualified_function_suffix: bool,
     active_function_name: Option<String>,
     active_receiver: Option<(BindingId, ClassInstance)>,
+    active_constructor: bool,
     method_instances: BTreeMap<(TypeId, String, usize), FunctionId>,
     pending_methods: Vec<(
         severian_ast::FunctionDeclaration,
         FunctionDeclaration,
         ClassInstance,
         BTreeMap<String, TypeId>,
+        bool,
     )>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     trait_names: BTreeSet<String>,
@@ -3550,7 +3563,7 @@ impl Analyzer<'_> {
                 Ok(Statement::Continue { span: *span })
             }
             AstStatement::Binding(binding) => {
-                if !binding.mutable
+                if (!binding.mutable || self.active_constructor)
                     && binding.annotation.is_none()
                     && !self.declarations.contains(&binding.name)
                 {
@@ -7507,21 +7520,19 @@ impl Analyzer<'_> {
                 if matches!(callable_path(callee).as_deref(), Some("min" | "max"))
                     && arguments.len() == 2
                 {
-                    let integer = self
-                        .types
-                        .resolve_name("int")
-                        .expect("bootstrap defines int");
-                    let left = self.expression(&arguments[0].value, Some(integer))?;
-                    let right = self.expression(&arguments[1].value, Some(integer))?;
+                    let left = self.expression(&arguments[0].value, expected)?;
+                    let right = self.expression(&arguments[1].value, Some(left.type_id))?;
+                    if !self.integer_primitive(left.type_id) {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "min/max operands must be integers",
+                            Some(ast.span),
+                        ));
+                    }
                     let name = callable_path(callee).expect("matched callable name");
-                    return Ok(self.runtime_call(
-                        &format!("__sev_{name}_i64"),
-                        &[integer, integer],
-                        integer,
-                        vec![left, right],
-                        ast.span,
-                    ));
+                    return Ok(self.integer_extremum(&name, left, right, ast.span));
                 }
+
                 if callable_path(callee).as_deref() == Some("divmod") && arguments.len() == 2 {
                     let integer = self
                         .types
@@ -10305,13 +10316,10 @@ impl Analyzer<'_> {
                 span,
             });
         }
-        let constructor = instance
-            .constructors
-            .iter()
-            .find(|constructor| constructor.parameters.len() == arguments.len())
-            .cloned();
-        let implicit_defaults =
-            constructor.is_none() && arguments.is_empty() && !instance.fields.is_empty();
+        if !instance.constructors.is_empty() {
+            return self.lower_constructor_call(&instance, arguments, span);
+        }
+        let implicit_defaults = arguments.is_empty() && !instance.fields.is_empty();
         let fields = if self.is_error_type(instance.ty)
             && instance.fields.len() == 1
             && instance.fields[0].name == "__error"
@@ -10340,17 +10348,6 @@ impl Analyzer<'_> {
                 vec![message, function],
                 span,
             )]
-        } else if let Some(constructor) = constructor {
-            self.class_constructor_values(&instance, &constructor, arguments, span)?
-        } else if !instance.constructors.is_empty() {
-            return Err(Diagnostic::new(
-                "E000221",
-                format!(
-                    "constructor `{class}` has no overload accepting {} argument(s)",
-                    arguments.len()
-                ),
-                Some(span),
-            ));
         } else if instance.source_fields.len() == instance.fields.len()
             && arguments.len() <= instance.fields.len()
         {
@@ -11572,98 +11569,6 @@ impl Analyzer<'_> {
             .definition(ty)
             .map(|definition| definition.name.clone())
             .unwrap_or_else(|| format!("type#{}", ty.0))
-    }
-
-    fn class_constructor_values(
-        &mut self,
-        instance: &ClassInstance,
-        constructor: &severian_ast::FunctionDeclaration,
-        arguments: &[severian_ast::CallArgument],
-        span: severian_source::Span,
-    ) -> Result<Vec<Expression>, Diagnostic> {
-        // Class substitution deliberately leaves constructor generics symbolic.
-        // Infer them from actual types before requesting any concrete layouts.
-        let mut inferred_values = None;
-        let specialized;
-        let constructor = if constructor.type_parameters.is_empty() {
-            constructor
-        } else {
-            let values = arguments
-                .iter()
-                .map(|argument| self.expression(&argument.value, None))
-                .collect::<Result<Vec<_>, _>>()?;
-            let actuals = values
-                .iter()
-                .map(|value| self.constructor_argument_type_name(value.type_id))
-                .collect::<Vec<_>>();
-            specialized = package::generic::specialize_constructor(constructor, &actuals)?;
-            inferred_values = Some(values);
-            &specialized
-        };
-        let body = constructor.body.as_ref().ok_or_else(|| {
-            Diagnostic::new(
-                "E000211",
-                format!("constructor `{}` has no implementation", constructor.name),
-                Some(constructor.span),
-            )
-        })?;
-        let resolved_arguments = if let Some(values) = inferred_values {
-            values
-                .into_iter()
-                .zip(&constructor.parameters)
-                .map(|(value, parameter)| {
-                    let expected = self.resolve_source_type(&parameter.annotation)?;
-                    self.coerce(value, expected, false)
-                })
-                .collect::<Result<Vec<_>, Diagnostic>>()?
-        } else {
-            arguments
-                .iter()
-                .zip(&constructor.parameters)
-                .map(|(argument, parameter)| {
-                    let expected = self.resolve_source_type(&parameter.annotation)?;
-                    self.expression(&argument.value, Some(expected))
-                })
-                .collect::<Result<Vec<_>, Diagnostic>>()?
-        };
-        let previous = self.value_substitutions.clone();
-        for (parameter, argument) in constructor.parameters.iter().zip(resolved_arguments) {
-            self.value_substitutions
-                .insert(parameter.name.clone(), argument);
-        }
-        let values = (|| {
-            let mut values = Vec::with_capacity(instance.fields.len());
-            for (field_index, field) in instance.fields.iter().enumerate() {
-                let initializer = constructor_field_initializer(body, &field.name).or_else(|| {
-                    instance
-                        .source_fields
-                        .get(field_index)
-                        .and_then(|field| field.default.as_ref())
-                        .map(|default| (default, false))
-                });
-                let Some((initializer, unsafe_initializer)) = initializer else {
-                    return Err(Diagnostic::new(
-                        "E000221",
-                        format!(
-                            "constructor `{}` does not initialize field `{}`",
-                            constructor.name, field.name
-                        ),
-                        Some(span),
-                    ));
-                };
-                if unsafe_initializer {
-                    self.unsafe_depth += 1;
-                }
-                let value = self.expression(initializer, Some(field.ty));
-                if unsafe_initializer {
-                    self.unsafe_depth -= 1;
-                }
-                values.push(value?);
-            }
-            Ok(values)
-        })();
-        self.value_substitutions = previous;
-        values
     }
 
     fn empty_list_expression(
@@ -18024,6 +17929,16 @@ impl Analyzer<'_> {
             let previous_suffix_resolution = self.allow_qualified_function_suffix;
             self.allow_qualified_function_suffix = true;
             let resolved = (|| {
+                let mut parameters = Vec::new();
+                for (parameter, argument) in operator.parameters.iter().zip(indices) {
+                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                    let value = self.expression(argument, None)?;
+                    parameters.push((
+                        parameter.name.clone(),
+                        self.coerce(value, parameter_type, true)?,
+                    ));
+                }
+                self.value_substitutions.insert("self".into(), object.clone());
                 for (field, declaration) in instance.fields.iter().enumerate() {
                     let id = self.next_id();
                     self.value_substitutions.insert(
@@ -18039,13 +17954,7 @@ impl Analyzer<'_> {
                         },
                     );
                 }
-                for (parameter, argument) in operator.parameters.iter().zip(indices) {
-                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
-                    let value = self.expression(argument, None)?;
-                    let value = self.coerce(value, parameter_type, true)?;
-                    self.value_substitutions
-                        .insert(parameter.name.clone(), value);
-                }
+                self.value_substitutions.extend(parameters);
                 let (return_value, unsafe_return) = operator_return_expression(&operator.body)
                     .ok_or_else(|| {
                         Diagnostic::new(
@@ -19795,36 +19704,6 @@ fn type_query_operand(expression: &AstExpression) -> Option<&AstExpression> {
         return None;
     };
     Some(&argument.value)
-}
-
-fn constructor_field_initializer<'a>(
-    statements: &'a [AstStatement],
-    field: &str,
-) -> Option<(&'a AstExpression, bool)> {
-    for statement in statements {
-        match statement {
-            AstStatement::Binding(binding) if binding.name == field => {
-                return Some((&binding.value, false));
-            }
-            AstStatement::FieldAssignment {
-                object,
-                field: assigned,
-                value,
-                ..
-            } if assigned == field
-                && matches!(&object.kind, AstExpressionKind::Name(name) if name == "self") =>
-            {
-                return Some((value, false));
-            }
-            AstStatement::Unsafe { body, .. } => {
-                if let Some((value, _)) = constructor_field_initializer(body, field) {
-                    return Some((value, true));
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 fn operator_return_expression(statements: &[AstStatement]) -> Option<(&AstExpression, bool)> {

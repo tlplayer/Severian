@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 from bootstrap_mlir import ROOT, SEED, run
+from constructors import constructor_gates
 
 
 def main():
@@ -51,6 +52,7 @@ def main():
         run([SEED, "build", collection, "-o", executable])
         run([executable], cwd=directory)
         print("PASS: canonical scalar list (seed native)", flush=True)
+        constructor_gates(directory)
         accepted = {
             "direct_macro": """-> identity[T: int]():
     def identity(value: T) -> T:

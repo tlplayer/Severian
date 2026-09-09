@@ -26,14 +26,35 @@ Implemented and covered:
 - The seed infers constructor-local type and `usize` dimension parameters after
   class substitution. Member-local parameter names shadow enclosing names.
   Array dimensions stay symbolic until the constructor is selected for a call.
+- Seed field-initializing constructors execute complete callable bodies: locals,
+  branches, loops, assertions, method calls, recursive construction, and early
+  returns. Both `field = value` and `field := value` initialize declared fields.
+  Every successful return must initialize all fields; reads and escaping `self`
+  before initialization are rejected. Loop bodies are conservatively allowed to
+  execute zero times when checking initialization.
+- Constructor overloads use parameter types and conversion ranks, prefer concrete
+  overloads over equally ranked generic fallbacks, and diagnose ambiguity and
+  missing matches. Named/default arguments retain source evaluation order, and
+  supplied arguments execute once.
 - Seed ownership validation includes parameter types alongside local bindings;
   parameter array writes still respect active slice loans. Missing binding
   metadata is diagnosed instead of panicking.
 - Aggregate boxing uses LLVM's target layout, installed before LLVM translation,
   and the native payload header preserves scalar alignment. The native regression
   checks trailing fields after `u128` identities stored in lists.
-- A canonical `list[i32]` executes append, length, and indexed reads through the
-  seed. This is distinct from the source prelude's `buffer`-based list protocols.
+- A canonical `list[i32]` executes empty, array, and slice construction, append,
+  growth, length, capacity, and indexed reads through the seed. Array constructor
+  coverage includes dimensions zero, three, and six. This is distinct from the
+  source prelude's `buffer`-based list protocols.
+- Typed integer `min`/`max` preserve unsigned `usize` comparisons and evaluate
+  operands once. Inlined index operators bind their own receiver fields.
+  Embedded `throws(...)` tests do not change production function return types.
+
+The seed constructor gates can also run independently after building `sev`:
+
+```sh
+python3 tests/sev_compiler/constructors.py
+```
 
 Still required to complete the broader migration:
 
@@ -42,10 +63,9 @@ Still required to complete the broader migration:
   generic methods/operators and record trait implementations, borrowed receivers,
   and complete capability checking
   of generic class bodies. Current record specialization is a type-argument subset.
-- General seed constructor overload resolution and whole-body lowering. In
-  particular, `list[i32](array[i32, 3](...))` passes dimension inference but still
-  fails on its local `requested` binding: the seed extracts field initializers
-  instead of executing the complete constructor body.
+- Constructors with explicit result-returning/fallible signatures, together with
+  the general generic-body capability checking described above. The implemented
+  constructor path initializes and returns its declared class.
 - Arbitrary owned collection elements, initialized-element tracking, move/drop
   behavior during growth and removal, and loans that prevent invalidating mutation.
 - Migration of compiler consumers to the canonical collection implementations.

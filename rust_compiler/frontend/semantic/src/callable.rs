@@ -1,6 +1,86 @@
 use super::*;
 
 impl Analyzer<'_> {
+    pub(super) fn integer_extremum(
+        &mut self,
+        name: &str,
+        left: Expression,
+        right: Expression,
+        span: severian_source::Span,
+    ) -> Expression {
+        let ty = left.type_id;
+        let call = self.runtime_call(
+            &format!("__sev_{name}_type{}", ty.0),
+            &[ty, ty],
+            ty,
+            vec![left, right],
+            span,
+        );
+        let ExpressionKind::Call {
+            callee:
+                severian_hir::Callee::Direct {
+                    function: definition,
+                    ..
+                },
+            ..
+        } = &call.kind
+        else {
+            unreachable!()
+        };
+        let position = self
+            .runtime_functions
+            .iter()
+            .position(|function| function.definition == *definition)
+            .expect("registered extremum");
+        if self.runtime_functions[position].body.is_none() {
+            let parameters = self.runtime_functions[position].parameters.clone();
+            let left = Expression {
+                id: self.next_id(),
+                type_id: ty,
+                kind: ExpressionKind::Binding(parameters[0].binding),
+                span,
+            };
+            let right = Expression {
+                id: self.next_id(),
+                type_id: ty,
+                kind: ExpressionKind::Binding(parameters[1].binding),
+                span,
+            };
+            let condition = Expression {
+                id: self.next_id(),
+                type_id: self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool"),
+                span,
+                kind: ExpressionKind::Binary {
+                    operator: if name == "min" {
+                        BinaryOperator::Less
+                    } else {
+                        BinaryOperator::Greater
+                    },
+                    left: Box::new(left.clone()),
+                    right: Box::new(right.clone()),
+                },
+            };
+            let value = Expression {
+                id: self.next_id(),
+                type_id: ty,
+                span,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(left),
+                    fallback: Box::new(right),
+                },
+            };
+            self.runtime_functions[position].call_type = CallType::Severian;
+            self.runtime_functions[position].body = Some(Block {
+                statements: vec![Statement::Return(Some(value))],
+            });
+        }
+        call
+    }
+
     pub(super) fn lower_callable_body(
         &mut self,
         ast_function: &severian_ast::FunctionDeclaration,
@@ -9,10 +89,12 @@ impl Analyzer<'_> {
         globals: &BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
         global_values: &BTreeMap<String, Expression>,
         aliases: BTreeMap<String, TypeId>,
+        constructor: Option<&ClassInstance>,
     ) -> Result<(), Diagnostic> {
         let Some(ast_body) = &ast_function.body else {
             return Ok(());
         };
+        self.active_constructor = constructor.is_some();
         self.names = globals.clone();
         self.active_function_name = Some(ast_function.name.clone());
         self.declarations.clear();
@@ -46,8 +128,14 @@ impl Analyzer<'_> {
                 (parameter.binding, variable, type_id),
             );
         }
+        let constructor_storage = constructor
+            .map(|owner| self.begin_constructor(owner, bindings, ast_function.span))
+            .transpose()?;
         let result_type = function.result.ty;
         let (mut body, hooks) = self.lower_function_hooks(ast_function, bindings, result_type)?;
+        if let Some((_, prefix)) = &constructor_storage {
+            body.statements.extend(prefix.statements.clone());
+        }
         for contract in ast_function
             .contracts
             .iter()
@@ -174,6 +262,10 @@ impl Analyzer<'_> {
                 }],
             };
         }
+        if let (Some(owner), Some((receiver, _))) = (constructor, constructor_storage) {
+            self.finish_constructor(owner, receiver, &mut body, bindings, ast_function.span)?;
+            function.result = universal_boundary(owner.ty);
+        }
         let effects = function
             .parameters
             .iter()
@@ -190,6 +282,13 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Option<Expression>, Diagnostic> {
+        // An inlined operator installs its own receiver and field bindings.
+        // Those must not resolve against the enclosing method/constructor.
+        if self.value_substitutions.contains_key("self")
+            && self.value_substitutions.contains_key(name)
+        {
+            return Ok(None);
+        }
         if !self.declarations.contains(name) {
             if let Some((binding, owner)) = self.active_receiver.clone() {
                 if let Some((index, field)) = owner
@@ -369,7 +468,7 @@ impl Analyzer<'_> {
             self.parameter_effects
                 .insert(id, vec![ParameterEffect::Shared; function.parameters.len()]);
             self.pending_methods
-                .push((method.clone(), function, owner.clone(), aliases));
+                .push((method.clone(), function, owner.clone(), aliases, false));
             id
         };
         let arguments = self.apply_parameter_effects(
