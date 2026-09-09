@@ -16,6 +16,8 @@ enum PrimitiveRepresentation:
     BrainFloatBits(bits: u16)
     FloatBits(bits: u16, exponent_bits: u16, fraction_bits: u16, supports_infinity: bool)
     PointerBits(bits: u16)
+    RecordAggregate
+    TaggedAggregate
 
 
 trait Primitive: Type

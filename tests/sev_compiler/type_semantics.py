@@ -85,7 +85,7 @@ class TypeSemantics(MigrationCase):
                 Value
             def wrong() -> First:
                 return Second.Value
-        ''', "enum variant does not match expected type")
+        ''', "tagged alternative does not match expected type")
         self.rejects('''
             enum First:
                 Value
@@ -93,7 +93,7 @@ class TypeSemantics(MigrationCase):
                 Value
             def ambiguous():
                 value = Value
-        ''', "ambiguous enum variant")
+        ''', "ambiguous tagged variant")
 
     def test_additive_extension_example(self):
         path = ROOT / "docs/examples/01-types/07-extend/01-basic-extend.sev"

@@ -1,0 +1,39 @@
+import universal
+
+
+# Each compiler case gets a fresh module. Its declarations are checked with the
+# subject's normal imports and cannot leak into later accept/reject cases.
+def module(subject: universal.Module, case: universal.CompilerTestCase, namespace: string) -> universal.Module:
+    result = universal.empty_module()
+    for item in subject.items:
+        match item:
+            case Test:
+                pass
+            case _:
+                result.items.append(item)
+    for item in case.declarations:
+        match item:
+            case Record:
+                record := declaration
+                record.name = declaration.name if declaration.extension else namespace + declaration.name
+                record.lookup = namespace
+                result.items.append(universal.Record(record))
+            case Function:
+                function := declaration
+                function.name = namespace + declaration.name
+                function.lookup = namespace
+                result.items.append(universal.Function(function))
+            case Trait:
+                trait := declaration
+                trait.name = namespace + declaration.name
+                trait.lookup = namespace
+                result.items.append(universal.Trait(trait))
+            case Type:
+                type := declaration
+                type.name = namespace + declaration.name
+                type.lookup = namespace
+                result.items.append(universal.Type(type))
+            case _:
+                result.items.append(item)
+    result.items.append(universal.Function(universal.FunctionDeclaration(name=namespace + "$compiler_case$" + string(case.span.start), body=case.body, span=case.span, lookup=namespace)))
+    return result

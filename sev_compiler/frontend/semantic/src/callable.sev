@@ -8,6 +8,8 @@ import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
 import "expansion.sev" as expansion
 import "construction.sev" as construction
+import "compiler_cases.sev" as compiler_cases
+import "../../../universal/type/tagged.sev" as tagged
 import "definitions.sev" as definitions
 import "match.sev" as matches
 import "../../../universal/type/scalar_conversion.sev" as conversions
@@ -53,6 +55,9 @@ def callable_path(expression: universal.Expression) -> string:
 
 
 def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> universal.TypeId | diagnostics.Diagnostic:
+    named_tagged_variant = callable_tagged_selection(state, expression)
+    if named_tagged_variant.record != -1:
+        return state.records[named_tagged_variant.record].type_id
     match expression.kind:
         case Name:
             index := 0
@@ -64,12 +69,20 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                 if constant.name == state.namespace + name or constant.name == name:
                     return constant.type_id
         case Call:
+            variant = callable_tagged_selection(state, callee)
+            if variant.record != -1:
+                return state.records[variant.record].type_id
             match callee.kind:
                 case SourceSymbol:
                     return callable_expression(state, expression, universal.TypeId(0)).type_id
                 case _:
                     pass
             name = callable_path(callee)
+            for function in state.functions:
+                syntax ?= function.operator_syntax
+                if syntax != None:
+                    if syntax.symbol == name:
+                        return callable_expression(state, expression, universal.TypeId(0)).type_id
             if name == "type" or name == "string":
                 return universal.TypeId(3)
             if name == "len" and len(arguments) == 1:
@@ -305,6 +318,31 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
     return callable_expression_inner(state, expression, expected)
 
 
+def callable_tagged_selection(state: CallableAnalysis, expression: universal.Expression) -> tagged.VariantSelection | diagnostics.Diagnostic:
+    path = callable_path(expression)
+    if path == "" or path.split(".")[0] in state.names:
+        return tagged.VariantSelection()
+    for constant in state.constants:
+        if constant.name == path or constant.name == state.namespace + path:
+            return tagged.VariantSelection()
+    return tagged.select(state.records, state.namespace, path, universal.TypeId(0), expression.span)
+
+
+def callable_tagged_value(state: CallableAnalysis, selection: tagged.VariantSelection, arguments: list[universal.CallArgument], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    record = state.records[selection.record]
+    if expected.index != 0 and expected.index != record.type_id.index:
+        return error(callable_diagnostic("tagged alternative does not match expected type", span))
+    payload_type = record.fields[selection.variant + 1].type_id
+    for payload in state.records:
+        if payload.type_id.index == payload_type.index:
+            bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=payload.fields), arguments)
+            if bound.message != "":
+                return error(callable_diagnostic(bound.message, span))
+            value = callable_expression(state, universal.Expression(universal.RecordValue(bound.arguments), span, type_id=payload_type), payload_type)
+            return universal.Expression(universal.OutcomeValue(value, selection.variant), span, type_id=record.type_id)
+    return error(callable_diagnostic("tagged alternative has no payload layout", span))
+
+
 def callable_slice_bound(state: CallableAnalysis, bound: universal.Expression | None, fallback: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
     supplied ?= bound
     if supplied != None:
@@ -317,6 +355,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
     path = callable_path(expression)
     if path == "cfg" or path.starts_with("cfg.") or path == "lower":
         return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
+    named_tagged_variant = callable_tagged_selection(state, expression)
+    if named_tagged_variant.record != -1:
+        return callable_tagged_value(state, named_tagged_variant, [], expression.span, expected)
     result_type := expected
     kind := expression.kind
     match expression.kind:
@@ -341,7 +382,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             return error(callable_diagnostic("fallback requires an optional or fallible value", expression.span))
         case ListLiteral:
             element_type := universal.TypeId(0)
-            if expected.index > 200 and expected.index < 400:
+            if scalar.scalar_representation(expected) == "buffer":
                 element_type = universal.TypeId(expected.index - 200)
             typed: list[universal.Expression] = []
             for element in elements:
@@ -655,6 +696,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol, expression.span))
             return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
         case Call:
+            variant = callable_tagged_selection(state, callee)
+            if variant.record != -1:
+                return callable_tagged_value(state, variant, arguments, expression.span, expected)
             expansion_result = callable_expand_grammar(state, callee, arguments, expression.span)
             expanded ?= expansion_result.value
             if expanded != None:
@@ -774,6 +818,27 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     state.next_id[0] += 1
                     return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.TypeId(3))
                 return error(callable_diagnostic("type requires a concrete value", expression.span))
+            named_operation := false
+            for function in state.functions:
+                syntax ?= function.operator_syntax
+                if syntax != None:
+                    if syntax.symbol == name:
+                        named_operation = true
+            if named_operation:
+                operands: list[universal.Expression] = []
+                types: list[universal.TypeId] = []
+                positional := true
+                for argument in arguments:
+                    if argument.name != None:
+                        positional = false
+                    operand = callable_expression(state, argument.value, universal.TypeId(0))
+                    operands.append(operand)
+                    types.append(operand.type_id)
+                if positional:
+                    selected_operator = callable_operator(state, name, types, expression.span)
+                    implementation ?= selected_operator.function
+                    if implementation != None:
+                        return callable_resolved_operator(state, implementation, operands, expression.span, expected)
             function_lookup = callable_select_function(state, name, arguments)
             selected ?= function_lookup.selection
             selected_functions: list[universal.FunctionDeclaration] = []
@@ -959,6 +1024,8 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     if result_type.index == 2:
                         return error(callable_diagnostic("unit function cannot return a value", span))
                     returned_value = callable_expression(state, expression_value, result_type)
+                elif result_type.index == 6:
+                    returned_value = callable_expression(state, universal.Expression(universal.LiteralValue(universal.NoneValue()), span), result_type)
                 elif result_type.index != 2:
                     return error(callable_diagnostic("scalar function must return a value", span))
                 operands: list[universal.Expression] = []
@@ -993,8 +1060,16 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 returned = callable_terminates(universal.Block([universal.If(resolved, then_typed, else_typed, span)]))
                 output.statements.append(callable_control(state, "If", [resolved], [then_typed, else_typed], span, returned))
             case Match:
-                expanded = matches.expand_match(subject, arms, span)
-                typed = callable_block(state, [expanded], result_type, false)
+                resolved = callable_expression(state, subject, universal.TypeId(0))
+                expanded := universal.empty_block()
+                tagged_match := false
+                for record in state.records:
+                    if record.type_id.index == resolved.type_id.index and record.representation == "TaggedAggregate":
+                        expanded = tagged.expand_match(record, resolved, arms, span)
+                        tagged_match = true
+                if not tagged_match:
+                    expanded.statements.append(matches.expand_match(resolved, arms, span))
+                typed = callable_block(callable_scope(state), expanded.statements, result_type, false)
                 for nested in typed.statements:
                     output.statements.append(nested)
                 returned = callable_terminates(typed)
@@ -1029,6 +1104,11 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
         index += 1
     if complete and not returned:
+        if result_type.index == 6:
+            span = source.Span(source.SourceId(0), 0, 0)
+            value = callable_expression(state, universal.Expression(universal.LiteralValue(universal.NoneValue()), span), result_type)
+            output.statements.append(callable_control(state, "Return", [value], [], span, true))
+            return output
         if result_type.index != 2:
             return error(callable_diagnostic("scalar function can reach its end without returning a value", None))
         output.statements.append(callable_control(state, "Return", [], [], source.Span(source.SourceId(0), 0, 0), true))
@@ -1155,7 +1235,24 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 state.records.append(record_declaration)
             case _:
                 pass
+    tagged.layouts(state.records)
     callable_register_aliases(state)
+    for implementation in state.declarations.implementations:
+        if not implementation.extension or len(implementation.methods) == 0:
+            continue
+        owners = definitions.family_members(state.declarations, universal.named_type(implementation.name, [], implementation.span), state.records, implementation.lookup)
+        for owner in owners:
+            for record in state.records:
+                if record.type_id.index != owner.index:
+                    continue
+                methods = record.methods[:]
+                for method in implementation.methods:
+                    for previous in methods:
+                        if previous.name == method.name:
+                            return error(callable_diagnostic("extension cannot replace existing member " + method.name, method.span))
+                    methods.append(method)
+                record.methods = methods
+                state.records[int(record.type_id.index) - 1000] = record
     grammar_scalar.resolve(state.declarations, state.records)
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
@@ -1316,10 +1413,17 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         for compiler_case in declaration.compiler_cases:
                             isolated_definitions = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
                             isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records[:], declarations=isolated_definitions, generics=state.generics)
-                            checked ?= callable_check_compiler_case(isolated, compiler_case.body)
-                            rejected := false
-                            if checked is Diagnostic:
-                                rejected = true
+                            rejected := compiler_case.parse_error != ""
+                            if not rejected:
+                                if len(compiler_case.declarations) != 0:
+                                    subject = compiler_cases.module(module, compiler_case, declaration.lookup)
+                                    module_result ?= analyze_registered_callables(subject, false, visible, [], [], environment, initializer_namespace)
+                                    if module_result is Diagnostic:
+                                        rejected = true
+                                else:
+                                    checked ?= callable_check_compiler_case(isolated, compiler_case.body)
+                                    if checked is Diagnostic:
+                                        rejected = true
                             expect_rejection := false
                             match compiler_case.expectation:
                                 case Reject:

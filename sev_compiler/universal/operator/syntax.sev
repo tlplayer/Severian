@@ -34,3 +34,5 @@ class OperatorSyntax:
     closing: string = ""
     separator: string = ""
     grouping: bool = false
+    declaration_members: string = ""
+    representation: string = ""

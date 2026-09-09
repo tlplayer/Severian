@@ -1,9 +1,11 @@
 import lexer
 from lexer import TokenKind
 import diagnostics
+from diagnostics import Diagnostic
 import source
 import universal
 from universal import CompilerExpectation
+from universal import CompilerTestCase
 
 def formatted_string_expression(value: string, span: source.Span, syntaxes: list[universal.OperatorSyntax], lexical_rules: list[universal.RecordDeclaration] = []) -> universal.Expression | diagnostics.Diagnostic:
     rules: list[lexer.SourceLexicalRule] = []
@@ -139,7 +141,9 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
     result = universal.Module([])
     parser_separators(parser)
     while not parser_at_simple(parser, Eof):
-        if parser_at_symbol(parser, "@"):
+        if parser_declaration_syntax(parser).grammar_form == "Declaration":
+            result.items.append(universal.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
+        elif parser_at_symbol(parser, "@"):
             decorators: list[universal.Decorator] = []
             while parser_at_symbol(parser, "@"):
                 decorators.append(parser_scalar_decorator(parser))
@@ -481,16 +485,71 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
                 continue
             parser_next(parser)
             parser_expect_symbol(parser, ":", "expected colon after compiler expectation")
-            case_block = parser_indented_block(parser, "compiler case")
-            statements = setup[:]
-            for statement in case_block[0].statements:
-                statements.append(statement)
-            cases.append(universal.CompilerTestCase(expectation, None, universal.Block(statements), case_start))
+            parser_expect(parser, Newline, "expected newline after compiler case")
+            parser_separators(parser)
+            parser_expect(parser, Indent, "expected compiler case body")
+            tokens: list[lexer.Token] = []
+            depth := 1
+            while depth > 0:
+                token = parser_next(parser)
+                if token.kind == Eof:
+                    return error(parser_fail(parser, "unterminated compiler case"))
+                if token.kind == Indent:
+                    depth += 1
+                elif token.kind == Dedent:
+                    depth -= 1
+                if depth > 0:
+                    tokens.append(token)
+            end = parser_peek(parser).span
+            tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", source.Span(end.source, end.start, end.start))))
+            if len(setup) != 0:
+                cases.append(universal.CompilerTestCase(Accept, None, universal.Block(setup[:]), case_start))
+            parsed ?= parser_compiler_case(Parser(tokens), expectation, setup, case_start)
+            if parsed is Diagnostic:
+                cases.append(universal.CompilerTestCase(expectation, None, universal.empty_block(), case_start, parse_error=parsed.message))
+            if parsed is CompilerTestCase:
+                cases.append(parsed)
             parser_separators(parser)
         end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
         return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end))
     block = parser_indented_block(parser, "test")
     return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]))
+
+
+def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectation, setup: list[universal.Statement], span: source.Span) -> universal.CompilerTestCase | diagnostics.Diagnostic:
+    statements = setup[:]
+    declarations: list[universal.Item] = []
+    parser_separators(parser)
+    while not parser_at_simple(parser, Eof):
+        if parser_declaration_syntax(parser).grammar_form == "Declaration":
+            declarations.append(universal.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
+        elif parser_at_identifier(parser, "class"):
+            declarations.append(universal.Record(parser_record_declaration(parser)))
+        elif parser_at_identifier(parser, "extend"):
+            declarations.append(universal.Record(parser_record_declaration(parser, true)))
+        elif parser_at_identifier(parser, "trait"):
+            declarations.append(universal.Trait(parser_trait_declaration(parser, [])))
+        elif parser_at_identifier(parser, "def"):
+            declarations.append(universal.Function(parser_function_declaration(parser, [])))
+        elif parser_at_symbol(parser, "@"):
+            decorators: list[universal.Decorator] = []
+            while parser_at_symbol(parser, "@"):
+                decorators.append(parser_scalar_decorator(parser))
+            if not parser_at_identifier(parser, "def"):
+                return error(parser_fail(parser, "expected function after decorator"))
+            declarations.append(universal.Function(parser_function_declaration(parser, decorators)))
+        elif parser_at_identifier(parser, "operator"):
+            operation = parser_operator_declaration(parser)
+            operation.receiver = false
+            declarations.append(universal.OperatorItem(operation))
+        elif parser_at_identifier(parser, "union"):
+            declarations.append(universal.Type(parser_family_declaration(parser)))
+        elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
+            declarations.append(universal.Type(parser_type_declaration(parser, [])))
+        else:
+            statements.append(parser_block_statement(parser))
+        parser_separators(parser)
+    return universal.CompilerTestCase(expectation, None, universal.Block(statements), span, declarations=declarations)
 
 def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Block, u32] | diagnostics.Diagnostic:
     parser_expect(parser, Newline, "expected newline after " + owner)
@@ -596,9 +655,8 @@ def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         arm_start = parser_peek(parser).span
-        if not parser_at_identifier(parser, "case"):
-            return error(parser_fail(parser, "expected case before match pattern"))
-        parser_next(parser)
+        if parser_at_identifier(parser, "case"):
+            parser_next(parser)
         pattern: universal.Expression | None := None
         if parser_at_identifier(parser, "_"):
             parser_next(parser)
@@ -947,6 +1005,57 @@ def precedence(operator: universal.OperatorSyntax) -> int:
 
 def parse(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
     return parser_module(Parser(tokens))
+
+
+# Named declaration syntax is supplied by a G contract. The structural parser
+# only distinguishes typed fields from named callable signatures.
+def parser_declaration_syntax(parser: Parser) -> universal.OperatorSyntax:
+    token = parser_peek(parser)
+    for syntax in token.syntaxes:
+        if syntax.grammar_form == "Declaration" and string(token) == syntax.symbol and (token.kind == Identifier or token.kind == Symbol):
+            return syntax
+    return universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None)
+
+
+def parser_named_declaration(parser: Parser, syntax: universal.OperatorSyntax) -> universal.RecordDeclaration | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    name = parser_identifier(parser, "expected a declaration name")[0]
+    parser_expect_symbol(parser, ":", "expected colon after declaration name")
+    parser_expect(parser, Newline, "expected newline after declaration name")
+    parser_separators(parser)
+    parser_expect(parser, Indent, "expected indented declaration members")
+    alternatives: list[universal.CallableAlternative] = []
+    fields: list[universal.FunctionParameter] = []
+    parser_separators(parser)
+    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        member = parser_identifier(parser, "expected a declaration member")
+        if syntax.declaration_members == "Fields":
+            fields.append(parser_named_field(parser, member))
+        else:
+            parameters: list[universal.FunctionParameter] = []
+            if parser_take_symbol(parser, "(") != None:
+                while not parser_at_symbol(parser, ")"):
+                    field = parser_identifier(parser, "expected a parameter name")
+                    parameters.append(parser_named_field(parser, field))
+                    if parser_take_symbol(parser, ",") == None:
+                        break
+                parser_expect_symbol(parser, ")", "expected closing parameter parenthesis")
+            alternatives.append(universal.CallableAlternative(member[0], parameters, member[1]))
+        parser_expect(parser, Newline, "expected newline after declaration member")
+        parser_separators(parser)
+    end = parser_expect(parser, Dedent, "expected end of declaration").span.end
+    if syntax.representation == "TaggedAggregate" and len(alternatives) == 0:
+        return error(parser_fail(parser, "tagged type requires at least one alternative"))
+    return universal.RecordDeclaration(name, fields, [], source.Span(start.source, start.start, end), alternatives=alternatives, representation=syntax.representation, declaration_grammar=syntax.definition)
+
+
+def parser_named_field(parser: Parser, field: tuple[string, source.Span]) -> universal.FunctionParameter | diagnostics.Diagnostic:
+    parser_expect_symbol(parser, ":", "expected field annotation")
+    annotation = parser_type_annotation(parser)
+    default: universal.Expression | absent := absent
+    if parser_take_symbol(parser, "=") != None:
+        default = parser_expression(parser, 0)
+    return universal.FunctionParameter(field[0], annotation, default, field[1])
 
 
 def parser_record_declaration(parser: Parser, extension: bool = false) -> universal.RecordDeclaration | diagnostics.Diagnostic:

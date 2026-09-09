@@ -103,7 +103,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
         for operation in selected.operations:
             match operation:
                 case Allocate:
-                    if type_id.index == 3 or (type_id.index > 200 and type_id.index < 400):
+                    if type_id.index == 3 or scalar.scalar_representation(type_id) == "buffer":
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)

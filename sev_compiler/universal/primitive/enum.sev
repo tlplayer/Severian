@@ -1,0 +1,8 @@
+# A declaration creates a nominal tagged type. Each named callable describes
+# one alternative and its typed payload; a bare name has an empty payload.
+# The compiler consumes this G contract through the shared declaration parser.
+trait enum: G:
+    symbol: Y = enum
+    form: GrammarForm = GrammarForm.Declaration
+    members: DeclarationMembers = DeclarationMembers.Callables
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.TaggedAggregate

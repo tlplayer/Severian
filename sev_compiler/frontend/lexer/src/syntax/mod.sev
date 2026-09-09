@@ -121,6 +121,9 @@ def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.Operato
             if previous.definition.declaration.value != 0 and (previous.grammar_form == "Delimited" or syntax.grammar_form == "Delimited"):
                 if previous.grammar_form != syntax.grammar_form or previous.closing != syntax.closing or previous.separator != syntax.separator or previous.grouping != syntax.grouping:
                     return error(diagnostics.diagnostic_at("E000103", "conflicting delimited grammar " + syntax.symbol, span))
+            if previous.definition.declaration.value != 0 and (previous.grammar_form == "Declaration" or syntax.grammar_form == "Declaration"):
+                if previous.grammar_form != syntax.grammar_form or previous.declaration_members != syntax.declaration_members or previous.representation != syntax.representation or previous.definition.module != syntax.definition.module or previous.definition.declaration.value != syntax.definition.declaration.value:
+                    return error(diagnostics.diagnostic_at("E000103", "conflicting declaration grammar " + syntax.symbol, span))
             if previous.definition.declaration.value == 0 or (syntax.domain == universal.OperatorDomain.GrammarOperator and previous.domain != universal.OperatorDomain.GrammarOperator):
                 registry.operators[index] = syntax
             return
@@ -157,6 +160,8 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             closing := ""
             separator := ""
             grouping := false
+            declaration_members := ""
+            representation := ""
             fixity := universal.Fixity.Infix
             precedence := 0
             associativity := universal.Associativity.Left
@@ -170,6 +175,8 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 closing = base_syntax.closing
                 separator = base_syntax.separator
                 grouping = base_syntax.grouping
+                declaration_members = base_syntax.declaration_members
+                representation = base_syntax.representation
             fields: list[string] = []
             for property in descriptor.properties:
                 if property.name in fields:
@@ -209,6 +216,15 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     if len(property.tokens) != 0 and token_word(property.tokens[0]) == "Body":
                         form = "Body" if property.name == "left" else "ConditionBody"
                         fixity = universal.Fixity.Prefix
+                elif property.name == "members" or property.name == "representation":
+                    contract = "DeclarationMembers" if property.name == "members" else "PrimitiveRepresentation"
+                    if len(property.tokens) != 3 or token_word(property.tokens[0]) != contract or not token_is_symbol(property.tokens[1], "."):
+                        return error(diagnostics.diagnostic_at("E000103", "declaration grammar requires " + contract, descriptor.span))
+                    value = token_word(property.tokens[2])
+                    if property.name == "members":
+                        declaration_members = value
+                    else:
+                        representation = value
                 elif property.name == "form":
                     if len(property.tokens) != 3 or token_word(property.tokens[0]) != "GrammarForm" or not token_is_symbol(property.tokens[1], "."):
                         return error(diagnostics.diagnostic_at("E000103", "grammar form requires GrammarForm", descriptor.span))
@@ -248,8 +264,15 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     return error(diagnostics.diagnostic_at("E000103", "operator precedence is required", descriptor.span))
                 if form == "Delimited" and (closing == "" or separator == "" or closing == separator or symbol == closing):
                     return error(diagnostics.diagnostic_at("E000103", "delimited grammar requires distinct delimiters", descriptor.span))
+                if form == "Declaration":
+                    if declaration_members not in ["Fields", "Callables"]:
+                        return error(diagnostics.diagnostic_at("E000103", "declaration grammar requires Fields or Callables members", descriptor.span))
+                    if representation not in ["RecordAggregate", "TaggedAggregate"]:
+                        return error(diagnostics.diagnostic_at("E000103", "declaration grammar requires an aggregate representation", descriptor.span))
+                    if (declaration_members == "Callables") != (representation == "TaggedAggregate"):
+                        return error(diagnostics.diagnostic_at("E000103", "declaration members do not match the representation", descriptor.span))
                 identity = universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
-                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping)
+                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation)
                 if descriptor.grammar:
                     syntax.domain = universal.OperatorDomain.GrammarOperator
                 register_operator_syntax(registry, syntax, descriptor.span)

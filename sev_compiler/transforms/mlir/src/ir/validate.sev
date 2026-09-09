@@ -92,7 +92,7 @@ def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationErro
         if not is_float(value.type_id) or value.text == "":
             return error(InvalidAttribute("floating literal requires a float type and spelling"))
     if kind == "integer_literal":
-        if not is_integer(value.type_id) or value.text == "":
+        if (not is_integer(value.type_id) and scalar_kind_name(value.type_id.scalar.kind) != "index") or value.text == "":
             return error(InvalidAttribute("integer literal requires an integer type and spelling"))
         spelling := value.text
         if spelling.starts_with("-") or spelling.starts_with("+"):
@@ -102,7 +102,7 @@ def validate_attribute(value: MlirAttributeValue) -> bool | MlirVerificationErro
         for digit in spelling.bytes():
             if digit < 48 or digit > 57:
                 return error(InvalidAttribute("integer literal requires decimal digits"))
-    if kind == "integer" or kind == "float" or kind == "float_literal" or kind == "type":
+    if kind == "integer" or kind == "integer_literal" or kind == "float" or kind == "float_literal" or kind == "type":
         validate_type(value.type_id)
     if kind == "symbol" and value.symbol == "":
         return error(InvalidAttribute("symbol references cannot be empty"))

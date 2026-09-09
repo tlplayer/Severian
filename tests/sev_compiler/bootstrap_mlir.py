@@ -206,7 +206,9 @@ def main():
     # to prove tests are absent from build IR, rather than merely uncalled.
     assert function_counts["false_test"] == function_counts["build_excludes_tests"] + 1
     assert function_counts["string_core"] == function_counts["string_core_build"] + 4
-    assert function_counts["numeric_conversion"] == function_counts["numeric_conversion_build"] + 40
+    # Eight integer storage types and f64 generate 9 x 9 conversion cases,
+    # followed by four explicit policy regressions in the source provider.
+    assert function_counts["numeric_conversion"] == function_counts["numeric_conversion_build"] + 85
     rejected = {
         "numeric_mode": ('int(1.5, checked)\n', "required numeric policy"),
         "numeric_unknown_mode": ('int(1, unknown)\n', "unknown numeric conversion mode"),
