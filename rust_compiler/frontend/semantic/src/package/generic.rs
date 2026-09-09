@@ -763,6 +763,7 @@ pub(super) fn collect_generic_specializations(
                             expected.as_deref(),
                             &globals,
                             index,
+                            types,
                             &mut specializations,
                         )?;
                         if let Some(ty) = expected.or_else(|| {
@@ -777,6 +778,7 @@ pub(super) fn collect_generic_specializations(
                         None,
                         &globals,
                         index,
+                        types,
                         &mut specializations,
                     )?,
                     Item::Function(function) => visit_function_for_specializations(
@@ -784,6 +786,7 @@ pub(super) fn collect_generic_specializations(
                         function,
                         &globals,
                         index,
+                        types,
                         &mut specializations,
                     )?,
                     Item::Class(class) if class.type_parameters.is_empty() => {
@@ -799,6 +802,7 @@ pub(super) fn collect_generic_specializations(
                                 function,
                                 &fields,
                                 index,
+                                types,
                                 &mut specializations,
                             )?;
                         }
@@ -811,6 +815,7 @@ pub(super) fn collect_generic_specializations(
                             None,
                             &mut names,
                             index,
+                            types,
                             &mut specializations,
                         )?;
                     }
@@ -831,6 +836,7 @@ fn visit_function_for_specializations(
     function: &severian_ast::FunctionDeclaration,
     inherited_names: &BTreeMap<String, String>,
     index: &ProgramIndex,
+    types: &severian_universal::TypeContext,
     specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     let id = function_def_id(module.package, module.id, &module.ast, function);
@@ -858,6 +864,7 @@ fn visit_function_for_specializations(
                 result.as_deref(),
                 &mut names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1231,6 +1238,7 @@ fn visit_statements_for_specializations(
     result: Option<&str>,
     names: &mut BTreeMap<String, String>,
     index: &ProgramIndex,
+    types: &severian_universal::TypeContext,
     specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     for statement in statements {
@@ -1246,6 +1254,7 @@ fn visit_statements_for_specializations(
                     expected.as_deref(),
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 if let Some(ty) =
@@ -1265,6 +1274,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 for name in bound {
@@ -1278,6 +1288,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_expression_for_specializations(
@@ -1286,6 +1297,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1302,6 +1314,7 @@ fn visit_statements_for_specializations(
                         None,
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1317,6 +1330,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1329,6 +1343,7 @@ fn visit_statements_for_specializations(
                     result,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1344,6 +1359,7 @@ fn visit_statements_for_specializations(
                     Some("bool"),
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 if let Some(message) = message {
@@ -1353,6 +1369,7 @@ fn visit_statements_for_specializations(
                         Some("string"),
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1365,6 +1382,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1377,6 +1395,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_statements_for_specializations(
@@ -1385,6 +1404,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1395,6 +1415,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_statements_for_specializations(
@@ -1403,6 +1424,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1418,6 +1440,7 @@ fn visit_statements_for_specializations(
                     Some("bool"),
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_statements_for_specializations(
@@ -1426,6 +1449,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_statements_for_specializations(
@@ -1434,6 +1458,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1451,6 +1476,7 @@ fn visit_statements_for_specializations(
                         None,
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1460,6 +1486,7 @@ fn visit_statements_for_specializations(
                     Some("bool"),
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 for guard in guards {
@@ -1469,6 +1496,7 @@ fn visit_statements_for_specializations(
                         Some("bool"),
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1478,6 +1506,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1493,6 +1522,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 if let Some(initializer) = initializer {
@@ -1502,6 +1532,7 @@ fn visit_statements_for_specializations(
                         None,
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1511,6 +1542,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1521,6 +1553,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 for case in cases {
@@ -1536,6 +1569,7 @@ fn visit_statements_for_specializations(
                         result,
                         &mut case_names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1552,6 +1586,7 @@ fn visit_statements_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 for case in cases {
@@ -1561,6 +1596,7 @@ fn visit_statements_for_specializations(
                         None,
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                     visit_statements_for_specializations(
@@ -1569,6 +1605,7 @@ fn visit_statements_for_specializations(
                         result,
                         &mut names.clone(),
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -1578,6 +1615,7 @@ fn visit_statements_for_specializations(
                     result,
                     &mut names.clone(),
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1592,6 +1630,7 @@ fn visit_expression_for_specializations(
     expected: Option<&str>,
     names: &BTreeMap<String, String>,
     index: &ProgramIndex,
+    types: &severian_universal::TypeContext,
     specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     match &expression.kind {
@@ -1660,7 +1699,7 @@ fn visit_expression_for_specializations(
                         if explicit.len() > signature.type_parameters.len() {
                             continue;
                         }
-                        for ((parameter, value), metadata) in signature
+                        for (position, ((parameter, value), metadata)) in signature
                             .type_parameters
                             .iter()
                             .zip(explicit)
@@ -1668,9 +1707,17 @@ fn visit_expression_for_specializations(
                                 &signature.type_parameters,
                                 &signature.constraints,
                             ))
+                            .enumerate()
                         {
                             match metadata.kind {
                                 severian_universal::GenericParamKind::Type => {
+                                    if let severian_ast::ExpressionKind::TypeApplication {
+                                        arguments, ..
+                                    } = &callee.kind {
+                                        validate_explicit_type(
+                                            &arguments[position], module, names, index, types,
+                                        )?;
+                                    }
                                     substitution.insert_type(parameter.clone(), value.clone());
                                 }
                                 severian_universal::GenericParamKind::Dimension => {
@@ -1802,6 +1849,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1814,6 +1862,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1828,6 +1877,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             visit_expression_for_specializations(
@@ -1836,6 +1886,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             visit_expression_for_specializations(
@@ -1844,6 +1895,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1854,6 +1906,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             visit_expression_for_specializations(
@@ -1862,6 +1915,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1872,6 +1926,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1882,6 +1937,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1895,6 +1951,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             visit_expression_for_specializations(
@@ -1903,6 +1960,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1919,6 +1977,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             for bound in [start, end, step].into_iter().flatten() {
@@ -1928,6 +1987,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -1939,6 +1999,7 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1953,6 +2014,7 @@ fn visit_expression_for_specializations(
                 operand_expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -1986,6 +2048,7 @@ fn visit_expression_for_specializations(
                 operand_expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             visit_expression_for_specializations(
@@ -1994,6 +2057,7 @@ fn visit_expression_for_specializations(
                 operand_expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -2007,6 +2071,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -2019,6 +2084,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_expression_for_specializations(
@@ -2027,6 +2093,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -2039,6 +2106,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
             for clause in clauses {
@@ -2048,6 +2116,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 if let Some(condition) = &clause.condition {
@@ -2057,6 +2126,7 @@ fn visit_expression_for_specializations(
                         Some("bool"),
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -2074,6 +2144,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -2084,6 +2155,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 if let Some(condition) = &clause.condition {
@@ -2093,6 +2165,7 @@ fn visit_expression_for_specializations(
                         Some("bool"),
                         names,
                         index,
+                        types,
                         specializations,
                     )?;
                 }
@@ -2106,6 +2179,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
                 visit_expression_for_specializations(
@@ -2114,6 +2188,7 @@ fn visit_expression_for_specializations(
                     None,
                     names,
                     index,
+                    types,
                     specializations,
                 )?;
             }
@@ -2123,6 +2198,7 @@ fn visit_expression_for_specializations(
                 None,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
@@ -2133,12 +2209,58 @@ fn visit_expression_for_specializations(
                 expected,
                 names,
                 index,
+                types,
                 specializations,
             )?;
         }
         severian_ast::ExpressionKind::Literal(_)
         | severian_ast::ExpressionKind::Name(_)
         | severian_ast::ExpressionKind::Symbol(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_explicit_type(
+    annotation: &TypeAnnotation,
+    module: ModuleId,
+    names: &BTreeMap<String, String>,
+    index: &ProgramIndex,
+    types: &severian_universal::TypeContext,
+) -> Result<(), Diagnostic> {
+    match &annotation.kind {
+        TypeAnnotationKind::Named { name, arguments } => {
+            if types.resolve_name(name).is_none()
+                && !names.contains_key(&format!("$type:{name}"))
+                && !names.contains_key(&format!("$dimension:{name}"))
+                && !resolve_path(module, name, index).iter().any(|id| {
+                    matches!(
+                        index.definitions[id].kind,
+                        DefKind::Type | DefKind::Class(_) | DefKind::Trait(_)
+                    )
+                })
+            {
+                return Err(Diagnostic::new(
+                    "E000204", format!("unknown type `{name}`"), Some(annotation.span),
+                ));
+            }
+            for argument in arguments {
+                validate_explicit_type(argument, module, names, index, types)?;
+            }
+        }
+        TypeAnnotationKind::Function { parameters, result } => {
+            for parameter in parameters {
+                validate_explicit_type(parameter, module, names, index, types)?;
+            }
+            validate_explicit_type(result, module, names, index, types)?;
+        }
+        TypeAnnotationKind::Union(members) => {
+            for member in members {
+                validate_explicit_type(member, module, names, index, types)?;
+            }
+        }
+        TypeAnnotationKind::DimensionConstant(_)
+        | TypeAnnotationKind::DimensionRuntime(_)
+        | TypeAnnotationKind::ShapeSpread(_) => {}
     }
     Ok(())
 }

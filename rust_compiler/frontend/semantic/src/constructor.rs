@@ -150,10 +150,19 @@ impl Analyzer<'_> {
             ));
         }
         let declared_result = self.resolve_instantiated_type(&constructor.result, &aliases)?;
-        if declared_result != owner.ty && self.types.resolve_name("unit") != Some(declared_result) {
+        let result_type = if self.types.resolve_name("unit") == Some(declared_result) {
+            owner.ty
+        } else {
+            declared_result
+        };
+        let success_type = self
+            .fallible_types
+            .get(&result_type)
+            .map_or(result_type, |result| result.success);
+        if success_type != owner.ty {
             return Err(Diagnostic::new(
                 "E000221",
-                "a field-initializing constructor must return its class; explicit result-returning constructors are not implemented",
+                "a field-initializing constructor must return its class or a fallible result of its class",
                 Some(constructor.result.span),
             ));
         }
@@ -189,11 +198,7 @@ impl Analyzer<'_> {
                 generic_parameters: Vec::new(),
                 type_parameters: Vec::new(),
                 parameters,
-                result: universal_boundary(
-                    self.types
-                        .resolve_name("unit")
-                        .expect("bootstrap defines unit"),
-                ),
+                result: universal_boundary(result_type),
                 compile_route: severian_universal::CompileRoute::Standard,
                 call_type: CallType::Severian,
                 body: None,
@@ -207,9 +212,9 @@ impl Analyzer<'_> {
                 .push((constructor, function, owner.clone(), aliases, true));
         }
         let arguments = self.apply_parameter_effects(id, values, span);
-        Ok(Expression {
+        let call = Expression {
             id: self.next_id(),
-            type_id: owner.ty,
+            type_id: result_type,
             span,
             kind: ExpressionKind::Call {
                 callee: severian_hir::Callee::Direct {
@@ -220,7 +225,14 @@ impl Analyzer<'_> {
                 arguments,
                 evaluation_order,
             },
-        })
+        };
+        Ok(
+            if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                self.unwrap_fallible_expression(call, fallible, span)
+            } else {
+                call
+            },
+        )
     }
 
     pub(super) fn begin_constructor(
@@ -284,7 +296,8 @@ impl Analyzer<'_> {
         owner: &ClassInstance,
         receiver: BindingId,
         body: &mut Block,
-        bindings: &[Binding],
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
         span: severian_source::Span,
     ) -> Result<(), Diagnostic> {
         let checker = Initialization {
@@ -321,9 +334,93 @@ impl Analyzer<'_> {
             },
             span,
         };
-        constructor_returns(body, &result);
+        let result = if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+            self.fallible_success_expression(result_type, fallible, result, span)?
+        } else {
+            result
+        };
+        constructor_returns(body, &result, &mut |value| {
+            self.check_constructor_result(owner, value, bindings, span)
+        })?;
         body.statements.push(Statement::Return(Some(result)));
         Ok(())
+    }
+
+    fn check_constructor_result(
+        &mut self,
+        owner: &ClassInstance,
+        value: &mut Expression,
+        bindings: &mut Vec<Binding>,
+        span: severian_source::Span,
+    ) -> Result<Option<BindingId>, Diagnostic> {
+        if owner
+            .source_fields
+            .iter()
+            .all(|field| field.constraints.is_empty())
+        {
+            return Ok(None);
+        }
+        let returned = if value.type_id == owner.ty {
+            value
+        } else if let ExpressionKind::Variant {
+            variant: 1, fields, ..
+        } = &mut value.kind
+        {
+            let Some(returned) = fields.first_mut().filter(|field| field.type_id == owner.ty)
+            else {
+                return Ok(None);
+            };
+            returned
+        } else {
+            // An error return has no constructed value to validate.
+            return Ok(None);
+        };
+        // Evaluate an explicit result once before checking its fields. This
+        // also covers factory returns and keeps checks on `return self`.
+        let binding = self.new_binding_id();
+        bindings.push(Binding {
+            id: binding,
+            variable: severian_hir::VariableId(binding.0),
+            type_id: owner.ty,
+            value: returned.clone(),
+            mutable: false,
+            preserve_error: false,
+            span,
+        });
+        let object = Expression {
+            id: self.next_id(),
+            type_id: owner.ty,
+            span,
+            kind: ExpressionKind::Binding(binding),
+        };
+        let previous = self.value_substitutions.clone();
+        let mut fields = Vec::new();
+        for (index, field) in owner.fields.iter().enumerate() {
+            let field_value = Expression {
+                id: self.next_id(),
+                type_id: field.ty,
+                span,
+                kind: ExpressionKind::Field {
+                    object: Box::new(object.clone()),
+                    index: index as u32,
+                },
+            };
+            self.value_substitutions
+                .insert(field.name.clone(), field_value.clone());
+            fields.push(field_value);
+        }
+        let checked = fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, field)| self.validate_field_value(owner, index, field, span))
+            .collect::<Result<Vec<_>, _>>();
+        self.value_substitutions = previous;
+        returned.id = self.next_id();
+        returned.kind = ExpressionKind::Aggregate {
+            class: owner.ty,
+            fields: checked?,
+        };
+        Ok(Some(binding))
     }
 }
 
@@ -479,14 +576,11 @@ impl Initialization<'_> {
                     }
                 }
                 Statement::Return(value) => {
-                    if value.is_some() {
-                        return Err(Diagnostic::new(
-                            "E000221",
-                            "a constructor cannot return an explicit value",
-                            Some(self.span),
-                        ));
+                    if let Some(value) = value {
+                        self.expression(value, &initialized)?;
+                    } else {
+                        self.complete(&initialized)?;
                     }
-                    self.complete(&initialized)?;
                     return Ok(None);
                 }
                 Statement::Sequence(body) | Statement::Placement { body, .. } => {
@@ -560,34 +654,49 @@ fn merge(left: Option<BTreeSet<u32>>, right: Option<BTreeSet<u32>>) -> Option<BT
     }
 }
 
-fn constructor_returns(body: &mut Block, result: &Expression) {
+fn constructor_returns(
+    body: &mut Block,
+    result: &Expression,
+    check: &mut impl FnMut(&mut Expression) -> Result<Option<BindingId>, Diagnostic>,
+) -> Result<(), Diagnostic> {
     for statement in &mut body.statements {
         match statement {
-            Statement::Return(value) => *value = Some(result.clone()),
+            Statement::Return(value) if value.is_none() => *value = Some(result.clone()),
+            Statement::Return(Some(value)) => {
+                if let Some(binding) = check(value)? {
+                    *statement = Statement::Sequence(Block {
+                        statements: vec![
+                            Statement::Binding(binding),
+                            Statement::Return(Some(value.clone())),
+                        ],
+                    });
+                }
+            }
             Statement::Sequence(body)
             | Statement::Placement { body, .. }
             | Statement::While { body, .. }
-            | Statement::ExpectThrow { body, .. } => constructor_returns(body, result),
+            | Statement::ExpectThrow { body, .. } => constructor_returns(body, result, check)?,
             Statement::If {
                 then_block,
                 else_block,
                 ..
             } => {
-                constructor_returns(then_block, result);
-                constructor_returns(else_block, result);
+                constructor_returns(then_block, result, check)?;
+                constructor_returns(else_block, result, check)?;
             }
             Statement::Try {
                 body, catch_body, ..
             } => {
-                constructor_returns(body, result);
-                constructor_returns(catch_body, result);
+                constructor_returns(body, result, check)?;
+                constructor_returns(catch_body, result, check)?;
             }
             Statement::Match { arms, .. } => {
                 for arm in arms {
-                    constructor_returns(&mut arm.body, result);
+                    constructor_returns(&mut arm.body, result, check)?;
                 }
             }
             _ => {}
         }
     }
+    Ok(())
 }

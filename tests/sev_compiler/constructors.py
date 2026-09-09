@@ -7,6 +7,67 @@ from bootstrap_mlir import ROOT, SEED, run
 
 def constructor_gates(directory):
     accepted = {
+        "constructor_result_constraints": ('''class Positive:
+    value: i32 { value < 0 -> Error("negative") }
+    def Positive(input: i32) -> Self | Error:
+        value = input
+        return self
+
+def argument() -> i32:
+    print("once")
+    return 3
+
+def main():
+    assert(Positive(argument()).value == 3)
+    rejected := false
+    try:
+        unused = Positive(-1)
+    catch error:
+        rejected = true
+    assert(rejected)
+''', "once\n"),
+        "constructor_explicit_result": ('''class Number:
+    value: i32
+    def Number(input: i32) -> Self:
+        if input < 0:
+            return Number(-input)
+        value = input
+        return self
+
+def main():
+    assert(Number(-7).value == 7)
+    assert(Number(4).value == 4)
+''', ""),
+        "constructor_fallible_result": ('''class Checked:
+    value: i32
+    def Checked(input: i32) -> Self | Error:
+        if input < 0:
+            throw Error("negative")
+        if input == 99:
+            return error(Error("explicit error"))
+        value = input
+        if input == 0:
+            return
+        if input == 7:
+            return self
+
+def main():
+    assert(Checked(7).value == 7)
+    assert(Checked(0).value == 0)
+    assert(Checked(8).value == 8)
+    rejected := false
+    try:
+        unused = Checked(-1)
+    catch error:
+        rejected = true
+    assert(rejected)
+    rejected = false
+    try:
+        unused = Checked(99)
+    catch error:
+        rejected = true
+    assert(rejected)
+''', ""),
         "constructor_body": ('''class Counter:
     value: i32
     calls: i32 = 0
@@ -185,6 +246,7 @@ def main():
         "loop_missing": ("while input:\n            value = 1\n            break", "", "uninitialized field `value`"),
         "early_return": ("if input:\n            return\n        value = 1", "", "uninitialized field `value`"),
         "escape": ("copy = self\n        value = 1", "", "uninitialized field `value`"),
+        "explicit_return": ("return self", "", "uninitialized field `value`"),
     }
     for name, (body, extra, diagnostic) in rejected.items():
         subject = directory / ("constructor_reject_" + name + ".sev")
@@ -195,7 +257,10 @@ def main():
 
     for name, source, diagnostic in [
         ("ambiguous", "class Ambiguous:\n    value: i32\n    def Ambiguous(a: i32):\n        value = 1\n    def Ambiguous(b: i32):\n        value = 2\ndef main():\n    x = Ambiguous(i32(3))\n", "ambiguous constructor call"),
+        ("named_crossed", "class Ambiguous:\n    value: i32\n    def Ambiguous(a: i32, b: i32):\n        value = 1\n    def Ambiguous(b: i64, a: i16):\n        value = 2\ndef main():\n    x = Ambiguous(a=i16(3), b=i32(4))\n", "ambiguous constructor call"),
         ("wrong_result", "class Checked:\n    value: i32\n    def Checked() -> i32:\n        value = 1\ndef main():\n    x = Checked()\n", "field-initializing constructor must return its class"),
+        ("wrong_generic_result", "class Box[T]:\n    value: T\ndef main():\n    value: Box[float] = Box[int](1)\n", "does not satisfy expected type"),
+        ("fallible_uninitialized", "class Checked:\n    value: i32\n    def Checked() -> Self | Error:\n        return self\ndef main():\n    x = Checked()\n", "uninitialized field `value`"),
         ("no_match", "class Checked:\n    value: i32\n    def Checked(input: i32):\n        value = input\ndef main():\n    x = Checked(\"wrong\")\n", "no overload accepting"),
     ]:
         subject = directory / ("constructor_" + name + ".sev")

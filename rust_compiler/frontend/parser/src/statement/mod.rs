@@ -94,6 +94,7 @@ struct Parser<'a> {
     tokens: &'a [Token],
     cursor: usize,
     continuation_indents: usize,
+    context_alias: Option<usize>,
     operators: BTreeMap<OperatorSyntax, ParserOperator>,
 }
 
@@ -109,6 +110,7 @@ impl Parser<'_> {
             tokens,
             cursor: 0,
             continuation_indents: 0,
+            context_alias: None,
             operators: source_operator_table(tokens),
         }
     }
@@ -473,7 +475,9 @@ impl Parser<'_> {
         if !self
             .tokens
             .get(self.cursor + 2)
-            .is_some_and(|token| token.kind == TokenKind::Colon)
+            .is_some_and(|token| {
+                matches!(token.kind, TokenKind::Colon | TokenKind::Newline | TokenKind::Eof)
+            })
         {
             return Ok(None);
         }
@@ -1427,7 +1431,30 @@ impl Parser<'_> {
                     span: Span::new(start.source, start.start, end),
                 });
             }
-            let resource = self.expression(0)?;
+            // The outer `as` binds the resource. Casts inside parentheses or
+            // call arguments still belong to the resource expression.
+            let previous_alias = self.context_alias;
+            let mut depth = 0usize;
+            self.context_alias = None;
+            for (offset, token) in self.tokens[self.cursor..].iter().enumerate() {
+                match &token.kind {
+                    TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => {
+                        depth += 1;
+                    }
+                    TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
+                        depth = depth.saturating_sub(1);
+                    }
+                    TokenKind::Identifier(name) if depth == 0 && name == "as" => {
+                        self.context_alias = Some(self.cursor + offset);
+                        break;
+                    }
+                    TokenKind::Colon | TokenKind::Newline | TokenKind::Eof if depth == 0 => break,
+                    _ => {}
+                }
+            }
+            let resource = self.expression(0);
+            self.context_alias = previous_alias;
+            let resource = resource?;
             if !self.at_identifier("as") {
                 return Err(self.error("expected `as` after context expression"));
             }
@@ -2304,6 +2331,7 @@ impl Parser<'_> {
             return Ok((Vec::new(), Vec::new()));
         }
         self.next();
+        while self.take(&TokenKind::Newline).is_some() {}
         if !self.at(&TokenKind::LeftBrace) {
             return Ok((
                 vec![GenericConstraint::Predicate(self.expression(0)?)],
@@ -3127,6 +3155,7 @@ impl Parser<'_> {
             tokens: self.tokens,
             cursor: self.cursor,
             continuation_indents: self.continuation_indents,
+            context_alias: self.context_alias,
             operators: self.operators.clone(),
         };
         trial.type_annotation().is_ok()
@@ -3145,6 +3174,9 @@ impl Parser<'_> {
             const SYMBOL_PACK_PRECEDENCE: u8 = 8;
             const CAST_PRECEDENCE: u8 = 9;
             if self.at_identifier("as") {
+                if self.context_alias == Some(self.cursor) {
+                    break;
+                }
                 if CAST_PRECEDENCE < minimum_precedence {
                     break;
                 }

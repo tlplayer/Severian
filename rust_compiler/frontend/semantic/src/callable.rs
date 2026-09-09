@@ -187,7 +187,7 @@ impl Analyzer<'_> {
                 .definition(success_type)
                 .is_some_and(|definition| definition.name == "None");
         let falls_through = block_flow(ast_body) == ControlFlow::FallsThrough;
-        if !allows_fallthrough && falls_through {
+        if constructor.is_none() && !allows_fallthrough && falls_through {
             return Err(Diagnostic::new(
                 "E000209",
                 "not every path in this function returns its declared result",
@@ -205,7 +205,11 @@ impl Analyzer<'_> {
                 self.default_expression(result_type, ast_function.span)?,
             )));
         }
-        if allows_fallthrough && falls_through && self.fallible_types.contains_key(&result_type) {
+        if constructor.is_none()
+            && allows_fallthrough
+            && falls_through
+            && self.fallible_types.contains_key(&result_type)
+        {
             body.statements.push(self.statement(
                 &AstStatement::Return {
                     value: None,
@@ -214,6 +218,11 @@ impl Analyzer<'_> {
                 bindings,
                 result_type,
             )?);
+        }
+        if let (Some(owner), Some((receiver, _))) = (constructor, constructor_storage) {
+            self.finish_constructor(
+                owner, receiver, &mut body, bindings, result_type, ast_function.span,
+            )?;
         }
         if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
             let catch_binding = self.new_binding_id();
@@ -261,10 +270,6 @@ impl Analyzer<'_> {
                     span: ast_function.span,
                 }],
             };
-        }
-        if let (Some(owner), Some((receiver, _))) = (constructor, constructor_storage) {
-            self.finish_constructor(owner, receiver, &mut body, bindings, ast_function.span)?;
-            function.result = universal_boundary(owner.ty);
         }
         let effects = function
             .parameters

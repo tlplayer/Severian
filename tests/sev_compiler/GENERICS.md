@@ -35,7 +35,16 @@ Implemented and covered:
 - Constructor overloads use parameter types and conversion ranks, prefer concrete
   overloads over equally ranked generic fallbacks, and diagnose ambiguity and
   missing matches. Named/default arguments retain source evaluation order, and
-  supplied arguments execute once.
+  supplied arguments execute once. Keyword conversion ranks are compared in
+  source argument order even when overloads declare parameters in different orders.
+- Seed constructors support explicit `Self` returns and `Self | Error` results,
+  including bare returns, fallthrough, factory returns, `throw`, and explicit
+  `return error(...)`. Successful explicit results retain field constraints and
+  are evaluated once; error exits do not require complete initialization.
+  Constraint failures retain typed error values through the catch boundary.
+- Seed specialization discovery resolves explicit type arguments before using
+  them as inference evidence. Constructor expected-type checking uses structural
+  assignability and rejects substitution of a different nominal specialization.
 - Seed ownership validation includes parameter types alongside local bindings;
   parameter array writes still respect active slice loans. Missing binding
   metadata is diagnosed instead of panicking.
@@ -63,14 +72,17 @@ Still required to complete the broader migration:
   generic methods/operators and record trait implementations, borrowed receivers,
   and complete capability checking
   of generic class bodies. Current record specialization is a type-argument subset.
-- Constructors with explicit result-returning/fallible signatures, together with
-  the general generic-body capability checking described above. The implemented
-  constructor path initializes and returns its declared class.
+- Source-compiler constructor bodies and fallible constructor execution, together
+  with the general generic-body capability checking described above. Seed support
+  does not establish these capabilities in the source compiler.
 - Arbitrary owned collection elements, initialized-element tracking, move/drop
   behavior during growth and removal, and loans that prevent invalidating mutation.
 - Migration of compiler consumers to the canonical collection implementations.
 
-The new focused semantic/ownership tests and native gates do not imply completion
-of these remaining stages. The broader semantic suite currently has ten failures
-that also reproduce at the unchanged baseline; run with `RUST_MIN_STACK=33554432`
-to avoid its existing test-thread stack overflow.
+These gates do not imply completion of the remaining stages. Seven of the ten
+baseline Rust semantic failures are fixed: multiline contracts, bodyless hook
+signatures, union overload ranking, unresolved explicit type arguments, and the
+two structural tensor constructor cases. The three remaining tests disagree with
+the current integer-to-float conversion policy (`lossy` versus implicit
+`promote`); that language-policy decision is pending. Run semantic tests with
+`RUST_MIN_STACK=33554432` to avoid test-thread stack overflow.

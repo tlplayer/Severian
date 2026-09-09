@@ -4074,6 +4074,7 @@ impl Analyzer<'_> {
                             Some(self.expression(value, Some(result_type))?)
                         }
                     }
+                    None if self.active_constructor => None,
                     None if result_type != unit => {
                         if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
                             if fallible.success == unit {
@@ -10222,7 +10223,7 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let mut instance = if type_arguments.is_empty() {
+        let instance = if type_arguments.is_empty() {
             self.class_instances
                 .get(&(class.to_owned(), Vec::new()))
                 .cloned()
@@ -10231,24 +10232,16 @@ impl Analyzer<'_> {
         } else {
             self.instantiate_class(class, type_arguments, span)?
         };
-        if let Some(expected) = expected.filter(|expected| *expected != instance.ty
-            && !self.union_types.get(expected).is_some_and(|members| members.contains(&instance.ty))) {
-            if let Some(expected_instance) = self
-                .class_instances_by_type
-                .get(&expected)
-                .filter(|expected_instance| expected_instance.name == instance.name)
-                .cloned()
-            {
-                instance = expected_instance;
-            } else {
-                return Err(semantic_error(
-                    format!(
-                        "constructed class `{}` ({:?}) does not satisfy expected type {:?}",
-                        instance.name, instance.ty, expected
-                    ),
-                    span,
-                ));
-            }
+        if let Some(expected) =
+            expected.filter(|expected| !self.accepts_expression_type(instance.ty, *expected))
+        {
+            return Err(semantic_error(
+                format!(
+                    "constructed class `{}` ({:?}) does not satisfy expected type {:?}",
+                    instance.name, instance.ty, expected
+                ),
+                span,
+            ));
         }
         if instance.name.rsplit('.').next() == Some("char") {
             let [argument] = arguments else {
@@ -15057,7 +15050,7 @@ impl Analyzer<'_> {
         result: TypeId,
         span: severian_source::Span,
     ) -> Expression {
-        let error = self.string_expression(message, span);
+        let error = self.core_error_expression(message, span);
         Expression {
             id: self.next_id(),
             type_id: result,
@@ -15147,25 +15140,18 @@ impl Analyzer<'_> {
                 let condition = self.expression(&constraint.condition, Some(boolean))?;
                 let failure = match constraint.failure.as_ref() {
                     Some(failure) => {
-                        let error_message = match &failure.kind {
-                            AstExpressionKind::Call { callee, arguments }
-                                if callable_path(callee).as_deref() == Some("Error") =>
-                            {
-                                arguments.first().map(|argument| &argument.value)
-                            }
-                            _ => None,
-                        };
-                        let error = if let Some(message) = error_message {
-                            let string = self
-                                .types
-                                .resolve_name("string")
-                                .expect("bootstrap defines string");
-                            self.expression(message, Some(string))?
-                        } else if let Some(inlined) = self.inline_source_call(failure, None)? {
+                        let error = if let Some(inlined) = self.inline_source_call(failure, None)? {
                             inlined
                         } else {
                             self.expression(failure, None)?
                         };
+                        if !self.is_error_type(error.type_id) {
+                            return Err(Diagnostic::new(
+                                "E000215",
+                                "a field constraint must produce an error value",
+                                Some(failure.span),
+                            ));
+                        }
                         Some(error)
                     }
                     None => None,
@@ -15196,7 +15182,7 @@ impl Analyzer<'_> {
                 condition
             };
             let error = failure.unwrap_or_else(|| {
-                self.string_expression(
+                self.core_error_expression(
                     format!("constraint failed for `{}.{field_name}`", instance.name),
                     constraint_span,
                 )
@@ -15651,7 +15637,18 @@ impl Analyzer<'_> {
                 resolved.push(self.resolved_list_expression(element, values, span)?);
             }
         }
-        Ok(Some((resolved, conversions, evaluation_order)))
+        // Compare each supplied argument across overloads in source order.
+        // Parameter order can differ between declarations when keywords are
+        // used; comparing those positions can select a dominated overload.
+        let mut ordered_conversions = Vec::with_capacity(conversions.len());
+        for index in &evaluation_order {
+            if *index < fixed {
+                ordered_conversions.push(conversions[*index]);
+            } else {
+                ordered_conversions.extend_from_slice(&conversions[fixed..]);
+            }
+        }
+        Ok(Some((resolved, ordered_conversions, evaluation_order)))
     }
 
     fn resolve_parameter_argument(
@@ -15685,7 +15682,7 @@ impl Analyzer<'_> {
         };
         let conversion = if matches!(
             value.kind,
-            ExpressionKind::Aggregate { class, .. }
+            ExpressionKind::Variant { class, .. }
                 if class == expected && self.union_types.contains_key(&class)
         ) {
             ConversionRank::General
