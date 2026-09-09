@@ -130,6 +130,16 @@ def __buffer_store[T](value: T, values: list[T], position: index)
 @mlir("memref.dim")
 def __buffer_dimension[T](values: list[T], axis: index) -> index
 
+extend list[T]:
+    def append(value: T):
+        count = __list_size(__buffer_dimension(self, 0))
+        assert(count < 9223372036854775807)
+        result: list[T] = __buffer_allocate(__list_index(count + 1))
+        for position in range(count):
+            __buffer_store(__buffer_load(self, __list_index(position)), result, __list_index(position))
+        __buffer_store(value, result, __list_index(count))
+        self = result
+
 operator list_create[T](size: int, exemplar: T) -> list[T]:
     assert(size >= 0)
     return __buffer_allocate(__list_index(size))

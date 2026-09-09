@@ -130,6 +130,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             return callable_hint(state, operand)
         case Slice:
             return callable_hint(state, object)
+        case Subscript:
+            return callable_expression(state, expression, universal.TypeId(0)).type_id
         case Binary:
             if grammar_scalar.comparison(state.declarations, operator.symbol):
                 return universal.TypeId(1)
@@ -488,6 +490,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         return error(callable_diagnostic("an integer cannot initialize unit", expression.span))
                     if result_type.index == 3 or result_type.index == 132 or result_type.index == 5 or result_type.index == 6:
                         return error(callable_diagnostic("integer cannot initialize text or char", expression.span))
+                    if scalar.scalar_representation(result_type) not in ["integer", "index"]:
+                        return error(callable_diagnostic("integer literal does not match expected type", expression.span))
                     storage ?= scalar.scalar_type(result_type)
                     if storage != None:
                         if conversions.scalar_numeric(result_type):
@@ -792,8 +796,29 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 supplied = [universal.CallArgument(None, receiver, receiver.span)]
                 for argument in arguments:
                     supplied.append(argument)
-                target = universal.Expression(universal.Name(method.name), callee.span)
-                return callable_expression(state, universal.Expression(universal.Call(target, supplied), expression.span), expected)
+                if not method.extension:
+                    target = universal.Expression(universal.Name(method.name), callee.span)
+                    return callable_expression(state, universal.Expression(universal.Call(target, supplied), expression.span), expected)
+                bound = packs.bind_arguments(method, supplied)
+                if bound.message != "":
+                    return error(callable_diagnostic(bound.message, expression.span))
+                resolved: list[universal.CallArgument] = []
+                for argument in bound.arguments:
+                    index := 0
+                    for parameter in method.parameters:
+                        if argument.name == parameter.name:
+                            operand = callable_expression(state, argument.value, method.parameter_types[index])
+                            resolved.append(universal.CallArgument(parameter.name, operand, argument.span))
+                        index += 1
+                id = universal.HirId(u32(state.next_id[0]))
+                state.next_id[0] += 1
+                kind = universal.ResolvedCall(universal.Direct(method.definition, universal.Substitution(method.type_arguments)), resolved)
+                result := universal.Expression(kind, expression.span, id, method.result_type)
+                if expected.index != 0 and expected.index != result.type_id.index:
+                    result = callable_success(state, result)
+                    if expected.index != result.type_id.index:
+                        return error(callable_diagnostic("call result does not match its expected scalar type", expression.span))
+                return result
             target ?= scalar.scalar_type_name(name)
             if target != None:
                 if conversions.scalar_numeric(target):
@@ -1203,6 +1228,8 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
         parameter_types.append(type_id)
         typed_parameters.append(parameter)
     declaration.parameters = typed_parameters
+    if declaration.extension and len(parameter_types) != 0:
+        declaration.owner_type = parameter_types[0]
     result_type := universal.TypeId(2)
     annotation ?= declaration.result
     if annotation != None:
@@ -1262,7 +1289,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     tagged.layouts(state.records)
     callable_register_aliases(state)
     for implementation in state.declarations.implementations:
-        if not implementation.extension or len(implementation.methods) == 0:
+        if not implementation.extension or len(implementation.methods) == 0 or len(implementation.type_parameters) != 0:
             continue
         owners = definitions.family_members(state.declarations, universal.named_type(implementation.name, [], implementation.span), state.records, implementation.lookup)
         for owner in owners:
@@ -1531,7 +1558,27 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
             for function in state.functions:
                 if function.name == record.name + "." + member:
                     return CallableOptionalFunction(function)
-    return CallableOptionalFunction()
+    selected: universal.FunctionDeclaration | None := None
+    for template in state.generics:
+        if not template.extension or template.name.split(".")[-1] != member or owner.index == 0:
+            continue
+        actuals: list[universal.TypeId] = []
+        for parameter in template.type_parameters:
+            actuals.append(universal.TypeId(0))
+        namespace := ""
+        lookup ?= template.lookup
+        if lookup != None:
+            namespace = lookup
+        inferred ?= callable_infer_annotation(state, template.parameters[0].annotation, owner, template.type_parameters, actuals, namespace)
+        if inferred is Diagnostic:
+            continue
+        candidate = callable_specialize_generic(state, template, actuals)
+        if candidate.parameter_types[0].index != owner.index:
+            continue
+        if selected != None:
+            return error(callable_diagnostic("ambiguous extension method " + member, callee.span))
+        selected = candidate
+    return CallableOptionalFunction(selected)
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
@@ -1666,7 +1713,7 @@ def callable_replace_signature(function: universal.FunctionDeclaration, names: l
     annotation ?= function.result
     if annotation != None:
         result = definitions.replace_annotation(annotation, names, replacements)
-    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition)
+    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension)
 
 
 def callable_register_aliases(state: CallableAnalysis) -> unit | diagnostics.Diagnostic:
@@ -1742,6 +1789,31 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             return error(diagnostics.diagnostic_at("E000212", "ambiguous operator implementation " + syntax.symbol, operation.span))
                 state.functions.append(signature)
             case Record:
+                if declaration.extension and len(declaration.type_parameters) != 0:
+                    if len(declaration.fields) != 0 or len(declaration.operators) != 0 or len(declaration.traits) != 0:
+                        return error(callable_diagnostic("generic extensions currently declare methods", declaration.span))
+                    type_arguments: list[universal.TypeAnnotation] = []
+                    for parameter in declaration.type_parameters:
+                        type_arguments.append(universal.named_type(parameter, [], declaration.span))
+                    receiver = universal.named_type(declaration.name, type_arguments, declaration.span)
+                    for method in declaration.methods:
+                        function := callable_replace_signature(method, ["Self"], [receiver])
+                        function.name = declaration.lookup + "$extension$" + string(ordinal) + "." + method.name
+                        ordinal += 1
+                        function.extension = true
+                        function.lookup = declaration.lookup
+                        function.type_parameters = declaration.type_parameters[:]
+                        function.constraints = declaration.constraints[:]
+                        for constraint in method.constraints:
+                            function.constraints.append(constraint)
+                        if len(method.type_parameters) != 0:
+                            return error(callable_diagnostic("generic extension method parameters require call argument inference", method.span))
+                        parameters = [universal.FunctionParameter("self", receiver, None, declaration.span)]
+                        for parameter in function.parameters:
+                            parameters.append(parameter)
+                        function.parameters = parameters
+                        callable_register_generic(state, function)
+                    continue
                 owners: list[universal.TypeId] := []
                 if declaration.extension or definitions.alias_named(state.declarations, declaration.name, declaration.lookup) != None:
                     owners = definitions.family_members(state.declarations, universal.named_type(declaration.name, [], declaration.span), state.records, declaration.lookup)
@@ -1806,6 +1878,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             function := callable_replace_signature(method, ["Self"], [receiver_type])
                             function.name = definitions.type_name(owner, state.records) + "." + method.name
                             function.owner_type = owner
+                            function.extension = true
                             function.lookup = declaration.lookup
                             parameters = [universal.FunctionParameter("self", receiver_type, None, declaration.span)]
                             for parameter in function.parameters:
@@ -2034,6 +2107,8 @@ def callable_satisfies(state: CallableAnalysis, type_id: universal.TypeId, trait
 
 def callable_validate_implementations(state: CallableAnalysis) -> unit | diagnostics.Diagnostic:
     for declaration in state.declarations.implementations:
+        if declaration.extension and len(declaration.type_parameters) != 0:
+            continue
         owners: list[universal.TypeId] := []
         if declaration.extension or definitions.alias_named(state.declarations, declaration.name, declaration.lookup) != None:
             owners = definitions.family_members(state.declarations, universal.named_type(declaration.name, [], declaration.span), state.records, declaration.lookup)

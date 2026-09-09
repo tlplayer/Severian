@@ -309,6 +309,20 @@ compares elements. Both `!` and `not` negate booleans; `not in` negates membersh
 While initializers run once in the loop's enclosing scope. Statements after a
 direct `break` or `continue` are omitted from executable output.
 
+`python3 tests/sev_compiler/list_growth.py` checks the unchanged declaration,
+instruction, argument, and node generic examples (`12`, `16`, `18`, and `24`).
+`append` is an ordinary `extend list[T]` method in
+`universal/primitive/collections.sev`. It allocates a replacement buffer, copies
+the elements, and assigns the result to its receiver. Growth currently costs
+O(n); existing aliases retain the previous buffer when that binding is replaced.
+Generic extension receiver types are inferred through aliases and record
+applications. Buffer receiver bodies are expanded at the call site before SSA
+promotion, preserving allocation lifetimes across assignments, returns, and
+loops. Recursive buffer receiver calls and replacement of buffer fields inside
+records remain diagnosed until their reference ABI and aggregate ownership are
+supported. The gate also checks source-provider renaming, keyword evaluation
+order, AddressSanitizer results, and balanced allocations.
+
 The acceptance runner uses these existing files unchanged:
 
 | Example | Mode | Coverage |

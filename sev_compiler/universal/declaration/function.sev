@@ -79,6 +79,7 @@ class FunctionDeclaration:
     lookup: string | None = None
     operator_syntax: OperatorSyntax | None = None
     owner_type: TypeId = TypeId(0)
+    extension: bool = false
     template: DefId | None = None
     type_arguments: list[TypeBinding] = []
     pack_specialization: bool = false

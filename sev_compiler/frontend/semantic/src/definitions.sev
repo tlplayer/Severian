@@ -383,9 +383,16 @@ def family_members(definitions: SemanticDefinitions, annotation: universal.TypeA
                     return error(diagnostics.diagnostic_at("E000205", "cyclic type family " + alias.name, annotation.span))
                 target ?= alias.definition
                 if target != None:
+                    if len(alias.type_parameters) != len(arguments):
+                        return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
+                    replacements: list[universal.TypeAnnotation] = []
+                    for argument in arguments:
+                        actual = type_annotation(definitions, argument, records, namespace, active)
+                        replacements.append(universal.named_type(type_name(actual, records), [], argument.span))
+                    substituted = replace_annotation(target, alias.type_parameters, replacements)
                     path = active[:]
                     path.append(alias.name)
-                    return family_members(definitions, target, records, alias.lookup, path)
+                    return family_members(definitions, substituted, records, alias.lookup, path)
     return [type_annotation(definitions, annotation, records, namespace)]
 
 
