@@ -33,6 +33,7 @@ members = [
     "model/neuralnet",
     "network",
     "path",
+    "package",
     "time",
     "process",
     "environment",

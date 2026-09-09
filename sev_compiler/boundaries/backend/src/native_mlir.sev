@@ -18,7 +18,7 @@ def run_tool(arguments: list[string]):
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string):
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false):
     run_tool(["mkdir", "-p", path.dirname(output)])
     if file.write(output + ".mlir", mlir) != 0:
         throw Error("could not write MLIR artifact")
@@ -27,7 +27,15 @@ def emit_native(mlir: string, output: string):
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
     run_tool([opt, output + ".mlir", "--verify-each", "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership", "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", output + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", output + ".llvm.mlir", "-o", output + ".ll"])
-    run_tool([clang, output + ".ll", "-o", output])
+    arguments = [clang, output + ".ll", "-o", output, "-O" + string(optimization)]
+    if debug_symbols:
+        arguments.append("-g")
+    if strip:
+        arguments.append("-s")
+    if lto:
+        arguments.append("-flto")
+        arguments.append("-fuse-ld=lld")
+    run_tool(arguments)
 
 
 def execute_native(executable: string, arguments: list[string]) -> int:

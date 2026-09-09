@@ -1,0 +1,39 @@
+import package
+import source
+import "pipeline/source.sev" as pipeline
+import "../../backend/src/native_mlir.sev" as backend
+
+# This private entry consumes the package library's immutable resolved graph.
+# It performs one compilation unit and never discovers or resolves packages.
+def compile_package_unit(arguments: list[string]) -> unit | Error:
+    if len(arguments) != 10:
+        throw Error("invalid compilation-unit protocol arguments")
+    if arguments[8] != "host":
+        throw Error("source compiler currently supports only the host platform")
+    resolution = package.decode_resolution(package.read_text(arguments[6]))
+    emit = arguments[4]
+    files: list[source.SourceFile] = []
+    text = pipeline.compile_to_mlir(source.load(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files)
+    if emit == "check":
+        return
+    if emit == "sources":
+        paths: list[string] = []
+        for file in files:
+            paths.append(file.path)
+        package.write_text(arguments[3], paths.join("\n"))
+        return
+    if emit != "":
+        package.write_text(arguments[3], text)
+    else:
+        entries = resolution.packages[0].manifest.entries
+        profile = arguments[9]
+        if profile not in ["dev", "release"]:
+            throw Error("unsupported compiler profile: " + profile)
+        table = "profile." + profile
+        optimization = int(package.setting(entries, table, "opt-level", "3" if profile == "release" else "0"))
+        if optimization < 0 or optimization > 3:
+            throw Error("profile opt-level must be between 0 and 3")
+        debug_symbols = package.setting(entries, table, "debug-symbols", "false" if profile == "release" else "true") == "true"
+        strip = package.setting(entries, table, "strip", "true" if profile == "release" else "false") == "true"
+        lto = package.setting(entries, table, "lto", "true" if profile == "release" else "false") == "true"
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto)

@@ -1,0 +1,49 @@
+import "model.sev"
+import "host.sev"
+import "manifest.sev"
+import "edit.sev"
+import path
+
+# A versioned compilation-unit protocol keeps package orchestration independent
+# of the concrete compiler and does not recursively invoke package commands.
+def encode_resolution(resolution: Resolution) -> string:
+    text := "format = 1\n"
+    for resolved in resolution.packages:
+        text += "\n[[package]]\nname = " + toml_quote(resolved.identity.name) + "\nversion = " + toml_quote(resolved.identity.version) + "\nsource = " + toml_quote(resolved.identity.source) + "\nroot = " + toml_quote(resolved.root) + "\nchecksum = " + toml_quote(resolved.checksum) + "\nmanifest = " + toml_quote(render_manifest(resolved.manifest.entries)) + "\n"
+    for edge in resolution.edges:
+        text += "\n[[edge]]\nparent = " + string(edge.parent) + "\nchild = " + string(edge.child) + "\nalias = " + toml_quote(edge.alias) + "\ndevelopment = " + ("true" if edge.development else "false") + "\n"
+    return text
+
+def decode_resolution(text: string) -> Resolution | Error:
+    entries = parse_document(text)
+    if setting(entries, "", "format") != "1":
+        throw Error("unsupported compilation graph format")
+    packages: list[ResolvedPackage] = []
+    edges: list[DependencyEdge] = []
+    seen: list[string] = []
+    for entry in entries:
+        table = entry.table
+        if table in seen:
+            continue
+        seen.append(table)
+        if table.starts_with("package."):
+            identity = PackageIdentity(text_setting(entries, table, "name"), text_setting(entries, table, "version"), text_setting(entries, table, "source"))
+            packages.append(ResolvedPackage(identity, text_setting(entries, table, "root"), parse_manifest(text_setting(entries, table, "manifest")), text_setting(entries, table, "checksum")))
+        elif table.starts_with("edge."):
+            edges.append(DependencyEdge(int(setting(entries, table, "parent")), int(setting(entries, table, "child")), text_setting(entries, table, "alias"), setting(entries, table, "development") == "true"))
+    for edge in edges:
+        if edge.parent < 0 or edge.child < 0 or edge.parent >= int(len(packages)) or edge.child >= int(len(packages)):
+            throw Error("compilation graph edge has an invalid package identity")
+    return Resolution(packages, edges, "")
+
+def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string) -> Artifact | Error:
+    if unit.output != "":
+        mkdir(path.dirname(unit.output))
+    stage = temporary("/tmp")
+    write_text(stage + "/resolution.toml", encode_resolution(resolution))
+    input = inside(resolution.packages[unit.package_index].root, unit.target.path)
+    status = command([compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile])
+    remove_tree(stage)
+    if status != 0:
+        throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
+    return Artifact(unit.target, unit.platform, unit.profile, emit if emit != "" else "native", unit.output)

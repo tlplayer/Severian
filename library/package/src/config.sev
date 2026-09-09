@@ -1,0 +1,60 @@
+import "model.sev"
+
+class Option:
+    path: string
+    kind: string
+    default: string
+    values: list[string]
+
+# Source representation of the bootstrap configuration catalog.
+def default_catalog() -> list[Option]:
+    return [
+        Option("language.type-safe", "bool", "true", []),
+        Option("build.profile", "enum", "dev", ["dev", "release"]),
+        Option("build.target", "string", "host", []),
+        Option("build.incremental", "bool", "true", []),
+        Option("diagnostics.mode", "enum", "user", ["user", "developer"]),
+        Option("diagnostics.message-format", "enum", "text", ["text", "json"]),
+        Option("diagnostics.max-errors", "integer", "5", []),
+        Option("diagnostics.verify-each", "bool", "false", []),
+        Option("profile.dev.opt-level", "integer", "0", []),
+        Option("profile.dev.debug-symbols", "bool", "true", []),
+        Option("profile.dev.strip", "bool", "false", []),
+        Option("profile.dev.lto", "bool", "false", []),
+        Option("profile.release.opt-level", "integer", "3", []),
+        Option("profile.release.debug-symbols", "bool", "false", []),
+        Option("profile.release.strip", "bool", "true", []),
+        Option("profile.release.lto", "bool", "true", []),
+        Option("test.coverage-min", "integer", "0", []),
+        Option("test.memory-max", "string", "4GB", []),
+        Option("test.leaks", "enum", "deny", ["allow", "warn", "deny"]),
+        Option("publish.registry", "string", "default", []),
+        Option("publish.include-source", "bool", "true", []),
+        Option("publish.include-interface", "bool", "true", []),
+    ]
+
+def validate_configuration(entries: list[Entry]) -> unit | Error:
+    catalog = default_catalog()
+    for entry in entries:
+        if entry.table not in ["build", "language", "diagnostics", "test", "publish"] and not entry.table.starts_with("profile."):
+            continue
+        key = entry.table + "." + entry.key
+        found := false
+        for option in catalog:
+            if option.path != key:
+                continue
+            found = true
+            value = entry.value
+            if option.kind == "bool" and value not in ["true", "false"]:
+                throw Error("configuration requires a boolean: " + key)
+            if option.kind == "integer":
+                for digit in value.characters():
+                    if not "0123456789".contains(string(digit)):
+                        throw Error("configuration requires a nonnegative integer: " + key)
+            if option.kind == "string" or option.kind == "enum":
+                if not value.starts_with("\"") or not value.ends_with("\""):
+                    throw Error("configuration requires a string: " + key)
+                if option.kind == "enum" and value[1:int(len(value)) - 1] not in option.values:
+                    throw Error("unsupported configuration value for " + key)
+        if not found:
+            throw Error("unknown compiler configuration option: " + key)

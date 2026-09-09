@@ -18,7 +18,7 @@ libraries. Linking it into a directory on PATH makes subsequent `sev build`
 results immediately available as `sev_compiler`. The Rust seed remains `sev`.
 Direct executable invocation accepts `--sysroot /path/to/Severian`, or reads
 `SEVERIAN_SYSROOT`; its fallback `..` supports invocation from this package.
-Bare file invocation runs the program. `build` writes a native executable;
+Package directories now use [`import package`](../library/package/API.md) for discovery, resolution, build/test planning, dependency edits, publication and installation. Bare file invocation runs the program. `build` writes a native executable;
 `--emit mlir` writes MLIR; `check` performs source analysis and MLIR construction.
 The hosted native boundary uses LLVM/MLIR 21 tools and the existing environment
 variables for selecting them. Compiler code lives under the normal frontend,

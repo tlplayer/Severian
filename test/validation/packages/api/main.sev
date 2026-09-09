@@ -1,0 +1,189 @@
+import package
+import environment
+
+test "manifest targets and aliases":
+    manifest = package.parse_manifest("[package]\nname = \"demo\"\nversion = \"1.0.0\"\n[[bin]]\nname = \"demo\"\npath = \"src/main.sev\"\n[dependencies]\nshapes = { package = \"geometry\", version = \"2\" }\n")
+    assert(manifest.name == "demo")
+    assert(manifest.dependencies[0].alias == "shapes")
+    assert(manifest.dependencies[0].reference.name == "geometry")
+    assert(manifest.targets[0].path == "src/main.sev")
+
+test "numeric version ordering":
+    assert(package.newer("2.10.0", "2.9.9"))
+    assert(not package.version_matches("20.0.0", "2"))
+    assert(package.version_matches("2.4.1", "2"))
+
+test "archive is binary and round trips":
+    stage = package.temporary("/tmp")
+    entries = [package.ArchiveEntry("source/main.sev", false, [u8(0), u8(128), u8(255)]), package.ArchiveEntry("artifacts/host/dev/bin/demo", true, [u8(1)])]
+    package.write_archive(stage + "/demo.pkg", package.Archive(2, "demo", entries))
+    archive = package.read_archive(stage + "/demo.pkg")
+    assert(archive.version == 2)
+    assert(archive.entries[1].contents == [u8(0), u8(128), u8(255)])
+    assert(archive.entries[0].executable)
+    package.extract(archive, stage + "/unpacked")
+    package.remove_tree(stage)
+
+test "new project resolves and cleans only outputs":
+    stage = package.temporary("/tmp")
+    project = package.new(stage + "/demo")
+    assert(project.manifest.name == "demo")
+    resolution = package.resolve(project, package.Resolve())
+    assert(len(resolution.packages) == 1)
+    assert(len(resolution.edges) == 0)
+    planned = package.plan(project, package.Build())
+    assert(planned.units[0].output == project.root + "/target/host/dev/bin/demo")
+    package.clean(project, package.Clean())
+    assert(package.exists(project.root + "/src/main.sev"))
+    package.remove_tree(stage)
+
+test "invalid manifests fail before resolution":
+    failed := false
+    try:
+        package.parse_manifest("[package]\nname = \"demo\"\n[[bin]]\nname = \"demo\"\npath = \"../outside.sev\"\n")
+    catch error: Error:
+        failed = true
+    assert(failed)
+    failed = false
+    try:
+        package.parse_manifest("[package]\nname = \"demo\"\n[[bin]]\nname = \"first\"\npath = \"src/a.sev\"\n[[bin]]\nname = \"second\"\npath = \"src/b.sev\"\n")
+    catch error: Error:
+        failed = true
+    assert(failed)
+
+test "shell arguments preserve metacharacters":
+    assert(package.capture(["printf", "%s", "spaces ' quotes $HOME ; literal"]) == "spaces ' quotes $HOME ; literal")
+
+test "library orchestrates build test publish and install":
+    stage = package.temporary("/tmp")
+    project = package.new(stage + "/demo")
+    package.write_text(stage + "/compiler", "#!/bin/sh\nif [ \"$4\" != check ]; then printf '#!/bin/sh\\nexit 0\\n' > \"$3\"; chmod 755 \"$3\"; fi\n")
+    package.require_command(["chmod", "755", stage + "/compiler"])
+    fixture_compiler = package.Compiler(stage + "/compiler", ".")
+    built = package.build(project, fixture_compiler)
+    assert(built.artifacts[0].path == project.root + "/target/host/dev/bin/demo")
+    report = package.test(project, fixture_compiler)
+    assert(report.failed == 0)
+    archive = package.publish(project, fixture_compiler, package.Publish(stage + "/registry", true, "release", "host"))
+    assert(package.read_archive(archive).version == 2)
+    selected = package.select(stage + "/registry/packages/demo/0.1.0", package.Requirements("demo", "host", "release", false))
+    assert(selected.kind == "native")
+    previous = environment.get("SEVERIAN_REGISTRY", "")
+    environment.set("SEVERIAN_REGISTRY", stage + "/registry")
+    installed = package.install("demo@0.1.0", fixture_compiler, package.Install(stage + "/bin", "demo", "release", "host"))
+    assert(package.exists(installed))
+    environment.set("SEVERIAN_REGISTRY", previous)
+    package.remove_tree(stage)
+
+
+test "dependency edits resolve aliases and preserve files on failure":
+    stage = package.temporary("/tmp")
+    previous = environment.get("SEVERIAN_REGISTRY", "")
+    environment.set("SEVERIAN_REGISTRY", stage + "/registry")
+    package.write_text(stage + "/compiler", "#!/bin/sh\nif [ \"$4\" = sources ]; then printf '%s\\n' \"$2\" > \"$3\"; fi\nexit 0\n")
+    package.require_command(["chmod", "755", stage + "/compiler"])
+    compiler = package.Compiler(stage + "/compiler", ".")
+    library = package.new(stage + "/geometry", "", true)
+    package.publish(library, compiler, package.Publish(stage + "/registry", true, "dev", "host"))
+    project = package.new(stage + "/app")
+    changed = package.add(project, "geometry@0", "shapes")
+    graph = package.resolve(changed)
+    assert(len(graph.packages) == 2)
+    assert(graph.edges[0].alias == "shapes")
+    assert(package.dependency_source(graph, changed.root + "/src/main.sev", "shapes").ends_with("/src/lib.sev"))
+    before = package.read_text(changed.root + "/package.toml")
+    failed := false
+    try:
+        package.add(changed, "missing@1")
+    catch error: Error:
+        failed = true
+    assert(failed)
+    assert(package.read_text(changed.root + "/package.toml") == before)
+    environment.set("SEVERIAN_REGISTRY", previous)
+    package.remove_tree(stage)
+
+test "locked resolution pins content and rejects stale source":
+    stage = package.temporary("/tmp")
+    project = package.new(stage + "/demo")
+    package.resolve(project, package.Resolve("build", true, ""))
+    package.write_text(project.root + "/src/main.sev", "def main():\n    print(99)\n")
+    failed := false
+    try:
+        package.resolve(project, package.Resolve("build", true, ""))
+    catch error: Error:
+        failed = true
+    assert(failed)
+    package.remove_tree(stage)
+
+test "root tests alone may use development dependencies":
+    stage = package.temporary("/tmp")
+    project = package.new(stage + "/demo")
+    package.write_text(project.root + "/package.toml", project.manifest_text + "\n[dev-dependencies]\nunavailable = \"1.0.0\"\n")
+    refreshed = package.open(project.root)
+    assert(len(package.resolve(refreshed).packages) == 1)
+    failed := false
+    try:
+        package.resolve(refreshed, package.Resolve("test", false, stage + "/empty-registry"))
+    catch error: Error:
+        failed = true
+    assert(failed)
+    package.remove_tree(stage)
+
+test "open recovers an interrupted manifest lock transaction":
+    stage = package.temporary("/tmp")
+    project = package.new(stage + "/demo")
+    journal = project.root + "/.sev-transaction"
+    package.write_text(journal + "/manifest.old", project.manifest_text)
+    package.write_text(journal + "/lock.old", project.lock_text)
+    package.write_text(journal + "/ready", "rollback")
+    package.write_text(project.root + "/package.toml", "incomplete")
+    recovered = package.open(project.root)
+    assert(recovered.manifest_text == project.manifest_text)
+    assert(recovered.lock_text == project.lock_text)
+    assert(not package.exists(journal))
+    package.remove_tree(stage)
+
+test "archive rejects duplicate and traversing entries":
+    stage = package.temporary("/tmp")
+    failed := false
+    try:
+        package.write_archive(stage + "/bad.pkg", package.Archive(2, "bad", [package.ArchiveEntry("../escape", false, [])]))
+    catch error: Error:
+        failed = true
+    assert(failed)
+    assert(not package.exists(stage + "/bad.pkg"))
+    failed = false
+    try:
+        package.write_archive(stage + "/duplicate.pkg", package.Archive(2, "bad", [package.ArchiveEntry("same", false, []), package.ArchiveEntry("same", false, [])]))
+    catch error: Error:
+        failed = true
+    assert(failed)
+    assert(not package.exists(stage + "/duplicate.pkg"))
+    package.remove_tree(stage)
+
+test "manifest edits preserve array tables and reject unknown configuration":
+    entries = package.parse_document("[package]\nname = \"demo\"\n[[package.metadata.rule]]\nname = \"first\"\n[[package.metadata.rule]]\nname = \"second\"\n")
+    rendered = package.render_manifest(entries)
+    assert(rendered.contains("[[package.metadata.rule]]"))
+    reparsed = package.parse_document(rendered)
+    assert(len(reparsed) == len(entries))
+    failed := false
+    try:
+        package.parse_manifest("[package]\nname = \"demo\"\n[build]\nunknown-setting = true\n")
+    catch error: Error:
+        failed = true
+    assert(failed)
+
+test "archive paths must contain valid UTF-8":
+    stage = package.temporary("/tmp")
+    package.write_archive(stage + "/valid.pkg", package.Archive(2, "demo", [package.ArchiveEntry("x", false, [])]))
+    bytes = package.read_bytes(stage + "/valid.pkg")
+    bytes[16] = u8(255)
+    package.write_bytes(stage + "/invalid.pkg", bytes)
+    failed := false
+    try:
+        package.read_archive(stage + "/invalid.pkg")
+    catch error: Error:
+        failed = true
+    assert(failed)
+    package.remove_tree(stage)

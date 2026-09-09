@@ -1,0 +1,55 @@
+import package
+import process
+
+def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool) -> int:
+    compiler = package.Compiler(process.arguments()[0], sysroot)
+    location = input if input != "" else "."
+    if command == "new":
+        project = package.new(location, "", library)
+        print("created " + project.root)
+        return 0
+    if command == "install":
+        print(package.install(input, compiler, package.Install(output, binary, profile if profile != "" else "release", platform if platform != "" else "host")))
+        return 0
+    if command == "run" and input != "" and not package.exists(input):
+        return package.run_reference(input, compiler, package.Run(binary, platform, profile, arguments, locked))
+    if command in ["add", "remove", "update"]:
+        project = package.open(".")
+        if command == "add":
+            package.add(project, input, alias, development)
+        elif command == "remove":
+            package.remove(project, input, development)
+        else:
+            package.update(project, input)
+        return 0
+    project = package.open(location)
+    if command == "build":
+        request = package.Build(binary, platform, profile, "" if emit == "plan" else emit, output, locked)
+        if emit == "plan":
+            planned = package.plan(project, request)
+            for unit in planned.units:
+                print(unit.target.name + " -> " + unit.output)
+            return 0
+        result = package.build(project, compiler, request)
+        for artifact in result.artifacts:
+            print(artifact.path)
+    elif command == "check":
+        package.check(project, compiler, package.Check(binary, platform, profile, emit, output, locked))
+    elif command == "test":
+        report = package.test(project, compiler, package.Test(binary, platform, profile, emit, output, locked))
+        for result in report.results:
+            print(("ok " if result.status == 0 else "FAILED ") + result.name)
+        return 1 if report.failed > 0 else 0
+    elif command == "run":
+        return package.run(project, compiler, package.Run(binary, platform, profile, arguments, locked))
+    elif command == "publish":
+        print(package.publish(project, compiler, package.Publish("", true, profile if profile != "" else "release", platform if platform != "" else "host")))
+    elif command == "tree":
+        print(package.tree(package.resolve(project)))
+    elif command == "metadata" or command == "resolve":
+        print(package.resolve(project, package.Resolve("build", locked, "")).lock)
+    elif command == "clean":
+        package.clean(project, package.Clean(platform, profile))
+    else:
+        throw Error("unknown package command: " + command)
+    return 0

@@ -2,8 +2,25 @@ import lexer
 import diagnostics
 import source
 import universal
+import package
 import "../../semantic/src/macros.sev" as macros
 import "lexical.sev"
+
+def package_dependency(resolution: package.Resolution, importer: string, alias: string) -> string | diagnostics.Diagnostic:
+    result ?= package.dependency_source(resolution, importer, alias)
+    if result is string:
+        return result
+    if result is Error:
+        return error(diagnostics.diagnostic("E000124", result.message))
+    return error(diagnostics.diagnostic("E000124", "package dependency lookup failed"))
+
+def package_module(resolution: package.Resolution, importer: string, locator: string) -> string | diagnostics.Diagnostic:
+    result ?= package.module_source(resolution, importer, locator)
+    if result is string:
+        return result
+    if result is Error:
+        return error(diagnostics.diagnostic("E000124", result.message))
+    return error(diagnostics.diagnostic("E000124", "package source lookup failed"))
 
 
 def normalized_path(path: string) -> string:
@@ -43,7 +60,7 @@ def registered_source(input: source.SourceFile, files: list[source.SourceFile]) 
     return registered
 
 
-def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> unit | diagnostics.Diagnostic:
+def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], "")) -> unit | diagnostics.Diagnostic:
     file = registered_source(input, files)
     if file.path in active:
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + file.path))
@@ -64,16 +81,21 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
             match tokens[index + 1].kind:
                 case String:
-                    child = normalized_path(parent_path(file.path) + "/" + string(tokens[index + 1]))
-                    discover_source_syntax(source.load(child), stack, files, registry)
+                    child := normalized_path(parent_path(file.path) + "/" + string(tokens[index + 1]))
+                    if len(resolution.packages) > 0:
+                        child = package_module(resolution, file.path, string(tokens[index + 1]))
+                    discover_source_syntax(source.load(child), stack, files, registry, resolution)
                 case _:
-                    pass
+                    if len(resolution.packages) > 0:
+                        name = lexer.token_word(tokens[index + 1])
+                        child = package_dependency(resolution, file.path, name)
+                        discover_source_syntax(source.load(child), stack, files, registry, resolution)
         index += 1
     lexer.discover_operator_descriptors(tokens, registry)
     registry.discovered.append(file.path)
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> universal.Module | diagnostics.Diagnostic:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], "")) -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path in active:
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + path))
@@ -81,7 +103,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
         return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
     stack = active[:]
     stack.append(path)
-    discover_source_syntax(input, [], files, registry)
+    discover_source_syntax(input, [], files, registry, resolution)
     lexer.resolve_operator_descriptors(registry)
     discover_lexical_rules(files, registry)
     registered = registered_source(input, files)
@@ -104,8 +126,21 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                 return error(diagnostics.diagnostic("E000120", "duplicate import alias: " + alias))
                             aliases.append(alias)
                             child_prefix += alias + "."
-                        child_path = normalized_path(parent_path(path) + "/" + locator)
-                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry)
+                        child_path := normalized_path(parent_path(path) + "/" + locator)
+                        if len(resolution.packages) > 0:
+                            child_path = package_module(resolution, path, locator)
+                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry, resolution)
+                        for child_item in child.items:
+                            result.items.append(child_item)
+                    case Name:
+                        if len(resolution.packages) == 0:
+                            return error(diagnostics.diagnostic("E000120", "named imports require a resolved package"))
+                        child_path = package_dependency(resolution, path, name)
+                        alias ?= declaration.alias
+                        child_prefix := prefix + name + "."
+                        if alias != None:
+                            child_prefix = prefix + alias + "."
+                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry, resolution)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case _:

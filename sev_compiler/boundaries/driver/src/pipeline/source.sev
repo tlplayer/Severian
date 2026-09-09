@@ -1,6 +1,7 @@
 import "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
 import process
+import package
 import lexer
 import diagnostics
 from diagnostics import Diagnostic
@@ -11,9 +12,8 @@ import "../../../../transforms/mlir/src/ir/text.sev" as text
 import "../../../../frontend/modules/src/source.sev"
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir") -> string:
-    files: list[source.SourceFile] = []
-    result ?= compile_source(input, include_tests, sysroot, files, emit)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = []) -> string:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution)
     if result is string:
         return result
     if result is Diagnostic:
@@ -23,7 +23,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir") -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], "")) -> string | diagnostics.Diagnostic:
     registry = lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
     if working_directory == "":
@@ -53,7 +53,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     # makes otherwise valid operator implementations ambiguous.
     if not subject_loaded:
         initializer_namespace = "__subject." if include_tests else ""
-        application = load_source_module(input, initializer_namespace, [], true, files, registry)
+        application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution)
         for item in application.items:
             parsed.items.append(item)
     typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace)

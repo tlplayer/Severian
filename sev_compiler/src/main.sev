@@ -3,6 +3,9 @@ import file
 import path
 import process
 import source
+import package
+import "../boundaries/driver/src/package_command.sev"
+import "../boundaries/driver/src/package_compiler.sev"
 import "../boundaries/driver/src/pipeline/source.sev" as compiler
 import "../boundaries/backend/src/native_mlir.sev" as backend
 
@@ -12,26 +15,44 @@ def exit_status(status: i32)
 
 def main():
     arguments = process.arguments()
+    if len(arguments) > 1 and arguments[1] == "__compile-unit":
+        compile_package_unit(arguments)
+        return
     command := "run"
     input := ""
     output := ""
     emit := ""
+    binary := ""
+    platform := ""
+    profile := ""
+    alias := ""
+    locked := false
+    library := false
+    development := false
     sysroot := environment.get("SEVERIAN_SYSROOT", "..")
     application: list[string] := []
     cursor := 1
     if len(arguments) > 1:
-        if arguments[1] in ["build", "run", "test", "check"]:
+        if arguments[1] in ["build", "run", "test", "check", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean"]:
             command = arguments[1]
             cursor += 1
     while cursor < len(arguments):
         argument = arguments[cursor]
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler [run|build|test|check] FILE.sev [--emit mlir|agent-ir] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean")
             return
         if argument == "--":
             application = arguments[cursor + 1:]
             break
-        if argument == "--emit" or argument == "--sysroot" or argument == "-o" or argument == "--output":
+        if argument == "--locked":
+            locked = true
+        elif argument == "--lib":
+            library = true
+        elif argument == "--dev":
+            development = true
+        elif argument == "--dry-run":
+            emit = "plan"
+        elif argument in ["--emit", "--sysroot", "-o", "--output", "--bin", "--filter", "--target", "--profile", "--alias"]:
             cursor += 1
             if cursor >= len(arguments):
                 throw Error(argument + " requires a value")
@@ -39,6 +60,14 @@ def main():
                 emit = arguments[cursor]
             elif argument == "--sysroot":
                 sysroot = arguments[cursor]
+            elif argument == "--bin" or argument == "--filter":
+                binary = arguments[cursor]
+            elif argument == "--target":
+                platform = arguments[cursor]
+            elif argument == "--profile":
+                profile = arguments[cursor]
+            elif argument == "--alias":
+                alias = arguments[cursor]
             else:
                 output = arguments[cursor]
         elif argument.starts_with("-"):
@@ -48,12 +77,15 @@ def main():
         else:
             throw Error("unexpected argument " + argument)
         cursor += 1
-    if input == "":
-        throw Error("expected a .sev source file; use --help for usage")
-    if emit != "" and emit != "mlir" and emit != "agent-ir":
+    if emit != "" and emit != "mlir" and emit != "agent-ir" and emit != "plan":
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
+    if not input.ends_with(".sev"):
+        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development)
+        if status != 0:
+            exit_status(i32(status))
+        return
     mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot, emit)
     if emit != "":
         if output == "":

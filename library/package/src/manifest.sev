@@ -1,0 +1,260 @@
+import "model.sev"
+import "config.sev"
+import "host.sev"
+import file
+import path
+import os
+
+def safe_name(value: string) -> string | Error:
+    if value == "" or value == "." or value == "..":
+        throw Error("invalid package or target name: " + value)
+    for character in value.characters():
+        if not "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.".contains(string(character)):
+            throw Error("invalid package or target name: " + value)
+    return value
+
+def relative_path(value: string) -> string | Error:
+    if value == "" or value.starts_with("/") or value.contains("\\") or value.contains(":"):
+        throw Error("unsafe package path: " + value)
+    for component in value.split("/"):
+        if component == "" or component == "." or component == "..":
+            throw Error("unsafe package path: " + value)
+    for byte in value.bytes():
+        if int(byte) < 32 or int(byte) == 127:
+            throw Error("control character in package path")
+    return value
+
+def inside(root: string, value: string) -> string | Error:
+    resolved = canonical(root + "/" + relative_path(value[:]))
+    if not resolved.starts_with(canonical(root) + "/"):
+        throw Error("source path escapes package root: " + value)
+    return resolved
+
+def toml_quote(value: string) -> string:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
+
+def unquote(raw: string) -> string | Error:
+    value = raw.strip()
+    if int(len(value)) < 2:
+        throw Error("expected a TOML string: " + raw)
+    if value.starts_with("'") and value.ends_with("'"):
+        return value[1:int(int(len(value))) - 1]
+    if not value.starts_with("\"") or not value.ends_with("\""):
+        throw Error("expected a TOML string: " + raw)
+    result := ""
+    escaped := false
+    for character in value[1:int(int(len(value))) - 1].characters():
+        item = string(character)
+        if escaped:
+            if item == "n":
+                result += "\n"
+            elif item == "r":
+                result += "\r"
+            elif item == "t":
+                result += "\t"
+            elif item == "\\" or item == "\"":
+                result += item
+            else:
+                throw Error("unsupported TOML escape: " + item)
+            escaped = false
+        elif item == "\\":
+            escaped = true
+        else:
+            result += item
+    if escaped:
+        throw Error("unterminated TOML escape")
+    return result
+
+# Delimiters inside strings and nested arrays/inline tables are data.
+def split_fields(text: string, separator: string) -> list[string] | Error:
+    result: list[string] = []
+    part := ""
+    quote_mark := ""
+    escaped := false
+    depth := 0
+    comment := false
+    for character in text.characters():
+        item = string(character)
+        if comment:
+            if item != "\n":
+                continue
+            comment = false
+        if quote_mark != "":
+            part += item
+            if escaped:
+                escaped = false
+            elif item == "\\" and quote_mark == "\"":
+                escaped = true
+            elif item == quote_mark:
+                quote_mark = ""
+        elif item == "\"" or item == "'":
+            quote_mark = item
+            part += item
+        elif item == "#":
+            comment = true
+        elif item == "[" or item == "{":
+            depth += 1
+            part += item
+        elif item == "]" or item == "}":
+            depth -= 1
+            part += item
+        elif item == separator and depth == 0:
+            if part.strip() != "":
+                result.append(part.strip())
+            part = ""
+        else:
+            part += item
+    if quote_mark != "" or depth != 0:
+        throw Error("unterminated TOML value")
+    if part.strip() != "":
+        result.append(part.strip())
+    return result
+
+def parse_document(text: string) -> list[Entry] | Error:
+    entries: list[Entry] = []
+    section := ""
+    array := false
+    binary := 0
+    for line in split_fields(text, "\n"):
+        if line.starts_with("[[") and line.ends_with("]]"):
+            name = line[2:int(int(len(line))) - 2].strip()
+            section = name + "." + string(binary)
+            array = true
+            binary += 1
+        elif line.starts_with("[") and line.ends_with("]"):
+            section = line[1:int(int(len(line))) - 1].strip()
+            array = false
+        else:
+            pair = split_fields(line, "=")
+            if int(len(pair)) != 2:
+                throw Error("invalid TOML assignment: " + line)
+            key := pair[0]
+            if key.starts_with("\"") or key.starts_with("'"):
+                key = unquote(key)
+            for entry in entries:
+                if entry.table == section and entry.key == key:
+                    throw Error("duplicate TOML key: " + section + "." + key)
+            entries.append(Entry(section, key, pair[1], array))
+    return entries
+
+def setting(entries: list[Entry], table: string, key: string, fallback: string = "") -> string:
+    for entry in entries:
+        if entry.table == table and entry.key == key:
+            return entry.value
+    return fallback
+
+def text_setting(entries: list[Entry], table: string, key: string, fallback: string = "") -> string:
+    raw = setting(entries, table, key)
+    return fallback if raw == "" else unquote(raw)
+
+def reference(value: string) -> Reference | Error:
+    if value.starts_with("git+") or value.starts_with("github.com/"):
+        location = value[4:] if value.starts_with("git+") else "https://" + value + ".git"
+        return Reference("", "", "git", location)
+    parts = value.split("@")
+    if int(len(parts)) > 2:
+        throw Error("invalid package reference: " + value)
+    name = safe_name(parts[0])
+    selector = parts[1] if int(len(parts)) == 2 else "*"
+    if selector != "*":
+        for component in selector.split("."):
+            if component == "":
+                throw Error("invalid version selector: " + selector)
+            for digit in component.characters():
+                if not "0123456789".contains(string(digit)):
+                    throw Error("invalid version selector: " + selector)
+        if int(len(selector.split("."))) > 3:
+            throw Error("invalid version selector: " + selector)
+    return Reference(name, selector, "registry", "")
+
+def parse_dependency(alias: string, raw: string, development: bool) -> Dependency | Error:
+    safe_name(alias[:])
+    if not raw.starts_with("{"):
+        return Dependency(alias, reference(alias + "@" + unquote(raw)), development)
+    fields = parse_document(split_fields(raw[1:int(int(len(raw))) - 1], ",").join("\n"))
+    for field in fields:
+        if field.key not in ["package", "version", "path", "git", "rev", "registry"]:
+            throw Error("unknown dependency field: " + field.key)
+    name = text_setting(fields, "", "package", alias)
+    selector = text_setting(fields, "", "version", "*")
+    ref = reference(name + "@" + selector)
+    location = text_setting(fields, "", "path")
+    git = text_setting(fields, "", "git")
+    if location != "" and git != "":
+        throw Error("dependency cannot select both path and Git")
+    if location != "":
+        ref.source = "path"
+        ref.location = location
+    elif git != "":
+        ref.source = "git"
+        ref.location = git
+        revision = text_setting(fields, "", "rev")
+        if revision != "":
+            ref.location += "#" + revision
+    else:
+        ref.location = text_setting(fields, "", "registry")
+    return Dependency(alias, ref, development)
+
+def parse_manifest(text: string) -> Manifest | Error:
+    entries = parse_document(text)
+    validate_configuration(entries)
+    name = safe_name(text_setting(entries, "package", "name"))
+    version = text_setting(entries, "package", "version", "0.1.0")
+    reference(name + "@" + version)
+    if int(len(version.split("."))) != 3:
+        throw Error("package version must have three numeric components")
+    targets: list[Target] = []
+    sections: list[string] = []
+    dependencies: list[Dependency] = []
+    names: list[string] = []
+    for entry in entries:
+        if entry.table == "dependencies" or entry.table == "dev-dependencies":
+            dependencies.append(parse_dependency(entry.key, entry.value, entry.table == "dev-dependencies"))
+        if (entry.table == "lib" or entry.table.starts_with("bin.")) and entry.table not in sections:
+            sections.append(entry.table)
+            kind = "library" if entry.table == "lib" else "binary"
+            target_name = safe_name(text_setting(entries, entry.table, "name", name if kind == "library" else ""))
+            if target_name in names:
+                throw Error("duplicate declared target: " + target_name)
+            names.append(target_name)
+            targets.append(Target(target_name, kind, relative_path(text_setting(entries, entry.table, "path"))))
+    default_run = text_setting(entries, "package", "default-run")
+    bins := 0
+    found := false
+    for target in targets:
+        if target.kind == "binary":
+            bins += 1
+            found = found or target.name == default_run
+    if (bins > 1 and default_run == "") or (default_run != "" and not found):
+        throw Error("package.default-run must name a declared binary")
+    return Manifest(name, version, default_run, targets, dependencies, entries)
+
+def open(location: string = ".") -> Project | Error:
+    root := canonical(location)
+    if os.is_file(root):
+        if path.basename(root) != "package.toml":
+            throw Error("package.open expects a directory or package.toml")
+        root = path.dirname(root)
+    while not os.is_file(root + "/package.toml"):
+        parent = path.dirname(root)
+        if parent == root:
+            throw Error("no package.toml found from " + location)
+        root = parent
+    handle = file.native_lock(root + "/.sev-edit.lock")
+    if handle < 0:
+        throw Error("could not lock project snapshot")
+    original := ""
+    lock := ""
+    try:
+        recover_edit(root)
+        original = read_text(root + "/package.toml")
+        if os.is_file(root + "/sev.lock"):
+            lock = read_text(root + "/sev.lock")
+        file.unlock(handle)
+    catch failure: Error:
+        file.unlock(handle)
+        throw Error(failure.message)
+    manifest = parse_manifest(original)
+    for target in manifest.targets:
+        inside(root, target.path)
+    return Project(root, manifest, original, lock)

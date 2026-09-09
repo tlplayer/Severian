@@ -1,0 +1,171 @@
+import "model.sev"
+import "host.sev"
+import "manifest.sev"
+import path
+import os
+
+def append_number(bytes: list[u8], value: int, width: int):
+    divisor := 1
+    for index in range(width - 1):
+        divisor *= 256
+    for index in range(width):
+        bytes.append(u8((value / divisor) % 256))
+        divisor = divisor / 256
+
+def append_text(bytes: list[u8], value: string):
+    # .bytes() retains UTF-8 rather than re-encoding individual Unicode scalars.
+    for byte in value.bytes():
+        bytes.append(byte)
+
+def number(bytes: list[u8], offset: int, width: int) -> int | Error:
+    if offset < 0 or width < 0 or offset > int(int(len(bytes))) - width:
+        throw Error("truncated package archive")
+    result := 0
+    for index in range(width):
+        if result > 36028797018963967:
+            throw Error("package entry exceeds host size limit")
+        result = result * 256 + int(bytes[offset + index])
+    return result
+
+def archive_text(bytes: list[u8], offset: int, count: int) -> string | Error:
+    if offset < 0 or count < 0 or offset > int(int(len(bytes))) - count:
+        throw Error("truncated package archive path")
+    cursor := offset
+    while cursor < offset + count:
+        first = int(bytes[cursor])
+        width := 1
+        if first >= 194 and first <= 223:
+            width = 2
+        elif first >= 224 and first <= 239:
+            width = 3
+        elif first >= 240 and first <= 244:
+            width = 4
+        elif first >= 128:
+            throw Error("invalid UTF-8 archive path")
+        if cursor + width > offset + count:
+            throw Error("truncated UTF-8 archive path")
+        for continuation in range(1, width):
+            byte = int(bytes[cursor + continuation])
+            if byte < 128 or byte > 191:
+                throw Error("invalid UTF-8 continuation in archive path")
+        if width > 1:
+            second = int(bytes[cursor + 1])
+            if (first == 224 and second < 160) or (first == 237 and second >= 160) or (first == 240 and second < 144) or (first == 244 and second >= 144):
+                throw Error("invalid UTF-8 scalar in archive path")
+        cursor += width
+    # Decode through the file boundary, which retains UTF-8 exactly.
+    stage = temporary("/tmp")
+    write_bytes(stage + "/text", bytes[offset:offset + count])
+    text = read_text(stage + "/text")
+    remove_tree(stage)
+    if int(len(text.bytes())) != count:
+        throw Error("invalid archive path encoding")
+    return text
+
+def read_archive(location: string) -> Archive | Error:
+    bytes = read_bytes(location)
+    if int(len(bytes)) < 8 or archive_text(bytes, 0, 6) != "SEVPKG" or bytes[6] != 0:
+        throw Error("invalid package archive magic")
+    version = int(bytes[7])
+    if version != 1 and version != 2:
+        throw Error("unsupported package archive version")
+    cursor := 8
+    name := ""
+    if version == 1:
+        length = number(bytes, cursor, 4)
+        cursor += 4
+        name = archive_text(bytes, cursor, length)
+        cursor += length
+    count = number(bytes, cursor, 4)
+    cursor += 4
+    if count > 100000:
+        throw Error("too many package archive entries")
+    entries: list[ArchiveEntry] = []
+    names: list[string] = []
+    for index in range(count):
+        length = number(bytes, cursor, 4)
+        cursor += 4
+        relative = relative_path(archive_text(bytes, cursor, length))
+        cursor += length
+        if relative in names:
+            throw Error("duplicate package archive entry: " + relative)
+        for previous in names:
+            if relative.starts_with(previous + "/") or previous.starts_with(relative + "/"):
+                throw Error("archive file/directory collision: " + relative)
+        names.append(relative)
+        flags := 0
+        if version == 2:
+            flags = number(bytes, cursor, 1)
+            cursor += 1
+            if flags > 1:
+                throw Error("unknown mandatory archive flags")
+        size = number(bytes, cursor, 8)
+        cursor += 8
+        if size > int(int(len(bytes))) - cursor:
+            throw Error("truncated package archive contents")
+        entries.append(ArchiveEntry(relative, flags == 1, bytes[cursor:cursor + size]))
+        cursor += size
+    if cursor != int(len(bytes)):
+        throw Error("trailing unindexed package archive contents")
+    return Archive(version, name, entries)
+
+def write_archive(destination: string, archive: Archive) -> unit | Error:
+    if archive.version != 1 and archive.version != 2:
+        throw Error("unsupported package archive version")
+    bytes: list[u8] = []
+    append_text(bytes, "SEVPKG")
+    bytes.append(0)
+    bytes.append(u8(archive.version))
+    if archive.version == 1:
+        append_number(bytes, int(len(archive.name.bytes())), 4)
+        append_text(bytes, archive.name)
+    append_number(bytes, int(len(archive.entries)), 4)
+    names: list[string] = []
+    for entry in archive.entries:
+        relative_path(entry.path)
+        if entry.path in names:
+            throw Error("duplicate archive entry: " + entry.path)
+        names.append(entry.path)
+    for name in sorted_strings(names):
+        for entry in archive.entries:
+            if entry.path == name:
+                append_number(bytes, int(len(name.bytes())), 4)
+                append_text(bytes, name)
+                if archive.version == 2:
+                    bytes.append(1 if entry.executable else 0)
+                append_number(bytes, int(len(entry.contents)), 8)
+                for byte in entry.contents:
+                    bytes.append(byte)
+    stage = temporary(path.dirname(destination))
+    write_bytes(stage + "/archive", bytes)
+    # Validate the complete index before committing any public output.
+    read_archive(stage + "/archive")
+    replace_file(stage + "/archive", destination)
+    remove_tree(stage)
+
+def extract(archive: Archive, destination: string) -> unit | Error:
+    if os.exists(destination):
+        throw Error("archive extraction requires a new destination")
+    names: list[string] = []
+    for entry in archive.entries:
+        relative_path(entry.path)
+        for previous in names:
+            if previous == entry.path or previous.starts_with(entry.path + "/") or entry.path.starts_with(previous + "/"):
+                throw Error("duplicate or conflicting archive path: " + entry.path)
+        names.append(entry.path)
+    stage = temporary(path.dirname(destination))
+    for entry in archive.entries:
+        relative_path(entry.path)
+        output = stage + "/" + entry.path
+        write_bytes(output, entry.contents)
+        if entry.executable:
+            require_command(["chmod", "755", "--", output])
+    replace_file(stage, destination)
+
+def bundle(project: Project, target: Target, destination: string, modules: list[string]) -> unit | Error:
+    entries: list[ArchiveEntry] = []
+    source_root = path.dirname(inside(project.root, target.path))
+    for location in sorted_strings(modules):
+        if location.starts_with(source_root + "/") and location.ends_with(".sev"):
+            entries.append(ArchiveEntry(location[int(int(len(source_root))) + 1:], false, read_bytes(location)))
+    write_archive(destination, Archive(1, target.name, entries))

@@ -1,0 +1,241 @@
+import "host.sev"
+import "model.sev"
+import "manifest.sev"
+import "archive.sev"
+import environment
+import os
+import path
+
+def registry_root(selected: string = "") -> string | Error:
+    if selected != "" and selected != "default":
+        return selected
+    configured = environment.get("SEVERIAN_REGISTRY", "")
+    if configured != "":
+        return configured
+    home = environment.get("HOME", "")
+    if home == "":
+        throw Error("registry needs SEVERIAN_REGISTRY or HOME")
+    return environment.get("XDG_DATA_HOME", home + "/.local/share") + "/severian/registry"
+
+def version_matches(version: string, selector: string) -> bool:
+    return selector == "*" or version == selector or version.starts_with(selector + ".")
+
+def newer(left: string, right: string) -> bool:
+    if right == "":
+        return true
+    a = left.split(".")
+    b = right.split(".")
+    for index in range(3):
+        if int(a[index]) != int(b[index]):
+            return int(a[index]) > int(b[index])
+    return false
+
+def versions(name: string, registry: string = "") -> list[string] | Error:
+    root = registry_root(registry) + "/packages/" + safe_name(name)
+    if not os.is_dir(root):
+        return []
+    text = capture(["find", root, "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-printf", "%f\n"])
+    if text == "":
+        return []
+    result: list[string] = []
+    for value in text.split("\n"):
+        # Registry versions use the same numeric grammar as references.
+        if int(len(value.split("."))) == 3:
+            reference(name + "@" + value)
+            result.append(value)
+    return sorted_strings(result)
+
+def fetch(ref: Reference, registry: string = "") -> string | Error:
+    if ref.source == "git":
+        root = registry_root(registry) + "/cache/git"
+        stage = temporary(root)
+        pieces = ref.location.split("#")
+        if int(len(pieces)) > 2:
+            throw Error("invalid Git reference")
+        require_command(["git", "clone", "--", pieces[0], stage + "/source"])
+        if int(len(pieces)) == 2:
+            require_command(["git", "-C", stage + "/source", "checkout", "--detach", pieces[1]])
+        return canonical(stage + "/source")
+    return fetch_registry(ref, registry)
+
+def fetch_registry(ref: Reference, registry: string) -> string | Error:
+    selected := ""
+    selected_registry = ref.location if ref.location != "" else registry
+    for version in versions(ref.name, selected_registry[:]):
+        if version_matches(version, ref.selector) and newer(version, selected):
+            selected = version
+    if selected == "":
+        throw Error("no registry release for " + ref.name + "@" + ref.selector)
+    release = registry_root(selected_registry[:]) + "/packages/" + ref.name + "/" + selected
+    return materialize_release(release, ref.name, selected, selected_registry)
+
+def materialize_release(release: string, name: string, version: string, registry: string) -> string | Error:
+    if os.is_file(release + "/source/package.toml"):
+        return canonical(release + "/source")
+    if os.is_file(release + "/metadata/package.toml"):
+        return canonical(release + "/metadata")
+    archive_path = release + "/" + name + "-" + version + ".pkg"
+    archive = read_archive(archive_path[:])
+    if archive.version != 2:
+        throw Error("registry consumption requires a published v2 distribution")
+    cache = registry_root(registry) + "/cache/distributions/" + digest(archive_path).replace(":", "-")
+    if not os.is_dir(cache):
+        extract(archive, cache[:])
+    if os.is_file(cache + "/source/package.toml"):
+        return canonical(cache + "/source")
+    return canonical(cache + "/metadata")
+
+def library_target(manifest: Manifest) -> Target | Error:
+    for target in manifest.targets:
+        if target.kind == "library":
+            return target
+    throw Error("dependency does not expose [lib]: " + manifest.name)
+
+def source_checksum(root: string, manifest_text: string = "") -> string | Error:
+    lines: list[string] = []
+    stage = temporary("/tmp")
+    if manifest_text != "":
+        write_text(stage + "/manifest", manifest_text)
+    for location in files(root):
+        relative = location[int(int(len(root))) + 1:]
+        if relative.starts_with("target/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "sev.lock":
+            continue
+        checksum = digest(stage + "/manifest") if relative == "package.toml" and manifest_text != "" else digest(location)
+        lines.append(relative + " " + checksum)
+    write_text(stage + "/index", lines.join("\n"))
+    result = digest(stage + "/index")
+    remove_tree(stage)
+    return result
+
+def visit(project: Project, source: string, development: bool, registry: string, packages: list[ResolvedPackage], edges: list[DependencyEdge], active: list[string], chain: list[string], locked: list[Entry]) -> int | Error:
+    if project.root in active:
+        throw Error("package dependency cycle: " + chain.join(" -> "))
+    for index in range(int(len(packages))):
+        if packages[index].root == project.root:
+            return index
+    index = int(int(len(packages)))
+    packages.append(ResolvedPackage(PackageIdentity(project.manifest.name, project.manifest.version, source), project.root, project.manifest, source_checksum(project.root, project.manifest_text)))
+    stack = active[:]
+    stack.append(project.root)
+    for dependency in project.manifest.dependencies:
+        if dependency.development and not development:
+            continue
+        next_chain = chain[:]
+        next_chain.append(dependency.reference.name)
+        try:
+            declared = dependency.reference
+            ref := Reference(declared.name, declared.selector, declared.source, declared.location)
+            if int(len(locked)) > 0 and ref.source == "registry":
+                ref.selector = locked_version(locked, ref)
+            location := ""
+            if ref.source == "path":
+                location = ref.location if ref.location.starts_with("/") else project.root + "/" + ref.location
+            else:
+                location = fetch(ref, registry[:])
+            child = open(location)
+            if child.manifest.name != ref.name or not version_matches(child.manifest.version, ref.selector):
+                throw Error("dependency identity does not match " + ref.name)
+            library_target(child.manifest)
+            child_source := "registry:default"
+            if ref.source == "path":
+                child_source = "path:" + child.root
+            elif ref.source == "git":
+                child_source = "git:" + capture(["git", "-C", child.root, "rev-parse", "HEAD"])
+            child_index = visit(child, child_source, false, registry[:], packages, edges, stack, next_chain, locked)
+            edges.append(DependencyEdge(index, child_index, dependency.alias, dependency.development))
+        catch error: Error:
+            throw Error(next_chain.join(" -> ") + ": " + error.message)
+    return index
+
+def render_lock(packages: list[ResolvedPackage], edges: list[DependencyEdge]) -> string:
+    records: list[string] = []
+    for index in range(int(len(packages))):
+        resolved = packages[index]
+        identity = resolved.identity
+        record := "\n[[package]]\nname = " + toml_quote(identity.name) + "\nversion = " + toml_quote(identity.version) + "\nsource = " + toml_quote(identity.source) + "\nchecksum = " + toml_quote(resolved.checksum) + "\n"
+        dependencies: list[string] = []
+        for edge in edges:
+            if edge.parent == index:
+                child = packages[edge.child].identity
+                dependencies.append(toml_quote(child.name + " " + child.version + " " + child.source))
+        record += "dependencies = [" + sorted_strings(dependencies).join(", ") + "]\n"
+        records.append(record)
+    return "# Generated by package.\nversion = 1\n" + sorted_strings(records).join("")
+
+def resolve(project: Project, request: Resolve) -> Resolution | Error:
+    if request.mode not in ["build", "test", "publish", "edit"]:
+        throw Error("unknown resolution mode: " + request.mode)
+    packages: list[ResolvedPackage] = []
+    edges: list[DependencyEdge] = []
+    locked: list[Entry] := []
+    if request.locked:
+        if project.lock_text == "":
+            throw Error("sev.lock is missing")
+        locked = parse_document(project.lock_text)
+    visit(project, "root", request.mode == "test" or request.mode == "edit", request.registry, packages, edges, [], [project.manifest.name], locked)
+    lock = render_lock(packages, edges)
+    if request.locked:
+        validate_lock(locked, packages)
+    return Resolution(packages, edges, lock)
+
+def dependency_source(resolution: Resolution, importer: string, alias: string) -> string | Error:
+    owner := -1
+    for index in range(int(len(resolution.packages))):
+        root = resolution.packages[index].root
+        if importer.starts_with(root + "/"):
+            if owner < 0 or int(len(root)) > int(len(resolution.packages[owner].root)):
+                owner = index
+    if owner < 0:
+        throw Error("module is outside the resolved package graph: " + importer)
+    manifest = resolution.packages[owner].manifest
+    for target in manifest.targets:
+        if target.kind == "library" and target.name == alias:
+            return inside(resolution.packages[owner].root, target.path)
+    for edge in resolution.edges:
+        if edge.parent == owner and edge.alias == alias:
+            child = resolution.packages[edge.child]
+            return inside(child.root, library_target(child.manifest).path)
+    throw Error("undeclared dependency import " + alias + " in " + manifest.name)
+
+def module_source(resolution: Resolution, importer: string, locator: string) -> string | Error:
+    if locator.starts_with("/") or locator.contains(":"):
+        throw Error("package source imports must be relative")
+    resolved = canonical(path.dirname(importer) + "/" + locator)
+    owner := ""
+    for package in resolution.packages:
+        if importer.starts_with(package.root + "/") and int(len(package.root)) > int(len(owner)):
+            owner = package.root
+    if owner == "" or not resolved.starts_with(owner + "/"):
+        throw Error("source import escapes its package: " + locator)
+    return resolved
+
+def resolve(project: Project) -> Resolution | Error:
+    return resolve(project, Resolve())
+
+def locked_version(entries: list[Entry], ref: Reference) -> string | Error:
+    selected := ""
+    for entry in entries:
+        if entry.key == "name" and entry.table.starts_with("package.") and unquote(entry.value) == ref.name:
+            version = text_setting(entries, entry.table, "version")
+            source = text_setting(entries, entry.table, "source")
+            if source.starts_with("registry:") and version_matches(version, ref.selector):
+                if selected != "" and selected != version:
+                    throw Error("lock has ambiguous versions for " + ref.name)
+                selected = version
+    if selected == "":
+        throw Error("lock has no matching version for " + ref.name)
+    return selected
+
+def validate_lock(entries: list[Entry], packages: list[ResolvedPackage]) -> unit | Error:
+    if setting(entries, "", "version") != "1":
+        throw Error("unsupported lockfile version")
+    for resolved in packages:
+        matched := false
+        for entry in entries:
+            if entry.key == "name" and entry.table.starts_with("package.") and unquote(entry.value) == resolved.identity.name:
+                if text_setting(entries, entry.table, "version") == resolved.identity.version and text_setting(entries, entry.table, "source") == resolved.identity.source:
+                    if text_setting(entries, entry.table, "checksum") != resolved.checksum:
+                        throw Error("locked content changed: " + resolved.identity.name)
+                    matched = true
+        if not matched:
+            throw Error("lock is stale for " + resolved.identity.name)

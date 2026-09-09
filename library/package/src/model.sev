@@ -1,0 +1,169 @@
+# Manifest declarations, resolution and realizations have separate identities.
+class Entry:
+    table: string
+    key: string
+    value: string
+    array: bool = false
+
+class Reference:
+    name: string
+    selector: string
+    source: string
+    location: string
+
+class Dependency:
+    alias: string
+    reference: Reference
+    development: bool
+
+class Target:
+    name: string
+    kind: string
+    path: string
+
+class Manifest:
+    name: string
+    version: string
+    default_run: string
+    targets: list[Target]
+    dependencies: list[Dependency]
+    entries: list[Entry]
+
+class Project:
+    root: string
+    manifest: Manifest
+    manifest_text: string
+    lock_text: string
+
+class PackageIdentity:
+    name: string
+    version: string
+    source: string
+
+class ResolvedPackage:
+    identity: PackageIdentity
+    root: string
+    manifest: Manifest
+    checksum: string
+
+class DependencyEdge:
+    parent: int
+    child: int
+    alias: string
+    development: bool
+
+class Resolution:
+    packages: list[ResolvedPackage]
+    edges: list[DependencyEdge]
+    lock: string
+
+class Resolve:
+    mode: string = "build"
+    locked: bool = false
+    registry: string = ""
+
+class Build:
+    target: string = ""
+    platform: string = ""
+    profile: string = ""
+    emit: string = ""
+    output: string = ""
+    locked: bool = false
+
+class Check:
+    target: string = ""
+    platform: string = ""
+    profile: string = ""
+    emit: string = ""
+    output: string = ""
+    locked: bool = false
+
+class Test:
+    filter: string = ""
+    platform: string = ""
+    profile: string = ""
+    emit: string = ""
+    output: string = ""
+    locked: bool = false
+
+class Run:
+    target: string = ""
+    platform: string = ""
+    profile: string = ""
+    arguments: list[string] = []
+    locked: bool = false
+
+class BuildUnit:
+    package_index: int
+    target: Target
+    platform: string
+    profile: string
+    output: string
+    include_tests: bool
+
+class BuildPlan:
+    project: Project
+    resolution: Resolution
+    units: list[BuildUnit]
+    mode: string
+    emit: string
+
+class Artifact:
+    target: Target
+    platform: string
+    profile: string
+    format: string
+    path: string
+
+class BuildResult:
+    plan: BuildPlan
+    artifacts: list[Artifact]
+
+class TestResult:
+    name: string
+    status: int
+
+class TestReport:
+    results: list[TestResult]
+    failed: int
+
+class Publish:
+    registry: string = ""
+    include_source: bool = true
+    profile: string = "release"
+    platform: string = "host"
+
+class Install:
+    directory: string = ""
+    target: string = ""
+    profile: string = "release"
+    platform: string = "host"
+
+class Clean:
+    platform: string = ""
+    profile: string = ""
+
+class Requirements:
+    target: string = ""
+    platform: string = "host"
+    profile: string = "release"
+    allow_container: bool = false
+
+class Selection:
+    kind: string
+    path: string
+    rejections: list[string]
+
+class ArchiveEntry:
+    path: string
+    executable: bool
+    contents: list[u8]
+
+class Archive:
+    version: int
+    name: string
+    entries: list[ArchiveEntry]
+
+class Compiler:
+    executable: string
+    sysroot: string

@@ -1,0 +1,128 @@
+import "host.sev"
+import "model.sev"
+import "manifest.sev"
+import "resolve.sev"
+import file
+import path
+import os
+
+class Edit:
+    project: Project
+    entries: list[Entry]
+
+    def add(value: string, alias: string = "", development: bool = false) -> unit | Error:
+        ref = reference(value)
+        if ref.source != "registry":
+            throw Error("edit.add currently requires a registry reference")
+        key = alias if alias != "" else ref.name
+        table = "dev-dependencies" if development else "dependencies"
+        remove(key, development)
+        raw := toml_quote(ref.selector)
+        if key != ref.name:
+            raw = "{ package = " + toml_quote(ref.name) + ", version = " + raw + " }"
+        entries.append(Entry(table, safe_name(key), raw))
+
+    def remove(alias: string, development: bool = false) -> unit | Error:
+        table = "dev-dependencies" if development else "dependencies"
+        replacement: list[Entry] = []
+        for entry in entries:
+            if entry.table != table or entry.key != alias:
+                replacement.append(entry)
+        entries = replacement
+
+    def update(alias: string) -> unit | Error:
+        # Existing selectors remain desired state; commit refreshes resolution.
+        for entry in entries:
+            if entry.table in ["dependencies", "dev-dependencies"] and entry.key == alias:
+                return
+        throw Error("unknown dependency alias: " + alias)
+
+    def commit() -> Project | Error:
+        original = project
+        text = render_manifest(entries)
+        candidate = Project(original.root, parse_manifest(text), text, "")
+        resolution = resolve(candidate, Resolve("edit", false, ""))
+        lock = file.native_lock(original.root + "/.sev-edit.lock")
+        if lock < 0:
+            throw Error("could not lock package edit")
+        try:
+            recover_edit(original.root)
+            if read_text(original.root + "/package.toml") != original.manifest_text:
+                throw Error("package.toml changed while editing; reopen the project")
+            current_lock = read_text(original.root + "/sev.lock") if os.is_file(original.root + "/sev.lock") else ""
+            if current_lock != original.lock_text:
+                throw Error("sev.lock changed while editing; reopen the project")
+            stage = original.root + "/.sev-transaction"
+            mkdir(stage)
+            write_text(stage + "/manifest.old", original.manifest_text)
+            write_text(stage + "/lock.old", current_lock)
+            write_text(stage + "/manifest.new", text)
+            write_text(stage + "/lock.new", resolution.lock)
+            require_command(["sync", "-f", stage])
+            write_text(stage + "/ready", "rollback")
+            require_command(["sync", "-f", stage])
+            replace_file(stage + "/manifest.new", original.root + "/package.toml")
+            replace_file(stage + "/lock.new", original.root + "/sev.lock")
+            require_command(["sync", "-f", original.root])
+            remove_tree(stage)
+            file.unlock(lock)
+        catch error: Error:
+            recover_edit(original.root)
+            file.unlock(lock)
+            throw Error(error.message)
+        return open(original.root)
+
+def render_manifest(entries: list[Entry]) -> string:
+    tables: list[string] = []
+    for entry in entries:
+        if entry.table not in tables:
+            tables.append(entry.table)
+    output := ""
+    for table in tables:
+        array := false
+        for entry in entries:
+            if entry.table == table:
+                array = entry.array
+        if array:
+            components = table.split(".")
+            output += "\n[[" + components[:int(len(components)) - 1].join(".") + "]]\n"
+        elif table != "":
+            output += "\n[" + table + "]\n"
+        for entry in entries:
+            if entry.table == table:
+                output += toml_quote(entry.key) + " = " + entry.value + "\n"
+    return output
+
+
+def edit(project: Project) -> Edit:
+    return Edit(project, project.manifest.entries[:])
+
+def add(project: Project, value: string, alias: string = "", development: bool = false) -> Project | Error:
+    transaction = edit(project)
+    transaction.add(value, alias, development)
+    return transaction.commit()
+
+def remove(project: Project, alias: string, development: bool = false) -> Project | Error:
+    transaction = edit(project)
+    transaction.remove(alias, development)
+    return transaction.commit()
+
+def update(project: Project, alias: string) -> Project | Error:
+    transaction = edit(project)
+    transaction.update(alias)
+    return transaction.commit()
+
+def new(location: string, name: string = "", library: bool = false) -> Project | Error:
+    if os.exists(location):
+        throw Error("new package destination already exists")
+    selected = safe_name(name if name != "" else path.basename(location))
+    stage = temporary(path.dirname(location))
+    header := "[package]\nname = " + toml_quote(selected) + "\nversion = \"0.1.0\"\nedition = \"2026\"\n"
+    target = "lib" if library else "main"
+    header += "\n[lib]\n" if library else "\n[[bin]]\n"
+    header += "name = " + toml_quote(selected) + "\npath = \"src/" + target + ".sev\"\n"
+    write_text(stage + "/package.toml", header)
+    write_text(stage + "/src/" + target + ".sev", "def answer() -> int:\n    return 42\n" if library else "def main():\n    print(\"hello, severian\")\n")
+    write_text(stage + "/sev.lock", resolve(open(stage)).lock)
+    replace_file(stage, location)
+    return open(location)

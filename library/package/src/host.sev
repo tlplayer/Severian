@@ -1,0 +1,123 @@
+import environment
+import file
+import path
+import process
+import os
+
+# Hosted primitives only. Package decisions remain in ordinary Severian.
+@c(symbol="getpid")
+def process_id() -> i32
+
+def quote(value: string) -> string:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def command(arguments: list[string]) -> int:
+    words: list[string] = []
+    for argument in arguments:
+        words.append(quote(argument))
+    return process.run(words.join(" "))
+
+def require_command(arguments: list[string]) -> unit | Error:
+    if command(arguments) != 0:
+        throw Error("host operation failed: " + arguments[0])
+
+def capture(arguments: list[string]) -> string | Error:
+    directory = temporary("/tmp")
+    words: list[string] = []
+    for argument in arguments:
+        words.append(quote(argument))
+    status = process.run(words.join(" ") + " > " + quote(directory + "/output"))
+    result = file.raw(directory + "/output")
+    remove_tree(directory)
+    if status != 0:
+        throw Error("host operation failed: " + arguments[0])
+    return result.strip()
+
+def canonical(value: string) -> string | Error:
+    return capture(["realpath", "-e", "--", value])
+
+def exists(value: string) -> bool:
+    return os.exists(value)
+
+def mkdir(value: string) -> unit | Error:
+    if not os.make_directories(value):
+        throw Error("could not create directory " + value)
+
+def write_text(destination: string, contents: string) -> unit | Error:
+    mkdir(path.dirname(destination))
+    if file.write(destination, contents) != 0:
+        throw Error("could not write " + destination)
+
+def read_text(location: string) -> string | Error:
+    if not os.is_file(location):
+        throw Error("missing file " + location)
+    return file.raw(location)
+
+def temporary(parent: string, prefix: string = ".sev-") -> string | Error:
+    mkdir(parent)
+    index := 0
+    while index < 10000:
+        candidate = parent + "/" + prefix + string(process_id()) + "-" + string(index)
+        if process.run("mkdir -- " + quote(candidate) + " 2>/dev/null") == 0:
+            return candidate
+        index += 1
+    throw Error("could not allocate package staging directory")
+
+def replace_file(source: string, destination: string) -> unit | Error:
+    if os.rename(source, destination) != 0:
+        throw Error("could not replace " + destination)
+
+def remove_tree(location: string) -> unit | Error:
+    require_command(["rm", "-rf", "--", location])
+
+def copy_file(source: string, destination: string) -> unit | Error:
+    mkdir(path.dirname(destination))
+    if not os.copy(source, destination):
+        throw Error("could not copy " + source)
+
+def sorted_strings(values: list[string]) -> list[string]:
+    result: list[string] = []
+    for value in values:
+        result.append(value)
+    for i in range(int(len(result))):
+        for j in range(i + 1, int(len(result))):
+            if result[j] < result[i]:
+                previous = result[i]
+                result[i] = result[j]
+                result[j] = previous
+    return result
+
+def files(root: string) -> list[string] | Error:
+    links = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "target", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "l", "-print"])
+    if links != "":
+        throw Error("package content may not contain symlinks: " + links)
+    output = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "target", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "f", "-print"])
+    if output == "":
+        return []
+    return sorted_strings(output.split("\n"))
+
+def digest(location: string) -> string | Error:
+    return "sha256:" + capture(["sha256sum", "--", location]).split(" ")[0]
+
+def read_bytes(location: string) -> list[u8] | Error:
+    if not os.is_file(location):
+        throw Error("could not read " + location)
+    return file.map(location)
+
+def write_bytes(location: string, contents: list[u8]) -> unit | Error:
+    mkdir(path.dirname(location))
+    if file.write(location, contents) != 0:
+        throw Error("could not write " + location)
+
+def recover_edit(root: string) -> unit | Error:
+    stage = root + "/.sev-transaction"
+    if not os.is_file(stage + "/ready"):
+        return
+    copy_file(stage + "/manifest.old", root + "/package.toml")
+    previous = read_text(stage + "/lock.old")
+    if previous == "":
+        if os.is_file(root + "/sev.lock"):
+            os.remove(root + "/sev.lock")
+    else:
+        write_text(root + "/sev.lock", previous)
+    remove_tree(stage)

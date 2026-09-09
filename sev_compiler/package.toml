@@ -23,6 +23,7 @@ path = "src/main.sev"
 ### DEPENDENCIES #######################################################
 
 [dependencies]
+package = { path = "../library/package" }
 diagnostics = { path = "diagnostics" }
 lexer = { path = "frontend/lexer" }
 parser = { path = "frontend/parser" }

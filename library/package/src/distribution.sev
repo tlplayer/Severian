@@ -1,0 +1,173 @@
+import "host.sev"
+import "model.sev"
+import "manifest.sev"
+import "resolve.sev"
+import "archive.sev"
+import "build.sev"
+import "edit.sev"
+import os
+import path
+import environment
+import file
+
+def select(root: string, requirements: Requirements) -> Selection | Error:
+    manifest = parse_manifest(read_text(root + "/metadata/package.toml"))
+    selected := requirements.target
+    if selected == "":
+        selected = manifest.default_run
+    if selected == "":
+        for target in manifest.targets:
+            if target.kind == "binary":
+                selected = target.name
+    declared := false
+    for target in manifest.targets:
+        declared = declared or (target.kind == "binary" and target.name == selected)
+    if not declared:
+        return Selection("unavailable", "", ["unknown binary: " + selected])
+    native = root + "/artifacts/" + safe_name(requirements.platform) + "/" + safe_name(requirements.profile) + "/bin/" + safe_name(selected)
+    rejected: list[string] = []
+    compatible := false
+    if os.is_file(root + "/metadata/build.toml"):
+        provenance = parse_document(read_text(root + "/metadata/build.toml"))
+        compatible = text_setting(provenance, "", "architecture") == capture(["uname", "-m"]) and text_setting(provenance, "", "os") == capture(["uname", "-s"]) and text_setting(provenance, "", "runtime-abi") == "severian-source-1"
+    if os.is_file(native) and requirements.platform == "host" and compatible:
+        return Selection("native", native, rejected)
+    rejected.append("no compatible native artifact for " + requirements.platform + "/" + requirements.profile)
+    rejected.append("compiler/backend artifact loading is not supported by this compiler")
+    if os.is_file(root + "/source/package.toml"):
+        return Selection("source", root + "/source", rejected)
+    rejected.append("distribution contains no source fallback")
+    rejected.append("container execution is not supported by this compiler")
+    return Selection("unavailable", "", rejected)
+
+def frozen_manifest(project: Project, resolution: Resolution) -> string | Error:
+    entries: list[Entry] = []
+    for entry in project.manifest.entries:
+        if entry.table != "dependencies" and entry.table != "dev-dependencies" and not (entry.table == "publish" and entry.key == "registry"):
+            entries.append(entry)
+    for edge in resolution.edges:
+        if edge.parent == 0 and not edge.development:
+            identity = resolution.packages[edge.child].identity
+            value = "{ package = " + toml_quote(identity.name) + ", version = " + toml_quote(identity.version) + " }"
+            entries.append(Entry("dependencies", edge.alias, value))
+    return render_manifest(entries)
+
+def publish(project: Project, compiler: Compiler, request: Publish) -> string | Error:
+    if setting(project.manifest.entries, "package", "publish") == "false":
+        throw Error("package is marked publish = false")
+    root = registry_root(request.registry)
+    release = root + "/packages/" + project.manifest.name + "/" + project.manifest.version
+    if os.exists(release):
+        throw Error("registry release already exists: " + release)
+    include_source = request.include_source and setting(project.manifest.entries, "publish", "include-source") != "false"
+    result = build(project, compiler, Build("", request.platform, request.profile, "", "", false))
+    if not include_source:
+        for target in project.manifest.targets:
+            if target.kind == "library":
+                throw Error("source-free libraries require compiler interfaces and compatible library artifacts")
+    stage = temporary(root)
+    distribution = stage + "/distribution"
+    mkdir(distribution)
+    frozen = frozen_manifest(project, result.plan.resolution)
+    published = resolve(Project(project.root, parse_manifest(frozen), frozen, ""), Resolve("publish", false, request.registry))
+    write_text(distribution + "/metadata/build.toml", "architecture = " + toml_quote(capture(["uname", "-m"])) + "\nos = " + toml_quote(capture(["uname", "-s"])) + "\nruntime-abi = \"severian-source-1\"\n")
+    write_text(distribution + "/metadata/package.toml", frozen)
+    write_text(distribution + "/metadata/sev.lock", published.lock)
+    if include_source:
+        for location in files(project.root):
+            relative = location[int(len(project.root)) + 1:]
+            if relative.starts_with("target/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "package.toml" or relative == "sev.lock":
+                continue
+            if location.ends_with(".sev"):
+                copy_file(location, distribution + "/source/" + relative_path(relative))
+        write_text(distribution + "/source/package.toml", frozen)
+        # Lock the actual published source set, including the frozen manifest.
+        published_source = Project(distribution + "/source", parse_manifest(frozen), frozen, "")
+        source_resolution = resolve(published_source, Resolve("publish", false, request.registry))
+        write_text(distribution + "/source/sev.lock", source_resolution.lock)
+        write_text(distribution + "/metadata/sev.lock", source_resolution.lock)
+    for artifact in result.artifacts:
+        if artifact.format == "native":
+            destination = distribution + "/artifacts/" + artifact.platform + "/" + artifact.profile + "/bin/" + artifact.target.name
+            copy_file(artifact.path, destination)
+            require_command(["chmod", "755", "--", destination])
+    entries: list[ArchiveEntry] = []
+    for location in files(distribution):
+        relative = location[int(len(distribution)) + 1:]
+        entries.append(ArchiveEntry(relative, relative.starts_with("artifacts/"), read_bytes(location)))
+    name = project.manifest.name + "-" + project.manifest.version + ".pkg"
+    write_archive(distribution + "/" + name, Archive(2, project.manifest.name, entries))
+    mkdir(path.dirname(release))
+    lock = file.native_lock(root + "/.sev-publish.lock")
+    if lock < 0:
+        throw Error("could not lock registry publication")
+    try:
+        if os.exists(release):
+            throw Error("registry release already exists: " + release)
+        replace_file(distribution, release)
+        file.unlock(lock)
+    catch error: Error:
+        file.unlock(lock)
+        remove_tree(stage)
+        throw Error(error.message)
+    remove_tree(stage)
+    return release + "/" + name
+
+def materialize(value: string, compiler: Compiler, request: Run) -> string | Error:
+    ref = reference(value)
+    platform = request.platform if request.platform != "" else "host"
+    profile = request.profile if request.profile != "" else "release"
+    location = fetch(ref)
+    if ref.source == "git":
+        result = execute(plan(open(location), Build(request.target, request.platform, request.profile, "", "", request.locked), "run"), compiler)
+        return result.artifacts[0].path
+    selected = select(path.dirname(location), Requirements(request.target, platform, profile, false))
+    if selected.kind == "native":
+        return selected.path
+    if selected.kind == "source":
+        stage = temporary(registry_root() + "/cache/build")
+        require_command(["cp", "-R", "--", selected.path, stage + "/source"])
+        result = execute(plan(open(stage + "/source"), Build(request.target, platform, profile, "", "", true), "run"), compiler)
+        return result.artifacts[0].path
+    throw Error(selected.rejections.join("; "))
+
+def run_reference(value: string, compiler: Compiler, request: Run) -> int | Error:
+    executable: string = materialize(value, compiler, request)
+    arguments: list[string] = [executable]
+    for argument in request.arguments:
+        arguments.append(argument)
+    return command(arguments)
+
+def install(value: string, compiler: Compiler, request: Install) -> string | Error:
+    executable = materialize(value, compiler, Run(request.target, request.platform, request.profile, [], false))
+    directory := request.directory
+    if directory == "":
+        home = environment.get("HOME", "")
+        if home == "":
+            throw Error("install needs a directory or HOME")
+        directory = home + "/.local/bin"
+    mkdir(directory)
+    destination = directory + "/" + safe_name(path.basename(executable))
+    if os.exists(destination):
+        throw Error("installed command already exists: " + destination)
+    stage = temporary(directory)
+    copy_file(executable, stage + "/binary")
+    require_command(["chmod", "755", "--", stage + "/binary"])
+    require_command(["ln", "--", stage + "/binary", destination])
+    remove_tree(stage)
+    return destination
+
+def select(root: string) -> Selection | Error:
+    return select(root, Requirements())
+
+def publish(project: Project, compiler: Compiler) -> string | Error:
+    return publish(project, compiler, Publish())
+
+def install(value: string, compiler: Compiler) -> string | Error:
+    return install(value, compiler, Install())
+
+def materialize(value: string, compiler: Compiler) -> string | Error:
+    return materialize(value, compiler, Run())
+
+def run_reference(value: string, compiler: Compiler) -> int | Error:
+    return run_reference(value, compiler, Run())

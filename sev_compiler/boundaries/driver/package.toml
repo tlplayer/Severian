@@ -12,6 +12,7 @@ name = "sev-bootstrap-driver"
 path = "src/main.sev"
 
 [dependencies]
+package = { path = "../../../library/package" }
 abi = { path = "../abi" }
 backend = { path = "../backend" }
 bootstrap = { path = "../../bootstrap" }

@@ -1,5 +1,8 @@
 # Building and packaging
 
+The source-owned `import package` API and its current compiler boundary are
+documented in [the package library API](API.md).
+
 This directory is the executable specification for Severian packages. A change
 to manifest discovery, dependency resolution, build output placement, or the
 `.pkg` format should update this example and its tests in the same change.

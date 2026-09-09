@@ -1,0 +1,152 @@
+import "compiler.sev"
+import "host.sev"
+import "model.sev"
+import "manifest.sev"
+import "resolve.sev"
+import "archive.sev"
+import os
+import path
+
+def output_root(project: Project, platform: string, profile: string) -> string | Error:
+    return project.root + "/target/" + safe_name(platform) + "/" + safe_name(profile)
+
+def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
+    resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
+    platform = request.platform if request.platform != "" else text_setting(project.manifest.entries, "build", "target", "host")
+    profile = request.profile if request.profile != "" else text_setting(project.manifest.entries, "build", "profile", "dev")
+    root = output_root(project, platform, profile)
+    units: list[BuildUnit] = []
+    # Dependencies are checked first; compilation receives the same whole graph.
+    for index in range(int(len(resolution.packages)) - 1, 0, -1):
+        dependency = resolution.packages[index]
+        target = library_target(dependency.manifest)
+        units.append(BuildUnit(index, target, platform, profile, "", false))
+    selected := request.target
+    if mode == "run" and selected == "":
+        selected = project.manifest.default_run
+    found := false
+    for target in project.manifest.targets:
+        if selected != "" and target.name != selected:
+            continue
+        if mode == "run" and target.kind != "binary":
+            continue
+        destination := root + "/bin/" + target.name if target.kind == "binary" else root + "/pkg/" + target.name + "-" + project.manifest.version + ".pkg"
+        if mode == "test":
+            destination = root + "/tests/" + target.name
+        elif request.emit != "":
+            destination += ".json" if request.emit == "agent-ir" else "." + request.emit
+        if request.output != "":
+            destination = request.output
+        units.append(BuildUnit(0, target, platform, profile, destination, mode == "test"))
+        found = true
+    if not found:
+        throw Error("no matching declared target: " + selected)
+    root_count := 0
+    for unit in units:
+        if unit.package_index == 0:
+            root_count += 1
+    if (request.output != "" or mode == "run") and root_count != 1:
+        throw Error("operation requires exactly one declared target; select it by name")
+    if mode == "test" and os.is_dir(project.root + "/tests"):
+        for location in files(project.root + "/tests"):
+            if location.ends_with(".sev"):
+                relative = location[int(len(project.root)) + 1:]
+                units.append(BuildUnit(0, Target(relative, "test", relative), platform, profile, root + "/tests/" + relative.replace("/", "_").replace(".sev", ""), true))
+    return BuildPlan(project, resolution, units, mode, request.emit)
+
+# The compilation-unit protocol is the only compiler execution boundary.
+def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
+    artifacts: list[Artifact] = []
+    for unit in plan.units:
+        if unit.package_index != 0 or (plan.mode == "check" and plan.emit == ""):
+            compile_unit(compiler, unit, plan.resolution, "check")
+        elif unit.target.kind == "library" and not unit.include_tests and plan.emit == "":
+            listing = BuildUnit(unit.package_index, unit.target, unit.platform, unit.profile, unit.output + ".sources", false)
+            compile_unit(compiler, listing, plan.resolution, "sources")
+            bundle(plan.project, unit.target, unit.output, read_text(listing.output).strip().split("\n"))
+            os.remove(listing.output)
+            artifacts.append(Artifact(unit.target, unit.platform, unit.profile, "bundle", unit.output))
+        else:
+            mkdir(path.dirname(unit.output))
+            artifacts.append(compile_unit(compiler, unit, plan.resolution, plan.emit))
+    return BuildResult(plan, artifacts)
+
+def build(project: Project, compiler: Compiler, request: Build) -> BuildResult | Error:
+    return execute(plan(project, request), compiler)
+
+def check(project: Project, compiler: Compiler, request: Check) -> BuildResult | Error:
+    return execute(plan(project, Build(request.target, request.platform, request.profile, request.emit, request.output, request.locked), "check"), compiler)
+
+def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Error:
+    planned = plan(project, Build("", request.platform, request.profile, request.emit, request.output, request.locked), "test")
+    # Each invocation owns its executables, including simultaneous test runs.
+    stage = temporary(output_root(project, planned.units[-1].platform, planned.units[-1].profile) + "/tests", "run-")
+    for index in range(int(len(planned.units))):
+        unit := planned.units[index]
+        if unit.package_index == 0:
+            unit.output = stage + "/test-" + string(index)
+            planned.units[index] = unit
+    result = execute(planned, compiler)
+    tests: list[TestResult] = []
+    failed := 0
+    for artifact in result.artifacts:
+        if request.filter != "" and not artifact.target.name.contains(request.filter):
+            continue
+        if request.emit != "":
+            continue
+        status = command([artifact.path])
+        tests.append(TestResult(artifact.target.name, status))
+        if status != 0:
+            failed += 1
+    return TestReport(tests, failed)
+
+def run(project: Project, compiler: Compiler, request: Run) -> int | Error:
+    result = execute(plan(project, Build(request.target, request.platform, request.profile, "", "", request.locked), "run"), compiler)
+    artifact: Artifact = result.artifacts[0]
+    arguments: list[string] = [artifact.path]
+    for argument in request.arguments:
+        arguments.append(argument)
+    return command(arguments)
+
+def clean(project: Project, request: Clean) -> unit | Error:
+    destination := project.root + "/target"
+    if request.profile != "" and request.platform == "":
+        throw Error("clean profile requires a platform")
+    if request.platform != "":
+        destination += "/" + safe_name(request.platform)
+    if request.profile != "":
+        destination += "/" + safe_name(request.profile)
+    if os.exists(destination):
+        resolved = canonical(destination)
+        if resolved != project.root + "/target" and not resolved.starts_with(project.root + "/target/"):
+            throw Error("target directory escapes project root")
+        remove_tree(destination)
+
+def metadata(project: Project) -> Resolution | Error:
+    return resolve(project)
+
+def tree(resolution: Resolution) -> string:
+    lines: list[string] = []
+    for edge in resolution.edges:
+        parent = resolution.packages[edge.parent].identity
+        child = resolution.packages[edge.child].identity
+        lines.append(parent.name + "@" + parent.version + " -> " + edge.alias + " = " + child.name + "@" + child.version)
+    return sorted_strings(lines).join("\n")
+
+def plan(project: Project) -> BuildPlan | Error:
+    return plan(project, Build())
+
+def build(project: Project, compiler: Compiler) -> BuildResult | Error:
+    return build(project, compiler, Build())
+
+def check(project: Project, compiler: Compiler) -> BuildResult | Error:
+    return check(project, compiler, Check())
+
+def test(project: Project, compiler: Compiler) -> TestReport | Error:
+    return test(project, compiler, Test())
+
+def run(project: Project, compiler: Compiler) -> int | Error:
+    return run(project, compiler, Run())
+
+def clean(project: Project) -> unit | Error:
+    return clean(project, Clean())
