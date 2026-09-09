@@ -6,6 +6,103 @@ from migration import MigrationCase, ROOT
 
 
 class TypeSemantics(MigrationCase):
+    def test_for_initializer_runs_once_and_has_loop_scope(self):
+        self.native('''
+            def initial() -> int:
+                print("initial")
+                return 0
+            def values() -> list[int]:
+                print("values")
+                return [10, 20, 30]
+            test:
+                total := 0
+                for value in values() with index := initial():
+                    index += 1
+                    if index == 2:
+                        continue
+                    total += value
+                    assert(index == 1 or index == 3)
+                assert(total == 40)
+                for value in range(0) with index := initial():
+                    assert(false)
+                for value in range(5) with index := 0:
+                    index += 1
+                    if index == 2:
+                        break
+                    total += value
+                assert(total == 40)
+        ''', expected="initial\nvalues\ninitial\n")
+        self.rejects('''
+            def main():
+                for value in range(3) with index := 0:
+                    index += 1
+                print(index)
+        ''', "unknown name index")
+
+    def test_symbol_generic_example(self):
+        path = ROOT / "docs/examples/01-types/04-generics/23-symbol-generic.sev"
+        self.native(path.read_text())
+
+    def test_wrapped_parameters_arguments_and_source_delimiters(self):
+        self.native('''
+            enum Packet:
+                Empty
+                Data(
+                    value: int,
+                )
+            class Box[
+                T,
+            ]:
+                value: T
+            def add(
+                left: int,
+                right: int = 2,
+            ) -> int:
+                return left + right
+            def boxed(
+                value: Box[
+                    int,
+                ],
+            ) -> int:
+                return value.value
+            test:
+                values = [
+                    add(
+                        20,
+                        right=22,
+                    ),
+                    7,
+                ]
+                pair = (
+                    values[0],
+                    boxed(
+                        Box[int](9),
+                    ),
+                )
+                assert(pair[0] == 42)
+                assert(pair[1] == 9)
+                if true:
+                    assert(add(
+                        40
+                    ) == 42)
+                assert(values[1] == 7)
+                packet = Data(
+                    pair[0],
+                )
+                match packet:
+                    case Data:
+                        assert(value == 42)
+                    case Empty:
+                        assert(false)
+        ''')
+        self.rejects('''
+            def value(
+                first: int
+                second: int
+            ) -> int:
+                return first
+        ''', "expected closing parenthesis")
+
     def test_enum_examples(self):
         for name in ("01-enum-basics", "02-enum-payloads"):
             with self.subTest(example=name):

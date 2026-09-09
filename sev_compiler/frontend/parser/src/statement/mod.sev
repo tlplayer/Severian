@@ -137,6 +137,13 @@ def parser_separators(parser: Parser):
     while parser_at_simple(parser, Newline) or parser_at_symbol(parser, ","):
         parser_next(parser)
 
+
+# Layout inside an explicit delimiter separates list items, not statements.
+# Keep the original tokens and spans; only the delimited parser consumes it.
+def parser_delimited_layout(parser: Parser):
+    while parser_at_simple(parser, Newline) or parser_at_simple(parser, Indent) or parser_at_simple(parser, Dedent):
+        parser_next(parser)
+
 def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
     result = universal.Module([])
     parser_separators(parser)
@@ -240,6 +247,7 @@ def parser_type_parameters(parser: Parser, pack: list[string] = []) -> tuple[lis
     constraints: list[universal.GenericConstraint] = []
     if parser_take_symbol(parser, "[") == None:
         return (parameters, constraints)
+    parser_delimited_layout(parser)
     if not parser_at_symbol(parser, "]"):
         while true:
             packed = parser_take_symbol(parser, "...") != None
@@ -252,7 +260,11 @@ def parser_type_parameters(parser: Parser, pack: list[string] = []) -> tuple[lis
             if parser_take_symbol(parser, ":") != None:
                 bound = parser_type_annotation(parser)
                 constraints.append(universal.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+            parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
+                break
+            parser_delimited_layout(parser)
+            if parser_at_symbol(parser, "]"):
                 break
     parser_expect_symbol(parser, "]", "expected closing type parameter bracket")
     return (parameters, constraints)
@@ -291,6 +303,7 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
     parser_expect_symbol(parser, "(", "expected opening parenthesis")
     parameters: list[universal.FunctionParameter] = []
     keyword_only := false
+    parser_delimited_layout(parser)
     while not parser_at_symbol(parser, ")"):
         variadic = parser_take_symbol(parser, "*") != None
         if variadic:
@@ -307,8 +320,10 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
             default = parsed_default
             parameter_end = parsed_default.span.end
         parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), variadic=variadic, keyword_only=keyword_only and not variadic))
+        parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None:
             break
+        parser_delimited_layout(parser)
     close = parser_expect_symbol(parser, ")", "expected closing parenthesis").span
     result := universal.named_type("unit", [], close)
     if parser_take_symbol(parser, "->") != None:
@@ -567,6 +582,28 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
     return (universal.Block(statements, [], []), end)
 
+
+class LoopInitializer:
+    binding: universal.Binding | None = None
+
+
+def parser_loop_initializer(parser: Parser) -> LoopInitializer | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "with"):
+        parser_next(parser)
+        return LoopInitializer(parser_binding(parser))
+    return LoopInitializer()
+
+
+def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitializer, span: source.Span) -> universal.Statement:
+    binding ?= initializer.binding
+    if binding != None:
+        # The initializer runs once in a scope enclosing the whole loop.
+        scope = universal.Block([universal.BindingStatement(binding), loop])
+        taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+        return universal.If(taken, scope, universal.empty_block(), span)
+    return loop
+
+
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
     for syntax in parser_peek(parser).syntaxes:
         if syntax.grammar_form in ["Body", "ConditionBody"]:
@@ -582,21 +619,12 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
     if parser_at_identifier(parser, "while"):
         start = parser_next(parser).span
         condition = parser_expression(parser, 0)
-        initializer: universal.Binding | None := None
-        if parser_at_identifier(parser, "with"):
-            parser_next(parser)
-            initializer = parser_binding(parser)
+        initializer = parser_loop_initializer(parser)
         parser_expect_symbol(parser, ":", "expected colon after while condition")
         body = parser_indented_block(parser, "while")
         span = source.Span(start.source, start.start, body[1])
         loop: universal.Statement = universal.While(condition, body[0], span)
-        binding ?= initializer
-        if binding != None:
-            # The initializer runs once in a scope enclosing the whole loop.
-            scope = universal.Block([universal.BindingStatement(binding), loop])
-            taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
-            return universal.If(taken, scope, universal.empty_block(), span)
-        return loop
+        return parser_initialized_loop(loop, initializer, span)
     if parser_at_identifier(parser, "break"):
         return universal.Break(parser_next(parser).span)
     if parser_at_identifier(parser, "continue"):
@@ -608,9 +636,11 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
             return error(parser_fail(parser, "expected in after iteration binding"))
         parser_next(parser)
         iterable = parser_expression(parser, 0)
+        initializer = parser_loop_initializer(parser)
         parser_expect_symbol(parser, ":", "expected colon after iterable")
         body = parser_indented_block(parser, "for")
-        return universal.ForEach(name, iterable, body[0], source.Span(start.source, start.start, body[1]))
+        span = source.Span(start.source, start.start, body[1])
+        return parser_initialized_loop(universal.ForEach(name, iterable, body[0], span), initializer, span)
     if parser_at_identifier(parser, "if"):
         start = parser_next(parser).span
         condition = parser_expression(parser, 0)
@@ -800,6 +830,7 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     while true:
         if parser_take_symbol(parser, "(") != None:
             arguments: list[universal.CallArgument] = []
+            parser_delimited_layout(parser)
             while not parser_at_symbol(parser, ")"):
                 start = parser_peek(parser).span
                 argument_name: string | absent := absent
@@ -809,8 +840,10 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 spread = parser_take_symbol(parser, "...") != None
                 argument = parse_expression(parser, 0)
                 arguments.append(universal.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end), spread=spread))
+                parser_delimited_layout(parser)
                 if parser_take_symbol(parser, ",") == None:
                     break
+                parser_delimited_layout(parser)
             end = parser_expect_symbol(parser, ")", "expected closing parenthesis").span.end
             value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
         elif parser_take_symbol(parser, "[") != None:
@@ -848,12 +881,15 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
         if syntax.grammar_form == "Delimited" and lexer.token_is_symbol(token, syntax.symbol):
             arguments: list[universal.CallArgument] = []
             separated := false
+            parser_delimited_layout(parser)
             while not parser_at_symbol(parser, syntax.closing):
                 value = parse_expression(parser, 0)
                 arguments.append(universal.CallArgument(None, value, value.span))
+                parser_delimited_layout(parser)
                 if parser_take_symbol(parser, syntax.separator) == None:
                     break
                 separated = true
+                parser_delimited_layout(parser)
             end = parser_expect_symbol(parser, syntax.closing, "expected closing " + syntax.closing).span.end
             span = source.Span(token.span.source, token.span.start, end)
             if syntax.grouping and len(arguments) == 1 and not separated:
@@ -897,10 +933,13 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             pass
     if lexer.token_is_symbol(token, "["):
         elements: list[universal.Expression] = []
+        parser_delimited_layout(parser)
         while not parser_at_symbol(parser, "]"):
             elements.append(parse_expression(parser, 0))
+            parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
                 break
+            parser_delimited_layout(parser)
         end = parser_expect_symbol(parser, "]", "expected closing list bracket").span.end
         return universal.Expression(universal.ListLiteral(elements), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "{"):
@@ -966,10 +1005,13 @@ def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics
     arguments: list[universal.TypeAnnotation] = []
     end := name[1].end
     if parser_take_symbol(parser, "[") != None:
+        parser_delimited_layout(parser)
         while not parser_at_symbol(parser, "]"):
             arguments.append(parse_type_annotation(parser))
+            parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
                 break
+            parser_delimited_layout(parser)
         end = parser_expect_symbol(parser, "]", "expected closing type bracket").span.end
     return universal.named_type(qualified, arguments, source.Span(name[1].source, name[1].start, end))
 
@@ -1034,11 +1076,14 @@ def parser_named_declaration(parser: Parser, syntax: universal.OperatorSyntax) -
         else:
             parameters: list[universal.FunctionParameter] = []
             if parser_take_symbol(parser, "(") != None:
+                parser_delimited_layout(parser)
                 while not parser_at_symbol(parser, ")"):
                     field = parser_identifier(parser, "expected a parameter name")
                     parameters.append(parser_named_field(parser, field))
+                    parser_delimited_layout(parser)
                     if parser_take_symbol(parser, ",") == None:
                         break
+                    parser_delimited_layout(parser)
                 parser_expect_symbol(parser, ")", "expected closing parameter parenthesis")
             alternatives.append(universal.CallableAlternative(member[0], parameters, member[1]))
         parser_expect(parser, Newline, "expected newline after declaration member")
