@@ -203,8 +203,22 @@ def operation_results(operation: universal.Operation) -> list[universal.ValueId]
             return []
 
 
+def reachable_blocks(body: universal.CfgBody) -> list[int]:
+    reachable = [body.entry]
+    cursor := 0
+    while cursor < len(reachable):
+        terminal ?= body.blocks[reachable[cursor]].terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                if edge.target not in reachable:
+                    reachable.append(edge.target)
+        cursor += 1
+    return reachable
+
+
 def dominators(body: universal.CfgBody) -> list[int]:
     count = int(len(body.blocks))
+    reachable = reachable_blocks(body)
     result: list[int] = []
     for row in range(count):
         for column in range(count):
@@ -213,12 +227,14 @@ def dominators(body: universal.CfgBody) -> list[int]:
     while changed:
         changed = false
         for index in range(count):
-            if index == body.entry:
+            if index == body.entry or index not in reachable:
                 continue
             for member in range(count):
                 common := 1
                 found := false
                 for predecessor in range(count):
+                    if predecessor not in reachable:
+                        continue
                     terminal ?= body.blocks[predecessor].terminator
                     if terminal != None:
                         for edge in successors(terminal.exit):
@@ -245,8 +261,11 @@ def verify_inputs(values: list[universal.ValueId], available: list[int], span: s
 
 def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
     dominance = dominators(body)
+    reachable = reachable_blocks(body)
     count = int(len(body.blocks))
     for block in body.blocks:
+        if block.id not in reachable:
+            continue
         available: list[int] = []
         for parameter in parameters:
             available.append(int(parameter.index))

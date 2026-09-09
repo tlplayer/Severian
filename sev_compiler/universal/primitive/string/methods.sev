@@ -46,6 +46,17 @@ def slice_bound(value: int, size: int, reverse: bool) -> int:
     return result
 
 
+def slice_next(position: int, end: int, step: int) -> int:
+    # Stop at the bound before adding a step that would cross it or overflow.
+    if step < 0:
+        if step <= end - position:
+            return end
+    else:
+        if step >= end - position:
+            return end
+    return position + step
+
+
 operator slice_at(value: string, start: int, stop: int, step: int, has_start: bool, has_stop: bool) -> string:
     assert(step != 0)
     size = text.length(value)
@@ -62,14 +73,7 @@ operator slice_at(value: string, start: int, stop: int, step: int, has_start: bo
             text.__store(text.__load(value, text.__index(index)), part, text.__index(index - first))
             index += 1
         result = text.concat(result, part)
-        # Check the remaining distance before adding step to avoid overflow.
-        if reverse:
-            if step <= end - position:
-                break
-        else:
-            if step >= end - position:
-                break
-        position += step
+        position = slice_next(position, end, step)
     return result
 
 

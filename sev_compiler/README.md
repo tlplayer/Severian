@@ -91,8 +91,12 @@ must agree with the implementation. Source contract regressions run with
 `python3 tests/sev_compiler/source_contracts.py` and the migration runner's
 `Gate3SourceSyntax` class.
 
-`universal/operator/scalar.sev` still supplies fallback lowering descriptions
-for unmigrated operations. Compile-time execution of compiler-semantic methods,
+Scalar grammar traits declare `operations: {T: ScalarOperation}` maps in
+`universal/grammar/contracts.sev`. Type keys select the lowering description;
+`universal/operator/scalar.sev` defines the descriptor data. Editing a map changes
+the operation without rebuilding the compiler. Run the native checks with
+`python3 tests/sev_compiler/grammar_scalar.py`.
+Compile-time execution of compiler-semantic methods,
 capability enforcement and the canonical CFG pipeline remain unfinished; typed
 callable binding does not complete those migrations. Calls retain resolved
 `DefId` and `FunctionId` identities through HIR and MIR.

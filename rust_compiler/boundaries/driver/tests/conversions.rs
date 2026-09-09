@@ -4,6 +4,54 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn converted_strings_survive_later_conversions_and_enum_storage() {
+    test_source(
+        r#"
+enum Literal:
+    Integer(spelling: string)
+enum Operation:
+    Constant(value: Literal, result: int)
+def spelling(value: int) -> string:
+    return string(value)
+test:
+    first = spelling(10)
+    second = spelling(20)
+    unsigned_value: u64 = 18446744073709551615
+    wide_value: i128 = -170141183460469231731687303715884105728
+    wide_unsigned_value: u128 = 340282366920938463463374607431768211455
+    unsigned = string(unsigned_value)
+    wide = string(wide_value)
+    wide_unsigned = string(wide_unsigned_value)
+    floating = string(1.25)
+    wide_float = string(f128(1.0))
+    character = string('🙂')
+    size = string(usize(42))
+    operations: list[Operation] = []
+    position := 0
+    while position < 3:
+        operations.append(Operation.Constant(Literal.Integer(string(position)), position + 10))
+        position += 1
+    assert(first == "10")
+    assert(second == "20")
+    assert(unsigned == "18446744073709551615")
+    assert(wide == "-170141183460469231731687303715884105728")
+    assert(wide_unsigned == "340282366920938463463374607431768211455")
+    assert(floating == "1.25")
+    assert(wide_float == "0x1.0000000000000000000000000000p+0")
+    assert(character == "🙂")
+    assert(size == "42")
+    for operation in operations:
+        match operation:
+            case Constant:
+                match value:
+                    case Integer:
+                        other = string(result)
+                        assert(int(spelling) == result - 10)
+"#,
+    );
+}
+
 fn test_source(source: &str) {
     let root = std::env::temp_dir().join(format!(
         "severian-conversions-{}-{}",

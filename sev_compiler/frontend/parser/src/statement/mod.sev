@@ -808,12 +808,20 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     if lexer.token_is_symbol(token, "{"):
         keys: list[universal.Expression] = []
         values: list[universal.Expression] = []
-        while not parser_at_symbol(parser, "}"):
+        multiline = parser_take(parser, Newline) != None
+        if multiline:
+            parser_expect(parser, Indent, "expected indented map entries")
+        parser_separators(parser)
+        while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, Dedent):
             keys.append(parse_expression(parser, 0))
             parser_expect_symbol(parser, ":", "expected colon after map key")
             values.append(parse_expression(parser, 0))
             if parser_take_symbol(parser, ",") == None:
                 break
+            parser_separators(parser)
+        parser_separators(parser)
+        if multiline:
+            parser_expect(parser, Dedent, "expected end of map entries")
         end = parser_expect_symbol(parser, "}", "expected closing map brace").span.end
         return universal.Expression(universal.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "("):

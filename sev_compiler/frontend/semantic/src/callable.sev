@@ -1605,7 +1605,7 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
     scalar_syntax ?= function.operator_syntax
     if scalar_syntax != None:
         if scalar_syntax.scalar_operation != None:
-            kind: universal.ExpressionKind = universal.Unary(scalar_syntax, operands[0])
+            kind: universal.ExpressionKind := universal.Unary(scalar_syntax, operands[0])
             if len(operands) == 2:
                 kind = universal.Binary(scalar_syntax, operands[0], operands[1])
             id = universal.HirId(u32(state.next_id[0]))

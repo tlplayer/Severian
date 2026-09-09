@@ -16,14 +16,21 @@ typedef struct {
 
 static void sev_string_list_push(sev_string_list *list, const char *value);
 
-static _Thread_local char sev_conversion_buffer[128];
-
 static char *sev_string_allocation(size_t length) {
     if (length + 1 > SIZE_MAX - sizeof(sev_owned_string)) abort();
     sev_owned_string *allocation = malloc(sizeof(sev_owned_string) + length + 1);
     if (allocation == NULL) abort();
     allocation->length = length;
     return (char *)(allocation + 1);
+}
+
+// Converted strings can escape into bindings, collections, and MIR literals.
+// Give each result the same stable storage as other allocating string operations.
+static char *sev_conversion_result(const char *buffer, size_t length) {
+    char *result = sev_string_allocation(length);
+    memcpy(result, buffer, length);
+    result[length] = '\0';
+    return result;
 }
 
 static size_t sev_utf8_width(unsigned char byte) {
@@ -56,16 +63,19 @@ const char *__sev_string_identity(const char *value) {
 }
 
 const char *__sev_string_from_int(int64_t value) {
-    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%lld", (long long)value);
-    return sev_conversion_buffer;
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%lld", (long long)value);
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_uint(uint64_t value) {
-    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%llu", (unsigned long long)value);
-    return sev_conversion_buffer;
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)value);
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_u128(unsigned __int128 value) {
+    char buffer[128];
     char reversed[39];
     size_t length = 0;
     do {
@@ -73,15 +83,16 @@ const char *__sev_string_from_u128(unsigned __int128 value) {
         value /= 10;
     } while (value != 0);
     for (size_t index = 0; index < length; ++index) {
-        sev_conversion_buffer[index] = reversed[length - index - 1];
+        buffer[index] = reversed[length - index - 1];
     }
-    sev_conversion_buffer[length] = '\0';
-    return sev_conversion_buffer;
+    buffer[length] = '\0';
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_i128(__int128 value) {
+    char buffer[128];
     if (value >= 0) return __sev_string_from_u128((unsigned __int128)value);
-    sev_conversion_buffer[0] = '-';
+    buffer[0] = '-';
     unsigned __int128 magnitude = (unsigned __int128)(-(value + 1)) + 1;
     char reversed[39];
     size_t length = 0;
@@ -90,32 +101,34 @@ const char *__sev_string_from_i128(__int128 value) {
         magnitude /= 10;
     } while (magnitude != 0);
     for (size_t index = 0; index < length; ++index) {
-        sev_conversion_buffer[index + 1] = reversed[length - index - 1];
+        buffer[index + 1] = reversed[length - index - 1];
     }
-    sev_conversion_buffer[length + 1] = '\0';
-    return sev_conversion_buffer;
+    buffer[length + 1] = '\0';
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_float(double value) {
-    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%.15g", value);
-    return sev_conversion_buffer;
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%.15g", value);
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_f128(__float128 value) {
+    char buffer[128];
     unsigned __int128 bits;
     memcpy(&bits, &value, sizeof(bits));
     unsigned sign = (unsigned)(bits >> 127);
     unsigned exponent = (unsigned)((bits >> 112) & 0x7fff);
     unsigned __int128 fraction = bits & ((((unsigned __int128)1) << 112) - 1);
-    char *output = sev_conversion_buffer;
+    char *output = buffer;
     if (sign != 0) *output++ = '-';
     if (exponent == 0x7fff) {
         strcpy(output, fraction == 0 ? "inf" : "nan");
-        return sev_conversion_buffer;
+        return sev_conversion_result(buffer, strlen(buffer));
     }
     if (exponent == 0 && fraction == 0) {
         strcpy(output, "0x0p+0");
-        return sev_conversion_buffer;
+        return sev_conversion_result(buffer, strlen(buffer));
     }
     *output++ = '0';
     *output++ = 'x';
@@ -127,9 +140,9 @@ const char *__sev_string_from_f128(__float128 value) {
     }
     *output++ = 'p';
     int power = exponent == 0 ? -16382 : (int)exponent - 16383;
-    snprintf(output, (size_t)(sev_conversion_buffer + sizeof(sev_conversion_buffer) - output),
+    snprintf(output, (size_t)(buffer + sizeof(buffer) - output),
              "%+d", power);
-    return sev_conversion_buffer;
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 double __sev_float_from_string(const char *value) {
@@ -145,38 +158,41 @@ const char *__sev_string_from_bool(_Bool value) {
 }
 
 const char *__sev_string_from_char(uint32_t value) {
+    char buffer[128];
     size_t length;
     if (value <= 0x7f) {
-        sev_conversion_buffer[0] = (char)value;
+        buffer[0] = (char)value;
         length = 1;
     } else if (value <= 0x7ff) {
-        sev_conversion_buffer[0] = (char)(0xc0 | (value >> 6));
-        sev_conversion_buffer[1] = (char)(0x80 | (value & 0x3f));
+        buffer[0] = (char)(0xc0 | (value >> 6));
+        buffer[1] = (char)(0x80 | (value & 0x3f));
         length = 2;
     } else if (value <= 0xffff) {
-        sev_conversion_buffer[0] = (char)(0xe0 | (value >> 12));
-        sev_conversion_buffer[1] = (char)(0x80 | ((value >> 6) & 0x3f));
-        sev_conversion_buffer[2] = (char)(0x80 | (value & 0x3f));
+        buffer[0] = (char)(0xe0 | (value >> 12));
+        buffer[1] = (char)(0x80 | ((value >> 6) & 0x3f));
+        buffer[2] = (char)(0x80 | (value & 0x3f));
         length = 3;
     } else {
-        sev_conversion_buffer[0] = (char)(0xf0 | (value >> 18));
-        sev_conversion_buffer[1] = (char)(0x80 | ((value >> 12) & 0x3f));
-        sev_conversion_buffer[2] = (char)(0x80 | ((value >> 6) & 0x3f));
-        sev_conversion_buffer[3] = (char)(0x80 | (value & 0x3f));
+        buffer[0] = (char)(0xf0 | (value >> 18));
+        buffer[1] = (char)(0x80 | ((value >> 12) & 0x3f));
+        buffer[2] = (char)(0x80 | ((value >> 6) & 0x3f));
+        buffer[3] = (char)(0x80 | (value & 0x3f));
         length = 4;
     }
-    sev_conversion_buffer[length] = '\0';
-    return sev_conversion_buffer;
+    buffer[length] = '\0';
+    return sev_conversion_result(buffer, length);
 }
 
 const char *__sev_string_from_usize(uintptr_t value) {
-    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%llu", (unsigned long long)value);
-    return sev_conversion_buffer;
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)value);
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_string_from_pointer(const void *value) {
-    snprintf(sev_conversion_buffer, sizeof(sev_conversion_buffer), "%p", value);
-    return sev_conversion_buffer;
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%p", value);
+    return sev_conversion_result(buffer, strlen(buffer));
 }
 
 const char *__sev_type_string(const char *value) {
