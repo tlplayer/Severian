@@ -84,6 +84,11 @@ def main():
     inputs.update({
         # Prerequisite order, not directory numbering.
         "example_hello": (ROOT / "docs/examples/00-getting-started/01-hello.sev", "build"),
+        "example_strings": (ROOT / "docs/examples/01-types/01-basic/04-strings.sev", "build"),
+        "example_identity": (ROOT / "docs/examples/01-types/01-basic/06-is.sev", "test"),
+        "example_while_initializer": (ROOT / "docs/examples/02-functions/02-control-flow/01-while-initializer.sev", "build"),
+        "example_if_while_for": (ROOT / "docs/examples/02-functions/02-control-flow/02-if-while-for.sev", "build"),
+        "example_continue_break": (ROOT / "docs/examples/02-functions/02-control-flow/03-continue-break.sev", "build"),
         "example_functions": (ROOT / "docs/examples/02-functions/01-basic/01-basic-functions.sev", "build"),
         "example_conditional": (ROOT / "docs/examples/02-functions/02-control-flow/07-conditional-expression.sev", "test"),
         "example_variables": (ROOT / "docs/examples/00-getting-started/02-variables.sev", "build"),
@@ -99,6 +104,10 @@ def main():
         "example_compiler_tests": (ROOT / "docs/examples/03-testing/02-with-tests/08-compile.sev", "test"),
         "printing": (io_source, "test"),
         "example_math": (ROOT / "docs/examples/05-building/src/math.sev", "build"),
+        "example_building_library": (ROOT / "docs/examples/05-building/src/lib.sev", "build"),
+        "example_building_library_tests": (ROOT / "docs/examples/05-building/src/lib.sev", "test"),
+        "example_building_binary": (ROOT / "docs/examples/05-building/src/main.sev", "build"),
+        "example_building_binary_tests": (ROOT / "docs/examples/05-building/src/main.sev", "test"),
         "example_clamp": (ROOT / "docs/examples/03-testing/01-basics/01-ordinary-and-named.sev", "test"),
         "scalar_functions": (scalar_tests / "functions.sev", "test"),
         "expression_values": (scalar_tests / "values.sev", "test"),
@@ -118,6 +127,11 @@ def main():
     inputs["test_excludes_main"] = (test_main, "test")
     expected_stdout = {
         "example_hello": "hello, severian\n",
+        "example_strings": "Severian\n8\nSEVERIAN\ntrue\nHello, Severian!\nSever\n",
+        "example_while_initializer": "0\n1\n2\ntrue\n",
+        "example_if_while_for": "0\n1\n2\neven\nodd\neven\nodd\n",
+        "example_continue_break": "1\n",
+        "example_building_binary": "42\n",
         "example_functions": "large\n",
         "example_primitives": "10\n1000000\n0.5\ntrue\na\n",
         "example_constants": "3\n3.1415926\n",

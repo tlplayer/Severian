@@ -36,6 +36,7 @@ enum ExpressionKind:
     Call(callee: Expression, arguments: list[CallArgument])
     ListLiteral(elements: list[Expression])
     Subscript(object: Expression, index: Expression)
+    Slice(object: Expression, start: Expression | None, stop: Expression | None, step: Expression | None)
     ListValue(elements: list[Expression], construction: Expression, storage: Expression)
     IndexReference(object: Expression, index: Expression, access: Expression, storage: Expression | None)
     OutcomeValue(value: Expression, variant: int)

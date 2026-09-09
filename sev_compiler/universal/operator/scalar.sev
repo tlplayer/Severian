@@ -46,6 +46,7 @@ def scalar_operations() -> list[ScalarOperation]:
         ScalarOperation("+", 1, false, "addi"),
         ScalarOperation("-", 1, false, "subi"),
         ScalarOperation("not", 1, true, "xori", identity=1),
+        ScalarOperation("!", 1, true, "xori", identity=1),
         ScalarOperation("+", 2, false, "addi"),
         ScalarOperation("-", 2, false, "subi"),
         ScalarOperation("*", 2, false, "muli"),

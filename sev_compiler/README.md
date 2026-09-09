@@ -247,6 +247,31 @@ directory for library sources; use `--sysroot /path/to/Severian` elsewhere.
 
 ## Examples in prerequisite order
 
+The known-good example spine has a focused regression gate:
+
+```sh
+target/debug/sev build sev_compiler
+python3 tests/sev_compiler/known_good_spine.py
+```
+
+Run these commands from the repository root. The gate uses the source compiler
+to build all six unchanged examples: hello, conversion, conditional expression,
+ordinary/named tests, and `05-building/src/{lib,main}.sev`. It verifies emitted
+MLIR, checks native stdout exactly, and runs the five subjects with supported
+ordinary/compiler tests. Hello's integration test mode remains unsupported;
+its output is checked by running the built program. Set
+`SEVERIAN_SOURCE_COMPILER` to select another source compiler executable.
+
+`python3 tests/sev_compiler/example_progress.py` also checks the string and
+identity examples and the first three control-flow examples. String slices
+support omitted bounds, negative indices, and signed steps over Unicode
+characters; a zero step traps. `length()`, `contains()`, and ASCII `upper()`
+use source-library methods (`upper()` preserves non-ASCII bytes). Integer-list
+`copy` allocates independent storage, `is` compares storage identity, and `==`
+compares elements. Both `!` and `not` negate booleans; `not in` negates membership.
+While initializers run once in the loop's enclosing scope. Statements after a
+direct `break` or `continue` are omitted from executable output.
+
 The acceptance runner uses these existing files unchanged:
 
 | Example | Mode | Coverage |
@@ -262,6 +287,8 @@ The acceptance runner uses these existing files unchanged:
 | `docs/examples/02-functions/01-basic/02-signatures.sev` | build | Float defaults, keyword calls, and string conversion |
 | `docs/examples/01-types/01-basic/03-conversion.sev` | build/test | Mixed arithmetic, explicit conversions, policies, and a compiler rejection case |
 | `docs/examples/05-building/src/math.sev` | build | Typed integer function and return |
+| `docs/examples/05-building/src/lib.sev` | build/test | Library root and relative private-module import |
+| `docs/examples/05-building/src/main.sev` | build/test | Binary imports its library root; prints `42` |
 | `docs/examples/03-testing/01-basics/01-ordinary-and-named.sev` | test | Calls, comparisons, early returns, ordinary and named tests |
 | `docs/examples/03-testing/02-with-tests/08-compile.sev` | test | Accepted/rejected fragments and isolated case bindings |
 

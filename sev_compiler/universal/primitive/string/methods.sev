@@ -1,0 +1,84 @@
+import "core.sev" as text
+
+
+def __contains_bytes(value: string, needle: string) -> bool:
+    offset := 0
+    while offset + text.byte_count(needle) <= text.byte_count(value):
+        index := 0
+        while index < text.byte_count(needle):
+            if text.byte_at(value, offset + index) != text.byte_at(needle, index):
+                break
+            index += 1
+        if index == text.byte_count(needle):
+            return true
+        offset += 1
+    return false
+
+
+# ASCII case conversion preserves all other UTF-8 bytes. Full Unicode case
+# mapping (including expanding mappings) requires the Unicode data library.
+def __upper_ascii(value: string) -> string:
+    result = text.__allocate(text.__index(text.byte_count(value)))
+    position := 0
+    while position < text.byte_count(value):
+        byte := text.byte_at(value, position)
+        if byte >= 97 and byte <= 122:
+            byte -= 32
+        text.__store(u8(byte), result, text.__index(position))
+        position += 1
+    return result
+
+
+operator in(needle: string, value: string) -> bool:
+    return __contains_bytes(value, needle)
+
+
+def slice_bound(value: int, size: int, reverse: bool) -> int:
+    result := value
+    if result < 0:
+        result += size
+    minimum = -1 if reverse else 0
+    maximum = size - 1 if reverse else size
+    if result < minimum:
+        return minimum
+    if result > maximum:
+        return maximum
+    return result
+
+
+operator slice_at(value: string, start: int, stop: int, step: int, has_start: bool, has_stop: bool) -> string:
+    assert(step != 0)
+    size = text.length(value)
+    reverse = step < 0
+    position := slice_bound(start, size, reverse) if has_start else (size - 1 if reverse else 0)
+    end = slice_bound(stop, size, reverse) if has_stop else (-1 if reverse else size)
+    result := ""
+    while (position > end if reverse else position < end):
+        first = text.__offset(value, position, 0)
+        last = text.__offset(value, position + 1, 0)
+        part = text.__allocate(text.__index(last - first))
+        index := first
+        while index < last:
+            text.__store(text.__load(value, text.__index(index)), part, text.__index(index - first))
+            index += 1
+        result = text.concat(result, part)
+        # Check the remaining distance before adding step to avoid overflow.
+        if reverse:
+            if step <= end - position:
+                break
+        else:
+            if step >= end - position:
+                break
+        position += step
+    return result
+
+
+extend string:
+    def length() -> int:
+        return text.length(self)
+
+    def contains(needle: string) -> bool:
+        return __contains_bytes(self, needle)
+
+    def upper() -> string:
+        return __upper_ascii(self)

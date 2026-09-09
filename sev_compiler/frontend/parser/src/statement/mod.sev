@@ -512,9 +512,21 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
     if parser_at_identifier(parser, "while"):
         start = parser_next(parser).span
         condition = parser_expression(parser, 0)
+        initializer: universal.Binding | None := None
+        if parser_at_identifier(parser, "with"):
+            parser_next(parser)
+            initializer = parser_binding(parser)
         parser_expect_symbol(parser, ":", "expected colon after while condition")
         body = parser_indented_block(parser, "while")
-        return universal.While(condition, body[0], source.Span(start.source, start.start, body[1]))
+        span = source.Span(start.source, start.start, body[1])
+        loop: universal.Statement = universal.While(condition, body[0], span)
+        binding ?= initializer
+        if binding != None:
+            # The initializer runs once in a scope enclosing the whole loop.
+            scope = universal.Block([universal.BindingStatement(binding), loop])
+            taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+            return universal.If(taken, scope, universal.empty_block(), span)
+        return loop
     if parser_at_identifier(parser, "break"):
         return universal.Break(parser_next(parser).span)
     if parser_at_identifier(parser, "continue"):
@@ -660,6 +672,22 @@ def parser_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostic
 def parse_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
     left := parser_unary(parser)
     while true:
+        if parser_at_identifier(parser, "not") and parser.cursor[0] + 1 < len(parser.tokens):
+            following = parser.tokens[parser.cursor[0] + 1]
+            if string(following) == "in" and is_binary_operator(following):
+                operator = binary_operator(following)
+                if precedence(operator) < minimum:
+                    break
+                negation = parser_next(parser)
+                parser_next(parser)
+                prefix ?= token_operator(negation, universal.Fixity.Prefix)
+                if prefix != None:
+                    right = parse_expression(parser, precedence(operator) + 1)
+                    span = source.Span(left.span.source, left.span.start, right.span.end)
+                    membership = universal.Expression(universal.Binary(operator, left, right), span)
+                    left = universal.Expression(universal.Unary(prefix, membership), span)
+                    continue
+                return error(parser_fail(parser, "not in requires a negation operator"))
         if not is_binary_operator(parser_peek(parser)):
             break
         operator = binary_operator(parser_peek(parser))
@@ -712,9 +740,26 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             end = parser_expect_symbol(parser, ")", "expected closing parenthesis").span.end
             value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
         elif parser_take_symbol(parser, "[") != None:
-            index = parse_expression(parser, 0)
-            end = parser_expect_symbol(parser, "]", "expected closing subscript bracket").span.end
-            value = universal.Expression(universal.Subscript(value, index), source.Span(value.span.source, value.span.start, end))
+            first: universal.Expression | None := None
+            if not parser_at_symbol(parser, ":"):
+                first = parse_expression(parser, 0)
+            if parser_take_symbol(parser, ":") != None:
+                stop: universal.Expression | None := None
+                step: universal.Expression | None := None
+                if not parser_at_symbol(parser, ":") and not parser_at_symbol(parser, "]"):
+                    stop = parse_expression(parser, 0)
+                if parser_take_symbol(parser, ":") != None:
+                    if not parser_at_symbol(parser, "]"):
+                        step = parse_expression(parser, 0)
+                end = parser_expect_symbol(parser, "]", "expected closing slice bracket").span.end
+                value = universal.Expression(universal.Slice(value, first, stop, step), source.Span(value.span.source, value.span.start, end))
+                continue
+            index ?= first
+            if index != None:
+                end = parser_expect_symbol(parser, "]", "expected closing subscript bracket").span.end
+                value = universal.Expression(universal.Subscript(value, index), source.Span(value.span.source, value.span.start, end))
+            else:
+                return error(parser_fail(parser, "expected a subscript index"))
         elif parser_take_symbol(parser, ".") != None:
             member = parser_identifier(parser, "expected member name")
             value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))

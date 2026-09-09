@@ -42,6 +42,20 @@ trait Not: G:
     associativity: Associativity = Right
 
 
+trait Bang: G:
+    symbol: Y = !
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
+trait Copy: G:
+    symbol: Y = copy
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    associativity: Associativity = Right
+
+
 trait Move: G:
     symbol: Y = move
     fixity: Fixity = Fixity.Prefix
@@ -414,6 +428,10 @@ trait List: G:
 trait Index: G:
     access: string = "element_at"
     storage: string = "element_set"
+
+
+trait Slice: G:
+    access: string = "slice_at"
 
 
 trait Iteration: G:

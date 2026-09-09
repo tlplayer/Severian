@@ -24,6 +24,30 @@ def __list_size(value: index) -> int
     def count(values: list[T]) -> int:
         return __list_size(dimension(values, 0))
 
+    @mlir("memref.extract_aligned_pointer_as_index")
+    def address(values: list[T]) -> index
+
+    operator copy(values: list[T]) -> list[T]:
+        result = allocate(__list_index(count(values)))
+        position := 0
+        while position < count(values):
+            store(load(values, __list_index(position)), result, __list_index(position))
+            position += 1
+        return result
+
+    operator is(left: list[T], right: list[T]) -> bool:
+        return address(left) == address(right)
+
+    operator ==(left: list[T], right: list[T]) -> bool:
+        if count(left) != count(right):
+            return false
+        position := 0
+        while position < count(left):
+            if load(left, __list_index(position)) != load(right, __list_index(position)):
+                return false
+            position += 1
+        return true
+
     operator list_create(size: int, exemplar: T) -> list[T]:
         return allocate(__list_index(size))
 

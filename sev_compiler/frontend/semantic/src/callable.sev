@@ -92,6 +92,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                             return field.type_id
         case Unary:
             return callable_hint(state, operand)
+        case Slice:
+            return callable_hint(state, object)
         case Binary:
             if operators.scalar_comparison(operator.symbol):
                 return universal.TypeId(1)
@@ -100,6 +102,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             match value:
                 case FloatValue:
                     return universal.TypeId(164)
+                case StringValue:
+                    return universal.TypeId(3)
                 case _:
                     pass
         case Conditional:
@@ -279,6 +283,14 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
     return callable_expression_inner(state, expression, expected)
 
 
+def callable_slice_bound(state: CallableAnalysis, bound: universal.Expression | None, fallback: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
+    supplied ?= bound
+    if supplied != None:
+        return callable_expression(state, supplied, universal.TypeId(64))
+    literal = universal.Expression(universal.LiteralValue(universal.IntegerValue(fallback)), span)
+    return callable_expression(state, literal, universal.TypeId(64))
+
+
 def callable_expression_inner(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
     path = callable_path(expression)
     if path == "cfg" or path.starts_with("cfg.") or path == "lower":
@@ -305,6 +317,16 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             element = universal.Expression(universal.UpdateOperand(2), expression.span, type_id=element_type)
             storage = callable_protocol(state, "Index", "storage", [container, index, element], expression.span, universal.TypeId(2))
             return universal.Expression(universal.ListValue(typed, create, storage), expression.span, type_id=create.type_id)
+        case Slice:
+            receiver = callable_expression(state, object, universal.TypeId(0))
+            operands: list[universal.Expression] = [receiver]
+            operands.append(callable_slice_bound(state, start, "0", expression.span))
+            operands.append(callable_slice_bound(state, stop, "0", expression.span))
+            operands.append(callable_slice_bound(state, step, "1", expression.span))
+            for present in [start != None, stop != None]:
+                literal = universal.Expression(universal.LiteralValue(universal.BooleanValue(present)), expression.span)
+                operands.append(callable_expression(state, literal, universal.TypeId(1)))
+            return callable_protocol(state, "Slice", "access", operands, expression.span, expected)
         case Subscript:
             receiver = callable_expression(state, object, universal.TypeId(0))
             position = callable_expression(state, index, universal.TypeId(64))
@@ -434,6 +456,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         pass
             resolved = callable_expression(state, operand, expected)
             result_type = resolved.type_id
+            implementation = callable_operator(state, operator.symbol, [result_type], expression.span)
+            function ?= implementation.function
+            if function != None:
+                return callable_resolved_operator(state, function, [resolved], expression.span, expected)
             selected ?= operators.scalar_operation(operator.symbol, 1, result_type.index == 1, scalar.scalar_representation(result_type))
             if selected == None or result_type.index == 2 or result_type.index == 3 or result_type.index == 132:
                 return error(callable_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
@@ -454,6 +480,12 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case Binary:
             if operator.symbol == "is":
                 operand = callable_expression(state, left, universal.TypeId(0))
+                if callable_path(right) in state.names:
+                    rhs = callable_expression(state, right, operand.type_id)
+                    selected = callable_operator(state, operator.symbol, [operand.type_id, rhs.type_id], expression.span)
+                    function ?= selected.function
+                    if function != None:
+                        return callable_resolved_operator(state, function, [operand, rhs], expression.span, expected)
                 annotation = universal.named_type(callable_path(right), [], right.span)
                 tested = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 for record in state.records:
@@ -497,7 +529,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                             case _:
                                                 pass
                         return error(callable_diagnostic("lazy grammar requires an expression semantic body", expression.span))
-            comparison = operators.scalar_comparison(operator.symbol)
+            comparison = operators.scalar_comparison(operator.symbol) or operator.symbol == "in"
             operand_type := universal.TypeId(0) if comparison else expected
             if operand_type.index == 0:
                 operand_type = conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
@@ -713,9 +745,12 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
 def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
     output = universal.empty_block()
     returned := false
+    loop_exit := false
     index := 0
     for statement in statements:
         if returned:
+            if loop_exit:
+                break
             return error(callable_diagnostic("statement after unconditional return", None))
         match statement:
             case BindingStatement:
@@ -849,11 +884,13 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     return error(callable_diagnostic("break outside a loop", span))
                 output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
+                loop_exit = true
             case Continue:
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
                 output.statements.append(callable_control(state, "Continue", [], [], span, true))
                 returned = true
+                loop_exit = true
             case _:
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
         index += 1
@@ -1205,6 +1242,10 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
     if owner.index >= 100000:
         required = callable_required_member(state, owner, member)
         return required
+    if owner.index != 0:
+        for function in state.functions:
+            if function.owner_type.index == owner.index and function.name.split(".")[-1] == member:
+                return CallableOptionalFunction(function)
     for record in state.records:
         if record.type_id.index == owner.index:
             for function in state.functions:

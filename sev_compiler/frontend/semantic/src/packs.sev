@@ -56,6 +56,13 @@ def renamed(name: string, names: list[string], replacements: list[string]) -> st
     return name
 
 
+def rename_optional_expression(expression: universal.Expression | None, names: list[string], replacements: list[string]) -> universal.Expression | None:
+    supplied ?= expression
+    if supplied != None:
+        return rename_expression(supplied, names, replacements)
+    return None
+
+
 def rename_expression(expression: universal.Expression, names: list[string], replacements: list[string]) -> universal.Expression:
     kind := expression.kind
     match expression.kind:
@@ -63,6 +70,15 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
             kind = universal.Name(renamed(name, names, replacements))
         case Member:
             kind = universal.Member(rename_expression(object, names, replacements), name)
+        case ListLiteral:
+            renamed_elements: list[universal.Expression] = []
+            for element in elements:
+                renamed_elements.append(rename_expression(element, names, replacements))
+            kind = universal.ListLiteral(renamed_elements)
+        case Subscript:
+            kind = universal.Subscript(rename_expression(object, names, replacements), rename_expression(index, names, replacements))
+        case Slice:
+            kind = universal.Slice(rename_expression(object, names, replacements), rename_optional_expression(start, names, replacements), rename_optional_expression(stop, names, replacements), rename_optional_expression(step, names, replacements))
         case Call:
             operands: list[universal.CallArgument] = []
             for argument in arguments:
