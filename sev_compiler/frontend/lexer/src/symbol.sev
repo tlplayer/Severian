@@ -11,20 +11,21 @@ class LexicalSymbol:
 def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
     # Only the declaration/structural bootstrap is closed. Value operations are
     # supplied by registered source descriptors and use one open token category.
-    symbols = [LexicalSymbol("@"), LexicalSymbol(":"), LexicalSymbol(":="), LexicalSymbol("?="), LexicalSymbol("="), LexicalSymbol("->"), LexicalSymbol("("), LexicalSymbol(")"), LexicalSymbol("["), LexicalSymbol("]"), LexicalSymbol("{"), LexicalSymbol("}"), LexicalSymbol("|"), LexicalSymbol(","), LexicalSymbol(".")]
+    symbols = [LexicalSymbol("@"), LexicalSymbol(":"), LexicalSymbol(":="), LexicalSymbol("?="), LexicalSymbol("="), LexicalSymbol("->"), LexicalSymbol("("), LexicalSymbol(")"), LexicalSymbol("["), LexicalSymbol("]"), LexicalSymbol("{"), LexicalSymbol("}"), LexicalSymbol("|"), LexicalSymbol(","), LexicalSymbol("."), LexicalSymbol("...")]
     for operation in operators:
-        characters = operation.symbol.characters()
-        if len(characters) == 0:
-            continue
-        first = characters[0]
-        if (first >= "a" and first <= "z") or (first >= "A" and first <= "Z") or first == "_":
-            continue
-        found := false
-        for previous in symbols:
-            if previous.spelling == operation.symbol:
-                found = true
-        if not found:
-            symbols.append(LexicalSymbol(operation.symbol))
+        for spelling in [operation.symbol, operation.closing, operation.separator]:
+            characters = spelling.characters()
+            if len(characters) == 0:
+                continue
+            first = characters[0]
+            if (first >= "a" and first <= "z") or (first >= "A" and first <= "Z") or first == "_":
+                continue
+            found := false
+            for previous in symbols:
+                if previous.spelling == spelling:
+                    found = true
+            if not found:
+                symbols.append(LexicalSymbol(spelling))
     return symbols
 
 

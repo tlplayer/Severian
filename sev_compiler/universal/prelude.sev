@@ -1,5 +1,6 @@
 # Ordered source providers. Add library behavior here without rebuilding the compiler.
 import "grammar/contracts.sev"
+import "primitive/tuple.sev"
 import "../../library/system/io/src/text.sev"
 import "primitive/numeric/conversion.sev" as numeric
 import "primitive/numeric/operators.sev"

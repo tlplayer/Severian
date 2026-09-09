@@ -1,0 +1,176 @@
+import source
+import diagnostics
+import universal
+import "definitions.sev" as definitions
+
+
+# Execute expression-producing source bodies by substitution and pack
+# application. Returned calls remain source expressions for ordinary analysis.
+# Runtime expressions are never executed by this phase.
+def same(left: universal.DefId, right: universal.DefId) -> bool:
+    return left.package == right.package and left.module == right.module and left.declaration.value == right.declaration.value
+
+
+def failure(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
+    return diagnostics.Diagnostic("E000216", message, span)
+
+
+def path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return path(object) + "." + name
+        case _:
+            return ""
+
+
+def reference(environment: definitions.SemanticDefinitions, name: string, namespace: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
+    template ?= definitions.record_template(environment, name, namespace)
+    if template != None:
+        return universal.Expression(universal.SourceSymbol(template.name, template.definition), span)
+    for lookup in [namespace + name, name]:
+        for declaration in environment.implementations:
+            if not declaration.extension and declaration.name == lookup:
+                return universal.Expression(universal.SourceSymbol(declaration.name, declaration.definition), span)
+        for function in environment.expression_functions:
+            if function.name == lookup:
+                return universal.Expression(universal.SourceSymbol(function.name, function.definition), span)
+    return error(failure("unresolved expression callable " + name, span))
+
+
+def accepts(annotation: universal.TypeAnnotation, expression: universal.Expression) -> bool:
+    match annotation.kind:
+        case Named:
+            if name == "Ex" and len(arguments) == 0:
+                return true
+            if name == "F" and len(arguments) == 0:
+                match expression.kind:
+                    case SourceSymbol:
+                        return true
+                    case _:
+                        return false
+            if name == "list" and len(arguments) == 1 and universal.simple_type_name(arguments[0]) == "Ex":
+                match expression.kind:
+                    case ListLiteral:
+                        return true
+                    case _:
+                        return false
+        case _:
+            pass
+    return false
+
+
+def invoke(environment: definitions.SemanticDefinitions, function: universal.FunctionDeclaration, values: list[universal.Expression], namespace: string, span: source.Span, budget: list[int], depth: int = 0) -> universal.Expression | diagnostics.Diagnostic:
+    if depth >= 64:
+        return error(failure("expression expansion exceeds call depth 64", span))
+    if len(function.parameters) != len(values) or len(function.type_parameters) != 0:
+        return error(failure("expression method argument count mismatch", span))
+    result ?= function.result
+    if result == None:
+        return error(failure("expression method must return Ex", function.span))
+    if result != None:
+        if universal.simple_type_name(result) != "Ex":
+            return error(failure("expression method must return Ex", function.span))
+    names: list[string] = []
+    index := 0
+    for parameter in function.parameters:
+        if not accepts(parameter.annotation, values[index]):
+            return error(failure("expression argument violates " + parameter.name + " contract", span))
+        names.append(parameter.name)
+        index += 1
+    operands = values[:]
+    body ?= function.body
+    if body != None:
+        for statement in body.statements:
+            match statement:
+                case BindingStatement:
+                    value = expression(environment, binding.value, names, operands, namespace, budget, depth)
+                    if binding.name in names:
+                        return error(failure("duplicate expression binding " + binding.name, binding.span))
+                    names.append(binding.name)
+                    operands.append(value)
+                case Return:
+                    returned ?= value
+                    if returned != None:
+                        return expression(environment, returned, names, operands, namespace, budget, depth)
+                case _:
+                    return error(failure("unsupported expression method statement", function.span))
+    return error(failure("expression method requires a returned expression", function.span))
+
+
+def expression(environment: definitions.SemanticDefinitions, input: universal.Expression, names: list[string], values: list[universal.Expression], namespace: string, budget: list[int], depth: int) -> universal.Expression | diagnostics.Diagnostic:
+    budget[0] -= 1
+    if budget[0] < 0:
+        return error(failure("expression expansion budget exceeded", input.span))
+    match input.kind:
+        case Name:
+            index := int(len(names)) - 1
+            while index >= 0:
+                if name == names[index]:
+                    return values[index]
+                index -= 1
+            return reference(environment, name, namespace, input.span)
+        case Member:
+            return reference(environment, path(input), namespace, input.span)
+        case SourceSymbol:
+            return input
+        case LiteralValue:
+            return input
+        case ListLiteral:
+            operands: list[universal.Expression] = []
+            for element in elements:
+                operands.append(expression(environment, element, names, values, namespace, budget, depth))
+            return universal.Expression(universal.ListLiteral(operands), input.span)
+        case Subscript:
+            target = expression(environment, object, names, values, namespace, budget, depth)
+            match target.kind:
+                case ListLiteral:
+                    match index.kind:
+                        case LiteralValue:
+                            match value:
+                                case IntegerValue:
+                                    position = int(spelling)
+                                    if position < 0 or position >= len(elements):
+                                        return error(failure("expression pack index out of bounds", index.span))
+                                    return elements[position]
+                                case _:
+                                    pass
+                        case _:
+                            pass
+                case _:
+                    pass
+            return error(failure("expression pack selection requires a constant index", input.span))
+        case Call:
+            target = expression(environment, callee, names, values, namespace, budget, depth)
+            operands: list[universal.CallArgument] = []
+            for argument in arguments:
+                value = expression(environment, argument.value, names, values, namespace, budget, depth)
+                if argument.spread:
+                    match value.kind:
+                        case ListLiteral:
+                            for element in elements:
+                                operands.append(universal.CallArgument(None, element, element.span))
+                        case _:
+                            return error(failure("expression application requires a pack", argument.span))
+                else:
+                    operands.append(universal.CallArgument(argument.name, value, argument.span))
+            match target.kind:
+                case SourceSymbol:
+                    for function in environment.expression_functions:
+                        if same(definition, function.definition):
+                            actuals: list[universal.Expression] = []
+                            for operand in operands:
+                                if operand.name != None:
+                                    return error(failure("expression method arguments must be positional", operand.span))
+                                actuals.append(operand.value)
+                            target_namespace := ""
+                            lookup ?= function.lookup
+                            if lookup != None:
+                                target_namespace = lookup
+                            return invoke(environment, function, actuals, target_namespace, input.span, budget, depth + 1)
+                case _:
+                    pass
+            return universal.Expression(universal.Call(target, operands), input.span)
+        case _:
+            return error(failure("unsupported expression expansion", input.span))

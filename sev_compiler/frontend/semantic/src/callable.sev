@@ -6,6 +6,7 @@ import "../../../universal/type/scalar.sev" as scalar
 import "grammar_scalar.sev" as grammar_scalar
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
+import "expansion.sev" as expansion
 import "definitions.sev" as definitions
 import "match.sev" as matches
 import "../../../universal/type/scalar_conversion.sev" as conversions
@@ -61,13 +62,26 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                 if constant.name == state.namespace + name or constant.name == name:
                     return constant.type_id
         case Call:
+            match callee.kind:
+                case SourceSymbol:
+                    return callable_expression(state, expression, universal.TypeId(0)).type_id
+                case _:
+                    pass
             name = callable_path(callee)
-            if name == "type":
+            if name == "type" or name == "string":
                 return universal.TypeId(3)
+            if name == "len" and len(arguments) == 1:
+                pack = callable_field_pack(state, arguments[0].value)
+                if pack.found:
+                    return universal.TypeId(64)
             target ?= scalar.scalar_type_name(name)
             if target != None:
                 if conversions.scalar_numeric(target):
                     return target
+            template ?= definitions.record_template(state.declarations, name, state.namespace)
+            if template != None:
+                if template.type_pack != "":
+                    return callable_expression(state, expression, universal.TypeId(0)).type_id
             constructed = callable_constructor_type(state, callee)
             if constructed.index != 0:
                 return constructed
@@ -183,6 +197,10 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     bound = packs.bind_arguments(prototype, arguments)
     if bound.message != "":
         return error(callable_diagnostic(bound.message, template.span))
+    namespace := ""
+    lookup ?= template.lookup
+    if lookup != None:
+        namespace = lookup
     concrete: list[universal.FunctionParameter] = []
     suffix := ""
     for parameter in parameters:
@@ -192,14 +210,14 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
                 match parameter.annotation.kind:
                     case Named:
                         if name != "V":
-                            expected = callable_annotation(parameter.annotation)
+                            expected = callable_annotation(parameter.annotation, state.records, namespace, state.declarations)
                     case _:
-                        expected = callable_annotation(parameter.annotation)
+                        expected = callable_annotation(parameter.annotation, state.records, namespace, state.declarations)
                 typed = callable_expression(state, argument.value, expected)
                 known ?= scalar.scalar_type(typed.type_id)
-                if known != None:
+                if known != None or typed.type_id.index >= 1000:
                     suffix += "_" + string(typed.type_id.index)
-                    annotation = universal.named_type(known.name, [], parameter.span)
+                    annotation = universal.named_type(definitions.type_name(typed.type_id, state.records), [], parameter.span)
                     concrete.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span, keyword_only=parameter.keyword_only))
                 else:
                     return error(callable_diagnostic("variadic argument has no concrete value type", argument.span))
@@ -210,7 +228,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     if callable_specialization_count(state) >= 512:
         return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup)
-    signature = callable_signature(instance, int(len(state.functions)))
+    signature = callable_signature(instance, int(len(state.functions)), state.records, state.declarations)
     signature.pack_specialization = true
     state.functions.append(signature)
     return CallableSelection(signature, bound.arguments)
@@ -300,11 +318,6 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
     result_type := expected
     kind := expression.kind
     match expression.kind:
-        case TupleLiteral:
-            typed: list[universal.Expression] = []
-            for element in elements:
-                typed.append(callable_expression(state, element, universal.TypeId(0)))
-            return callable_tuple(state, typed, expression.span, expected)
         case Evaluate:
             return expression
         case Fallback:
@@ -346,23 +359,27 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case Slice:
             receiver = callable_expression(state, object, universal.TypeId(0))
             for record in state.records:
-                if record.type_id.index == receiver.type_id.index and record.name.starts_with("$tuple$"):
-                    stride = callable_tuple_bound(step, 1)
+                if record.type_id.index == receiver.type_id.index and callable_pack_record(state, record.type_id) != None:
+                    stride = callable_constant_integer(step, 1)
                     if stride == 0:
-                        return error(callable_diagnostic("tuple slice step cannot be zero", expression.span))
+                        return error(callable_diagnostic("aggregate slice step cannot be zero", expression.span))
                     size = int(len(record.fields))
                     first := size - 1 if stride < 0 else 0
                     last := -1 if stride < 0 else size
                     if start != None:
-                        first = slicing.bound(callable_tuple_bound(start, first), size, stride < 0)
+                        first = slicing.bound(callable_constant_integer(start, first), size, stride < 0)
                     if stop != None:
-                        last = slicing.bound(callable_tuple_bound(stop, last), size, stride < 0)
+                        last = slicing.bound(callable_constant_integer(stop, last), size, stride < 0)
                     base = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
                     fields: list[universal.Expression] = []
                     while (first > last if stride < 0 else first < last):
                         fields.append(universal.Expression(universal.FieldReference(base, first), expression.span, type_id=record.fields[first].type_id))
                         first = slicing.next_position(first, last, stride)
-                    body = callable_tuple(state, fields, expression.span, expected)
+                    target = universal.Expression(universal.SourceSymbol(record.name, record.definition), expression.span)
+                    arguments: list[universal.CallArgument] = []
+                    for field in fields:
+                        arguments.append(universal.CallArgument(None, field, field.span))
+                    body = callable_expression(state, universal.Expression(universal.Call(target, arguments), expression.span), expected)
                     return universal.Expression(universal.Evaluate(receiver, body), expression.span, type_id=body.type_id)
             operands: list[universal.Expression] = [receiver]
             operands.append(callable_slice_bound(state, start, "0", expression.span))
@@ -373,17 +390,25 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 operands.append(callable_expression(state, literal, universal.TypeId(1)))
             return callable_protocol(state, "Slice", "access", operands, expression.span, expected)
         case Subscript:
+            pack = callable_field_pack(state, object)
+            if pack.found:
+                position := callable_constant_integer(index, 0)
+                if position < 0:
+                    position += int(len(pack.values))
+                if position < 0 or position >= len(pack.values):
+                    return error(callable_diagnostic("field pack index is out of bounds", index.span))
+                return callable_expression(state, pack.values[position], expected)
             receiver = callable_expression(state, object, universal.TypeId(0))
             for record in state.records:
-                if record.type_id.index == receiver.type_id.index and record.name.starts_with("$tuple$"):
-                    position := callable_tuple_bound(index, 0)
+                if record.type_id.index == receiver.type_id.index and callable_pack_record(state, record.type_id) != None:
+                    position := callable_constant_integer(index, 0)
                     if position < 0:
                         position += int(len(record.fields))
                     if position < 0 or position >= len(record.fields):
-                        return error(callable_diagnostic("tuple index is out of bounds", index.span))
+                        return error(callable_diagnostic("aggregate index is out of bounds", index.span))
                     field_type = record.fields[position].type_id
                     if expected.index != 0 and expected.index != field_type.index:
-                        return error(callable_diagnostic("tuple element does not match expected type", expression.span))
+                        return error(callable_diagnostic("aggregate element does not match expected type", expression.span))
                     return universal.Expression(universal.FieldReference(receiver, position), expression.span, type_id=field_type)
             position = callable_expression(state, index, universal.TypeId(64))
             container = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
@@ -619,12 +644,39 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol, expression.span))
             return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
         case Call:
+            expansion_result = callable_expand_grammar(state, callee, arguments, expression.span)
+            expanded ?= expansion_result.value
+            if expanded != None:
+                return callable_expression(state, expanded, expected)
+            for argument in arguments:
+                if argument.spread:
+                    return error(callable_diagnostic("call-site expansion requires a compile-time expression pack", argument.span))
             name = callable_path(callee)
+            if name == "string" and len(arguments) == 1:
+                value = callable_expression(state, arguments[0].value, universal.TypeId(0))
+                callable_register_record_methods(state, value.type_id)
+                conversion = callable_operator(state, "string", [value.type_id], expression.span)
+                function ?= conversion.function
+                if function != None:
+                    if function.result_type.index != 3:
+                        return error(callable_diagnostic("string conversion must return string", expression.span))
+                    return callable_resolved_operator(state, function, [value], expression.span, expected)
             if name == "lower" or name.starts_with("cfg."):
                 return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
             if name == "mlir":
                 return callable_mlir(state, arguments, expression.span, expected)
+            if name == "len" and len(arguments) == 1:
+                pack = callable_field_pack(state, arguments[0].value)
+                if pack.found:
+                    literal = universal.Expression(universal.LiteralValue(universal.IntegerValue(string(len(pack.values)))), expression.span)
+                    result = callable_expression(state, literal, expected)
+                    receiver ?= pack.receiver
+                    if receiver != None:
+                        return universal.Expression(universal.Evaluate(receiver, result), expression.span, type_id=result.type_id)
+                    return result
             alias_type := callable_constructor_type(state, callee)
+            if alias_type.index == 0:
+                alias_type = callable_infer_field_pack(state, callee, arguments, expected)
             alias ?= definitions.alias_named(state.declarations, name, state.namespace)
             if alias != None:
                 if alias_type.index == 0:
@@ -642,7 +694,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                 resolved.append(universal.CallArgument(field.name, typed, argument.span))
                     if expected.index != 0 and expected.index != record.type_id.index:
                         return error(callable_diagnostic("constructor does not match expected type", expression.span))
-                    return universal.Expression(universal.RecordValue(resolved), expression.span, type_id=record.type_id)
+                    return universal.Expression(universal.RecordValue(resolved), expression.span, type_id=record.type_id, grammar=expression.grammar)
             method_lookup = callable_method(state, callee)
             method ?= method_lookup.function
             if method != None:
@@ -928,7 +980,12 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     output.statements.append(nested)
                 returned = callable_terminates(typed)
             case ForEach:
-                expanded = callable_iteration(state, name, iterable, body, span, result_type)
+                pack = callable_field_pack(state, iterable)
+                expanded := universal.empty_block()
+                if pack.found:
+                    expanded = callable_pack_iteration(state, name, pack, body, span, result_type)
+                else:
+                    expanded = callable_iteration(state, name, iterable, body, span, result_type)
                 for nested in expanded.statements:
                     output.statements.append(nested)
             case While:
@@ -1131,6 +1188,10 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for item in module.items:
         match item:
             case Function:
+                result ?= declaration.result
+                if result != None:
+                    if universal.simple_type_name(result) == "Ex":
+                        continue
                 if declaration.name == "assert" or declaration.name == "type" or declaration.name == "string":
                     return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
                 if len(declaration.type_parameters) != 0:
@@ -1417,7 +1478,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
         local.names.append(parameter.name)
         local.mutables.append(true)
     if function.owner_type.index != 0:
-        local.declarations = definitions.SemanticDefinitions(local.declarations.aliases[:], local.declarations.traits, local.declarations.implementations, record_templates=local.declarations.record_templates, record_instances=local.declarations.record_instances)
+        local.declarations = definitions.SemanticDefinitions(local.declarations.aliases[:], local.declarations.traits, local.declarations.implementations, record_templates=local.declarations.record_templates, record_instances=local.declarations.record_instances, expression_functions=local.declarations.expression_functions)
         span = function.parameters[0].span
         local.declarations.aliases.append(universal.TypeDeclaration([], local.namespace + "Self", [], [], None, span, id=function.owner_type))
     local.types = function.parameter_types[:]
@@ -1843,7 +1904,7 @@ def callable_register_generic(state: CallableAnalysis, function: universal.Funct
 
 def callable_generic_environment(state: CallableAnalysis, function: universal.FunctionDeclaration, arguments: list[universal.TypeId]) -> CallableAnalysis | diagnostics.Diagnostic:
     local = callable_scope(state)
-    local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances)
+    local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances, expression_functions=state.declarations.expression_functions)
     local.contract = function
     lookup ?= function.lookup
     if lookup != None:
@@ -2117,6 +2178,10 @@ def callable_type_expression(expression: universal.Expression) -> universal.Type
 
 def callable_constructor_type(state: CallableAnalysis, callee: universal.Expression) -> universal.TypeId | diagnostics.Diagnostic:
     match callee.kind:
+        case SourceSymbol:
+            for record in state.records:
+                if expansion.same(record.definition, definition) and definitions.record_instance(state.declarations, record.type_id) == None:
+                    return record.type_id
         case Subscript:
             name = callable_path(object)
             if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
@@ -2143,6 +2208,8 @@ def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId
                     if template.definition.declaration.value == instance.template.declaration.value:
                         index := 0
                         for name in template.type_parameters:
+                            if name == template.type_pack:
+                                continue
                             alias = universal.TypeDeclaration([], record.lookup + name, [], [], None, record.span, id=instance.arguments[index].type_id, lookup=record.lookup)
                             callable_prepend_alias(state.declarations, alias)
                             index += 1
@@ -2153,7 +2220,7 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
         if record.type_id.index != owner.index or definitions.record_instance(state.declarations, record.type_id) == None:
             continue
         local = callable_scope(state)
-        local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances)
+        local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances, expression_functions=state.declarations.expression_functions)
         callable_record_environment(local, owner)
         for method in record.methods:
             if len(method.type_parameters) != 0 or len(method.constraints) != 0:
@@ -2175,6 +2242,19 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
                 parameters.append(parameter)
             method.parameters = parameters
             state.functions.append(callable_signature(method, int(len(state.functions)), state.records, local.declarations))
+
+        for operation in record.operators:
+            found := false
+            for function in state.functions:
+                syntax ?= function.operator_syntax
+                if syntax != None:
+                    if function.owner_type.index == owner.index and syntax.symbol == operation.syntax.symbol:
+                        found = true
+            if found:
+                continue
+            function = callable_operator_function(operation, owner, record.lookup, state.records)
+            function.owner_type = owner
+            state.functions.append(callable_signature(function, int(len(state.functions)), state.records, local.declarations))
 
 
 def callable_infer_annotation(state: CallableAnalysis, annotation: universal.TypeAnnotation, actual: universal.TypeId, parameters: list[string], actuals: list[universal.TypeId], namespace: string) -> unit | diagnostics.Diagnostic:
@@ -2264,9 +2344,8 @@ def callable_symbolic_type(state: CallableAnalysis, type_id: universal.TypeId) -
     return false
 
 
-# Tuples have structural record layouts, including heterogeneous elements.
-# Projection and formatting reuse ordinary record and callable lowering.
-def callable_tuple_bound(expression: universal.Expression | None, fallback: int) -> int | diagnostics.Diagnostic:
+# Static pack projections and slices preserve each selected field type.
+def callable_constant_integer(expression: universal.Expression | None, fallback: int) -> int | diagnostics.Diagnostic:
     value ?= expression
     if value == None:
         return fallback
@@ -2280,57 +2359,148 @@ def callable_tuple_bound(expression: universal.Expression | None, fallback: int)
                         pass
             case Unary:
                 if operator.symbol == "-":
-                    return 0 - callable_tuple_bound(operand, 0)
+                    return 0 - callable_constant_integer(operand, 0)
                 if operator.symbol == "+":
-                    return callable_tuple_bound(operand, 0)
+                    return callable_constant_integer(operand, 0)
             case _:
                 pass
-        return error(callable_diagnostic("tuple indices and slice bounds require constant integers", value.span))
+        return error(callable_diagnostic("indices and slice bounds require constant integers", value.span))
     return fallback
 
 
-def callable_tuple(state: CallableAnalysis, values: list[universal.Expression], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
-    key := "$tuple$"
-    for value in values:
-        key += "$" + string(value.type_id.index)
-    type_id := universal.TypeId(0)
-    for record in state.records:
-        if record.name == key:
-            type_id = record.type_id
-    if type_id.index == 0:
-        fields: list[universal.FunctionParameter] = []
-        index := 0
-        for value in values:
-            if scalar.scalar_representation(value.type_id) in ["utf8", "buffer"]:
-                return error(callable_diagnostic("tuple buffer fields require aggregate ownership lowering", span))
-            annotation = universal.named_type(definitions.type_name(value.type_id, state.records), [], span)
-            fields.append(universal.FunctionParameter("item" + string(index), annotation, None, span, type_id=value.type_id))
-            index += 1
-        type_id = universal.TypeId(u32(1000 + len(state.records)))
-        state.records.append(universal.RecordDeclaration(key, fields, [], span, type_id=type_id))
-        annotation = universal.named_type(key, [], span)
-        receiver = universal.Expression(universal.Name("value"), span)
-        result := universal.Expression(universal.LiteralValue(universal.StringValue("(")), span)
-        index = 0
-        for field in fields:
-            if index != 0:
-                comma = universal.Expression(universal.LiteralValue(universal.StringValue(",")), span)
-                result = test_modes.call("format.text.concat", [result, comma], span)
-            member = universal.Expression(universal.Member(receiver, field.name), span)
-            rendered = test_modes.call("string", [member], span)
-            result = test_modes.call("format.text.concat", [result, rendered], span)
-            index += 1
-        ending = universal.Expression(universal.LiteralValue(universal.StringValue(",)" if len(fields) == 1 else ")")), span)
-        result = test_modes.call("format.text.concat", [result, ending], span)
-        body = universal.Block([universal.Return(result, span)])
-        function = universal.FunctionDeclaration(name="format.string", parameters=[universal.FunctionParameter("value", annotation, None, span)], result=universal.named_type("string", [], span), body=body, span=span)
-        state.functions.append(callable_signature(function, int(len(state.functions)), state.records, state.declarations))
-    if expected.index != 0 and expected.index != type_id.index:
-        return error(callable_diagnostic("tuple does not match expected type", span))
-    fields: list[universal.CallArgument] = []
+class CallableFieldPack:
+    found: bool = false
+    values: list[universal.Expression] = []
+    receiver: universal.Expression | None = None
+
+
+def callable_field_pack(state: CallableAnalysis, expression: universal.Expression) -> CallableFieldPack | diagnostics.Diagnostic:
+    match expression.kind:
+        case Member:
+            owner = callable_hint(state, object)
+            for record in state.records:
+                if record.type_id.index != owner.index:
+                    continue
+                declared := false
+                for template in state.declarations.record_templates:
+                    if template.definition.module == record.definition.module and template.definition.declaration.value == record.definition.declaration.value:
+                        for field in template.fields:
+                            if field.variadic and field.name == name:
+                                declared = true
+                if not declared:
+                    return CallableFieldPack()
+                receiver = callable_expression(state, object, universal.TypeId(0))
+                fields: list[universal.Expression] = []
+                index := 0
+                for field in record.fields:
+                    if field.pack == name:
+                        fields.append(universal.Expression(universal.FieldReference(receiver, index), expression.span, type_id=field.type_id))
+                    index += 1
+                return CallableFieldPack(true, fields, receiver)
+        case _:
+            pass
+    return CallableFieldPack()
+
+
+def callable_infer_field_pack(state: CallableAnalysis, callee: universal.Expression, arguments: list[universal.CallArgument], expected: universal.TypeId) -> universal.TypeId | diagnostics.Diagnostic:
+    name = callable_path(callee)
+    selected := definitions.record_template(state.declarations, name, state.namespace)
+    match callee.kind:
+        case SourceSymbol:
+            for candidate in state.declarations.record_templates:
+                if expansion.same(candidate.definition, definition):
+                    selected = candidate
+        case _:
+            pass
+    template ?= selected
+    if template != None:
+        if template.type_pack == "":
+            return universal.TypeId(0)
+        if name in state.names:
+            return error(callable_diagnostic("binding is not callable: " + name, callee.span))
+        contextual ?= definitions.record_instance(state.declarations, expected)
+        if contextual != None:
+            if contextual.template.module == template.definition.module and contextual.template.declaration.value == template.definition.declaration.value:
+                return expected
+        if len(template.type_parameters) != 1 or len(template.fields) != 1 or not template.fields[0].variadic:
+            return error(callable_diagnostic("inferred aggregate construction requires one field pack", callee.span))
+        annotations: list[universal.TypeAnnotation] = []
+        for argument in arguments:
+            if argument.name != None:
+                return error(callable_diagnostic("field pack construction requires positional values", argument.span))
+            value = callable_expression(state, argument.value, universal.TypeId(0))
+            annotations.append(universal.named_type(definitions.type_name(value.type_id, state.records), [], argument.span))
+        resolved = definitions.instantiate_record(state.declarations, template, annotations, state.records, state.namespace, callee.span)
+        callable_record_layout(state.records, resolved, [])
+        return resolved
+    return universal.TypeId(0)
+
+
+def callable_pack_iteration(state: CallableAnalysis, name: string, pack: CallableFieldPack, body: universal.Block, span: source.Span, result_type: universal.TypeId) -> universal.Block | diagnostics.Diagnostic:
+    output = universal.empty_block()
+    values: list[universal.Expression] = []
+    receiver ?= pack.receiver
+    if receiver != None:
+        receiver_name = "$pack$receiver$" + string(len(state.names))
+        binding = callable_binding(state, universal.Binding(receiver_name, None, receiver, false, false, span))
+        output.statements.append(universal.BindingStatement(binding))
+        base = universal.Expression(universal.BindingReference(binding.id), span, type_id=binding.type_id)
+        for value in pack.values:
+            match value.kind:
+                case FieldReference:
+                    values.append(universal.Expression(universal.FieldReference(base, index), value.span, type_id=value.type_id))
+                case _:
+                    return error(callable_diagnostic("field pack requires resolved projections", span))
     index := 0
     for value in values:
-        field_name = "item" + string(index)
-        fields.append(universal.CallArgument(field_name, value, span))
+        prefix = "$pack$" + string(state.next_id[0]) + "$" + string(index) + "$"
+        replacement = prefix + name
+        names = state.names[:]
+        replacements = state.names[:]
+        names.append(name)
+        replacements.append(replacement)
+        expanded = packs.expand_block(body, "", 0, names, replacements, prefix)
+        binding = universal.Binding(replacement, None, value, false, false, span)
+        output.statements.append(universal.BindingStatement(callable_binding(state, binding)))
+        typed = callable_block(state, expanded.statements, result_type, false)
+        for statement in typed.statements:
+            output.statements.append(statement)
         index += 1
-    return universal.Expression(universal.RecordValue(fields), span, type_id=type_id)
+    return output
+
+
+class CallableExpansion:
+    value: universal.Expression | None = None
+
+
+def callable_expand_grammar(state: CallableAnalysis, callee: universal.Expression, arguments: list[universal.CallArgument], span: source.Span) -> CallableExpansion | diagnostics.Diagnostic:
+    match callee.kind:
+        case SourceSymbol:
+            for grammar in state.declarations.traits:
+                if not expansion.same(grammar.definition, definition):
+                    continue
+                for method in grammar.methods:
+                    if method.name == "semantic":
+                        operands: list[universal.Expression] = []
+                        for argument in arguments:
+                            operands.append(argument.value)
+                        pack = universal.Expression(universal.ListLiteral(operands), span)
+                        result = expansion.invoke(state.declarations, method, [pack], grammar.lookup, span, [10000])
+                        result.span = span
+                        result.grammar = grammar.definition
+                        return CallableExpansion(result)
+                return error(callable_diagnostic("expression grammar requires a semantic method", span))
+        case _:
+            pass
+    return CallableExpansion()
+
+
+def callable_pack_record(state: CallableAnalysis, type_id: universal.TypeId) -> universal.RecordDeclaration | None:
+    for record in state.records:
+        if record.type_id.index != type_id.index:
+            continue
+        for template in state.declarations.record_templates:
+            if expansion.same(template.definition, record.definition):
+                if len(template.fields) == 1 and template.fields[0].variadic:
+                    return record
+    return None

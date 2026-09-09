@@ -14,3 +14,13 @@ trait TupleSyntax: G:
 
 class tuple[...T]:
     items: ...T
+
+    operator string() -> string:
+        result := "("
+        separator := ""
+        for item in self.items:
+            result = result + separator + string(item)
+            separator = ","
+        if len(self.items) == 1:
+            result = result + ","
+        return result + ")"

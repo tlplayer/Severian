@@ -36,7 +36,7 @@ def bind_arguments(function: universal.FunctionDeclaration, arguments: list[univ
         if name in assigned:
             return BoundArguments(message="duplicate argument " + name)
         assigned.append(name)
-        result.append(universal.CallArgument(name, argument.value, argument.span))
+        result.append(universal.CallArgument(name, argument.value, argument.span, spread=argument.spread))
     for parameter in function.parameters:
         if parameter.name not in assigned:
             default_value ?= parameter.default
@@ -79,11 +79,6 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
             for element in elements:
                 renamed_elements.append(rename_expression(element, names, replacements))
             kind = universal.ListLiteral(renamed_elements)
-        case TupleLiteral:
-            renamed_elements: list[universal.Expression] = []
-            for element in elements:
-                renamed_elements.append(rename_expression(element, names, replacements))
-            kind = universal.TupleLiteral(renamed_elements)
         case Subscript:
             kind = universal.Subscript(rename_expression(object, names, replacements), rename_expression(index, names, replacements))
         case Slice:
@@ -91,7 +86,7 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
         case Call:
             operands: list[universal.CallArgument] = []
             for argument in arguments:
-                operands.append(universal.CallArgument(argument.name, rename_expression(argument.value, names, replacements), argument.span))
+                operands.append(universal.CallArgument(argument.name, rename_expression(argument.value, names, replacements), argument.span, spread=argument.spread))
             kind = universal.Call(rename_expression(callee, names, replacements), operands)
         case Unary:
             kind = universal.Unary(operator, rename_expression(operand, names, replacements))
@@ -103,7 +98,7 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
             kind = universal.Stringify(rename_expression(value, names, replacements))
         case _:
             pass
-    return universal.Expression(kind, expression.span)
+    return universal.Expression(kind, expression.span, grammar=expression.grammar)
 
 
 def expand_block(block: universal.Block, pack: string, count: int, names: list[string], replacements: list[string], prefix: string) -> universal.Block:
@@ -139,6 +134,8 @@ def expand_block(block: universal.Block, pack: string, count: int, names: list[s
                     names.append(binding.name)
                     replacements.append(prefix + binding.name)
                 result.statements.append(universal.BindingStatement(universal.Binding(renamed(binding.name, names, replacements), binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
+            case FieldSet:
+                result.statements.append(universal.FieldSet(rename_expression(target, names, replacements), rename_expression(value, names, replacements), span, update))
             case ExpressionStatement:
                 result.statements.append(universal.ExpressionStatement(rename_expression(expression, names, replacements)))
             case Return:

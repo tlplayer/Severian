@@ -130,6 +130,17 @@ Variadic `*values: V` functions specialize for the supplied argument types;
 keyword-only. This initial form requires the pack to be first and does not
 support call-site unpacking or arbitrary collection iteration.
 
+[`universal/primitive/tuple.sev`](universal/primitive/tuple.sev) declares tuple
+syntax through `G` and stores its elements as `items: ...T` in `class tuple[...T]`.
+Its `semantic` method executes source expression helpers; `construct` applies
+the supplied callable to `...values`. Delimited grammar and field packs are
+shared mechanisms, also usable by other source classes. Tuples lower as ordinary
+records, with constant indexing and slicing; their string operator is source
+code. Empty, singleton, heterogeneous scalar, and nested tuples are supported.
+The existing restriction on owned string and buffer fields also applies here.
+Run `python3 tests/sev_compiler/tuples.py -v` against the built source compiler
+to check the tuple example, expression helpers, and shared pack behavior.
+
 Concrete record classes and their instance methods use the same callable body
 lowering as free functions. Calls preserve receiver storage, source argument
 order, mutations, recursion, local rebinding, and returns. `while` and `range`

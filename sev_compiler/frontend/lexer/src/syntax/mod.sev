@@ -118,6 +118,9 @@ def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.Operato
         if previous.symbol == syntax.symbol and previous.fixity == syntax.fixity:
             if previous.precedence != syntax.precedence or previous.associativity != syntax.associativity:
                 return error(diagnostics.diagnostic_at("E000103", "conflicting operator syntax " + syntax.symbol, span))
+            if previous.definition.declaration.value != 0 and (previous.grammar_form == "Delimited" or syntax.grammar_form == "Delimited"):
+                if previous.grammar_form != syntax.grammar_form or previous.closing != syntax.closing or previous.separator != syntax.separator or previous.grouping != syntax.grouping:
+                    return error(diagnostics.diagnostic_at("E000103", "conflicting delimited grammar " + syntax.symbol, span))
             if previous.definition.declaration.value == 0 or (syntax.domain == universal.OperatorDomain.GrammarOperator and previous.domain != universal.OperatorDomain.GrammarOperator):
                 registry.operators[index] = syntax
             return
@@ -151,6 +154,9 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 continue
             symbol := ""
             form := ""
+            closing := ""
+            separator := ""
+            grouping := false
             fixity := universal.Fixity.Infix
             precedence := 0
             associativity := universal.Associativity.Left
@@ -160,6 +166,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 fixity = base_syntax.fixity
                 precedence = int(base_syntax.precedence)
                 associativity = base_syntax.associativity
+                form = base_syntax.grammar_form
+                closing = base_syntax.closing
+                separator = base_syntax.separator
+                grouping = base_syntax.grouping
             fields: list[string] = []
             for property in descriptor.properties:
                 if property.name in fields:
@@ -172,6 +182,17 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                             symbol += string(token)
                         else:
                             return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
+                elif property.name in ["closing", "separator"]:
+                    if len(property.tokens) != 1 or property.tokens[0].kind != TokenKind.String or string(property.tokens[0]) == "":
+                        return error(diagnostics.diagnostic_at("E000103", "delimiter properties require nonempty strings", descriptor.span))
+                    if property.name == "closing":
+                        closing = string(property.tokens[0])
+                    else:
+                        separator = string(property.tokens[0])
+                elif property.name == "grouping":
+                    if len(property.tokens) != 1 or token_word(property.tokens[0]) not in ["true", "false"]:
+                        return error(diagnostics.diagnostic_at("E000103", "grouping requires a boolean", descriptor.span))
+                    grouping = token_word(property.tokens[0]) == "true"
                 elif property.name == "precedence":
                     if len(property.tokens) != 1:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
@@ -225,8 +246,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             if symbol != "":
                 if precedence == 0 and (form == "" or form == "Infix" or form == "Prefix" or form == "Postfix"):
                     return error(diagnostics.diagnostic_at("E000103", "operator precedence is required", descriptor.span))
+                if form == "Delimited" and (closing == "" or separator == "" or closing == separator or symbol == closing):
+                    return error(diagnostics.diagnostic_at("E000103", "delimited grammar requires distinct delimiters", descriptor.span))
                 identity = universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
-                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form)
+                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping)
                 if descriptor.grammar:
                     syntax.domain = universal.OperatorDomain.GrammarOperator
                 register_operator_syntax(registry, syntax, descriptor.span)

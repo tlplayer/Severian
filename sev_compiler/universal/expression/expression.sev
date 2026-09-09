@@ -17,6 +17,7 @@ class CallArgument:
     name: string | absent
     value: Expression
     span: source.Span
+    spread: bool = false
 
 
 enum ResolvedCallee:
@@ -35,7 +36,6 @@ enum ExpressionKind:
     Member(object: Expression, name: string)
     Call(callee: Expression, arguments: list[CallArgument])
     ListLiteral(elements: list[Expression])
-    TupleLiteral(elements: list[Expression])
     Evaluate(value: Expression, body: Expression)
     Fallback(value: Expression, alternative: Expression)
     ThrowValue(value: Expression)

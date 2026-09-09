@@ -46,7 +46,7 @@ def print(*objects: V, sep: V = None, end: V = None, file: None = None, flush: b
     first := true
     for object in objects:
         __write("" if first else separator, 0)
-        __write(format.string(object), 0)
+        __write(string(object), 0)
         first = false
     __write(ending, 0)
     if flush:

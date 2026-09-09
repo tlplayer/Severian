@@ -124,18 +124,13 @@ def project(expression: universal.Expression, names: list[string], getters: list
         case Call:
             rewritten: list[universal.CallArgument] = []
             for argument in arguments:
-                rewritten.append(universal.CallArgument(argument.name, project(argument.value, names, getters, contexts, bound), argument.span))
+                rewritten.append(universal.CallArgument(argument.name, project(argument.value, names, getters, contexts, bound), argument.span, spread=argument.spread))
             kind = universal.Call(project(callee, names, getters, contexts, bound), rewritten)
         case ListLiteral:
             rewritten: list[universal.Expression] = []
             for element in elements:
                 rewritten.append(project(element, names, getters, contexts, bound))
             kind = universal.ListLiteral(rewritten)
-        case TupleLiteral:
-            rewritten: list[universal.Expression] = []
-            for element in elements:
-                rewritten.append(project(element, names, getters, contexts, bound))
-            kind = universal.TupleLiteral(rewritten)
         case MapLiteral:
             projected_keys: list[universal.Expression] = []
             projected_values: list[universal.Expression] = []
@@ -158,7 +153,7 @@ def project(expression: universal.Expression, names: list[string], getters: list
             kind = universal.Stringify(project(value, names, getters, contexts, bound))
         case _:
             pass
-    return universal.Expression(kind, expression.span)
+    return universal.Expression(kind, expression.span, grammar=expression.grammar)
 
 
 def project_block(block: universal.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[universal.Statement], ordinal: list[int]) -> universal.Block:

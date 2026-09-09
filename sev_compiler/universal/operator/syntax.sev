@@ -31,3 +31,6 @@ class OperatorSyntax:
     grammar_name: string = ""
     grammar_form: string = ""
     scalar_operation: ScalarOperation | None = None
+    closing: string = ""
+    separator: string = ""
+    grouping: bool = false

@@ -19,6 +19,7 @@ class SemanticDefinitions:
     symbol_descriptors: list[universal.TraitDeclaration] = []
     record_templates: list[universal.RecordDeclaration] = []
     record_instances: list[RecordInstance] = []
+    expression_functions: list[universal.FunctionDeclaration] = []
 
 
 def definition_id(name: string, ordinal: int) -> universal.DefId:
@@ -251,6 +252,14 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
     ordinal := 0
     for item in module.items:
         match item:
+            case Function:
+                result ?= declaration.result
+                if result != None:
+                    if universal.simple_type_name(result) == "Ex":
+                        function := declaration
+                        function.definition = definition_id(function.name, 40000 + ordinal)
+                        definitions.expression_functions.append(function)
+                        ordinal += 1
             case Trait:
                 if declaration.name.split(".")[-1] == "G" and declaration.name != "G":
                     return error(diagnostics.diagnostic_at("E000212", "reserved compiler contract G cannot be redeclared", declaration.span))
@@ -397,7 +406,7 @@ def record_template(definitions: SemanticDefinitions, name: string, namespace: s
 
 
 def instantiate_record(definitions: SemanticDefinitions, template: universal.RecordDeclaration, arguments: list[universal.TypeAnnotation], records: list[universal.RecordDeclaration], namespace: string, span: source.Span) -> universal.TypeId | diagnostics.Diagnostic:
-    if len(arguments) != len(template.type_parameters):
+    if (template.type_pack == "" and len(arguments) != len(template.type_parameters)) or (template.type_pack != "" and len(arguments) < len(template.type_parameters) - 1):
         return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", span))
     if len(template.traits) != 0:
         return error(diagnostics.diagnostic_at("E000205", "generic record trait implementations require instantiated trait validation", span))
@@ -438,6 +447,21 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
         if field.name in names:
             return error(diagnostics.diagnostic_at("E000205", "duplicate field " + field.name, field.span))
         names.append(field.name)
+        if field.variadic:
+            if template.type_pack == "" or universal.simple_type_name(field.annotation) != template.type_pack:
+                return error(diagnostics.diagnostic_at("E000205", "expanded field must use the declared type pack", field.span))
+            if field.default != None:
+                return error(diagnostics.diagnostic_at("E000205", "expanded fields cannot have defaults", field.span))
+            offset := 0
+            for replacement in replacements[len(template.type_parameters) - 1:]:
+                type_id = type_annotation(definitions, replacement, records, template.lookup)
+                if scalar.scalar_representation(type_id) in ["utf8", "buffer"]:
+                    return error(diagnostics.diagnostic_at("E000205", "aggregate resource fields require ownership lowering", field.span))
+                if type_id.index == 2:
+                    return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
+                fields.append(universal.FunctionParameter(field.name + "$" + string(offset), replacement, None, field.span, type_id=type_id, pack=field.name))
+                offset += 1
+            continue
         annotation = replace_annotation(field.annotation, template.type_parameters, replacements)
         type_id = type_annotation(definitions, annotation, records, template.lookup)
         if type_id.index == 3:

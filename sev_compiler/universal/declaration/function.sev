@@ -32,6 +32,7 @@ class FunctionParameter:
     modifiers: list[BoundaryModifier] = []
     variadic: bool = false
     keyword_only: bool = false
+    pack: string = ""
 
 
 class ExternalCall:
@@ -120,6 +121,7 @@ class RecordDeclaration:
     type_parameters: list[string] = []
     constraints: list[GenericConstraint] = []
     extension: bool = false
+    type_pack: string = ""
 
 
 def outcome_variants(record: RecordDeclaration) -> list[TypeId]:
