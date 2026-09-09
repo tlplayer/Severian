@@ -1,6 +1,6 @@
 import "../../../universal/cfg/cfg.sev"
 import universal
-import "../../../universal/type/scalar.sev" as scalar
+import "../../../universal/type/storage.sev" as storage_types
 import source
 import diagnostics
 
@@ -103,7 +103,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
         for operation in selected.operations:
             match operation:
                 case Allocate:
-                    if type_id.index == 3 or scalar.scalar_representation(type_id) == "buffer":
+                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.records).index != 0:
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)

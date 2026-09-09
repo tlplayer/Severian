@@ -3,6 +3,7 @@ from diagnostics import Diagnostic
 import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
+import "../../../universal/type/storage.sev" as storage_types
 import "grammar_scalar.sev" as grammar_scalar
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
@@ -103,6 +104,10 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             for record in state.records:
                 if record.name == state.namespace + name or record.name == name:
                     return record.type_id
+            type_method = callable_type_method(state, callee)
+            type_function ?= type_method.function
+            if type_function != None:
+                return type_function.result_type
             method_lookup = callable_method(state, callee)
             method ?= method_lookup.function
             if method != None:
@@ -257,7 +262,7 @@ def callable_specialization_count(state: CallableAnalysis) -> int:
     return count
 
 
-def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableOptionalSelection | diagnostics.Diagnostic:
+def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument], expected: universal.TypeId = universal.TypeId(0)) -> CallableOptionalSelection | diagnostics.Diagnostic:
     lookup := state.namespace + name
     local := false
     for template in state.generics:
@@ -279,7 +284,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
         if function.name == lookup:
             candidates.append(function)
     if len(candidates) == 0:
-        generic = callable_select_generic(state, lookup, arguments)
+        generic = callable_select_generic(state, lookup, arguments, expected)
         return generic
     message := "no overload accepts these arguments for " + name
     for function in candidates:
@@ -382,8 +387,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             return error(callable_diagnostic("fallback requires an optional or fallible value", expression.span))
         case ListLiteral:
             element_type := universal.TypeId(0)
-            if scalar.scalar_representation(expected) == "buffer":
-                element_type = universal.TypeId(expected.index - 200)
+            if storage_types.buffer_element(expected, state.records).index != 0:
+                element_type = storage_types.buffer_element(expected, state.records)
             typed: list[universal.Expression] = []
             for element in elements:
                 value = callable_expression(state, element, element_type)
@@ -755,6 +760,20 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if expected.index != 0 and expected.index != record.type_id.index:
                         return error(callable_diagnostic("constructor does not match expected type", expression.span))
                     return universal.Expression(universal.RecordValue(resolved), expression.span, type_id=record.type_id, grammar=expression.grammar)
+            type_method = callable_type_method(state, callee)
+            type_function ?= type_method.function
+            if type_function != None:
+                bound = packs.bind_arguments(type_function, arguments)
+                if bound.message != "":
+                    return error(callable_diagnostic(bound.message, expression.span))
+                operands: list[universal.Expression] = []
+                for argument in bound.arguments:
+                    index := 0
+                    for parameter in type_function.parameters:
+                        if argument.name == parameter.name:
+                            operands.append(callable_expression(state, argument.value, type_function.parameter_types[index]))
+                        index += 1
+                return callable_resolved_operator(state, type_function, operands, expression.span, expected)
             method_lookup = callable_method(state, callee)
             method ?= method_lookup.function
             if method != None:
@@ -824,6 +843,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if syntax != None:
                     if syntax.symbol == name:
                         named_operation = true
+            for function in state.generics:
+                syntax ?= function.operator_syntax
+                if syntax != None:
+                    if syntax.symbol == name:
+                        named_operation = true
             if named_operation:
                 operands: list[universal.Expression] = []
                 types: list[universal.TypeId] = []
@@ -839,7 +863,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     implementation ?= selected_operator.function
                     if implementation != None:
                         return callable_resolved_operator(state, implementation, operands, expression.span, expected)
-            function_lookup = callable_select_function(state, name, arguments)
+            function_lookup = callable_select_function(state, name, arguments, expected)
             selected ?= function_lookup.selection
             selected_functions: list[universal.FunctionDeclaration] = []
             if selected != None:
@@ -1173,7 +1197,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
         if type_id.index == 2:
             return error(callable_diagnostic("unit cannot be a scalar parameter", parameter.span))
         parameter.type_id = type_id
-        if type_id.index >= 1000 and declaration.body != None:
+        if storage_types.indirect_value(type_id, records) and declaration.body != None:
             parameter.modifiers = [universal.BoundaryModifier("reference")]
         parameter_names.append(parameter.name)
         parameter_types.append(type_id)
@@ -1257,7 +1281,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
             continue
-        if record.name.starts_with("$outcome$"):
+        if record.name.starts_with("$outcome$") or record.storage_element.index != 0:
             continue
         resolved_fields: list[universal.FunctionParameter] = []
         field_names: list[string] = []
@@ -1671,7 +1695,7 @@ def callable_operator_function(operation: universal.OperatorDeclaration, owner: 
         annotation = definitions.replace_annotation(parameter.annotation, ["Self"], [receiver_type])
         parameters.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span))
     result = definitions.replace_annotation(operation.result, ["Self"], [receiver_type])
-    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=operation.definition)
+    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=operation.definition, type_parameters=operation.type_parameters, constraints=operation.constraints)
 
 
 def callable_same_types(left: list[universal.TypeId], right: list[universal.TypeId]) -> bool | diagnostics.Diagnostic:
@@ -1707,6 +1731,9 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                 operation.definition = definitions.definition_id(operation.syntax.symbol, 10000 + ordinal)
                 ordinal += 1
                 function = callable_operator_function(operation, universal.TypeId(0), namespace, state.records)
+                if len(function.type_parameters) != 0:
+                    callable_register_generic(state, function)
+                    continue
                 signature = callable_signature(function, int(len(state.functions)), state.records, state.declarations)
                 for previous in state.functions:
                     syntax ?= previous.operator_syntax
@@ -1830,6 +1857,43 @@ def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId
 
 def callable_operator(state: CallableAnalysis, symbol: string, operands: list[universal.TypeId], span: source.Span) -> CallableOptionalFunction | diagnostics.Diagnostic:
     selected: universal.FunctionDeclaration | None := None
+    for function in state.functions:
+        syntax ?= function.operator_syntax
+        if syntax != None:
+            if syntax.symbol == symbol and callable_same_types(function.parameter_types, operands):
+                if selected != None:
+                    return error(diagnostics.diagnostic_at("E000212", "ambiguous operator implementation " + symbol, span))
+                selected = function
+    if selected != None:
+        return CallableOptionalFunction(selected)
+    for template in state.generics:
+        syntax ?= template.operator_syntax
+        if syntax != None:
+            if syntax.symbol != symbol or len(template.parameters) != len(operands):
+                continue
+            actuals: list[universal.TypeId] = []
+            for parameter in template.type_parameters:
+                actuals.append(universal.TypeId(0))
+            namespace := ""
+            lookup ?= template.lookup
+            if lookup != None:
+                namespace = lookup
+            index := 0
+            matched := true
+            for parameter in template.parameters:
+                inferred ?= callable_infer_annotation(state, parameter.annotation, operands[index], template.type_parameters, actuals, namespace)
+                if inferred is Diagnostic:
+                    matched = false
+                index += 1
+            if not matched:
+                continue
+            candidate = callable_specialize_generic(state, template, actuals)
+            if callable_same_types(candidate.parameter_types, operands):
+                if selected != None:
+                    return error(diagnostics.diagnostic_at("E000212", "ambiguous generic operator implementation " + symbol, span))
+                selected = candidate
+    if selected != None:
+        return CallableOptionalFunction(selected)
     symbolic := false
     for operand in operands:
         if operand.index >= 100000:
@@ -1849,13 +1913,6 @@ def callable_operator(state: CallableAnalysis, symbol: string, operands: list[un
         if selected == None:
             return error(diagnostics.diagnostic_at("E000219", "generic operator use requires an explicit trait capability: " + symbol, span))
         return CallableOptionalFunction(selected)
-    for function in state.functions:
-        syntax ?= function.operator_syntax
-        if syntax != None:
-            if syntax.symbol == symbol and callable_same_types(function.parameter_types, operands):
-                if selected != None:
-                    return error(diagnostics.diagnostic_at("E000212", "ambiguous operator implementation " + symbol, span))
-                selected = function
     if selected == None and (len(operands) == 1 or len(operands) == 2):
         homogeneous := true
         for operand in operands:
@@ -1999,8 +2056,9 @@ def callable_validate_implementations(state: CallableAnalysis) -> unit | diagnos
 
 
 def callable_register_generic(state: CallableAnalysis, function: universal.FunctionDeclaration) -> unit | diagnostics.Diagnostic:
-    if function.body == None or len(function.decorators) != 0:
-        return error(diagnostics.diagnostic("E000219", "generic function requires a source body"))
+    operation = boundary.scalar_boundary(function, "mlir")
+    if (function.body == None and operation == "") or (len(function.decorators) != 0 and operation == ""):
+        return error(diagnostics.diagnostic("E000219", "generic function requires a source body or typed MLIR boundary"))
     if len(function.type_parameters) > 256:
         return error(callable_diagnostic("generic parameter limit exceeded", function.span))
     names: list[string] = []
@@ -2073,7 +2131,7 @@ def callable_validate_generics(state: CallableAnalysis, module: universal.Module
         module.generic_functions.append(signature)
 
 
-def callable_select_generic(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument]) -> CallableOptionalSelection | diagnostics.Diagnostic:
+def callable_select_generic(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument], expected: universal.TypeId = universal.TypeId(0)) -> CallableOptionalSelection | diagnostics.Diagnostic:
     for template in state.generics:
         if template.name != name:
             continue
@@ -2092,54 +2150,67 @@ def callable_select_generic(state: CallableAnalysis, name: string, arguments: li
                     if lookup != None:
                         namespace = lookup
                     callable_infer_annotation(state, parameter.annotation, typed.type_id, template.type_parameters, actuals, namespace)
-        suffix := ""
-        symbolic := false
-        substitution = universal.Substitution([])
-        index := 0
-        for actual in actuals:
-            if actual.index == 0:
-                return error(diagnostics.diagnostic("E000219", "generic parameter cannot be inferred"))
-            symbolic = symbolic or callable_symbolic_type(state, actual)
-            suffix += "$" + string(actual.index)
-            substitution.arguments.append(universal.TypeBinding(universal.GenericParamId(u32(index)), actual))
-            index += 1
-        namespace := ""
-        lookup ?= template.lookup
-        if lookup != None:
-            namespace = lookup
-        for constraint in template.constraints:
-            match constraint:
-                case Parameter:
-                    constraint_index := 0
-                    for name in template.type_parameters:
-                        if parameter == name:
-                            bound_name ?= universal.simple_type_name(bound)
-                            if bound_name != None:
-                                trait ?= definitions.trait_named(state.declarations, bound_name, namespace)
-                                if trait != None:
-                                    if not callable_satisfies(state, actuals[constraint_index], trait):
-                                        return error(diagnostics.diagnostic_at("E000219", "type does not satisfy trait " + bound_name, span))
-                        constraint_index += 1
-                case _:
-                    pass
-        instance_name = template.name + "$generic" + suffix
-        for function in state.functions:
-            if function.name == instance_name:
-                return CallableOptionalSelection(CallableSelection(function, bound.arguments))
-        local = callable_generic_environment(state, template, actuals)
-        signature := callable_replace_signature(template, [], [])
-        signature.name = instance_name
-        signature = callable_signature(signature, int(len(state.functions)), state.records, local.declarations)
-        signature.template = template.definition
-        signature.type_arguments = substitution.arguments
-        if symbolic:
-            signature.definition = template.definition
-        else:
-            if callable_specialization_count(state) >= 1024:
-                return error(diagnostics.diagnostic("E000219", "specialization limit exceeded"))
-            state.functions.append(signature)
+        result_annotation ?= template.result
+        if result_annotation != None:
+            if expected.index != 0:
+                namespace := ""
+                lookup ?= template.lookup
+                if lookup != None:
+                    namespace = lookup
+                callable_infer_annotation(state, result_annotation, expected, template.type_parameters, actuals, namespace)
+        signature = callable_specialize_generic(state, template, actuals)
         return CallableOptionalSelection(CallableSelection(signature, bound.arguments))
     return CallableOptionalSelection()
+
+
+def callable_specialize_generic(state: CallableAnalysis, template: universal.FunctionDeclaration, actuals: list[universal.TypeId]) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    suffix := ""
+    symbolic := false
+    substitution = universal.Substitution([])
+    index := 0
+    for actual in actuals:
+        if actual.index == 0:
+            return error(diagnostics.diagnostic("E000219", "generic parameter cannot be inferred"))
+        symbolic = symbolic or callable_symbolic_type(state, actual)
+        suffix += "$" + string(actual.index)
+        substitution.arguments.append(universal.TypeBinding(universal.GenericParamId(u32(index)), actual))
+        index += 1
+    namespace := ""
+    lookup ?= template.lookup
+    if lookup != None:
+        namespace = lookup
+    for constraint in template.constraints:
+        match constraint:
+            case Parameter:
+                constraint_index := 0
+                for name in template.type_parameters:
+                    if parameter == name:
+                        bound_name ?= universal.simple_type_name(bound)
+                        if bound_name != None:
+                            trait ?= definitions.trait_named(state.declarations, bound_name, namespace)
+                            if trait != None:
+                                if not callable_satisfies(state, actuals[constraint_index], trait):
+                                    return error(diagnostics.diagnostic_at("E000219", "type does not satisfy trait " + bound_name, span))
+                    constraint_index += 1
+            case _:
+                pass
+    instance_name = template.name + "$generic" + suffix
+    for function in state.functions:
+        if function.name == instance_name:
+            return function
+    local = callable_generic_environment(state, template, actuals)
+    signature := callable_replace_signature(template, [], [])
+    signature.name = instance_name
+    signature = callable_signature(signature, int(len(state.functions)), state.records, local.declarations)
+    signature.template = template.definition
+    signature.type_arguments = substitution.arguments
+    if symbolic:
+        signature.definition = template.definition
+    else:
+        if callable_specialization_count(state) >= 1024:
+            return error(diagnostics.diagnostic("E000219", "specialization limit exceeded"))
+        state.functions.append(signature)
+    return signature
 
 
 def callable_mlir(state: CallableAnalysis, arguments: list[universal.CallArgument], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -2416,6 +2487,12 @@ def callable_infer_annotation(state: CallableAnalysis, annotation: universal.Typ
                     expanded = definitions.replace_annotation(target, alias.type_parameters, arguments)
                     callable_infer_annotation(state, expanded, actual, parameters, actuals, alias.lookup)
                     return
+            if name == "buffer" and len(arguments) == 1:
+                element = storage_types.buffer_element(actual, state.records)
+                if element.index == 0:
+                    return error(callable_diagnostic("generic argument has the wrong storage type", annotation.span))
+                callable_infer_annotation(state, arguments[0], element, parameters, actuals, namespace)
+                return
             template ?= definitions.record_template(state.declarations, name, namespace)
             if template != None:
                 for record in state.records:
@@ -2475,6 +2552,9 @@ def callable_symbolic_parameter(function: universal.FunctionDeclaration, index: 
 def callable_symbolic_type(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
     if type_id.index >= 100000:
         return true
+    element = storage_types.buffer_element(type_id, state.records)
+    if element.index != 0:
+        return callable_symbolic_type(state, element)
     instance ?= definitions.record_instance(state.declarations, type_id)
     if instance != None:
         for binding in instance.arguments:
@@ -2643,3 +2723,55 @@ def callable_pack_record(state: CallableAnalysis, type_id: universal.TypeId) -> 
                 if len(template.fields) == 1 and template.fields[0].variadic:
                     return record
     return None
+
+
+def callable_type_method(state: CallableAnalysis, callee: universal.Expression) -> CallableOptionalFunction | diagnostics.Diagnostic:
+    match callee.kind:
+        case Member:
+            path = callable_path(object)
+            if path == "" or path in state.names:
+                return CallableOptionalFunction()
+            owner := callable_constructor_type(state, object)
+            if owner.index == 0:
+                for record in state.records:
+                    if record.name == path or record.name == state.namespace + path:
+                        owner = record.type_id
+            if owner.index == 0:
+                return CallableOptionalFunction()
+            if owner.index >= 100000:
+                requirement = callable_required_member(state, owner, name)
+                method ?= requirement.function
+                if method != None:
+                    function = callable_replace_signature(method, [], [])
+                    function.parameters = function.parameters[1:]
+                    function.parameter_types = method.parameter_types[1:]
+                    function.result_type = method.result_type
+                    return CallableOptionalFunction(function)
+                return CallableOptionalFunction()
+            callable_register_record_methods(state, owner)
+            selected: universal.FunctionDeclaration | None := None
+            for function in state.functions:
+                if function.owner_type.index == owner.index and function.name.split(".")[-1] == name:
+                    selected = function
+            method ?= selected
+            if method != None:
+                if name.starts_with("_") and state.owner.index != owner.index:
+                    return error(callable_diagnostic("method is private: " + name, callee.span))
+                instance_name = method.name + "$type"
+                for function in state.functions:
+                    if function.name == instance_name:
+                        return CallableOptionalFunction(function)
+                function := callable_replace_signature(method, [], [])
+                function.name = instance_name
+                function.parameters = function.parameters[1:]
+                for record in state.records:
+                    if record.type_id.index == owner.index:
+                        for declared in record.methods:
+                            if declared.name == name:
+                                function.body = declared.body
+                function = callable_signature(function, int(len(state.functions)), state.records, state.declarations)
+                state.functions.append(function)
+                return CallableOptionalFunction(function)
+        case _:
+            pass
+    return CallableOptionalFunction()

@@ -8,6 +8,8 @@ import "../../../../universal/declaration/scalar.sev" as boundary
 def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> MlirType:
     for record in records:
         if record.type_id.index == id.index:
+            if record.storage_element.index != 0:
+                return memref_type(integer_type(8).scalar, [-1])
             fields: list[MlirType] = []
             for field in record.fields:
                 fields.append(callable_storage_type(callable_mlir_type(field.type_id, records)))
@@ -148,7 +150,8 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                                     sizes.append(integer_attribute(segment, integer_type(32)))
                                 segment_attribute = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], sizes)
                                 attributes.append(MlirNamedAttribute("operandSegmentSizes", segment_attribute))
-                            builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs, attributes)
+                            if not callable_buffer_operation(builder, module, callable_source, native_operation, inputs, outputs):
+                                builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs, attributes)
                         elif symbol != "":
                             builder_call(builder, symbol, inputs, outputs)
                         else:
@@ -315,3 +318,73 @@ def callable_cfg(builder: MlirOpBuilder, module: universal.Module, body: univers
                     builder_return(builder, outputs)
                 case Dead:
                     builder_create_operation(builder, operation_name("llvm", "unreachable"), terminator=true)
+
+
+# Rank-one buffers of copyable aggregate values use byte storage. LLVM computes
+# the ABI stride, including padding; ownership remains visible as a memref.
+def callable_buffer_stride(builder: MlirOpBuilder, element: MlirType) -> MlirValue:
+    base = builder_new_value(builder, pointer_type())
+    builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [base])
+    end = builder_new_value(builder, pointer_type())
+    offsets = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [integer_attribute(1, integer_type(32))])
+    builder_create_operation(builder, operation_name("llvm", "getelementptr"), [base], [end], [MlirNamedAttribute("rawConstantIndices", offsets), MlirNamedAttribute("elem_type", type_attribute(element))])
+    bytes = builder_new_value(builder, integer_type(64))
+    builder_create_operation(builder, operation_name("llvm", "ptrtoint"), [end], [bytes])
+    one = builder_new_value(builder, integer_type(64))
+    builder_constant(builder, one, integer_attribute(1, one.type_id))
+    nonzero = builder_new_value(builder, integer_type(64))
+    builder_binary(builder, nonzero, operation_name("arith", "maxui"), bytes, one)
+    stride = builder_new_value(builder, index_type())
+    builder_create_operation(builder, operation_name("arith", "index_cast"), [nonzero], [stride])
+    return stride
+
+
+def callable_buffer_address(builder: MlirOpBuilder, buffer: MlirValue, position: MlirValue, stride: MlirValue) -> MlirValue:
+    base = builder_new_value(builder, index_type())
+    builder_create_operation(builder, operation_name("memref", "extract_aligned_pointer_as_index"), [buffer], [base])
+    offset = builder_new_value(builder, index_type())
+    builder_binary(builder, offset, operation_name("arith", "muli"), position, stride)
+    address = builder_new_value(builder, index_type())
+    builder_binary(builder, address, operation_name("arith", "addi"), base, offset)
+    integer = builder_new_value(builder, integer_type(64))
+    builder_create_operation(builder, operation_name("arith", "index_cast"), [address], [integer])
+    pointer = builder_new_value(builder, pointer_type())
+    builder_create_operation(builder, operation_name("llvm", "inttoptr"), [integer], [pointer])
+    return pointer
+
+
+def callable_buffer_operation(builder: MlirOpBuilder, module: universal.Module, function: universal.FunctionDeclaration, operation: string, inputs: list[MlirValue], outputs: list[MlirValue]) -> bool:
+    if operation not in ["memref.alloc", "memref.load", "memref.store", "memref.dim"]:
+        return false
+    buffer_type := function.result_type
+    if operation == "memref.load" or operation == "memref.dim":
+        buffer_type = function.parameter_types[0]
+    elif operation == "memref.store":
+        buffer_type = function.parameter_types[1]
+    for record in module.records:
+        if record.type_id.index != buffer_type.index or record.storage_element.index == 0:
+            continue
+        element = callable_mlir_type(record.storage_element, module.records)
+        stride = callable_buffer_stride(builder, element)
+        if operation == "memref.alloc":
+            bytes = builder_new_value(builder, index_type())
+            builder_binary(builder, bytes, operation_name("arith", "muli"), inputs[0], stride)
+            restored = builder_new_value(builder, index_type())
+            builder_binary(builder, restored, operation_name("arith", "divui"), bytes, stride)
+            valid = builder_new_value(builder, integer_type(1))
+            builder_binary(builder, valid, operation_name("arith", "cmpi"), restored, inputs[0], [MlirNamedAttribute("predicate", integer_attribute(0, integer_type(64)))])
+            builder_assert(builder, valid, "buffer allocation size overflow")
+            segments = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [integer_attribute(1, integer_type(32)), integer_attribute(0, integer_type(32))])
+            builder_create_operation(builder, operation_name("memref", "alloc"), [bytes], outputs, [MlirNamedAttribute("operandSegmentSizes", segments)])
+        elif operation == "memref.dim":
+            bytes = builder_new_value(builder, index_type())
+            builder_create_operation(builder, operation_name("memref", "dim"), inputs, [bytes])
+            builder_binary(builder, outputs[0], operation_name("arith", "divui"), bytes, stride)
+        elif operation == "memref.load":
+            address = callable_buffer_address(builder, inputs[0], inputs[1], stride)
+            builder_create_operation(builder, operation_name("llvm", "load"), [address], outputs)
+        else:
+            address = callable_buffer_address(builder, inputs[1], inputs[2], stride)
+            builder_create_operation(builder, operation_name("llvm", "store"), [inputs[0], address])
+        return true
+    return false

@@ -132,6 +132,7 @@ class RecordDeclaration:
     alternatives: list[CallableAlternative] = []
     representation: string = ""
     declaration_grammar: DefId = DefId(0, 0, DeclarationId(0))
+    storage_element: TypeId = TypeId(0)
 
 
 def outcome_variants(record: RecordDeclaration) -> list[TypeId]:

@@ -1,0 +1,42 @@
+import "../declaration/function.sev"
+import "scalar.sev"
+
+
+# Storage types retain their element identity independently of value layouts.
+def buffer_element(id: TypeId, records: list[RecordDeclaration]) -> TypeId:
+    if scalar_representation(id) == "buffer":
+        return TypeId(id.index - 200)
+    for record in records:
+        if record.type_id.index == id.index:
+            return record.storage_element
+    return TypeId(0)
+
+
+def indirect_value(id: TypeId, records: list[RecordDeclaration]) -> bool:
+    return id.index >= 1000 and buffer_element(id, records).index == 0
+
+
+def copy_storage(id: TypeId, records: list[RecordDeclaration], active: list[int] = []) -> bool:
+    if id.index == 2:
+        return false
+    if id.index >= 100000:
+        return true
+    if int(id.index) in active:
+        return false
+    if buffer_element(id, records).index != 0:
+        return false
+    representation = scalar_representation(id)
+    if representation != "unknown":
+        return representation in ["integer", "float", "index", "pointer"]
+    for record in records:
+        if record.type_id.index == id.index:
+            for method in record.methods:
+                if method.name == "drop":
+                    return false
+            path = active[:]
+            path.append(int(id.index))
+            for field in record.fields:
+                if not copy_storage(field.type_id, records, path):
+                    return false
+            return true
+    return false

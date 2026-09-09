@@ -3,6 +3,8 @@ import source
 import diagnostics
 import "cfg.sev" as cfg
 import "ownership.sev" as ownership
+import "../../../universal/type/storage.sev" as storage_types
+import "../../../universal/declaration/scalar.sev" as boundary
 
 
 class CallableMirScope:
@@ -34,7 +36,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             if len(elements_values) != 0:
                 exemplar = elements_values[0]
             else:
-                exemplar = mir_value(module, universal.TypeId(expression.type_id.index - 200))
+                exemplar = mir_value(module, storage_types.buffer_element(expression.type_id, module.records))
                 cfg.append(context, universal.Operation.Constant(universal.NoneValue(), exemplar))
             local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar])
             result = mir_expression(module, context, local, construction)
@@ -138,9 +140,13 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
         case ResolvedCall:
             match callee:
                 case Direct:
+                    native := false
+                    for declaration in module.functions:
+                        if declaration.id.value == function.declaration.value:
+                            native = boundary.scalar_boundary(declaration, "mlir") != ""
                     evaluated: list[universal.ValueId] = []
                     for argument in arguments:
-                        if argument.value.type_id.index >= 1000:
+                        if storage_types.indirect_value(argument.value.type_id, module.records) and not native:
                             evaluated.append(callable_mir_place(module, context, scope, argument.value))
                         else:
                             evaluated.append(mir_expression(module, context, scope, argument.value))
@@ -172,7 +178,7 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
         match statement:
             case BindingStatement:
                 value := mir_expression(module, context, scope, binding.value)
-                if binding.type_id.index >= 1000:
+                if storage_types.indirect_value(binding.type_id, module.records):
                     address = mir_value(module, universal.TypeId(5))
                     cfg.append(context, universal.Operation.Allocate(binding.type_id, address))
                     cfg.append(context, universal.Operation.Store(address, value))
@@ -181,7 +187,7 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                     cfg.append(context, universal.Operation.Store(scope.bindings[binding.id.index], value))
                 else:
                     cell = mir_value(module, universal.TypeId(5))
-                    stored_type = universal.TypeId(5) if binding.type_id.index >= 1000 else binding.type_id
+                    stored_type = universal.TypeId(5) if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
                     cfg.append(context, universal.Operation.Allocate(stored_type, cell))
                     cfg.append(context, universal.Operation.Store(cell, value))
                     scope.bindings.append(cell)
@@ -211,7 +217,7 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
         local = CallableMirScope()
         context = cfg.ExecutionContext(universal.empty_cfg(function.result_type))
         for type_id in function.parameter_types:
-            stored_type = universal.TypeId(5) if type_id.index >= 1000 else type_id
+            stored_type = universal.TypeId(5) if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
             cell = mir_value(module, universal.TypeId(5))
@@ -237,7 +243,7 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
 def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
         case BindingReference:
-            if expression.type_id.index >= 1000:
+            if storage_types.indirect_value(expression.type_id, module.records):
                 address = mir_value(module, universal.TypeId(5))
                 cfg.append(context, universal.Operation.Load(scope.bindings[binding.index], address))
                 return address

@@ -2,6 +2,7 @@ import diagnostics
 import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
+import "../../../universal/type/storage.sev" as storage_types
 
 
 # Shared declaration environment. AST declarations survive with resolved
@@ -52,9 +53,16 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
         case Named:
             if name == "buffer" and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
-                if int(element.index) not in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
-                    return error(diagnostics.diagnostic_at("E000205", "buffer elements require scalar storage", annotation.span))
-                return universal.TypeId(200 + element.index)
+                if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
+                    return universal.TypeId(200 + element.index)
+                if not storage_types.copy_storage(element, records):
+                    return error(diagnostics.diagnostic_at("E000205", "buffer elements require copyable storage; owned elements require destruction lowering", annotation.span))
+                for record in records:
+                    if record.storage_element.index == element.index:
+                        return record.type_id
+                id = universal.TypeId(u32(1000 + len(records)))
+                records.append(universal.RecordDeclaration("$buffer$" + type_name(element, records), [], [], annotation.span, type_id=id, storage_element=element))
+                return id
             alias ?= alias_named(definitions, name, namespace)
             if alias != None:
                 if len(alias.type_parameters) != len(arguments):
@@ -65,7 +73,14 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     return alias.id
                 target ?= alias.definition
                 if target != None:
-                    substituted = replace_annotation(target, alias.type_parameters, arguments)
+                    # Arguments belong to the caller's scope; the alias body
+                    # belongs to its declaration scope. Resolve that boundary
+                    # before substituting names into the alias definition.
+                    replacements: list[universal.TypeAnnotation] = []
+                    for argument in arguments:
+                        actual = type_annotation(definitions, argument, records, namespace, active)
+                        replacements.append(universal.named_type(type_name(actual, records), [], argument.span))
+                    substituted = replace_annotation(target, alias.type_parameters, replacements)
                     match substituted.kind:
                         case Union:
                             # Family values still require a concrete member.
@@ -455,7 +470,7 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
             offset := 0
             for replacement in replacements[len(template.type_parameters) - 1:]:
                 type_id = type_annotation(definitions, replacement, records, template.lookup)
-                if scalar.scalar_representation(type_id) in ["utf8", "buffer"]:
+                if scalar.scalar_representation(type_id) == "utf8" or storage_types.buffer_element(type_id, records).index != 0:
                     return error(diagnostics.diagnostic_at("E000205", "aggregate resource fields require ownership lowering", field.span))
                 if type_id.index == 2:
                     return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
