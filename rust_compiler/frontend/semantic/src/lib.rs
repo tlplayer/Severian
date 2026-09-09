@@ -1343,18 +1343,21 @@ fn closed_type_families(ast: &severian_ast::Module) -> BTreeMap<String, BTreeSet
 
 fn compiler_lossless_conversion(ast: &severian_ast::Module) -> bool {
     let mut enabled = false;
-    for statement in ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            severian_ast::Item::Test(test) => Some(test.body.as_slice()),
-            _ => None,
-        })
-        .flatten()
-    {
-        let severian_ast::Statement::Expression(expression) = statement else {
-            continue;
-        };
+    for expression in ast.items.iter().flat_map(|item| match item {
+        severian_ast::Item::Expression(expression) => vec![expression],
+        severian_ast::Item::Test(test) => test
+            .body
+            .iter()
+            .filter_map(|statement| {
+                if let AstStatement::Expression(expression) = statement {
+                    Some(expression)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        _ => Vec::new(),
+    }) {
         let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
             continue;
         };
@@ -6118,7 +6121,27 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Fallback { value, fallback } => {
-                let value = self.expression(value, expected)?;
+                let value = self.expression(value, None)?;
+                if let Some(members) = self.union_types.get(&value.type_id).cloned() {
+                    let none = self.types.resolve_name("None").unwrap();
+                    let present = members.iter().enumerate().filter(|(_, member)| **member != none).collect::<Vec<_>>();
+                    if members.contains(&none) && present.len() == 1 {
+                        let (ordinal, member) = present[0];
+                        let member = *member;
+                        let condition = self.union_tag_condition(value.clone(), ordinal, ast.span);
+                        let projected = Expression {
+                            id: self.next_id(), type_id: member,
+                            kind: ExpressionKind::Field { object: Box::new(value), index: ordinal as u32 + 1 }, span: ast.span,
+                        };
+                        let target = expected.unwrap_or(member);
+                        let projected = self.coerce(projected, target, false)?;
+                        let fallback = self.expression(fallback, Some(target))?;
+                        return Ok(Expression {
+                            id: self.next_id(), type_id: target,
+                            kind: ExpressionKind::Fallback { condition: Box::new(condition), value: Box::new(projected), fallback: Box::new(fallback) }, span: ast.span,
+                        });
+                    }
+                }
                 let is_string = self
                     .types
                     .definition(value.type_id)
@@ -9052,8 +9075,8 @@ impl Analyzer<'_> {
                                     span: ast.span,
                                 });
                             }
-                            if self.types.primitive(target).is_some()
-                                && self.types.primitive(left.type_id).is_some()
+                            if (self.types.primitive(target).is_some() || self.class_instances_by_type.contains_key(&target))
+                                && !self.union_types.contains_key(&left.type_id)
                             {
                                 let boolean = self
                                     .types
@@ -9161,40 +9184,6 @@ impl Analyzer<'_> {
                             &[pointer, integer],
                             pointer,
                             vec![resolved_left, resolved_right],
-                            ast.span,
-                        ));
-                    }
-                }
-                if *operator == AstBinaryOperator::Power {
-                    let left = self.expression(left, None)?;
-                    let name = self
-                        .types
-                        .definition(left.type_id)
-                        .map(|definition| definition.name.as_str());
-                    if matches!(name, Some("float" | "f64")) {
-                        if matches!(
-                            right.kind,
-                            AstExpressionKind::Literal(AstLiteral::Integer(_))
-                        ) {
-                            let integer = self
-                                .types
-                                .resolve_name("int")
-                                .expect("bootstrap defines int");
-                            let right = self.expression(right, Some(integer))?;
-                            return Ok(self.runtime_call(
-                                "__sev_pow_f64_i64",
-                                &[left.type_id, integer],
-                                left.type_id,
-                                vec![left, right],
-                                ast.span,
-                            ));
-                        }
-                        let right = self.expression(right, Some(left.type_id))?;
-                        return Ok(self.runtime_call(
-                            "__sev_pow_f64_f64",
-                            &[left.type_id, left.type_id],
-                            left.type_id,
-                            vec![left, right],
                             ast.span,
                         ));
                     }
@@ -9690,38 +9679,19 @@ impl Analyzer<'_> {
                 let operator = universal_binary(*operator);
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
-                let mut left = self.prepare(left)?;
-                let mut right = self.prepare(right)?;
-                let mixed_float = match (left.constraint(), right.constraint()) {
-                    (TypeConstraint::Known(left), TypeConstraint::Known(right))
-                        if self.integer_primitive(left)
-                            && self.types.primitive(right).is_some_and(|primitive| {
-                                primitive.category == severian_universal::PrimitiveCategory::Float
-                            }) =>
-                    {
-                        Some((right, true))
-                    }
-                    (TypeConstraint::Known(left), TypeConstraint::Known(right))
-                        if self.types.primitive(left).is_some_and(|primitive| {
-                            primitive.category == severian_universal::PrimitiveCategory::Float
-                        }) && self.integer_primitive(right) =>
-                    {
-                        Some((left, false))
-                    }
-                    _ => None,
-                };
-                if let Some((float_type, integer_on_left)) = mixed_float {
-                    if integer_on_left {
-                        left = Prepared::Resolved(self.finish(left, float_type)?);
-                    } else {
-                        right = Prepared::Resolved(self.finish(right, float_type)?);
-                    }
-                }
+                let left = self.prepare(left)?;
+                let right = self.prepare(right)?;
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
                 let resolved = self
                     .types
-                    .resolve_binary(operator, left_constraint, right_constraint, expected)
+                    .resolve_binary_with_policy(
+                        operator,
+                        left_constraint,
+                        right_constraint,
+                        expected,
+                        self.conversion_policy(),
+                    )
                     .map_err(|error| {
                         self.binary_operator_error(
                             error,
@@ -9948,16 +9918,11 @@ impl Analyzer<'_> {
             };
             conversion = selected;
         }
-        if !explicit {
-            let rejected = conversion.kind == severian_universal::ConversionKind::Checked
-                || (self.lossless_conversion
-                    && conversion.kind == severian_universal::ConversionKind::Lossy);
-            if rejected {
-                return Err(semantic_error(
-                    "expression does not satisfy the expected type".into(),
-                    expression.span,
-                ));
-            }
+        if !self.conversion_policy().permits(conversion.kind) {
+            return Err(semantic_error(
+                "conversion may lose information under package lossless.conversion policy".into(),
+                expression.span,
+            ));
         }
         let span = expression.span;
         let converted = Expression {
@@ -9969,13 +9934,12 @@ impl Analyzer<'_> {
             },
             span,
         };
-        if explicit
-            && self
-                .types
-                .primitive(expression.type_id)
-                .is_some_and(|primitive| {
-                    primitive.category == severian_universal::PrimitiveCategory::Float
-                })
+        if self
+            .types
+            .primitive(expression.type_id)
+            .is_some_and(|primitive| {
+                primitive.category == severian_universal::PrimitiveCategory::Float
+            })
             && self.integer_primitive(expected)
         {
             let boolean = self
@@ -9988,7 +9952,7 @@ impl Analyzer<'_> {
                 kind: ExpressionKind::Binary {
                     operator: BinaryOperator::Subtract,
                     left: Box::new(expression.clone()),
-                    right: Box::new(expression),
+                    right: Box::new(expression.clone()),
                 },
                 span,
             };
@@ -10008,20 +9972,24 @@ impl Analyzer<'_> {
                 },
                 span,
             };
-            let failure =
-                self.throw_expression("non-finite float cannot convert to integer", expected, span);
+            let condition = self.float_integer_range_condition(&expression, expected, finite, span);
+            let failure = self.throw_expression(
+                "float conversion requires a finite value in the target range",
+                expected,
+                span,
+            );
             return Ok(Expression {
                 id: self.next_id(),
                 type_id: expected,
                 kind: ExpressionKind::Fallback {
-                    condition: Box::new(finite),
+                    condition: Box::new(condition),
                     value: Box::new(converted),
                     fallback: Box::new(failure),
                 },
                 span,
             });
         }
-        if explicit && conversion.kind == severian_universal::ConversionKind::Checked {
+        if conversion.kind == severian_universal::ConversionKind::Checked {
             if let Some(condition) =
                 self.checked_integer_conversion_condition(&expression, expected, span)
             {
@@ -10043,6 +10011,98 @@ impl Analyzer<'_> {
             }
         }
         Ok(converted)
+    }
+
+    fn conversion_policy(&self) -> severian_universal::ConversionPolicy {
+        if self.lossless_conversion {
+            severian_universal::ConversionPolicy::Lossless
+        } else {
+            severian_universal::ConversionPolicy::Approximate
+        }
+    }
+
+    fn float_integer_range_condition(
+        &mut self,
+        value: &Expression,
+        target: TypeId,
+        mut condition: Expression,
+        span: severian_source::Span,
+    ) -> Expression {
+        use severian_universal::{IntegerWidth, PrimitiveRepresentation};
+        let (bits, signed) = match self.types.primitive(target).unwrap().representation {
+            PrimitiveRepresentation::Integer { bits, signed } => (
+                match bits {
+                    IntegerWidth::Fixed(bits) => bits,
+                    IntegerWidth::Machine => 64,
+                },
+                signed,
+            ),
+            PrimitiveRepresentation::PointerInteger { signed } => (64, signed),
+            _ => unreachable!("integer target required"),
+        };
+        use severian_universal::FloatFormat;
+        let PrimitiveRepresentation::Float { format } =
+            self.types.primitive(value.type_id).unwrap().representation
+        else {
+            unreachable!("floating source required");
+        };
+        let (precision, max_exponent) = match format {
+            FloatFormat::Float8E4M3Fn => (4, 8),
+            FloatFormat::Float8E5M2 => (3, 15),
+            FloatFormat::Ieee(16) => (11, 15),
+            FloatFormat::BrainFloat16 => (8, 127),
+            FloatFormat::Ieee(32) => (24, 127),
+            FloatFormat::Ieee(64) | FloatFormat::Machine => (53, 1023),
+            FloatFormat::Ieee(128) => (113, 16383),
+            FloatFormat::Ieee(_) => unreachable!("unsupported floating representation"),
+        };
+        let magnitude_bits = bits - u16::from(signed);
+        let upper = 2f64.powi(i32::from(magnitude_bits));
+        let mut bounds = Vec::new();
+        if !signed {
+            bounds.push((BinaryOperator::GreaterEqual, "0.0".to_owned()));
+        } else if magnitude_bits <= max_exponent {
+            bounds.push((BinaryOperator::GreaterEqual, format!("{:.1}", -upper)));
+        }
+        if magnitude_bits <= max_exponent {
+            // Compare against MAX when representable. Otherwise MAX rounds up
+            // to an exact power of two, which must be an exclusive upper bound.
+            if magnitude_bits <= precision {
+                let maximum = (1u128 << magnitude_bits) - 1;
+                bounds.push((BinaryOperator::LessEqual, format!("{maximum}.0")));
+            } else {
+                bounds.push((BinaryOperator::Less, format!("{upper:.1}")));
+            }
+        }
+        for (operator, bound) in bounds {
+            let bound = Expression {
+                id: self.next_id(),
+                type_id: value.type_id,
+                kind: ExpressionKind::Literal(LiteralValue::Float(bound)),
+                span,
+            };
+            let comparison = Expression {
+                id: self.next_id(),
+                type_id: condition.type_id,
+                kind: ExpressionKind::Binary {
+                    operator,
+                    left: Box::new(value.clone()),
+                    right: Box::new(bound),
+                },
+                span,
+            };
+            condition = Expression {
+                id: self.next_id(),
+                type_id: condition.type_id,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::And,
+                    left: Box::new(condition),
+                    right: Box::new(comparison),
+                },
+                span,
+            };
+        }
+        condition
     }
 
     fn checked_integer_conversion_condition(
@@ -11379,11 +11439,27 @@ impl Analyzer<'_> {
         })
     }
 
+    fn union_tag_condition(&mut self, union: Expression, ordinal: usize, span: severian_source::Span) -> Expression {
+        let integer = self.tag_type();
+        let tag = Expression { id: self.next_id(), type_id: integer,
+            kind: ExpressionKind::Field { object: Box::new(union), index: 0 }, span };
+        let ordinal = self.integer_expression(&ordinal.to_string(), integer, span);
+        Expression { id: self.next_id(), type_id: self.types.resolve_name("bool").unwrap(),
+            kind: ExpressionKind::Binary { operator: BinaryOperator::Equal, left: Box::new(tag), right: Box::new(ordinal) }, span }
+    }
+
     fn convert_union_expression(
         &mut self,
         union: Expression,
         members: &[TypeId],
         expected: TypeId,
+    ) -> Result<Expression, Diagnostic> {
+        self.map_union_expression(union, members, expected, |analyzer, field| analyzer.coerce(field, expected, true))
+    }
+
+    fn map_union_expression(
+        &mut self, union: Expression, members: &[TypeId], expected: TypeId,
+        mut convert: impl FnMut(&mut Self, Expression) -> Result<Expression, Diagnostic>,
     ) -> Result<Expression, Diagnostic> {
         let span = union.span;
         let integer = self.tag_type();
@@ -11402,7 +11478,7 @@ impl Analyzer<'_> {
                 },
                 span,
             };
-            let value = self.coerce(field, expected, true)?;
+            let value = convert(self, field)?;
             let Some(fallback) = selected else {
                 selected = Some(value);
                 continue;
@@ -12334,6 +12410,13 @@ impl Analyzer<'_> {
         value: Expression,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        let string = self.types.resolve_name("string").unwrap();
+        if let Some(members) = self.union_types.get(&value.type_id).cloned() {
+            return self.map_union_expression(value, &members, string, |analyzer, field| analyzer.display_string(field, span));
+        }
+        if self.types.resolve_name("None") == Some(value.type_id) {
+            return Ok(self.string_expression("None", span));
+        }
         if let Some(owner) = self.class_instances_by_type.get(&value.type_id).cloned() {
             let mut conversions = owner.operators.iter().filter(|operator| {
                 operator.operator == severian_ast::OperatorSyntax::Conversion
@@ -15669,6 +15752,7 @@ impl Analyzer<'_> {
                 },
             ));
         }
+        let mut rank = ConversionRank::Exact;
         let value = if matches!(
             argument.kind,
             AstExpressionKind::List(_) | AstExpressionKind::Set(_) | AstExpressionKind::Map(_)
@@ -15676,7 +15760,27 @@ impl Analyzer<'_> {
             self.expression(argument, Some(expected)).ok()?
         } else {
             match self.prepare(argument) {
-                Ok(prepared) => self.finish(prepared, expected).ok()?,
+                Ok(prepared) => {
+                    let actual = match &prepared {
+                        Prepared::Resolved(value) => Some(value.type_id),
+                        Prepared::Literal(value, _)
+                            if self.types.resolve_literal(value, Some(expected)).is_err() =>
+                        {
+                            Some(self.types.resolve_literal(value, None).ok()?)
+                        }
+                        _ => None,
+                    };
+                    if let Some(actual) = actual {
+                        rank =
+                            conversion_rank(self.types, actual, expected, self.conversion_policy())
+                                .or_else(|| {
+                                    self.union_types
+                                        .contains_key(&expected)
+                                        .then_some(ConversionRank::General)
+                                })?;
+                    }
+                    self.finish(prepared, expected).ok()?
+                }
                 Err(_) => self.expression(argument, Some(expected)).ok()?,
             }
         };
@@ -15687,7 +15791,7 @@ impl Analyzer<'_> {
         ) {
             ConversionRank::General
         } else {
-            expression_conversion_rank(self.types, &value, expected)?
+            rank
         };
         Some((value, conversion))
     }
@@ -19961,11 +20065,12 @@ fn conversion_rank(
     types: &TypeContext,
     actual: TypeId,
     expected: TypeId,
+    policy: severian_universal::ConversionPolicy,
 ) -> Option<ConversionRank> {
     if actual == expected {
         return Some(ConversionRank::Exact);
     }
-    if !types.assignable(actual, expected) {
+    if !types.implicitly_convertible(actual, expected, policy) {
         return None;
     }
     if let (Some(actual_tensor), Some(expected_tensor)) =
@@ -19991,28 +20096,6 @@ fn conversion_rank(
         severian_universal::ConversionKind::Checked | severian_universal::ConversionKind::Lossy => {
             Some(ConversionRank::General)
         }
-    }
-}
-
-fn expression_conversion_rank(
-    types: &TypeContext,
-    expression: &Expression,
-    expected: TypeId,
-) -> Option<ConversionRank> {
-    match &expression.kind {
-        ExpressionKind::Convert { conversion, .. } if conversion.to == expected => {
-            match conversion.kind {
-                severian_universal::ConversionKind::Identity => Some(ConversionRank::Exact),
-                severian_universal::ConversionKind::Promote => types
-                    .numeric_conversion_cost(conversion.from, expected)
-                    .and_then(|cost| cost.try_into().ok())
-                    .map(ConversionRank::Widening)
-                    .or(Some(ConversionRank::General)),
-                severian_universal::ConversionKind::Checked
-                | severian_universal::ConversionKind::Lossy => Some(ConversionRank::General),
-            }
-        }
-        _ => conversion_rank(types, expression.type_id, expected),
     }
 }
 
@@ -21545,17 +21628,62 @@ def interpolate(text: string) -> string:
     }
 
     #[test]
-    fn power_expressions_lower_to_numeric_runtime_calls() {
+    fn power_expressions_resolve_declared_numeric_signatures() {
         let source = "def powers() -> float:\n    integer = 2 ** 2\n    root = integer ** .5\n    floating = 4.0 ** 2\n    return root + floating\n";
-        let (program, _) = analyze_source(source);
-        let names = program.modules[0]
+        let (program, context) = analyze_source(source);
+        let function = program.modules[0]
             .functions
             .iter()
-            .map(|function| function.name.as_str())
-            .collect::<BTreeSet<_>>();
-        assert!(names.contains("__sev_pow_i64_i64"));
-        assert!(names.contains("__sev_pow_f64_f64"));
-        assert!(names.contains("__sev_pow_f64_i64"));
+            .find(|function| function.name == "powers")
+            .unwrap();
+        let powers = function
+            .body
+            .as_ref()
+            .unwrap()
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                if let Statement::Binding(binding) = statement {
+                    let binding = program.modules[0]
+                        .bindings
+                        .iter()
+                        .find(|value| value.id == *binding)
+                        .unwrap();
+                    if let ExpressionKind::Binary {
+                        operator: BinaryOperator::Power,
+                        left,
+                        right,
+                    } = &binding.value.kind
+                    {
+                        return Some((left, right));
+                    }
+                }
+                None
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(powers.len(), 3);
+        assert_eq!(
+            powers[0].0.type_id,
+            context.types.resolve_name("int").unwrap()
+        );
+        assert_eq!(
+            powers[0].1.type_id,
+            context.types.resolve_name("u32").unwrap()
+        );
+        for (left, right) in &powers[1..] {
+            assert_eq!(left.type_id, context.types.resolve_name("float").unwrap());
+            assert_eq!(left.type_id, right.type_id);
+        }
+        assert!(matches!(
+            powers[1].0.kind,
+            ExpressionKind::Convert {
+                conversion: severian_hir::Conversion {
+                    kind: severian_universal::ConversionKind::Lossy,
+                    ..
+                },
+                ..
+            }
+        ));
         severian_mir::build(&program).unwrap();
     }
 
@@ -22037,7 +22165,7 @@ def interpolate(text: string) -> string:
             left.kind,
             ExpressionKind::Convert {
                 conversion: severian_hir::Conversion {
-                    kind: severian_universal::ConversionKind::Promote,
+                    kind: severian_universal::ConversionKind::Lossy,
                     ..
                 },
                 ..
@@ -22046,8 +22174,34 @@ def interpolate(text: string) -> string:
 
         assert_eq!(bindings[3].type_id, int);
         assert_eq!(bindings[4].type_id, float);
+        let ExpressionKind::Fallback {
+            condition,
+            value,
+            fallback,
+        } = &bindings[3].value.kind
+        else {
+            panic!("float to integer conversion must be guarded");
+        };
+        fn comparisons(expression: &Expression, operators: &mut Vec<BinaryOperator>) {
+            if let ExpressionKind::Binary {
+                operator,
+                left,
+                right,
+            } = &expression.kind
+            {
+                operators.push(*operator);
+                comparisons(left, operators);
+                comparisons(right, operators);
+            }
+        }
+        let mut operators = Vec::new();
+        comparisons(condition, &mut operators);
+        assert!(operators.contains(&BinaryOperator::Equal)); // finite (x - x == 0)
+        assert!(operators.contains(&BinaryOperator::GreaterEqual)); // lower bound
+        assert!(operators.contains(&BinaryOperator::Less)); // exclusive upper bound
+        assert!(matches!(fallback.kind, ExpressionKind::Throw(_)));
         assert!(matches!(
-            bindings[3].value.kind,
+            value.kind,
             ExpressionKind::Convert {
                 conversion: severian_hir::Conversion {
                     kind: severian_universal::ConversionKind::Lossy,
@@ -22060,7 +22214,7 @@ def interpolate(text: string) -> string:
             bindings[4].value.kind,
             ExpressionKind::Convert {
                 conversion: severian_hir::Conversion {
-                    kind: severian_universal::ConversionKind::Promote,
+                    kind: severian_universal::ConversionKind::Lossy,
                     ..
                 },
                 ..
@@ -22237,14 +22391,60 @@ def interpolate(text: string) -> string:
     }
 
     #[test]
+    fn module_policy_rejects_approximate_edges_without_reclassifying_them() {
+        let context = severian_bootstrap::load().unwrap();
+        for enabled in [false, true] {
+            for conversion in ["value", "float(value)", "value as float", "value ** .5"] {
+                let source = SourceFile::virtual_source("policy.sev", format!(
+                    "package.config.set(\"lossless.conversion\", {enabled})\nvalue: i32 = 7\nconverted: float = {conversion}\n"
+                ));
+                let tokens = severian_lexer::scan(&source).unwrap();
+                let ast = severian_parser::parse(&tokens).unwrap();
+                assert_eq!(
+                    analyze(&ast, &context.types).is_ok(),
+                    !enabled,
+                    "{conversion}, lossless={enabled}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn conversion_categories_order_exact_before_widening_before_general() {
         let context = severian_bootstrap::load().unwrap();
         let resolve = |name| context.types.resolve_name(name).unwrap();
-        let exact = conversion_rank(&context.types, resolve("i32"), resolve("i32")).unwrap();
-        let widening = conversion_rank(&context.types, resolve("i32"), resolve("i64")).unwrap();
-        let general = conversion_rank(&context.types, resolve("i32"), resolve("float")).unwrap();
+        let exact = conversion_rank(
+            &context.types,
+            resolve("i32"),
+            resolve("i32"),
+            severian_universal::ConversionPolicy::Approximate,
+        )
+        .unwrap();
+        let widening = conversion_rank(
+            &context.types,
+            resolve("i32"),
+            resolve("i64"),
+            severian_universal::ConversionPolicy::Approximate,
+        )
+        .unwrap();
+        let general = conversion_rank(
+            &context.types,
+            resolve("i32"),
+            resolve("float"),
+            severian_universal::ConversionPolicy::Approximate,
+        )
+        .unwrap();
         assert!(exact < widening);
         assert!(widening < general);
+        assert_eq!(
+            conversion_rank(
+                &context.types,
+                resolve("i32"),
+                resolve("float"),
+                severian_universal::ConversionPolicy::Lossless
+            ),
+            None
+        );
     }
 
     #[test]

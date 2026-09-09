@@ -1,9 +1,9 @@
 use crate::{
-    BinaryOperator, CompileRoute, CompilerId, ConversionKind, DeclarationId, DefId, DimExpr,
-    GenericParamId, IntegerWidth, LiteralKind, LiteralValue, OperatorSignature, PrimitiveCategory,
-    PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, RuntimeDimId, ShapeParameterId,
-    ShapeTerm, Substitution, TensorDimension, TensorShape, TensorType, TyInterner, TypeConstraint,
-    TypeId, TypeKind, TypePattern, UnaryOperator,
+    BinaryOperator, CompileRoute, CompilerId, ConversionKind, ConversionPolicy, DeclarationId,
+    DefId, DimExpr, GenericParamId, IntegerWidth, LiteralKind, LiteralValue, OperatorSignature,
+    PrimitiveCategory, PrimitiveDefinition, PrimitiveId, PrimitiveRepresentation, RuntimeDimId,
+    ShapeParameterId, ShapeTerm, Substitution, TensorDimension, TensorShape, TensorType,
+    TyInterner, TypeConstraint, TypeId, TypeKind, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -786,6 +786,17 @@ impl TypeContext {
         right: TypeConstraint,
         expected: Option<TypeId>,
     ) -> Result<ResolvedBinary, TypeError> {
+        self.resolve_binary_with_policy(operator, left, right, expected, ConversionPolicy::Lossless)
+    }
+
+    pub fn resolve_binary_with_policy(
+        &self,
+        operator: BinaryOperator,
+        left: TypeConstraint,
+        right: TypeConstraint,
+        expected: Option<TypeId>,
+        policy: ConversionPolicy,
+    ) -> Result<ResolvedBinary, TypeError> {
         let mut matches = Vec::new();
         for signature in self.binary.iter().filter(|item| item.operator == operator) {
             let Some(left_type) = exact(signature.left) else {
@@ -797,9 +808,10 @@ impl TypeContext {
             let Some(result) = resolve_pattern(signature.result, left_type, right_type) else {
                 continue;
             };
-            if constraint_matches(self, left, left_type)
-                && constraint_matches(self, right, right_type)
-                && expected.is_none_or(|expected| self.assignable(result, expected))
+            if constraint_matches_with_policy(self, left, left_type, policy)
+                && constraint_matches_with_policy(self, right, right_type, policy)
+                && expected
+                    .is_none_or(|expected| self.implicitly_convertible(result, expected, policy))
             {
                 matches.push(ResolvedBinary {
                     left: left_type,
@@ -833,8 +845,10 @@ impl TypeContext {
                     .iter()
                     .filter_map(|item| {
                         Some(
-                            constraint_conversion_cost(self, left, item.left)?
-                                + constraint_conversion_cost(self, right, item.right)?,
+                            constraint_conversion_cost_with_policy(self, left, item.left, policy)?
+                                + constraint_conversion_cost_with_policy(
+                                    self, right, item.right, policy,
+                                )?,
                         )
                     })
                     .min();
@@ -842,8 +856,10 @@ impl TypeContext {
                     let best = matches
                         .iter()
                         .filter(|item| {
-                            constraint_conversion_cost(self, left, item.left)
-                                .zip(constraint_conversion_cost(self, right, item.right))
+                            constraint_conversion_cost_with_policy(self, left, item.left, policy)
+                                .zip(constraint_conversion_cost_with_policy(
+                                    self, right, item.right, policy,
+                                ))
                                 .is_some_and(|(left, right)| left + right == best_cost)
                         })
                         .collect::<Vec<_>>();
@@ -1023,8 +1039,17 @@ fn constraint_matches(
     constraint: TypeConstraint,
     candidate: TypeId,
 ) -> bool {
+    constraint_matches_with_policy(context, constraint, candidate, ConversionPolicy::Lossless)
+}
+
+fn constraint_matches_with_policy(
+    context: &TypeContext,
+    constraint: TypeConstraint,
+    candidate: TypeId,
+    policy: ConversionPolicy,
+) -> bool {
     match constraint {
-        TypeConstraint::Known(actual) => context.assignable(actual, candidate),
+        TypeConstraint::Known(actual) => context.implicitly_convertible(actual, candidate, policy),
         TypeConstraint::Literal(kind) => context.primitive(candidate).is_some_and(|primitive| {
             primitive.category.literal_kind() == Some(kind)
                 || (kind == LiteralKind::Integer && primitive.category == PrimitiveCategory::Float)
@@ -1037,9 +1062,25 @@ fn constraint_conversion_cost(
     constraint: TypeConstraint,
     candidate: TypeId,
 ) -> Option<u32> {
+    constraint_conversion_cost_with_policy(
+        context,
+        constraint,
+        candidate,
+        ConversionPolicy::Lossless,
+    )
+}
+
+fn constraint_conversion_cost_with_policy(
+    context: &TypeContext,
+    constraint: TypeConstraint,
+    candidate: TypeId,
+    policy: ConversionPolicy,
+) -> Option<u32> {
     match constraint {
         TypeConstraint::Known(actual) if actual == candidate => Some(0),
-        TypeConstraint::Known(actual) if context.assignable(actual, candidate) => {
+        TypeConstraint::Known(actual)
+            if context.implicitly_convertible(actual, candidate, policy) =>
+        {
             context.numeric_conversion_cost(actual, candidate)
         }
         TypeConstraint::Literal(kind) => {
@@ -1228,11 +1269,12 @@ mod tests {
     fn mixed_integer_and_float_operators_promote_to_float() {
         let (types, int, _, float) = numeric_context();
         let resolved = types
-            .resolve_binary(
+            .resolve_binary_with_policy(
                 BinaryOperator::Add,
                 TypeConstraint::Known(int),
                 TypeConstraint::Known(float),
                 None,
+                ConversionPolicy::Approximate,
             )
             .unwrap();
         assert_eq!(resolved.left, float);

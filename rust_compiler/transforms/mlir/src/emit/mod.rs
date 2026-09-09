@@ -1611,15 +1611,17 @@ fn render_cfg_operation(
             right,
             result,
         } => {
-            let input = value_type(module, *left)?;
-            output.push_str(&format!(
-                "{indentation}%v{} = {} %v{}, %v{} : {}\n",
-                result.0,
-                binary_mnemonic(*operator, &input)?,
-                left.0,
-                right.0,
-                mlir_type(&input)?
-            ));
+            if !render_integer_power(output, module, *operator, *left, *right, *result, indent)? {
+                let input = value_type(module, *left)?;
+                output.push_str(&format!(
+                    "{indentation}%v{} = {} %v{}, %v{} : {}\n",
+                    result.0,
+                    binary_mnemonic(*operator, &input)?,
+                    left.0,
+                    right.0,
+                    mlir_type(&input)?
+                ));
+            }
         }
         Operation::Mlir {
             mnemonic,
@@ -2703,13 +2705,16 @@ fn render_block(
                 right,
                 result,
             } => {
-                let input_type = value_type(module, *left)?;
-                let spelling = mlir_type(&input_type)?;
-                let instruction = mlir_binary(*operator, &input_type)?;
-                output.push_str(&format!(
-                    "{indentation}%v{} = {instruction} %v{}, %v{} : {spelling}\n",
-                    result.0, left.0, right.0
-                ));
+                if !render_integer_power(output, module, *operator, *left, *right, *result, indent)?
+                {
+                    let input_type = value_type(module, *left)?;
+                    let spelling = mlir_type(&input_type)?;
+                    let instruction = mlir_binary(*operator, &input_type)?;
+                    output.push_str(&format!(
+                        "{indentation}%v{} = {instruction} %v{}, %v{} : {spelling}\n",
+                        result.0, left.0, right.0
+                    ));
+                }
             }
             Operation::Mlir {
                 mnemonic,
@@ -3676,6 +3681,71 @@ fn mlir_tensor_element(element: LoweredTensorElement) -> Result<String, MlirErro
         LoweredTensorElement::Float { format } => LoweredType::Float { format },
         LoweredTensorElement::Boolean => LoweredType::Boolean,
     })
+}
+
+// math.ipowi requires equal operand widths and interprets its exponent as
+// signed. Preserve the declared unsigned exponent by widening both operands,
+// then project the modular integer result back to the base representation.
+fn render_integer_power(
+    output: &mut String,
+    module: &Module,
+    operator: BinaryOperation,
+    left: ValueId,
+    right: ValueId,
+    result: ValueId,
+    indent: usize,
+) -> Result<bool, MlirError> {
+    if operator != BinaryOperation::Power {
+        return Ok(false);
+    }
+    let (
+        LoweredType::Integer {
+            bits: left_bits,
+            signed: left_signed,
+        },
+        LoweredType::Integer {
+            bits: right_bits,
+            signed: right_signed,
+        },
+    ) = (value_type(module, left)?, value_type(module, right)?)
+    else {
+        return Ok(false);
+    };
+    let bits = left_bits.max(right_bits + u16::from(!right_signed));
+    let indentation = "  ".repeat(indent);
+    let mut operands = Vec::new();
+    for (value, source_bits, signed) in [
+        (left, left_bits, left_signed),
+        (right, right_bits, right_signed),
+    ] {
+        if source_bits < bits {
+            let extension = if signed { "arith.extsi" } else { "arith.extui" };
+            let name = format!("%v{}_pow_{}", result.0, operands.len());
+            output.push_str(&format!(
+                "{indentation}{name} = {extension} %v{} : i{source_bits} to i{bits}\n",
+                value.0
+            ));
+            operands.push(name);
+        } else {
+            operands.push(format!("%v{}", value.0));
+        }
+    }
+    let destination = if left_bits == bits {
+        format!("%v{}", result.0)
+    } else {
+        format!("%v{}_pow_wide", result.0)
+    };
+    output.push_str(&format!(
+        "{indentation}{destination} = math.ipowi {}, {} : i{bits}\n",
+        operands[0], operands[1]
+    ));
+    if left_bits < bits {
+        output.push_str(&format!(
+            "{indentation}%v{} = arith.trunci {destination} : i{bits} to i{left_bits}\n",
+            result.0
+        ));
+    }
+    Ok(true)
 }
 
 fn mlir_binary(operator: BinaryOperation, ty: &LoweredType) -> Result<&'static str, MlirError> {

@@ -15,6 +15,20 @@ pub enum ConversionKind {
     Lossy,
 }
 
+/// Eligibility is independent of the classification carried by a conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversionPolicy {
+    Lossless,
+    Approximate,
+}
+
+impl ConversionPolicy {
+    pub const fn permits(self, kind: ConversionKind) -> bool {
+        // Checked conversions preserve information on every successful path.
+        !matches!((self, kind), (Self::Lossless, ConversionKind::Lossy))
+    }
+}
+
 impl ConversionKind {
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
@@ -68,6 +82,27 @@ impl Conversion {
 }
 
 impl TypeContext {
+    pub fn implicitly_convertible(
+        &self,
+        from: TypeId,
+        to: TypeId,
+        policy: ConversionPolicy,
+    ) -> bool {
+        if self.assignable(from, to) {
+            return true;
+        }
+        // Entering or leaving a measured dimension still requires an explicit
+        // request; permitting approximation cannot erase unit identities.
+        if [from, to].iter().any(|ty| {
+            self.primitive(*ty)
+                .is_some_and(|primitive| primitive.category == PrimitiveCategory::Measured)
+        }) {
+            return false;
+        }
+        self.numeric_conversion(from, to)
+            .is_some_and(|conversion| policy.permits(conversion.kind))
+    }
+
     /// Resolves the default numeric conversion between two universal types.
     pub fn numeric_conversion(&self, from: TypeId, to: TypeId) -> Option<Conversion> {
         let source = self.primitive(from)?;
@@ -122,6 +157,19 @@ impl TypeContext {
             ConversionKind::Identity => 0,
             ConversionKind::Promote => promotion_cost(source, target),
             ConversionKind::Checked => 1_000,
+            // Both directions remain approximate. When an operator can work
+            // in either domain, preserve fractional operands in a float domain
+            // before considering an integer domain that truncates them.
+            ConversionKind::Lossy
+                if matches!(source, PrimitiveRepresentation::Float { .. })
+                    && matches!(
+                        target,
+                        PrimitiveRepresentation::Integer { .. }
+                            | PrimitiveRepresentation::PointerInteger { .. }
+                    ) =>
+            {
+                3_000
+            }
             ConversionKind::Lossy => 2_000,
         })
     }
@@ -304,7 +352,7 @@ mod tests {
         assert_eq!(kind("u32", "i64"), ConversionKind::Promote);
         assert_eq!(kind("i64", "i32"), ConversionKind::Checked);
         assert_eq!(kind("i32", "u32"), ConversionKind::Checked);
-        assert_eq!(kind("i32", "f32"), ConversionKind::Promote);
+        assert_eq!(kind("i32", "f32"), ConversionKind::Lossy);
         assert_eq!(kind("f32", "i32"), ConversionKind::Lossy);
         assert_eq!(kind("f16", "f32"), ConversionKind::Promote);
         assert_eq!(kind("f8e4m3fn", "f16"), ConversionKind::Promote);

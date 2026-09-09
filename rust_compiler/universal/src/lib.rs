@@ -14,7 +14,7 @@ mod type_system;
 pub mod types;
 
 pub use context::{UniversalContext, UniversalError};
-pub use conversion::{Constructor, Conversion, ConversionKind};
+pub use conversion::{Constructor, Conversion, ConversionKind, ConversionPolicy};
 pub use execution::{
     ExecutionPlacement, EXECUTION_BACKEND_ATTRIBUTE, EXECUTION_DEVICE_ATTRIBUTE,
     EXECUTION_PLACEMENT_ATTRIBUTE,

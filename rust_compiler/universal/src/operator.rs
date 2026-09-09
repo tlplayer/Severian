@@ -175,7 +175,11 @@ mod tests {
             assert_eq!(BinaryOperator::from_spelling(spelling), Some(operator));
             assert_eq!(operator.to_string(), spelling);
         }
-        assert_eq!(BinaryOperator::from_spelling("??"), None);
+        assert_eq!(
+            BinaryOperator::from_spelling("??"),
+            Some(BinaryOperator::from_symbol("??"))
+        );
+        assert_eq!(BinaryOperator::from_spelling(""), None);
     }
 
     #[test]

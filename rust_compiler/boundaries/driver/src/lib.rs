@@ -72,54 +72,8 @@ mod tests {
         CompilerId,
     ) {
         let mut types = TypeContextBuilder::new();
-        let i32_type = types.register_declaration("test.i32", "i32").unwrap();
-        types
-            .define_primitive(
-                i32_type,
-                PrimitiveCategory::Integer,
-                PrimitiveRepresentation::Integer {
-                    bits: IntegerWidth::Fixed(32),
-                    signed: true,
-                },
-                true,
-            )
-            .unwrap();
-        let string_type = types.register_declaration("test.string", "string").unwrap();
-        types
-            .define_primitive(
-                string_type,
-                PrimitiveCategory::Text,
-                PrimitiveRepresentation::String,
-                true,
-            )
-            .unwrap();
-        let bool_type = types.register_declaration("test.bool", "bool").unwrap();
-        types
-            .define_primitive(
-                bool_type,
-                PrimitiveCategory::Boolean,
-                PrimitiveRepresentation::Boolean,
-                true,
-            )
-            .unwrap();
-        let unit_type = types.register_declaration("test.unit", "unit").unwrap();
-        types
-            .define_primitive(
-                unit_type,
-                PrimitiveCategory::Unit,
-                PrimitiveRepresentation::Unit,
-                true,
-            )
-            .unwrap();
-        let arguments_type = types.register_declaration("test.args", "args").unwrap();
-        types
-            .define_primitive(
-                arguments_type,
-                PrimitiveCategory::Arguments,
-                PrimitiveRepresentation::Arguments,
-                false,
-            )
-            .unwrap();
+        severian_universal::install_primitives(&mut types).unwrap();
+        let i32_type = types.clone().build().resolve_name("i32").unwrap();
         let custom = types
             .register_declaration("test.custom", "CustomValue")
             .unwrap();
