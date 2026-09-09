@@ -119,6 +119,7 @@ enum MlirAttributeKind:
     DenseIntegerAttributeKind
     DenseIntegerArrayAttributeKind
     IntegerAttributeKind
+    IntegerLiteralAttributeKind
     FloatAttributeKind
     FloatLiteralAttributeKind
     StringAttributeKind
@@ -270,6 +271,8 @@ def attribute_kind_name(kind: MlirAttributeKind) -> string:
             return "dense_integer_array"
         case IntegerAttributeKind:
             return "integer"
+        case IntegerLiteralAttributeKind:
+            return "integer_literal"
         case FloatAttributeKind:
             return "float"
         case FloatLiteralAttributeKind:

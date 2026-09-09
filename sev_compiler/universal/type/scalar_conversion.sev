@@ -4,7 +4,7 @@ import "scalar.sev"
 # Port of rust_compiler/universal/src/conversion.rs for the scalar slice.
 # Higher policy ranks permit more change: identity, promote, checked, lossy.
 def scalar_numeric(id: TypeId) -> bool:
-    return int(id.index) in [8, 16, 32, 64, 108, 164]
+    return int(id.index) in [8, 16, 32, 64, 108, 516, 532, 564, 164]
 
 
 def scalar_conversion_rank(from_type: TypeId, to_type: TypeId) -> int:
@@ -14,11 +14,15 @@ def scalar_conversion_rank(from_type: TypeId, to_type: TypeId) -> int:
         return 0
     if from_type.index == 164 or to_type.index == 164:
         return 3
-    if from_type.index == 108:
-        return 1 if to_type.index > 8 else 2
-    if to_type.index == 108:
-        return 2
-    return 1 if from_type.index < to_type.index else 2
+    source ?= scalar_type(from_type)
+    target ?= scalar_type(to_type)
+    if source != None:
+        if target != None:
+            if source.signed == target.signed:
+                return 1 if source.bits < target.bits else 2
+            if not source.signed and target.signed and source.bits < target.bits:
+                return 1
+    return 2
 
 
 def scalar_conversion_mode(mode: string) -> int:
@@ -40,7 +44,7 @@ def scalar_common_numeric(left: TypeId, right: TypeId) -> TypeId:
         return left
     if left.index == 164 or right.index == 164:
         return TypeId(164)
-    for index in [8, 16, 32, 64]:
+    for index in [8, 16, 32, 64, 516, 532, 564]:
         candidate = TypeId(u32(index))
         if scalar_conversion_rank(left, candidate) <= 1 and scalar_conversion_rank(right, candidate) <= 1:
             return candidate

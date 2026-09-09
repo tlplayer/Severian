@@ -1,0 +1,26 @@
+@c(symbol="pow")
+def __power(left: float, right: float) -> float
+
+
+operator **[G:Power](left: float, right: float) -> float:
+    return __power(left, right)
+
+
+-> integer_power[T: NativeInteger]():
+    def power(base: T, exponent: T) -> T:
+        assert(exponent >= 0)
+        result: T := 1
+        remaining := exponent
+        factor := base
+        while remaining > 0:
+            if remaining % 2 != 0:
+                result = result * factor
+            remaining = remaining / 2
+            if remaining != 0:
+                factor = factor * factor
+        return result
+
+    operator **[G:Power](left: T, right: T) -> T:
+        return power(left, right)
+
+integer_power[NativeInteger]()

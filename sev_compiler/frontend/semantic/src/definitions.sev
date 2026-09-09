@@ -52,7 +52,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
         case Named:
             if name == "buffer" and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
-                if int(element.index) not in [1, 8, 16, 32, 64, 108, 132, 164]:
+                if int(element.index) not in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
                     return error(diagnostics.diagnostic_at("E000205", "buffer elements require scalar storage", annotation.span))
                 return universal.TypeId(200 + element.index)
             alias ?= alias_named(definitions, name, namespace)
@@ -255,7 +255,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Function:
                 result ?= declaration.result
                 if result != None:
-                    if universal.simple_type_name(result) == "Ex":
+                    if len(declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
                         function := declaration
                         function.definition = definition_id(function.name, 40000 + ordinal)
                         definitions.expression_functions.append(function)

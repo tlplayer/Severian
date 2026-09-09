@@ -21,6 +21,21 @@ def __widen(value: i32) -> int
 @mlir("arith.extui")
 def __unsigned(value: u8) -> int
 
+@mlir("arith.extui")
+def __unsigned(value: u16) -> int
+
+@mlir("arith.extui")
+def __unsigned(value: u32) -> int
+
+@mlir("arith.bitcast")
+def __unsigned_digit(value: u64) -> int
+
+@mlir("arith.divui")
+def __unsigned_divide(value: u64, divisor: u64) -> u64
+
+@mlir("arith.remui")
+def __unsigned_remainder(value: u64, divisor: u64) -> u64
+
 
 def __digit(value: int) -> string:
     result = text.__allocate(text.__index(1))
@@ -56,6 +71,21 @@ def string(value: i32) -> string:
 
 def string(value: u8) -> string:
     return string(__unsigned(value))
+
+
+def string(value: u16) -> string:
+    return string(__unsigned(value))
+
+
+def string(value: u32) -> string:
+    return string(__unsigned(value))
+
+
+def string(value: u64) -> string:
+    digit = __digit(__unsigned_digit(__unsigned_remainder(value, 10)))
+    if value < 10:
+        return digit
+    return string(__unsigned_divide(value, 10)) + digit
 
 
 test "decimal conversion covers zero and signed and unsigned limits":

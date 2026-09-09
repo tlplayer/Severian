@@ -1,0 +1,35 @@
+import universal
+
+
+# A constructor initializes typed field locals, then returns the ordinary
+# record value. Missing initialization is diagnosed as an unbound field.
+def factory(record: universal.RecordDeclaration, method: universal.FunctionDeclaration) -> universal.FunctionDeclaration:
+    statements: list[universal.Statement] = []
+    initialized: list[string] = []
+    for parameter in method.parameters:
+        initialized.append(parameter.name)
+    body ?= method.body
+    if body != None:
+        for statement in body.statements:
+            match statement:
+                case BindingStatement:
+                    local := binding
+                    if local.name not in initialized:
+                        for field in record.fields:
+                            if field.name == local.name:
+                                local.annotation = field.annotation
+                        initialized.append(local.name)
+                    statements.append(universal.BindingStatement(local))
+                case _:
+                    statements.append(statement)
+    fields: list[universal.CallArgument] = []
+    for field in record.fields:
+        value ?= field.default
+        if field.name not in initialized:
+            if value != None:
+                statements.append(universal.BindingStatement(universal.Binding(field.name, field.annotation, value, false, false, field.span)))
+        reference = universal.Expression(universal.Name(field.name), field.span)
+        fields.append(universal.CallArgument(field.name, reference, field.span))
+    result = universal.Expression(universal.RecordValue(fields), record.span, type_id=record.type_id)
+    statements.append(universal.Return(result, record.span))
+    return universal.FunctionDeclaration(name=record.name + "$construct", parameters=method.parameters, result=universal.named_type(record.name, [], record.span), body=universal.Block(statements), span=method.span, lookup=record.lookup, owner_type=record.type_id, constructor=true)

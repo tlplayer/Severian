@@ -6,6 +6,7 @@ import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
 import "../../../universal/type/scalar_conversion.sev" as conversions
+import "../../../universal/type/integer_spelling.sev" as integer_spelling
 import "definitions.sev" as family_definitions
 
 
@@ -108,22 +109,16 @@ def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) 
     if name == "bits":
         return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, "" + string(type.bits))
     if name == "signed":
-        return lexer.token_from_lexeme(lexer.TokenKind.Identifier, lexeme, "false" if type.id.index == 108 else "true")
+        return lexer.token_from_lexeme(lexer.TokenKind.Identifier, lexeme, "true" if type.signed else "false")
     if type.representation == "float":
         throw Error("unsupported floating type property " + name)
-    lower := "0"
-    upper := "256"
-    maximum := "255"
-    if type.id.index != 108:
-        if type.bits == 64:
-            lower = "-9223372036854775808"
-            upper = "9223372036854775808"
-            maximum = "9223372036854775807"
-        else:
-            limit = 1 << (int(type.bits) - 1)
-            lower = "-" + string(limit)
-            upper = "" + string(limit)
-            maximum = "" + string(limit - 1)
+    lower = scalar.integer_minimum(type)
+    maximum = scalar.integer_maximum(type)
+    upper := ""
+    if type.bits == 64:
+        upper = "9223372036854775808" if type.signed else "18446744073709551616"
+    else:
+        upper = string(1 << (int(type.bits) - (1 if type.signed else 0)))
     if name == "min":
         return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, lower)
     if name == "max":
@@ -137,7 +132,7 @@ def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) 
 
 class MacroInteger:
     known: bool
-    value: int = 0
+    value: string = "0"
 
 
 class MacroCondition:
@@ -150,7 +145,7 @@ def macro_integer(expression: universal.Expression) -> MacroInteger:
         case LiteralValue:
             match value:
                 case IntegerValue:
-                    return MacroInteger(true, int(spelling))
+                    return MacroInteger(true, spelling)
                 case _:
                     pass
         case _:
@@ -171,18 +166,19 @@ def macro_condition(expression: universal.Expression) -> MacroCondition:
             rhs = macro_integer(right)
             if lhs.known:
                 if rhs.known:
+                    order = integer_spelling.compare(lhs.value, rhs.value)
                     if operator.symbol == "==":
-                        return MacroCondition(true, lhs.value == rhs.value)
+                        return MacroCondition(true, order == 0)
                     if operator.symbol == "!=":
-                        return MacroCondition(true, lhs.value != rhs.value)
+                        return MacroCondition(true, order != 0)
                     if operator.symbol == "<":
-                        return MacroCondition(true, lhs.value < rhs.value)
+                        return MacroCondition(true, order < 0)
                     if operator.symbol == ">":
-                        return MacroCondition(true, lhs.value > rhs.value)
+                        return MacroCondition(true, order > 0)
                     if operator.symbol == "<=":
-                        return MacroCondition(true, lhs.value <= rhs.value)
+                        return MacroCondition(true, order <= 0)
                     if operator.symbol == ">=":
-                        return MacroCondition(true, lhs.value >= rhs.value)
+                        return MacroCondition(true, order >= 0)
         case _:
             pass
     return MacroCondition(false)

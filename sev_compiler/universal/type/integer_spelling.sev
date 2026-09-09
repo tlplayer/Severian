@@ -1,0 +1,25 @@
+# Compare decimal integer spellings without narrowing them to the host int.
+def normalized(value: string) -> string:
+    negative = value.starts_with("-")
+    if negative or value.starts_with("+"):
+        value = value[1:]
+    while len(value) > 1 and value.starts_with("0"):
+        value = value[1:]
+    return "-" + value if negative and value != "0" else value
+
+
+def compare(left: string, right: string) -> int:
+    left = normalized(left)
+    right = normalized(right)
+    if left == right:
+        return 0
+    negative = left.starts_with("-")
+    if negative != right.starts_with("-"):
+        return -1 if negative else 1
+    if negative:
+        left = left[1:]
+        right = right[1:]
+    result := -1 if len(left) < len(right) else 1
+    if len(left) == len(right):
+        result = -1 if left < right else 1
+    return -result if negative else result

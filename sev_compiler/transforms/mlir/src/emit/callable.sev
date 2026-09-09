@@ -27,7 +27,7 @@ def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDecla
             return float_type(known.bits)
         if known.representation == "pointer":
             return pointer_type()
-        return integer_type(known.bits, not known.boolean and id.index != 108 and id.index != 132)
+        return integer_type(known.bits, not known.boolean and known.signed)
     throw Error("scalar MIR has an unknown value type")
 
 
@@ -77,7 +77,7 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                 output = callable_mlir_value(module, result)
                 match value:
                     case IntegerValue:
-                        builder_constant(builder, output, integer_attribute(int(spelling), output.type_id))
+                        builder_constant(builder, output, MlirAttributeValue(IntegerLiteralAttributeKind, spelling, 0, false, output.type_id, []))
                     case FloatValue:
                         builder_constant(builder, output, MlirAttributeValue(FloatLiteralAttributeKind, spelling, 0, false, output.type_id, []))
                     case NoneValue:

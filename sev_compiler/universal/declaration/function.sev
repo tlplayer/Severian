@@ -82,6 +82,7 @@ class FunctionDeclaration:
     template: DefId | None = None
     type_arguments: list[TypeBinding] = []
     pack_specialization: bool = false
+    constructor: bool = false
     cfg_index: int = -1
     # ABI sentinel for the seed record/list representation; never populated.
     # Executable bodies are indexed in Module.cfg_bodies.

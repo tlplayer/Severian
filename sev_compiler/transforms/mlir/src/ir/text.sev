@@ -103,6 +103,8 @@ def attribute_value_text(value: MlirAttributeValue) -> string:
         return "dense<[" + values + "]> : " + type_text(value.type_id)
     if kind == "integer":
         return string(value.integer) + " : " + type_text(value.type_id)
+    if kind == "integer_literal":
+        return value.text + " : " + type_text(value.type_id)
     if kind == "float":
         return string(value.floating) + " : " + type_text(value.type_id)
     if kind == "float_literal":

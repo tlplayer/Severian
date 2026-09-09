@@ -4,6 +4,7 @@ import "primitive/tuple.sev"
 import "../../library/system/io/src/text.sev"
 import "primitive/numeric/conversion.sev" as numeric
 import "primitive/numeric/operators.sev"
+import "primitive/numeric/power.sev"
 import "primitive/units.sev"
 import "primitive/collections.sev"
 import "primitive/string/methods.sev" as string_methods

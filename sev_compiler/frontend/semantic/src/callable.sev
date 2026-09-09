@@ -7,9 +7,11 @@ import "grammar_scalar.sev" as grammar_scalar
 import "../../../universal/declaration/scalar.sev" as boundary
 import "packs.sev" as packs
 import "expansion.sev" as expansion
+import "construction.sev" as construction
 import "definitions.sev" as definitions
 import "match.sev" as matches
 import "../../../universal/type/scalar_conversion.sev" as conversions
+import "../../../universal/type/integer_spelling.sev" as integer_spelling
 import "test_modes.sev" as test_modes
 import "../../../universal/primitive/slicing.sev" as slicing
 
@@ -440,14 +442,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         return error(callable_diagnostic("an integer cannot initialize unit", expression.span))
                     if result_type.index == 3 or result_type.index == 132 or result_type.index == 5 or result_type.index == 6:
                         return error(callable_diagnostic("integer cannot initialize text or char", expression.span))
-                    number = int(spelling)
-                    if result_type.index == 108:
-                        if number < 0 or number > 255:
-                            return error(callable_diagnostic("integer literal is outside u8", expression.span))
-                    elif result_type.index != 4 and result_type.index < 64:
-                        limit = 1 << (int(result_type.index) - 1)
-                        if number < 0 - limit or number >= limit:
-                            return error(callable_diagnostic("integer literal is outside the declared type", expression.span))
+                    storage ?= scalar.scalar_type(result_type)
+                    if storage != None:
+                        if conversions.scalar_numeric(result_type):
+                            if integer_spelling.compare(spelling, scalar.integer_minimum(storage)) < 0 or integer_spelling.compare(spelling, scalar.integer_maximum(storage)) > 0:
+                                return error(callable_diagnostic("integer literal is outside " + storage.name, expression.span))
                 case FloatValue:
                     result_type = universal.TypeId(164)
                 case NoneValue:
@@ -474,6 +473,18 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             result_type = expression.type_id
         case RecordValue:
             result_type = expression.type_id
+            resolved_fields: list[universal.CallArgument] = []
+            for argument in fields:
+                matched := false
+                for record in state.records:
+                    if record.type_id.index == result_type.index:
+                        for field in record.fields:
+                            if argument.name == field.name:
+                                resolved_fields.append(universal.CallArgument(field.name, callable_expression(state, argument.value, field.type_id), argument.span))
+                                matched = true
+                if not matched:
+                    return error(callable_diagnostic("unknown initialized record field", argument.span))
+            kind = universal.RecordValue(resolved_fields)
         case BindingReference:
             result_type = expression.type_id
         case FieldReference:
@@ -487,7 +498,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     index := 0
                     for field in record.fields:
                         if field.name == name:
-                            if field.name.starts_with("_") and state.owner.index != record.type_id.index:
+                            if field.name.starts_with("__") and state.owner.index != record.type_id.index:
                                 return error(callable_diagnostic("field is private: " + name, expression.span))
                             if expected.index != 0 and expected.index != field.type_id.index:
                                 return error(callable_diagnostic("field does not match expected type", expression.span))
@@ -683,6 +694,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     alias_type = alias.id
             for record in state.records:
                 if record.name == state.namespace + name or record.name == name or record.type_id.index == alias_type.index:
+                    callable_register_record_methods(state, record.type_id)
+                    for function in state.functions:
+                        if function.constructor and function.owner_type.index == record.type_id.index:
+                            target = universal.Expression(universal.Name(function.name), callee.span)
+                            return callable_expression(state, universal.Expression(universal.Call(target, arguments), expression.span), expected)
                     bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=record.fields), arguments)
                     if bound.message != "":
                         return error(callable_diagnostic(bound.message, expression.span))
@@ -881,7 +897,10 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         if not state.mutables[binding.index]:
                             return error(callable_diagnostic("cannot reassign immutable binding", span))
                     case FieldReference:
-                        pass
+                        for record in state.records:
+                            if record.type_id.index == object.type_id.index and state.owner.index != record.type_id.index:
+                                if record.fields[index].name.starts_with("_"):
+                                    return error(callable_diagnostic("field is read-only: " + record.fields[index].name, span))
                     case IndexReference:
                         if storage == None:
                             return error(callable_diagnostic("indexed storage is not writable", span))
@@ -1166,7 +1185,11 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
         state.records[int(record.type_id.index) - 1000] = record
         method_names: list[string] = []
         for method in record.methods:
-            if method.name in method_names or method.name in field_names:
+            if method.name == record.name.split(".")[-1]:
+                factory = construction.factory(record, method)
+                state.functions.append(callable_signature(factory, int(len(state.functions)), state.records, state.declarations))
+                continue
+            if method.name in method_names:
                 return error(callable_diagnostic("duplicate member " + method.name, method.span))
             method_names.append(method.name)
             method = callable_replace_signature(method, ["Self"], [universal.named_type(record.name, [], record.span)])
@@ -1190,7 +1213,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case Function:
                 result ?= declaration.result
                 if result != None:
-                    if universal.simple_type_name(result) == "Ex":
+                    if len(declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
                         continue
                 if declaration.name == "assert" or declaration.name == "type" or declaration.name == "string":
                     return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
@@ -1422,6 +1445,8 @@ def callable_terminates(block: universal.Block) -> bool:
 
 
 def callable_owner(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.TypeId:
+    if function.constructor:
+        return universal.TypeId(0)
     if function.owner_type.index != 0:
         return function.owner_type
     for record in state.records:
@@ -1479,8 +1504,9 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
         local.mutables.append(true)
     if function.owner_type.index != 0:
         local.declarations = definitions.SemanticDefinitions(local.declarations.aliases[:], local.declarations.traits, local.declarations.implementations, record_templates=local.declarations.record_templates, record_instances=local.declarations.record_instances, expression_functions=local.declarations.expression_functions)
-        span = function.parameters[0].span
-        local.declarations.aliases.append(universal.TypeDeclaration([], local.namespace + "Self", [], [], None, span, id=function.owner_type))
+        for record in state.records:
+            if record.type_id.index == function.owner_type.index:
+                local.declarations.aliases.append(universal.TypeDeclaration([], local.namespace + "Self", [], [], None, record.span, id=function.owner_type))
     local.types = function.parameter_types[:]
     callable_record_environment(local, function.owner_type)
     body ?= function.body
@@ -2222,7 +2248,16 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
         local = callable_scope(state)
         local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances, expression_functions=state.declarations.expression_functions)
         callable_record_environment(local, owner)
+        constructors_registered := false
+        for function in state.functions:
+            if function.constructor and function.owner_type.index == owner.index:
+                constructors_registered = true
         for method in record.methods:
+            if method.name == record.name.split("[")[0].split(".")[-1]:
+                if not constructors_registered:
+                    factory = construction.factory(record, method)
+                    state.functions.append(callable_signature(factory, int(len(state.functions)), state.records, local.declarations))
+                continue
             if len(method.type_parameters) != 0 or len(method.constraints) != 0:
                 return error(callable_diagnostic("generic record methods require method argument inference", method.span))
             name = record.name + "." + method.name

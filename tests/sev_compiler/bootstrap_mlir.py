@@ -187,7 +187,7 @@ def main():
         assert "__sev_string_from_" not in llvm_ir.read_text()
         assert "__sev_io_" not in llvm_ir.read_text()
         executable = ARTIFACTS / name
-        run([clang, llvm_ir, "-o", executable])
+        run([clang, llvm_ir, "-o", executable, "-lm"])
         result = run([executable], succeeds=name not in runtime_failures)
         if name in expected_stdout:
             assert result.stdout == expected_stdout[name], repr(result.stdout)
@@ -197,7 +197,7 @@ def main():
             assert result.returncode == 7, "preserve the source main's exit status"
         if name in {"expression_values", "printing", "string_core", "string_format"} and SANITIZE:
             sanitized = ARTIFACTS / f"{name}_asan"
-            run([clang, "-fsanitize=address", llvm_ir, "-o", sanitized])
+            run([clang, "-fsanitize=address", llvm_ir, "-o", sanitized, "-lm"])
             checked = run([sanitized])
             assert checked.stdout == expected_stdout.get(name, "")
             print(f"PASS: {name} under AddressSanitizer/LeakSanitizer", flush=True)

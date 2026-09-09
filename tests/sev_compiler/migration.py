@@ -104,7 +104,7 @@ class MigrationCase(unittest.TestCase):
         output = self.succeeds([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"),
                                "--mlir-to-llvmir", lowered])
         llvm.write_text(output)
-        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", executable])
+        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", executable, "-lm"])
         self.assertEqual(self.succeeds([executable]), expected)
         return mlir
 
