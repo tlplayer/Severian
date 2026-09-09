@@ -9,6 +9,8 @@ import "packs.sev" as packs
 import "definitions.sev" as definitions
 import "match.sev" as matches
 import "../../../universal/type/scalar_conversion.sev" as conversions
+import "test_modes.sev" as test_modes
+import "../../../universal/primitive/slicing.sev" as slicing
 
 
 class CallableAnalysis:
@@ -298,6 +300,30 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
     result_type := expected
     kind := expression.kind
     match expression.kind:
+        case TupleLiteral:
+            typed: list[universal.Expression] = []
+            for element in elements:
+                typed.append(callable_expression(state, element, universal.TypeId(0)))
+            return callable_tuple(state, typed, expression.span, expected)
+        case Evaluate:
+            return expression
+        case Fallback:
+            receiver = callable_expression(state, value, universal.TypeId(0))
+            for record in state.records:
+                if record.type_id.index == receiver.type_id.index:
+                    index := 0
+                    for variant in universal.outcome_variants(record):
+                        if int(variant.index) not in [6, 7] and not definitions.error_conformance(state.declarations, state.records, variant):
+                            reference = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
+                            test = universal.Expression(universal.OutcomeTest(reference, index), expression.span, type_id=universal.TypeId(1))
+                            taken = universal.Expression(universal.FieldReference(reference, index + 1), expression.span, type_id=variant)
+                            otherwise = callable_expression(state, alternative, variant)
+                            body = universal.Expression(universal.Conditional(test, taken, otherwise), expression.span, type_id=variant)
+                            if expected.index != 0 and expected.index != variant.index:
+                                return error(callable_diagnostic("fallback does not match expected type", expression.span))
+                            return universal.Expression(universal.Evaluate(receiver, body), expression.span, type_id=variant)
+                        index += 1
+            return error(callable_diagnostic("fallback requires an optional or fallible value", expression.span))
         case ListLiteral:
             element_type := universal.TypeId(0)
             if expected.index > 200 and expected.index < 400:
@@ -319,6 +345,25 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             return universal.Expression(universal.ListValue(typed, create, storage), expression.span, type_id=create.type_id)
         case Slice:
             receiver = callable_expression(state, object, universal.TypeId(0))
+            for record in state.records:
+                if record.type_id.index == receiver.type_id.index and record.name.starts_with("$tuple$"):
+                    stride = callable_tuple_bound(step, 1)
+                    if stride == 0:
+                        return error(callable_diagnostic("tuple slice step cannot be zero", expression.span))
+                    size = int(len(record.fields))
+                    first := size - 1 if stride < 0 else 0
+                    last := -1 if stride < 0 else size
+                    if start != None:
+                        first = slicing.bound(callable_tuple_bound(start, first), size, stride < 0)
+                    if stop != None:
+                        last = slicing.bound(callable_tuple_bound(stop, last), size, stride < 0)
+                    base = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
+                    fields: list[universal.Expression] = []
+                    while (first > last if stride < 0 else first < last):
+                        fields.append(universal.Expression(universal.FieldReference(base, first), expression.span, type_id=record.fields[first].type_id))
+                        first = slicing.next_position(first, last, stride)
+                    body = callable_tuple(state, fields, expression.span, expected)
+                    return universal.Expression(universal.Evaluate(receiver, body), expression.span, type_id=body.type_id)
             operands: list[universal.Expression] = [receiver]
             operands.append(callable_slice_bound(state, start, "0", expression.span))
             operands.append(callable_slice_bound(state, stop, "0", expression.span))
@@ -329,6 +374,17 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             return callable_protocol(state, "Slice", "access", operands, expression.span, expected)
         case Subscript:
             receiver = callable_expression(state, object, universal.TypeId(0))
+            for record in state.records:
+                if record.type_id.index == receiver.type_id.index and record.name.starts_with("$tuple$"):
+                    position := callable_tuple_bound(index, 0)
+                    if position < 0:
+                        position += int(len(record.fields))
+                    if position < 0 or position >= len(record.fields):
+                        return error(callable_diagnostic("tuple index is out of bounds", index.span))
+                    field_type = record.fields[position].type_id
+                    if expected.index != 0 and expected.index != field_type.index:
+                        return error(callable_diagnostic("tuple element does not match expected type", expression.span))
+                    return universal.Expression(universal.FieldReference(receiver, position), expression.span, type_id=field_type)
             position = callable_expression(state, index, universal.TypeId(64))
             container = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
             offset = universal.Expression(universal.UpdateOperand(1), expression.span, type_id=position.type_id)
@@ -371,6 +427,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     result_type = universal.TypeId(164)
                 case NoneValue:
                     result_type = universal.TypeId(6)
+                case AbsentValue:
+                    result_type = universal.TypeId(7)
                 case StringValue:
                     result_type = universal.TypeId(3)
                 case CharacterValue:
@@ -443,6 +501,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return error(callable_diagnostic("unknown name " + name, expression.span))
         case Unary:
             # A signed literal's range includes its sign, so -128 is valid i8.
+            source_operand := operand
+            if operator.symbol in ["not", "!"]:
+                source_operand = callable_truth(state, operand)
             if operator.symbol == "-":
                 match operand.kind:
                     case LiteralValue:
@@ -454,7 +515,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                 pass
                     case _:
                         pass
-            resolved = callable_expression(state, operand, expected)
+            resolved = callable_expression(state, source_operand, expected)
             result_type = resolved.type_id
             implementation = callable_operator(state, operator.symbol, [result_type], expression.span)
             function ?= implementation.function
@@ -483,7 +544,19 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     function ?= selected.function
                     if function != None:
                         return callable_resolved_operator(state, function, [operand, rhs], expression.span, expected)
-                annotation = universal.named_type(callable_path(right), [], right.span)
+                tested_name := callable_path(right)
+                match right.kind:
+                    case LiteralValue:
+                        match value:
+                            case NoneValue:
+                                tested_name = "None"
+                            case AbsentValue:
+                                tested_name = "absent"
+                            case _:
+                                pass
+                    case _:
+                        pass
+                annotation = universal.named_type(tested_name, [], right.span)
                 tested = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 for record in state.records:
                     if record.type_id.index == operand.type_id.index:
@@ -492,7 +565,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             if variant.index == tested.index:
                                 return universal.Expression(universal.OutcomeTest(operand, index), expression.span, type_id=universal.TypeId(1))
                             index += 1
-                return error(callable_diagnostic("variant test requires a declared outcome member", expression.span))
+                result = universal.Expression(universal.LiteralValue(universal.BooleanValue(operand.type_id.index == tested.index)), expression.span, type_id=universal.TypeId(1))
+                return universal.Expression(universal.Evaluate(operand, result), expression.span, type_id=result.type_id)
             for definition in state.declarations.traits:
                 if definition.grammar and definition.definition.module == operator.definition.module and definition.definition.declaration.value == operator.definition.declaration.value:
                     lazy := false
@@ -528,10 +602,15 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         return error(callable_diagnostic("lazy grammar requires an expression semantic body", expression.span))
             comparison = grammar_scalar.comparison(state.declarations, operator.symbol) or operator.symbol == "in"
             operand_type := universal.TypeId(0) if comparison else expected
+            left_hint = callable_hint(state, left)
+            right_hint = callable_hint(state, right)
+            aggregate = left_hint.index >= 1000 or right_hint.index >= 1000
             if operand_type.index == 0:
-                operand_type = conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
+                operand_type = conversions.scalar_common_numeric(left_hint, right_hint)
+            if aggregate:
+                operand_type = universal.TypeId(0)
             lhs = callable_success(state, callable_operand(state, left, operand_type))
-            rhs = callable_success(state, callable_operand(state, right, lhs.type_id))
+            rhs = callable_success(state, callable_operand(state, right, universal.TypeId(0) if aggregate else lhs.type_id))
             operator_lookup = callable_operator(state, operator.symbol, [lhs.type_id, rhs.type_id], expression.span)
             registered ?= operator_lookup.function
             if registered != None:
@@ -691,7 +770,7 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     if annotation != None:
         expected = callable_annotation(annotation, state.records, state.namespace, state.declarations)
     value := callable_expression(state, binding.value, expected)
-    if not binding.preserve_error:
+    if not binding.preserve_error and binding.annotation == None:
         value = callable_success(state, value)
     if value.type_id.index == 2:
         return error(callable_diagnostic("unit calls cannot initialize scalar bindings", binding.span))
@@ -977,6 +1056,7 @@ def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block
 
 
 def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "") -> universal.Module | diagnostics.Diagnostic:
+    module = test_modes.expand(module, include_tests, initializer_namespace)
     registered = definitions.register_declarations(module, environment)
     state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace)
     own_index := 0
@@ -1004,6 +1084,8 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
             continue
+        if record.name.starts_with("$outcome$"):
+            continue
         resolved_fields: list[universal.FunctionParameter] = []
         field_names: list[string] = []
         for field in record.fields:
@@ -1012,6 +1094,12 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             field_names.append(field.name)
             resolved_field := field
             resolved_field.type_id = callable_annotation(field.annotation, state.records, record.lookup, state.declarations)
+            if resolved_field.default == None:
+                for outcome in state.records:
+                    if outcome.type_id.index == resolved_field.type_id.index:
+                        for variant in universal.outcome_variants(outcome):
+                            if variant.index == 7:
+                                resolved_field.default = universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), field.span)
             if resolved_field.type_id.index == 3:
                 return error(callable_diagnostic("record string fields require aggregate ownership lowering", field.span))
             if resolved_field.type_id.index == 2:
@@ -1928,6 +2016,13 @@ def callable_truth(state: CallableAnalysis, expression: universal.Expression) ->
     value = callable_expression(state, expression, universal.TypeId(0))
     if value.type_id.index == 1:
         return value
+    for record in state.records:
+        if record.type_id.index == value.type_id.index:
+            index := 0
+            for variant in universal.outcome_variants(record):
+                if int(variant.index) not in [6, 7] and not definitions.error_conformance(state.declarations, state.records, variant):
+                    return universal.Expression(universal.OutcomeTest(value, index), expression.span, type_id=universal.TypeId(1))
+                index += 1
     implementation = callable_operator(state, "if", [value.type_id], expression.span)
     function ?= implementation.function
     if function != None:
@@ -1970,7 +2065,7 @@ def callable_success(state: CallableAnalysis, value: universal.Expression) -> un
     for record in state.records:
         if record.type_id.index == value.type_id.index:
             for variant in universal.outcome_variants(record):
-                if not definitions.error_conformance(state.declarations, state.records, variant):
+                if int(variant.index) not in [6, 7] and not definitions.error_conformance(state.declarations, state.records, variant):
                     return universal.Expression(universal.OutcomeUnwrap(value), value.span, type_id=variant)
     return value
 
@@ -2167,3 +2262,75 @@ def callable_symbolic_type(state: CallableAnalysis, type_id: universal.TypeId) -
             if callable_symbolic_type(state, binding.type_id):
                 return true
     return false
+
+
+# Tuples have structural record layouts, including heterogeneous elements.
+# Projection and formatting reuse ordinary record and callable lowering.
+def callable_tuple_bound(expression: universal.Expression | None, fallback: int) -> int | diagnostics.Diagnostic:
+    value ?= expression
+    if value == None:
+        return fallback
+    if value != None:
+        match value.kind:
+            case LiteralValue:
+                match value:
+                    case IntegerValue:
+                        return int(spelling)
+                    case _:
+                        pass
+            case Unary:
+                if operator.symbol == "-":
+                    return 0 - callable_tuple_bound(operand, 0)
+                if operator.symbol == "+":
+                    return callable_tuple_bound(operand, 0)
+            case _:
+                pass
+        return error(callable_diagnostic("tuple indices and slice bounds require constant integers", value.span))
+    return fallback
+
+
+def callable_tuple(state: CallableAnalysis, values: list[universal.Expression], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    key := "$tuple$"
+    for value in values:
+        key += "$" + string(value.type_id.index)
+    type_id := universal.TypeId(0)
+    for record in state.records:
+        if record.name == key:
+            type_id = record.type_id
+    if type_id.index == 0:
+        fields: list[universal.FunctionParameter] = []
+        index := 0
+        for value in values:
+            if scalar.scalar_representation(value.type_id) in ["utf8", "buffer"]:
+                return error(callable_diagnostic("tuple buffer fields require aggregate ownership lowering", span))
+            annotation = universal.named_type(definitions.type_name(value.type_id, state.records), [], span)
+            fields.append(universal.FunctionParameter("item" + string(index), annotation, None, span, type_id=value.type_id))
+            index += 1
+        type_id = universal.TypeId(u32(1000 + len(state.records)))
+        state.records.append(universal.RecordDeclaration(key, fields, [], span, type_id=type_id))
+        annotation = universal.named_type(key, [], span)
+        receiver = universal.Expression(universal.Name("value"), span)
+        result := universal.Expression(universal.LiteralValue(universal.StringValue("(")), span)
+        index = 0
+        for field in fields:
+            if index != 0:
+                comma = universal.Expression(universal.LiteralValue(universal.StringValue(",")), span)
+                result = test_modes.call("format.text.concat", [result, comma], span)
+            member = universal.Expression(universal.Member(receiver, field.name), span)
+            rendered = test_modes.call("string", [member], span)
+            result = test_modes.call("format.text.concat", [result, rendered], span)
+            index += 1
+        ending = universal.Expression(universal.LiteralValue(universal.StringValue(",)" if len(fields) == 1 else ")")), span)
+        result = test_modes.call("format.text.concat", [result, ending], span)
+        body = universal.Block([universal.Return(result, span)])
+        function = universal.FunctionDeclaration(name="format.string", parameters=[universal.FunctionParameter("value", annotation, None, span)], result=universal.named_type("string", [], span), body=body, span=span)
+        state.functions.append(callable_signature(function, int(len(state.functions)), state.records, state.declarations))
+    if expected.index != 0 and expected.index != type_id.index:
+        return error(callable_diagnostic("tuple does not match expected type", span))
+    fields: list[universal.CallArgument] = []
+    index := 0
+    for value in values:
+        field_name = "item" + string(index)
+        fields.append(universal.CallArgument(field_name, value, span))
+        index += 1
+    return universal.Expression(universal.RecordValue(fields), span, type_id=type_id)

@@ -6,6 +6,7 @@ import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
 import "../../../universal/type/scalar_conversion.sev" as conversions
+import "definitions.sev" as family_definitions
 
 
 # Declaration macros enumerate type families before ordinary name resolution.
@@ -49,8 +50,6 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
         # In the direct form, the left-hand name is the body binding and
         # the right-hand name is the family: -> lists[T: int]():
         for family in bindings:
-            if family != "int" and family != "float":
-                throw Error("unsupported scalar macro family " + family)
             families.append(family)
         bindings = parameters
     else:
@@ -63,8 +62,6 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
             if macro_identifier(input) != binding or macro_identifier(input) != "in":
                 throw Error("macro family constraints must follow binding order")
             family = macro_identifier(input)
-            if family != "int" and family != "float":
-                throw Error("unsupported scalar macro family " + family)
             families.append(family)
     seen: list[string] = []
     for binding in bindings:
@@ -272,17 +269,32 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                 throw Error("enumerative macro bodies must emit functions, operators or tests")
 
 
-def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], output: universal.Module):
+def macro_family(name: string, environment: family_definitions.SemanticDefinitions, span: source.Span) -> list[scalar.ScalarType] | diagnostics.Diagnostic:
+    members: list[scalar.ScalarType] = []
+    declared ?= family_definitions.alias_named(environment, name, "")
+    if declared == None and (name == "int" or name == "float"):
+        for type in scalar.scalar_types():
+            if conversions.scalar_numeric(type.id) and ((name == "float") == (type.representation == "float")):
+                members.append(type)
+        return members
+    for id in family_definitions.family_members(environment, universal.named_type(name, [], span), [], ""):
+        type ?= scalar.scalar_type(id)
+        if type == None:
+            return error(diagnostics.diagnostic_at("E000205", "enumerative macro requires primitive type metadata", span))
+        if type != None:
+            members.append(type)
+    return members
+
+
+def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], output: universal.Module, environment: family_definitions.SemanticDefinitions) -> unit | diagnostics.Diagnostic:
     if len(types) == len(definition.bindings):
         macro_instance(definition, types, output)
         return
     family = definition.families[len(types)]
-    for type in scalar.scalar_types():
-        if conversions.scalar_numeric(type.id):
-            if (family == "float") == (type.representation == "float"):
-                selected = types[:]
-                selected.append(type)
-                macro_enumerate(definition, selected, output)
+    for type in macro_family(family, environment, definition.tokens[0].span):
+        selected = types[:]
+        selected.append(type)
+        macro_enumerate(definition, selected, output, environment)
 
 
 def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
@@ -321,7 +333,6 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
                     parser.parser_expect_symbol(input, "(", "expected macro invocation")
                     parser.parser_expect_symbol(input, ")", "enumerative macros take no runtime arguments")
                     parser.parser_expect(input, Newline, "macro invocation must occupy a statement")
-                    macro_enumerate(definition, [], expanded)
                     invocation = true
         if not invocation:
             token = parser.parser_next(input)
@@ -333,6 +344,17 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
             ordinary.append(token)
     ordinary.append(parser.parser_next(input))
     result = parser.parse(ordinary)
+    environment = family_definitions.SemanticDefinitions()
+    for item in result.items:
+        match item:
+            case Type:
+                environment.aliases.append(declaration)
+            case _:
+                pass
+    for name in invoked:
+        for definition in definitions:
+            if definition.name == name:
+                macro_enumerate(definition, [], expanded, environment)
     for item in expanded.items:
         result.items.append(item)
     return result

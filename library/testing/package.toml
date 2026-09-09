@@ -7,3 +7,6 @@ description = "Source-level testing protocols and assertions"
 [lib]
 path = "src/lib.sev"
 
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/capture.sev"]

@@ -1,6 +1,18 @@
 # Source list construction, access, mutation, truth and iteration protocols.
 # buffer[T] is the typed rank-one MLIR storage boundary.
+import "slicing.sev" as slicing
+
 type list[T] = buffer[T]
+
+union ListElement:
+    i8
+    i16
+    i32
+    i64
+    u8
+    f64
+    bool
+    char
 
 @mlir("arith.index_cast")
 def __list_index(value: int) -> index
@@ -8,7 +20,7 @@ def __list_index(value: int) -> index
 @mlir("arith.index_cast")
 def __list_size(value: index) -> int
 
--> int_lists[T: int]():
+-> scalar_lists[T: ListElement]():
     @mlir("memref.alloc", operand_segments="1,0")
     def allocate(size: index) -> list[T]
 
@@ -48,48 +60,25 @@ def __list_size(value: index) -> int
             position += 1
         return true
 
-    operator list_create(size: int, exemplar: T) -> list[T]:
-        return allocate(__list_index(size))
-
-    operator element_at(values: list[T], position: int) -> T:
-        assert(position >= 0)
-        assert(position < count(values))
-        return load(values, __list_index(position))
-
-    operator element_set(values: list[T], position: int, value: T):
-        assert(position >= 0)
-        assert(position < count(values))
-        store(value, values, __list_index(position))
-
-    operator if[G:If](self: list[T]) -> bool:
-        return count(self) != 0
-
-    operator iteration_start(values: list[T]) -> int:
-        return 0
-
-    operator iteration_more(values: list[T], position: int) -> bool:
-        return position < count(values)
-
-    operator iteration_next(values: list[T], position: int) -> int:
-        return position + 1
-
-int_lists[int]()
-
--> float_lists[T: float]():
-    @mlir("memref.alloc", operand_segments="1,0")
-    def allocate(size: index) -> list[T]
-
-    @mlir("memref.load")
-    def load(values: list[T], position: index) -> T
-
-    @mlir("memref.store")
-    def store(value: T, values: list[T], position: index)
-
-    @mlir("memref.dim")
-    def dimension(values: list[T], axis: index) -> index
-
-    def count(values: list[T]) -> int:
-        return __list_size(dimension(values, 0))
+    operator slice_at(values: list[T], start: int, stop: int, step: int, has_start: bool, has_stop: bool) -> list[T]:
+        assert(step != 0)
+        size = count(values)
+        reverse = step < 0
+        first = slicing.bound(start, size, reverse) if has_start else (size - 1 if reverse else 0)
+        end = slicing.bound(stop, size, reverse) if has_stop else (-1 if reverse else size)
+        position := first
+        length := 0
+        while (position > end if reverse else position < end):
+            length += 1
+            position = slicing.next_position(position, end, step)
+        result = allocate(__list_index(length))
+        position = first
+        output := 0
+        while output < length:
+            store(load(values, __list_index(position)), result, __list_index(output))
+            position = slicing.next_position(position, end, step)
+            output += 1
+        return result
 
     operator list_create(size: int, exemplar: T) -> list[T]:
         return allocate(__list_index(size))
@@ -116,10 +105,13 @@ int_lists[int]()
     operator iteration_next(values: list[T], position: int) -> int:
         return position + 1
 
-float_lists[float]()
+scalar_lists[ListElement]()
 
 @mlir("memref.dim")
 def __string_dimension(value: string, axis: index) -> index
+
+def size(value: string) -> int:
+    return __list_size(__string_dimension(value, 0))
 
 operator if[G:If](self: string) -> bool:
     return __list_size(__string_dimension(self, 0)) != 0

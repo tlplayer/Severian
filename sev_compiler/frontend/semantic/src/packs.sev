@@ -70,11 +70,20 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
             kind = universal.Name(renamed(name, names, replacements))
         case Member:
             kind = universal.Member(rename_expression(object, names, replacements), name)
+        case Fallback:
+            kind = universal.Fallback(rename_expression(value, names, replacements), rename_expression(alternative, names, replacements))
+        case ThrowValue:
+            kind = universal.ThrowValue(rename_expression(value, names, replacements))
         case ListLiteral:
             renamed_elements: list[universal.Expression] = []
             for element in elements:
                 renamed_elements.append(rename_expression(element, names, replacements))
             kind = universal.ListLiteral(renamed_elements)
+        case TupleLiteral:
+            renamed_elements: list[universal.Expression] = []
+            for element in elements:
+                renamed_elements.append(rename_expression(element, names, replacements))
+            kind = universal.TupleLiteral(renamed_elements)
         case Subscript:
             kind = universal.Subscript(rename_expression(object, names, replacements), rename_expression(index, names, replacements))
         case Slice:

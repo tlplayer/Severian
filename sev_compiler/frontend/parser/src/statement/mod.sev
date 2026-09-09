@@ -708,6 +708,10 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
         parser_next(parser)
         otherwise = parse_expression(parser, 0)
         return universal.Expression(universal.Conditional(condition, left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
+    if minimum == 0 and parser_at_identifier(parser, "else"):
+        parser_next(parser)
+        otherwise = parse_expression(parser, 0)
+        return universal.Expression(universal.Fallback(left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
     return left
 
 
@@ -773,19 +777,24 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     match token.kind:
         case Identifier:
             value = string(token)
+            if value == "throw":
+                raised = parse_expression(parser, 0)
+                return universal.Expression(universal.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
             if value == "true":
                 return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
             if value == "false":
                 return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
             if value == "None":
                 return universal.Expression(universal.LiteralValue(universal.LiteralValue.NoneValue), token.span)
+            if value == "absent":
+                return universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), token.span)
             return universal.Expression(universal.Name(value), token.span)
         case Integer:
             value = lexer.token_number(token)
-            return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span)
+            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span))
         case Float:
             value = lexer.token_number(token)
-            return universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span)
+            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span))
         case Character:
             value = lexer.literal_codepoint(string(token))
             return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
@@ -825,10 +834,30 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
         end = parser_expect_symbol(parser, "}", "expected closing map brace").span.end
         return universal.Expression(universal.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "("):
+        if parser_take_symbol(parser, ")") != None:
+            return universal.Expression(universal.TupleLiteral([]), token.span)
         expression = parse_expression(parser, 0)
+        if parser_take_symbol(parser, ",") != None:
+            elements = [expression]
+            while not parser_at_symbol(parser, ")"):
+                elements.append(parse_expression(parser, 0))
+                if parser_take_symbol(parser, ",") == None:
+                    break
+            end = parser_expect_symbol(parser, ")", "expected closing tuple parenthesis").span.end
+            return universal.Expression(universal.TupleLiteral(elements), source.Span(token.span.source, token.span.start, end))
         parser_expect_symbol(parser, ")", "expected closing parenthesis")
         return expression
     return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
+
+
+def parser_numeric_suffix(parser: Parser, number: lexer.Token, value: universal.Expression) -> universal.Expression:
+    suffix = parser_peek(parser)
+    if suffix.kind == TokenKind.Identifier and suffix.span.start == number.span.end:
+        parser_next(parser)
+        name = universal.Expression(universal.Name("literal_" + string(suffix)), suffix.span)
+        span = source.Span(number.span.source, number.span.start, suffix.span.end)
+        return universal.Expression(universal.Call(name, [universal.CallArgument(None, value, value.span)]), span)
+    return value
 
 
 def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:

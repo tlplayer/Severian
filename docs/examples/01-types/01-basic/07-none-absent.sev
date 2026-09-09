@@ -6,5 +6,6 @@ test "not name specified it is not provided":
     assert(update.name is absent)
 
 test "The user gave none as the name":
+    update = Update()
     update.name = None
     assert(update.name is None)

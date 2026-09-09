@@ -1,0 +1,124 @@
+import "../../../sev_compiler/universal/primitive/string/core.sev" as text
+
+@c(symbol="tmpfile")
+def __temporary() -> native_ptr
+@c(symbol="fileno")
+def __descriptor(stream: native_ptr) -> i32
+@c(symbol="dup")
+def __duplicate(descriptor: i32) -> i32
+@c(symbol="dup2")
+def __redirect(source: i32, destination: i32) -> i32
+@c(symbol="close")
+def __close(descriptor: i32) -> i32
+@c(symbol="fclose")
+def __close_stream(stream: native_ptr) -> i32
+@c(symbol="fflush")
+def __flush(stream: native_ptr) -> i32
+@c(symbol="setbuf")
+def __buffer(stream: native_ptr, buffer: native_ptr)
+@c(symbol="lseek")
+def __offset(descriptor: i32, offset: int, origin: i32) -> int
+@c(symbol="fseek")
+def __seek(stream: native_ptr, offset: int, origin: i32) -> i32
+@c(symbol="ftruncate")
+def __truncate(descriptor: i32, size: int) -> i32
+@c(symbol="fgetc")
+def __read(stream: native_ptr) -> i32
+@mlir("llvm.inttoptr")
+def __pointer(value: int) -> native_ptr
+@mlir("llvm.ptrtoint")
+def __address(value: native_ptr) -> int
+
+
+def __position(stream: native_ptr) -> int:
+    # stdout/stderr use distinct FILE objects sharing these descriptors. Query
+    # the kernel offset; ftell may return the capture FILE's cached position.
+    return __offset(__descriptor(stream), 0, 1)
+
+
+class Capture:
+    output: native_ptr
+    errors: native_ptr
+    saved_output: i32
+    saved_errors: i32
+    output_prefix: int
+    error_prefix: int
+
+
+def begin() -> Capture:
+    assert(__flush(__pointer(0)) == 0)
+    output = __temporary()
+    errors = __temporary()
+    assert(__address(output) != 0 and __address(errors) != 0)
+    __buffer(output, __pointer(0))
+    __buffer(errors, __pointer(0))
+    saved_output = __duplicate(1)
+    saved_errors = __duplicate(2)
+    assert(saved_output >= 0 and saved_errors >= 0)
+    assert(__redirect(__descriptor(output), 1) >= 0)
+    assert(__redirect(__descriptor(errors), 2) >= 0)
+    return Capture(output, errors, saved_output, saved_errors, 0, 0)
+
+
+# Freeze module-initializer output so each case starts with the same prefix.
+def ready(context: Capture) -> Capture:
+    assert(__flush(__pointer(0)) == 0)
+    return Capture(context.output, context.errors, context.saved_output, context.saved_errors, __position(context.output), __position(context.errors))
+
+
+def reset(context: Capture) -> Capture:
+    assert(__flush(__pointer(0)) == 0)
+    assert(__truncate(__descriptor(context.output), context.output_prefix) == 0)
+    assert(__truncate(__descriptor(context.errors), context.error_prefix) == 0)
+    assert(__seek(context.output, context.output_prefix, 0) == 0)
+    assert(__seek(context.errors, context.error_prefix, 0) == 0)
+    return context
+
+
+def contents(stream: native_ptr) -> string:
+    assert(__flush(__pointer(0)) == 0)
+    size = __position(stream)
+    assert(size >= 0)
+    assert(__seek(stream, 0, 0) == 0)
+    result = text.__allocate(text.__index(size))
+    index := 0
+    while index < size:
+        byte = __read(stream)
+        assert(byte >= 0)
+        text.__store(u8(byte), result, text.__index(index))
+        index += 1
+    assert(__seek(stream, size, 0) == 0)
+    return result
+
+
+def stdout(context: Capture) -> string:
+    return contents(context.output)
+
+def stderr(context: Capture) -> string:
+    return contents(context.errors)
+
+def suspend(context: Capture):
+    assert(__flush(__pointer(0)) == 0)
+    assert(__redirect(context.saved_output, 1) >= 0)
+    assert(__redirect(context.saved_errors, 2) >= 0)
+
+
+def freeze(context: Capture) -> Capture:
+    frozen = ready(context)
+    suspend(frozen)
+    return frozen
+
+
+def resume(context: Capture) -> Capture:
+    refreshed = reset(context)
+    assert(__redirect(__descriptor(context.output), 1) >= 0)
+    assert(__redirect(__descriptor(context.errors), 2) >= 0)
+    return refreshed
+
+
+def finish(context: Capture):
+    suspend(context)
+    assert(__close(context.saved_output) == 0)
+    assert(__close(context.saved_errors) == 0)
+    assert(__close_stream(context.output) == 0)
+    assert(__close_stream(context.errors) == 0)

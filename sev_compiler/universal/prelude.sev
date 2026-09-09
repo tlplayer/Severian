@@ -1,0 +1,8 @@
+# Ordered source providers. Add library behavior here without rebuilding the compiler.
+import "grammar/contracts.sev"
+import "../../library/system/io/src/text.sev"
+import "primitive/numeric/conversion.sev" as numeric
+import "primitive/numeric/operators.sev"
+import "primitive/collections.sev"
+import "primitive/string/methods.sev" as string_methods
+import "../../library/testing/src/lib.sev"

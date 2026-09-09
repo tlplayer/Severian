@@ -8,6 +8,9 @@ import os
 @c(symbol="getpid")
 def process_id() -> i32
 
+@c(symbol="__sev_time_monotonic")
+def monotonic() -> float
+
 def quote(value: string) -> string:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 

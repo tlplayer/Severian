@@ -65,6 +65,28 @@ SEVPKG v1/v2 byte layout; publication uses v2. Installation defaults to
 
 Test reports currently describe test executables, and `Test.filter` selects target/source names.
 
+`package.pipeline` runs an ordered dependency graph of commands and preserves a
+report even when steps fail:
+
+```sev
+steps = [
+    package.Step("build", ["compiler", "build", "app.sev", "-o", "/tmp/app"], ".", stage="build"),
+    package.Step("run", ["/tmp/app"], ".", ["build"], stage="run"),
+]
+report = package.pipeline(steps, "/tmp/app-reports")
+assert(report.failed == 0 and report.blocked == 0)
+```
+
+Each invocation owns its report directory. `results.json` and `REPORT.md` are
+updated after every step; separate files retain stdout and stderr. Failed steps
+block their dependents while independent steps continue. Disabled steps count
+as absent, and timeouts count as failures. Optional stdout/stderr fixture paths
+check exact output. Stage coverage measures passing commands against eligible
+commands, including blocked and pending commands in the denominator; it does
+not claim instrumented line coverage. Dependencies must precede their consumers.
+Commands run through the hosted process boundary with quoted arguments and a
+per-step timeout (60 seconds by default).
+
 Current limits are explicit: the source compiler emits host executables;
 backend-artifact loading, general `.pkgi` generation/consumption, remote registry
 transport/authentication, and container/network-policy execution are not

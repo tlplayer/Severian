@@ -1,0 +1,212 @@
+import "host.sev" as host
+import file
+import process
+import os
+
+
+class Step:
+    name: string
+    arguments: list[string]
+    directory: string
+    dependencies: list[string] = []
+    group: string = ""
+    stage: string = "command"
+    timeout: int = 60
+    enabled: bool = true
+    stdout_fixture: string = ""
+    stderr_fixture: string = ""
+
+
+class Result:
+    step: Step
+    status: string = "pending"
+    exit_code: int = -1
+    seconds: float = 0.0
+    diagnostic: string = ""
+    stdout: string = ""
+    stderr: string = ""
+
+
+class Report:
+    results: list[Result]
+    directory: string
+    passed: int = 0
+    failed: int = 0
+    blocked: int = 0
+    absent: int = 0
+    pending: int = 0
+
+
+def json_string(value: string) -> string:
+    text := "\""
+    digits = "0123456789abcdef"
+    for character in value.characters():
+        number = int(character.bytes()[0])
+        if character == "\\":
+            text += "\\\\"
+        elif character == "\"":
+            text += "\\\""
+        elif number < 32:
+            text += "\\u00" + digits[number / 16] + digits[number % 16]
+        else:
+            text += string(character)
+    return text + "\""
+
+
+def validate(steps: list[Step]) -> unit | Error:
+    names: list[string] = []
+    for step in steps:
+        if step.name == "" or step.name in names:
+            throw Error("pipeline step names must be nonempty and unique: " + step.name)
+        for dependency in step.dependencies:
+            if dependency not in names:
+                throw Error("pipeline dependency must precede its consumer: " + dependency)
+        if step.enabled and (len(step.arguments) == 0 or step.timeout <= 0):
+            throw Error("pipeline step requires a command and a positive timeout: " + step.name)
+        names.append(step.name)
+
+
+def summarize(report: Report):
+    report.passed = 0
+    report.failed = 0
+    report.blocked = 0
+    report.absent = 0
+    report.pending = 0
+    for result in report.results:
+        if result.status == "pass":
+            report.passed += 1
+        elif result.status == "fail" or result.status == "timeout":
+            report.failed += 1
+        elif result.status == "blocked":
+            report.blocked += 1
+        elif result.status == "absent":
+            report.absent += 1
+        else:
+            report.pending += 1
+
+
+def save(report: Report) -> unit | Error:
+    summarize(report)
+    rows: list[string] = []
+    markdown := "# Package pipeline report\n\nCoverage counts example stages, not instrumented source lines.\n\n"
+    markdown += "Passed: " + string(report.passed) + "; failed: " + string(report.failed) + "; blocked: " + string(report.blocked) + "; absent: " + string(report.absent) + "; pending: " + string(report.pending) + "\n\n"
+    markdown += "| Stage | Pass | Fail | Timeout | Blocked | Absent | Pending | Success |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+    stages: list[string] = []
+    coverage: list[string] = []
+    statuses = ["pass", "fail", "timeout", "blocked", "absent", "pending"]
+    for result in report.results:
+        if result.step.stage not in stages:
+            stages.append(result.step.stage)
+    for stage in stages:
+        counts: list[int] = []
+        values: list[string] = []
+        total := 0
+        markdown += "| " + stage
+        for status in statuses:
+            count := 0
+            for result in report.results:
+                if result.step.stage == stage and result.status == status:
+                    count += 1
+            counts.append(count)
+            values.append(json_string(status) + ":" + string(count))
+            markdown += " | " + string(count)
+            if status != "absent":
+                total += count
+        percent = 100 * counts[0] / total if total != 0 else 0
+        markdown += " | " + string(counts[0]) + "/" + string(total) + " (" + string(percent) + "%) |\n"
+        coverage.append(json_string(stage) + ":{" + values.join(",") + ",\"eligible\":" + string(total) + ",\"success_percent\":" + string(percent) + "}")
+    markdown += "\n"
+    markdown += "| Step | Stage | Status | Seconds | Diagnostic |\n| --- | --- | --- | ---: | --- |\n"
+    for result in report.results:
+        arguments: list[string] = []
+        for argument in result.step.arguments:
+            arguments.append(json_string(argument))
+        row := "{\"name\":" + json_string(result.step.name)
+        row += ",\"group\":" + json_string(result.step.group)
+        row += ",\"stage\":" + json_string(result.step.stage)
+        row += ",\"status\":" + json_string(result.status)
+        row += ",\"exit_code\":" + string(result.exit_code)
+        row += ",\"seconds\":" + string(result.seconds)
+        row += ",\"command\":[" + arguments.join(",") + "]"
+        row += ",\"diagnostic\":" + json_string(result.diagnostic)
+        row += ",\"stdout\":" + json_string(result.stdout)
+        row += ",\"stderr\":" + json_string(result.stderr) + "}"
+        rows.append(row)
+        markdown += "| " + result.step.name.replace("|", "\\|") + " | " + result.step.stage + " | " + result.status + " | " + string(result.seconds) + " | " + result.diagnostic.replace("|", "\\|").replace("\n", " ") + " |\n"
+    document := "{\"schema_version\":1,\"coverage_kind\":\"example-stage\""
+    document += ",\"passed\":" + string(report.passed)
+    document += ",\"failed\":" + string(report.failed)
+    document += ",\"blocked\":" + string(report.blocked)
+    document += ",\"absent\":" + string(report.absent)
+    document += ",\"pending\":" + string(report.pending)
+    document += ",\"stages\":{" + coverage.join(",") + "}"
+    document += ",\"results\":[\n" + rows.join(",\n") + "\n]}\n"
+    host.write_text(report.directory + "/results.json.tmp", document)
+    host.replace_file(report.directory + "/results.json.tmp", report.directory + "/results.json")
+    host.write_text(report.directory + "/REPORT.md.tmp", markdown)
+    host.replace_file(report.directory + "/REPORT.md.tmp", report.directory + "/REPORT.md")
+
+
+def execute(step: Step, stdout: string, stderr: string) -> Result:
+    words: list[string] = ["timeout", "--kill-after=2", string(step.timeout)]
+    for argument in step.arguments:
+        words.append(argument)
+    quoted: list[string] = []
+    for word in words:
+        quoted.append(host.quote(word))
+    started = host.monotonic()
+    # Redirections surround cd as well, so directory failures are retained.
+    command = "(cd " + host.quote(step.directory) + " && " + quoted.join(" ") + ") > " + host.quote(stdout) + " 2> " + host.quote(stderr)
+    code = process.run(command)
+    result = Result(step, "pass" if code == 0 else "fail", code, host.monotonic() - started, stdout=stdout, stderr=stderr)
+    if code == 124 or code == 137:
+        result.status = "timeout"
+    if code != 0:
+        result.diagnostic = "process exited " + string(code)
+        for line in file.raw(stderr).split("\n"):
+            if line.strip() != "":
+                result.diagnostic = line
+                if line.contains("error:"):
+                    break
+    elif step.stdout_fixture != "" and not os.is_file(step.stdout_fixture):
+        result.status = "fail"
+        result.diagnostic = "missing stdout fixture " + step.stdout_fixture
+    elif step.stderr_fixture != "" and not os.is_file(step.stderr_fixture):
+        result.status = "fail"
+        result.diagnostic = "missing stderr fixture " + step.stderr_fixture
+    elif step.stdout_fixture != "" and file.raw(step.stdout_fixture) != file.raw(stdout):
+        result.status = "fail"
+        result.diagnostic = "stdout differs from " + step.stdout_fixture
+    elif step.stderr_fixture != "" and file.raw(step.stderr_fixture) != file.raw(stderr):
+        result.status = "fail"
+        result.diagnostic = "stderr differs from " + step.stderr_fixture
+    return result
+
+
+def pipeline(steps: list[Step], output: string) -> Report | Error:
+    validate(steps)
+    directory = host.temporary(output, "run-")
+    results: list[Result] = []
+    for step in steps:
+        results.append(Result(step))
+    report = Report(results, directory)
+    save(report)
+    for index in range(int(len(steps))):
+        step = steps[index]
+        result := Result(step)
+        if not step.enabled:
+            result.status = "absent"
+        else:
+            for dependency in step.dependencies:
+                for previous in report.results:
+                    if previous.step.name == dependency and previous.status != "pass":
+                        result.status = "blocked"
+                        result.diagnostic = "dependency did not pass: " + dependency
+            if result.status == "pending":
+                result = execute(step, directory + "/" + string(index) + ".stdout", directory + "/" + string(index) + ".stderr")
+        report.results[index] = result
+        save(report)
+        print(result.status + " " + step.name)
+    print("Pipeline: " + string(report.passed) + " passed, " + string(report.failed) + " failed, " + string(report.blocked) + " blocked, " + string(report.absent) + " absent")
+    print("Report: " + directory + "/REPORT.md")
+    return report

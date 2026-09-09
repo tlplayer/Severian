@@ -1,0 +1,333 @@
+import diagnostics
+import source
+import universal
+
+
+# Test policies are source declarations. This pass only composes their lifecycle
+# calls and lexical projections, then hands ordinary functions to the analyzer.
+class Policy:
+    name: string
+    namespace: string
+    context: string
+    begin: string
+    ready: string
+    before: string
+    after: string
+    finish: string
+    failure: string
+    names: list[string]
+    getters: list[string]
+    span: source.Span
+
+
+def path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            return path(object) + "." + name
+        case _:
+            return ""
+
+
+def property_value(declaration: universal.TraitDeclaration, name: string) -> universal.Expression | diagnostics.Diagnostic:
+    for property in declaration.properties:
+        if property.name == name:
+            value ?= property.default
+            if value != None:
+                return value
+    return error(diagnostics.diagnostic_at("E000215", "test policy requires " + name, declaration.span))
+
+
+def policy(declaration: universal.TraitDeclaration) -> Policy | diagnostics.Diagnostic:
+    fields: list[string] = []
+    for field in ["context", "begin", "ready", "before", "after", "finish", "failure"]:
+        value = property_value(declaration, field)
+        name = path(value)
+        if name == "":
+            return error(diagnostics.diagnostic_at("E000215", "test policy " + field + " requires a declaration reference", value.span))
+        fields.append(declaration.lookup + name)
+    selected = property_value(declaration, "name")
+    mode := ""
+    match selected.kind:
+        case LiteralValue:
+            match value:
+                case StringValue:
+                    mode = value
+                case _:
+                    pass
+        case _:
+            pass
+    if mode == "" or mode == "compiler":
+        return error(diagnostics.diagnostic_at("E000215", "test policy requires a nonreserved mode name", selected.span))
+    names: list[string] = []
+    getters: list[string] = []
+    bindings = property_value(declaration, "bindings")
+    match bindings.kind:
+        case MapLiteral:
+            index := 0
+            for key in keys:
+                binding := ""
+                match key.kind:
+                    case LiteralValue:
+                        match value:
+                            case StringValue:
+                                binding = value
+                            case _:
+                                pass
+                    case _:
+                        pass
+                getter = path(values[index])
+                if binding == "" or binding in names or getter == "":
+                    return error(diagnostics.diagnostic_at("E000215", "test bindings require unique names and getter references", key.span))
+                names.append(binding)
+                getters.append(declaration.lookup + getter)
+                index += 1
+        case _:
+            return error(diagnostics.diagnostic_at("E000215", "test bindings require a map", bindings.span))
+    return Policy(mode, declaration.lookup, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], names, getters, declaration.span)
+
+
+def name(value: string, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.Name(value), span)
+
+
+def call(function: string, values: list[universal.Expression], span: source.Span) -> universal.Expression:
+    arguments: list[universal.CallArgument] = []
+    for value in values:
+        arguments.append(universal.CallArgument(None, value, value.span))
+    return universal.Expression(universal.Call(name(function, span), arguments), span)
+
+
+def optional(expression: universal.Expression | None, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> universal.Expression | None:
+    value ?= expression
+    if value != None:
+        return project(value, names, getters, contexts, bound)
+    return None
+
+
+def project(expression: universal.Expression, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> universal.Expression:
+    kind := expression.kind
+    match expression.kind:
+        case Name:
+            index := 0
+            for binding in names:
+                if binding == name and name not in bound:
+                    return call(getters[index], [universal.Expression(universal.Name(contexts[index]), expression.span)], expression.span)
+                index += 1
+        case Member:
+            kind = universal.Member(project(object, names, getters, contexts, bound), name)
+        case Fallback:
+            kind = universal.Fallback(project(value, names, getters, contexts, bound), project(alternative, names, getters, contexts, bound))
+        case ThrowValue:
+            kind = universal.ThrowValue(project(value, names, getters, contexts, bound))
+        case Call:
+            rewritten: list[universal.CallArgument] = []
+            for argument in arguments:
+                rewritten.append(universal.CallArgument(argument.name, project(argument.value, names, getters, contexts, bound), argument.span))
+            kind = universal.Call(project(callee, names, getters, contexts, bound), rewritten)
+        case ListLiteral:
+            rewritten: list[universal.Expression] = []
+            for element in elements:
+                rewritten.append(project(element, names, getters, contexts, bound))
+            kind = universal.ListLiteral(rewritten)
+        case TupleLiteral:
+            rewritten: list[universal.Expression] = []
+            for element in elements:
+                rewritten.append(project(element, names, getters, contexts, bound))
+            kind = universal.TupleLiteral(rewritten)
+        case MapLiteral:
+            projected_keys: list[universal.Expression] = []
+            projected_values: list[universal.Expression] = []
+            for key in keys:
+                projected_keys.append(project(key, names, getters, contexts, bound))
+            for value in values:
+                projected_values.append(project(value, names, getters, contexts, bound))
+            kind = universal.MapLiteral(projected_keys, projected_values)
+        case Subscript:
+            kind = universal.Subscript(project(object, names, getters, contexts, bound), project(index, names, getters, contexts, bound))
+        case Slice:
+            kind = universal.Slice(project(object, names, getters, contexts, bound), optional(start, names, getters, contexts, bound), optional(stop, names, getters, contexts, bound), optional(step, names, getters, contexts, bound))
+        case Unary:
+            kind = universal.Unary(operator, project(operand, names, getters, contexts, bound))
+        case Binary:
+            kind = universal.Binary(operator, project(left, names, getters, contexts, bound), project(right, names, getters, contexts, bound))
+        case Conditional:
+            kind = universal.Conditional(project(condition, names, getters, contexts, bound), project(then_value, names, getters, contexts, bound), project(else_value, names, getters, contexts, bound))
+        case Stringify:
+            kind = universal.Stringify(project(value, names, getters, contexts, bound))
+        case _:
+            pass
+    return universal.Expression(kind, expression.span)
+
+
+def project_block(block: universal.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[universal.Statement], ordinal: list[int]) -> universal.Block:
+    result = universal.empty_block()
+    for statement in block.statements:
+        match statement:
+            case BindingStatement:
+                value = project(binding.value, names, getters, contexts, bound)
+                result.statements.append(universal.BindingStatement(universal.Binding(binding.name, binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
+                if binding.name not in bound:
+                    bound.append(binding.name)
+            case ExpressionStatement:
+                result.statements.append(universal.ExpressionStatement(project(expression, names, getters, contexts, bound)))
+            case Return:
+                result.statements.append(universal.Return(optional(value, names, getters, contexts, bound), span))
+            case Throw:
+                result.statements.append(universal.Throw(project(value, names, getters, contexts, bound), span))
+            case Assert:
+                checked = "$assert$" + string(ordinal[0])
+                ordinal[0] += 1
+                result.statements.append(universal.BindingStatement(universal.Binding(checked, None, project(condition, names, getters, contexts, bound), false, false, span)))
+                # Evaluate once, restore policy resources on failure, then keep
+                # the ordinary assertion and its source location.
+                result.statements.append(universal.If(name(checked, span), universal.empty_block(), universal.Block(failures[:]), span))
+                result.statements.append(universal.Assert(name(checked, span), optional(message, names, getters, contexts, bound), span, condition_span))
+            case If:
+                result.statements.append(universal.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal), span))
+            case While:
+                result.statements.append(universal.While(project(condition, names, getters, contexts, bound), project_block(body, names, getters, contexts, bound[:], failures, ordinal), span))
+            case ForEach:
+                local = bound[:]
+                local.append(name)
+                result.statements.append(universal.ForEach(name, project(iterable, names, getters, contexts, bound), project_block(body, names, getters, contexts, local, failures, ordinal), span))
+            case FieldSet:
+                result.statements.append(universal.FieldSet(project(target, names, getters, contexts, bound), project(value, names, getters, contexts, bound), span, update))
+            case GrammarApply:
+                rewritten: list[universal.Expression] = []
+                blocks: list[universal.Block] = []
+                for operand in operands:
+                    rewritten.append(project(operand, names, getters, contexts, bound))
+                for body in bodies:
+                    blocks.append(project_block(body, names, getters, contexts, bound[:], failures, ordinal))
+                result.statements.append(universal.GrammarApply(syntax, rewritten, blocks, span, exits))
+            case Match:
+                rewritten: list[universal.MatchArm] = []
+                for arm in arms:
+                    local = bound[:]
+                    binding ?= arm.binding_name
+                    if binding != None:
+                        local.append(binding)
+                    rewritten.append(universal.MatchArm(project_block(arm.body, names, getters, contexts, local, failures, ordinal), arm.binding_name, arm.annotation, arm.span, pattern=optional(arm.pattern, names, getters, contexts, bound)))
+                result.statements.append(universal.Match(project(subject, names, getters, contexts, bound), rewritten, span))
+            case _:
+                result.statements.append(statement)
+    return result
+
+
+def expand(module: universal.Module, enabled: bool, namespace: string) -> universal.Module | diagnostics.Diagnostic:
+    if not enabled:
+        return module
+    wanted: list[string] = []
+    for item in module.items:
+        match item:
+            case Test:
+                for mode in declaration.source_modes:
+                    if mode != "compiler" and mode not in wanted:
+                        wanted.append(mode)
+            case _:
+                pass
+    if len(wanted) == 0:
+        return module
+    policies: list[Policy] = []
+    for item in module.items:
+        match item:
+            case Trait:
+                for base in declaration.bases:
+                    if universal.simple_type_name(base) == "TestMode":
+                        selected = policy(declaration)
+                        if selected.name in wanted:
+                            for previous in policies:
+                                if previous.name == selected.name:
+                                    return error(diagnostics.diagnostic_at("E000215", "duplicate test policy " + selected.name, declaration.span))
+                            policies.append(selected)
+            case _:
+                pass
+    for mode in wanted:
+        found := false
+        for selected in policies:
+            if selected.name == mode:
+                found = true
+        if not found:
+            return error(diagnostics.diagnostic("E000215", "no source test policy for " + mode))
+    suite = universal.empty_block()
+    for selected in policies:
+        context = "$mode$" + selected.name
+        suite.statements.append(universal.BindingStatement(universal.Binding(context, None, call(selected.begin, [], selected.span), false, false, selected.span, mutable=true)))
+    items: list[universal.Item] = []
+    for item in module.items:
+        match item:
+            case ExpressionItem:
+                suite.statements.append(universal.ExpressionStatement(expression))
+            case BindingItem:
+                constant := false
+                if not binding.mutable and not binding.update:
+                    match binding.value.kind:
+                        case LiteralValue:
+                            constant = true
+                        case _:
+                            pass
+                if constant:
+                    items.append(item)
+                else:
+                    suite.statements.append(universal.BindingStatement(binding))
+            case Test:
+                pass
+            case _:
+                items.append(item)
+    for selected in policies[::-1]:
+        context = "$mode$" + selected.name
+        suite.statements.append(universal.BindingStatement(universal.Binding(context, None, call(selected.ready, [name(context, selected.span)], selected.span), true, false, selected.span)))
+    case_index := 0
+    for item in module.items:
+        match item:
+            case Test:
+                if "compiler" in declaration.source_modes:
+                    if len(declaration.source_modes) != 1:
+                        return error(diagnostics.diagnostic_at("E000215", "compiler mode cannot compose with runtime policies", declaration.span))
+                    items.append(item)
+                    continue
+                parameters: list[universal.FunctionParameter] = []
+                values: list[universal.Expression] = []
+                names: list[string] = []
+                getters: list[string] = []
+                contexts: list[string] = []
+                failures: list[universal.Statement] = []
+                cleanup: list[universal.Statement] = []
+                seen: list[string] = []
+                for mode in declaration.source_modes:
+                    if mode in seen:
+                        return error(diagnostics.diagnostic_at("E000215", "duplicate test mode " + mode, declaration.span))
+                    seen.append(mode)
+                    for selected in policies:
+                        if selected.name != mode:
+                            continue
+                        context = "$mode$" + mode
+                        parameters.append(universal.FunctionParameter(context, universal.named_type(selected.context, [], declaration.span), None, declaration.span))
+                        values.append(call(selected.before, [name(context, declaration.span)], declaration.span))
+                        failures.append(universal.ExpressionStatement(call(selected.failure, [name(context, declaration.span)], declaration.span)))
+                        cleanup.append(universal.ExpressionStatement(call(selected.after, [name(context, declaration.span)], declaration.span)))
+                        index := 0
+                        for binding in selected.names:
+                            if binding in names:
+                                return error(diagnostics.diagnostic_at("E000215", "ambiguous test binding " + binding, declaration.span))
+                            names.append(binding)
+                            getters.append(selected.getters[index])
+                            contexts.append(context)
+                            index += 1
+                function_name = "$case$" + string(case_index)
+                case_index += 1
+                body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0])
+                function = universal.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
+                items.append(universal.Function(function))
+                suite.statements.append(universal.ExpressionStatement(call(function_name, values, declaration.span)))
+                for statement in cleanup[::-1]:
+                    suite.statements.append(statement)
+            case _:
+                pass
+    for selected in policies[::-1]:
+        suite.statements.append(universal.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
+    items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], policies[0].span, lookup=namespace)))
+    module.items = items
+    return module

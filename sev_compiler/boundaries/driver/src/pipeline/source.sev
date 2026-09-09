@@ -3,6 +3,8 @@ import source
 import process
 import package
 import lexer
+import parser
+import universal
 import diagnostics
 from diagnostics import Diagnostic
 import "../../../../frontend/semantic/src/callable.sev" as semantic
@@ -10,6 +12,18 @@ import "../../../../transforms/mir/src/callable.sev" as mir
 import "../../../../transforms/mlir/src/emit/callable.sev" as mlir
 import "../../../../transforms/mlir/src/ir/text.sev" as text
 import "../../../../frontend/modules/src/source.sev"
+
+
+def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+    input = parser.Parser(lexer.scan_bootstrap(file))
+    result: list[universal.ImportDeclaration] = []
+    parser.parser_separators(input)
+    while not parser.parser_at_simple(input, lexer.TokenKind.Eof):
+        if not parser.parser_at_identifier(input, "import"):
+            return error(diagnostics.diagnostic("E000120", "prelude may only declare source imports"))
+        result.append(parser.parser_import_declaration(input))
+        parser.parser_separators(input)
+    return result
 
 
 def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = []) -> string:
@@ -32,20 +46,28 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     subject_path = normalized_path(input.path if input.path.starts_with("/") else working_directory + "/" + input.path)
     subject_loaded := false
     initializer_namespace := ""
-    parsed = load_source_module(source.load(root + "/sev_compiler/universal/grammar/contracts.sev"), "", [], false, files, registry)
-    providers = ["/library/system/io/src/text.sev", "/sev_compiler/universal/primitive/numeric/conversion.sev", "/sev_compiler/universal/primitive/numeric/operators.sev", "/sev_compiler/universal/primitive/collections.sev", "/sev_compiler/universal/primitive/string/methods.sev"]
-    namespaces = ["", "numeric.", "", "", "string_methods."]
-    provider_index := 0
-    for provider in providers:
-        provider_path = root + provider
+    parsed = universal.empty_module()
+    prelude = registered_source(source.load(root + "/sev_compiler/universal/prelude.sev"), files)
+    providers = prelude_providers(prelude)
+    for declaration in providers:
+        provider_locator := ""
+        namespace := ""
+        match declaration.subject:
+            case Locator:
+                provider_locator = locator
+            case _:
+                return error(diagnostics.diagnostic("E000120", "prelude providers require relative source imports"))
+        supplied ?= declaration.alias
+        if supplied != None:
+            namespace = supplied + "."
+        provider_path = normalized_path(parent_path(prelude.path) + "/" + provider_locator)
         is_subject = provider_path == subject_path
         if is_subject:
-            initializer_namespace = namespaces[provider_index]
-        library = load_source_module(input if is_subject else source.load(provider_path), namespaces[provider_index], [], is_subject, files, registry)
+            initializer_namespace = namespace
+        library = load_source_module(input if is_subject else source.load(provider_path), namespace, [], is_subject, files, registry)
         for item in library.items:
             parsed.items.append(item)
         subject_loaded = subject_loaded or is_subject
-        provider_index += 1
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
     # A direct provider keeps its original namespace and declaration identity.

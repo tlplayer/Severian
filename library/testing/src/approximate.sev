@@ -1,0 +1,14 @@
+def __absolute(value: float) -> float:
+    return -value if value < 0.0 else value
+
+def __finite(value: float) -> bool:
+    return value - value == 0.0
+
+def approximate(actual: float, expected: float, rtol: float = 1e-5, atol: float = 1e-8) -> bool:
+    assert(rtol >= 0.0 and __finite(rtol))
+    assert(atol >= 0.0 and __finite(atol))
+    if actual == expected:
+        return true
+    if not __finite(actual) or not __finite(expected):
+        return false
+    return __absolute(actual - expected) <= atol + rtol * __absolute(expected)

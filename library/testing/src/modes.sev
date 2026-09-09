@@ -1,0 +1,56 @@
+import "capture.sev" as capture
+import "profile.sev" as profile
+
+
+trait TestMode:
+    name: string
+    context: T
+    begin: F
+    ready: F
+    before: F
+    after: F
+    finish: F
+    failure: F
+    bindings: {string: F}
+
+
+trait Integration: TestMode:
+    name: string = "integ"
+    context: T = capture.Capture
+    begin: F = capture.begin
+    ready: F = capture.freeze
+    before: F = capture.resume
+    after: F = capture.suspend
+    finish: F = capture.finish
+    failure: F = capture.finish
+    bindings: {string: F} = {
+        "stdout": capture.stdout,
+        "stderr": capture.stderr,
+    }
+
+
+trait IntegrationLong: TestMode:
+    name: string = "integration"
+    context: T = capture.Capture
+    begin: F = capture.begin
+    ready: F = capture.freeze
+    before: F = capture.resume
+    after: F = capture.suspend
+    finish: F = capture.finish
+    failure: F = capture.finish
+    bindings: {string: F} = {
+        "stdout": capture.stdout,
+        "stderr": capture.stderr,
+    }
+
+
+trait Profile: TestMode:
+    name: string = "profile"
+    context: T = int
+    begin: F = profile.begin
+    ready: F = profile.ready
+    before: F = profile.before
+    after: F = profile.after
+    finish: F = profile.finish
+    failure: F = profile.finish
+    bindings: {string: F} = {}

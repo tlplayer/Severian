@@ -1,0 +1,21 @@
+# Shared index normalization for source collection protocols.
+def bound(value: int, size: int, reverse: bool) -> int:
+    result := value
+    if result < 0:
+        result += size
+    minimum = -1 if reverse else 0
+    maximum = size - 1 if reverse else size
+    if result < minimum:
+        return minimum
+    if result > maximum:
+        return maximum
+    return result
+
+def next_position(position: int, end: int, step: int) -> int:
+    if step < 0:
+        if step <= end - position:
+            return end
+    else:
+        if step >= end - position:
+            return end
+    return position + step

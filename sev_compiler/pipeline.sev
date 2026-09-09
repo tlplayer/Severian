@@ -1,0 +1,80 @@
+import package
+import environment
+import path
+import process
+import source
+import lexer
+
+@c(symbol="exit")
+def exit_status(status: i32)
+
+
+def repository() -> string | Error:
+    configured = environment.get("SEVERIAN_SYSROOT", "")
+    if configured != "":
+        return package.canonical(configured)
+    location := process.current_directory()
+    while location != "/" and location != "":
+        if package.exists(location + "/sev_compiler/package.toml") and package.exists(location + "/docs/examples"):
+            return package.canonical(location)
+        location = path.dirname(location)
+    throw Error("set SEVERIAN_SYSROOT to the Severian repository")
+
+
+def has_tests(location: string) -> bool:
+    tokens = lexer.scan_bootstrap(source.load(location))
+    depth := 0
+    for token in tokens:
+        if token.kind == lexer.TokenKind.Indent:
+            depth += 1
+        elif token.kind == lexer.TokenKind.Dedent:
+            depth -= 1
+        elif depth == 0 and lexer.token_word(token) == "test":
+            return true
+    return false
+
+
+def plan(root: string, rebuild: bool = true) -> list[package.Step] | Error:
+    project = package.open(root + "/sev_compiler")
+    config = project.manifest.entries
+    section_names = package.text_setting(config, "package.metadata.pipeline", "sections")
+    if section_names == "":
+        throw Error("compiler pipeline requires example sections in package metadata")
+    compiler = root + "/sev_compiler/target/host/dev/bin/sev_compiler"
+    seed = environment.get("SEVERIAN_SEED", root + "/target/debug/sev")
+    output = package.temporary(root + "/sev_compiler/target/pipeline/artifacts", "run-")
+    steps: list[package.Step] = []
+    dependencies: list[string] = []
+    if rebuild:
+        steps.append(package.Step("compiler", [seed, "build", root + "/sev_compiler", "--bin", "sev_compiler"], root, stage="compiler", timeout=1800))
+        dependencies.append("compiler")
+    for section in section_names.split(","):
+        for location in package.files(root + "/docs/examples/" + section.strip()):
+            if not location.ends_with(".sev"):
+                continue
+            relative = location[int(len(root + "/docs/examples/")):]
+            build_name = relative + ":build"
+            executable = output + "/" + relative.replace("/", "_")
+            steps.append(package.Step(build_name, [compiler, "build", location, "--sysroot", root, "-o", executable], root, dependencies, relative, "build"))
+            stdout_fixture = location[:-4] + ".stdout"
+            stderr_fixture = location[:-4] + ".stderr"
+            steps.append(package.Step(relative + ":run", [executable], root, [build_name], relative, "run", stdout_fixture=stdout_fixture if package.exists(stdout_fixture) else "", stderr_fixture=stderr_fixture if package.exists(stderr_fixture) else ""))
+            steps.append(package.Step(relative + ":test", [compiler, "test", location, "--sysroot", root, "-o", executable + ".tests"], root, dependencies, relative, "test", enabled=has_tests(location)))
+    return steps
+
+
+def run(rebuild: bool = true) -> package.Report | Error:
+    root = repository()
+    return package.pipeline(plan(root, rebuild), root + "/sev_compiler/target/pipeline/reports")
+
+
+def main():
+    arguments = process.arguments()
+    rebuild := true
+    if len(arguments) == 2 and arguments[1] == "--no-build":
+        rebuild = false
+    elif len(arguments) > 1:
+        throw Error("usage: sev run sev_compiler --bin compiler-pipeline [-- --no-build]")
+    report = run(rebuild)
+    if report.failed > 0 or report.blocked > 0:
+        exit_status(1)

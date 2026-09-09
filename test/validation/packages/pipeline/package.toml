@@ -1,0 +1,10 @@
+[package]
+name = "package-pipeline-tests"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "main.sev"
+
+[dependencies]
+package = { path = "../../../../library/package" }

@@ -1,2 +1,3 @@
 # Test syntax is structural compiler input; reusable testing APIs belong here.
-
+import "approximate.sev"
+import "modes.sev"

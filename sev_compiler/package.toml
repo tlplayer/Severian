@@ -10,11 +10,18 @@ edition = "2026"
 license = "Severian License"
 default-run = "sev_compiler"
 
+[package.metadata.pipeline]
+sections = "00-getting-started,01-types,02-functions,03-testing"
+
 ### TARGETS ############################################################
 
 [[bin]]
 name = "sev_compiler"
 path = "src/main.sev"
+
+[[bin]]
+name = "compiler-pipeline"
+path = "pipeline.sev"
 
 # [lib]
 # name = "sev_compiler"

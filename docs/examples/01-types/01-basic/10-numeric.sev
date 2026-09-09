@@ -1,4 +1,3 @@
-```sev
 '''
 `numeric` is the gap-filling numeric domain.
 
@@ -247,4 +246,3 @@ test "numeric tensor survives element and shape polymorphism":
             ),
         ]
     )
-```

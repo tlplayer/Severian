@@ -12,7 +12,23 @@ sev_compiler build --emit mlir ../docs/examples/00-getting-started/01-hello.sev 
 sev_compiler test ../docs/examples/03-testing/01-basics/01-ordinary-and-named.sev
 ```
 
-The package target is `target/host/dev/bin/sev_compiler`. The development command
+Build and audit documentation sections 00–03 through the source package pipeline
+from the repository root:
+
+```sh
+target/debug/sev run sev_compiler --bin compiler-pipeline
+target/debug/sev test sev_compiler
+```
+
+The pipeline builds `sev_compiler` with the seed, then uses that binary for every
+example's native build, execution, and test command. `sev test` includes the same
+audit as the `compiler examples 00-03` test. Failures remain failures and cause a
+nonzero exit; independent examples still run. Reports, stage coverage, and raw
+logs live under `sev_compiler/target/pipeline/reports/run-*/`. To audit an existing
+binary, run `sev_compiler/target/host/dev/bin/compiler-pipeline --no-build`.
+The section inventory is declared in `[package.metadata.pipeline]`.
+
+The compiler target is `target/host/dev/bin/sev_compiler`. The development command
 in `../bin/sev_compiler` runs that artifact and selects this checkout's source
 libraries. Linking it into a directory on PATH makes subsequent `sev build`
 results immediately available as `sev_compiler`. The Rust seed remains `sev`.
@@ -80,6 +96,12 @@ values and classified parser input as `To` (Token) values, before `Y` symbols an
 descriptor registration. Its built-in rules are
 compiled from Severian; loading arbitrary imported lexical-rule bodies at compiler
 runtime remains unfinished.
+
+`universal/prelude.sev` selects the source providers and their namespaces through
+ordinary imports. Adding a library provider there takes effect without rebuilding
+the executable. Collection operations share an enumerative macro over the
+source-declared `ListElement` family. Native checks for these mechanisms and the
+testing utilities run with `python3 tests/sev_compiler/library_coverage.py`.
 
 The executable loads syntax from `universal/grammar/contracts.sev` and discovers
 imported `trait Name: G` declarations before parsing dependent bodies. Source

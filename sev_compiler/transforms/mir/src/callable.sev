@@ -19,6 +19,9 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case Evaluate:
+            evaluated = mir_expression(module, context, scope, value)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated]), body)
         case UpdateOperand:
             return scope.update_operands[index]
         case ListValue:
