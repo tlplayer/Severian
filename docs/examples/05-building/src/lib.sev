@@ -1,9 +1,0 @@
-import "math.sev" as math
-
-
-def calculate() -> int:
-    return math.add(20, 22)
-
-
-test "library target imports a private module":
-    assert(calculate() == 42)
