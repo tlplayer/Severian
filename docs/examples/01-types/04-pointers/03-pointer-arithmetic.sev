@@ -29,4 +29,4 @@ test with compiler "Cannot increment pointer by offset":
     values := [10, 20, 30]
 
     reject:
-        (value_pointer+1) == &values + 1       
+        assert((value_pointer+1) == &values + 1)       
