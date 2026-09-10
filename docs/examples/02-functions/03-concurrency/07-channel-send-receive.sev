@@ -1,7 +1,11 @@
+# channel[T,N] elements
 def main():
-    messages = channel[string](buffer=10)
+    messages = channel[string,10]
 
     producer = async messages.send("hello") with self
+    producer = async messages.send("hello") with self
     message = await messages
+    print(message)
+    message = message.receive()
 
     print(message)

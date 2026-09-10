@@ -1,0 +1,248 @@
+import universal
+import * from "../../../universal/declaration/scalar.sev" as boundary
+
+
+class CachedEffect:
+    key: string
+    effect: int
+
+
+# Effects form a lattice: read < write < transfer. Aliases retain their
+# parameter origin. Traversing a recursive edge again adds no new operation.
+def root(value: universal.Expression) -> string:
+    match value.kind:
+        case Name:
+            return name
+        case BindingReference:
+            return "$binding$" + string(binding.index)
+        case FieldReference:
+            return root(object)
+        case IndexReference:
+            return root(object)
+        case Member:
+            return root(object)
+        case Subscript:
+            return root(object)
+        case Ownership:
+            if mode != "clone":
+                return root(value)
+        case _:
+            pass
+    return ""
+
+
+def parameter(function: universal.FunctionDeclaration, index: int, functions: list[universal.FunctionDeclaration], active: list[string] = [], cache: list[CachedEffect] = []) -> int:
+    if index >= len(function.parameters):
+        return 1
+    selected = function.parameters[index]
+    for modifier in selected.modifiers:
+        if modifier.name in ["borrow", "inferred read"]:
+            return 0
+        if modifier.name in ["borrow mut", "inferred write"]:
+            return 1
+        if modifier.name in ["move", "inferred move"]:
+            return 2
+    identity = function.name + ":" + string(index)
+    previous := 0
+    for cached in cache:
+        if cached.key == identity:
+            previous = cached.effect
+    if identity in active:
+        return previous
+    path = active
+    path.append(identity)
+    body ?= function.body
+    if body != None:
+        effect = block_effect(body, [selected.name, "$binding$" + string(index)], functions, path, function.result_mode == "", cache)
+        cursor := 0
+        for cached in cache:
+            if cached.key == identity:
+                cache[cursor] = CachedEffect(identity, max(previous, effect))
+                return max(previous, effect)
+            cursor += 1
+        cache.append(CachedEffect(identity, effect))
+        return effect
+    operation = boundary.scalar_boundary(function, "mlir")
+    if operation in ["memref.load", "memref.dim", "memref.extract_aligned_pointer_as_index"]:
+        return 0
+    if operation == "memref.store":
+        return 1 if index == 1 else 0
+    if operation != "" and not operation.starts_with("memref."):
+        return 0
+    return 1
+
+
+def effect_callable_path(value: universal.Expression) -> string:
+    match value.kind:
+        case Name:
+            return name
+        case Member:
+            return effect_callable_path(object) + "." + name
+        case _:
+            return ""
+
+
+def call(name: string, index: int, functions: list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
+    result := 0
+    found := false
+    for function in functions:
+        if function.name == name or function.name.ends_with("." + name):
+            found = true
+            result = max(result, parameter(function, index, functions, active, cache))
+    return result if found else 1
+
+
+def expression_effect(value: universal.Expression, aliases: list[string], functions: list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
+    result := 0
+    match value.kind:
+        case ResolvedCall:
+            for argument in arguments:
+                result = max(result, expression_effect(argument.value, aliases, functions, active, cache))
+                if root(argument.value) in aliases:
+                    match callee:
+                        case Direct:
+                            for target in functions:
+                                if target.definition.declaration.value == function.declaration.value:
+                                    index := 0
+                                    for input in target.parameters:
+                                        if argument.name == input.name:
+                                            result = max(result, parameter(target, index, functions, active, cache))
+                                        index += 1
+                        case _:
+                            result = max(result, 1)
+        case Ownership:
+            result = expression_effect(value, aliases, functions, active, cache)
+            if root(value) in aliases:
+                if mode == "move":
+                    return 2
+                if mode == "borrow mut":
+                    return max(result, 1)
+        case Call:
+            called := effect_callable_path(callee)
+            shift := 0
+            match callee.kind:
+                case Member:
+                    if root(object) in aliases:
+                        called = name
+                        result = max(result, call(called, 0, functions, active, cache))
+                        shift = 1
+                case _:
+                    pass
+            index := shift
+            for argument in arguments:
+                result = max(result, expression_effect(argument.value, aliases, functions, active, cache))
+                if root(argument.value) in aliases:
+                    result = max(result, call(called, index, functions, active, cache))
+                index += 1
+        case Binary:
+            result = max(expression_effect(left, aliases, functions, active, cache), expression_effect(right, aliases, functions, active, cache))
+        case Unary:
+            result = expression_effect(operand, aliases, functions, active, cache)
+        case Conditional:
+            result = max(expression_effect(condition, aliases, functions, active, cache), max(expression_effect(then_value, aliases, functions, active, cache), expression_effect(else_value, aliases, functions, active, cache)))
+        case Member:
+            result = expression_effect(object, aliases, functions, active, cache)
+        case FieldReference:
+            result = expression_effect(object, aliases, functions, active, cache)
+        case IndexReference:
+            result = max(expression_effect(object, aliases, functions, active, cache), expression_effect(index, aliases, functions, active, cache))
+        case Convert:
+            result = expression_effect(operand, aliases, functions, active, cache)
+        case BlockValue:
+            result = max(block_effect(body, aliases, functions, active, false, cache), expression_effect(value, aliases, functions, active, cache))
+        case Subscript:
+            result = max(expression_effect(object, aliases, functions, active, cache), expression_effect(index, aliases, functions, active, cache))
+        case ListLiteral:
+            for element in elements:
+                result = max(result, expression_effect(element, aliases, functions, active, cache))
+        case _:
+            pass
+    return result
+
+
+def block_effect(body: universal.Block, aliases: list[string], functions: list[universal.FunctionDeclaration], active: list[string], owns_result: bool, cache: list[CachedEffect]) -> int:
+    result := 0
+    for statement in body.statements:
+        match statement:
+            case BindingStatement:
+                result = max(result, expression_effect(binding.value, aliases, functions, active, cache))
+                if binding.name in aliases:
+                    result = max(result, 1)
+                if root(binding.value) in aliases:
+                    aliases.append(binding.name)
+                    if binding.type_id.index != 0:
+                        aliases.append("$binding$" + string(binding.id.index))
+            case GrammarApply:
+                for operand in operands:
+                    result = max(result, expression_effect(operand, aliases, functions, active, cache))
+                if syntax.grammar_name == "Assign" and len(operands) > 0:
+                    if root(operands[0]) in aliases:
+                        result = max(result, 1)
+                if syntax.grammar_name == "Return" and owns_result and len(operands) > 0:
+                    match operands[0].kind:
+                        case BindingReference:
+                            if root(operands[0]) in aliases:
+                                result = 2
+                        case _:
+                            pass
+                for nested in bodies:
+                    result = max(result, block_effect(nested, aliases, functions, active, owns_result, cache))
+            case FieldSet:
+                if root(target) in aliases:
+                    result = max(result, 1)
+                result = max(result, expression_effect(value, aliases, functions, active, cache))
+            case Return:
+                returned ?= value
+                if returned != None:
+                    result = max(result, expression_effect(returned, aliases, functions, active, cache))
+                    if owns_result and root(returned) in aliases:
+                        match returned.kind:
+                            case Name:
+                                result = 2
+                            case BindingReference:
+                                result = 2
+                            case Ownership:
+                                if mode == "move":
+                                    result = 2
+                            case _:
+                                pass
+            case Drop:
+                if root(value) in aliases:
+                    result = 2
+            case ExpressionStatement:
+                result = max(result, expression_effect(expression, aliases, functions, active, cache))
+            case Assert:
+                result = max(result, expression_effect(condition, aliases, functions, active, cache))
+            case If:
+                result = max(result, expression_effect(condition, aliases, functions, active, cache))
+                result = max(result, block_effect(then_block, aliases, functions, active, owns_result, cache))
+                result = max(result, block_effect(else_block, aliases, functions, active, owns_result, cache))
+            case While:
+                result = max(result, expression_effect(condition, aliases, functions, active, cache))
+                result = max(result, block_effect(body, aliases, functions, active, owns_result, cache))
+            case ForEach:
+                result = max(result, expression_effect(iterable, aliases, functions, active, cache))
+                result = max(result, block_effect(body, aliases, functions, active, owns_result, cache))
+            case Unsafe:
+                result = max(result, block_effect(body, aliases, functions, active, owns_result, cache))
+            case _:
+                pass
+    return result
+
+
+def infer(function: universal.FunctionDeclaration, index: int, functions: list[universal.FunctionDeclaration], cache: list[CachedEffect]) -> int:
+    # A pass visits each reachable parameter once. Repeat until the finite
+    # lattice stabilizes so recursive and mutually recursive callers agree.
+    result := 0
+    while true:
+        before := 0
+        count = len(cache)
+        for cached in cache:
+            before += cached.effect
+        result = parameter(function, index, functions, [], cache)
+        after := 0
+        for cached in cache:
+            after += cached.effect
+        if before == after and count == len(cache):
+            return result
+    return result

@@ -56,6 +56,14 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
                 if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
                     return universal.TypeId(200 + element.index)
+                if element.index == 3:
+                    for record in records:
+                        if record.storage_element.index == element.index:
+                            return record.type_id
+                    id = universal.TypeId(u32(1000 + len(records)))
+                    fields = [universal.FunctionParameter("data", universal.named_type("string", [], annotation.span), None, annotation.span, type_id=universal.TypeId(3)), universal.FunctionParameter("ends", universal.named_type("list", [universal.named_type("int", [], annotation.span)], annotation.span), None, annotation.span, type_id=universal.TypeId(264))]
+                    records.append(universal.RecordDeclaration("$buffer$string", fields, [], annotation.span, type_id=id, storage_element=element, representation="OwnedBuffer"))
+                    return id
                 if not storage_types.copy_storage(element, records):
                     return error(diagnostics.diagnostic_at("E000205", "buffer elements require copyable storage; owned elements require destruction lowering", annotation.span))
                 for record in records:

@@ -9,6 +9,19 @@ class Loan:
     exclusive: bool
 
 
+def constant_index(expression: universal.Expression) -> int:
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    return int(spelling)
+                case _:
+                    pass
+        case _:
+            pass
+    return -1
+
+
 def binding(expression: universal.Expression) -> int:
     match expression.kind:
         case BindingReference:

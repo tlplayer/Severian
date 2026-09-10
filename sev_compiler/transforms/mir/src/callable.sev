@@ -73,7 +73,6 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             payload = mir_expression(module, context, scope, value)
             if storage_types.owned_record(expression.type_id, module.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
-                aggregate.initialize(module, context, scope.aggregates, handle, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
                 tag = mir_value(module, universal.TypeId(64))
                 cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(variant)), tag))
@@ -118,6 +117,17 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             if storage_types.owned_record(expression.type_id, module.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
+                for record in module.records:
+                    if record.type_id.index == expression.type_id.index:
+                        field_index := 0
+                        for field in record.fields:
+                            present := false
+                            for argument in fields:
+                                if argument.name == field.name:
+                                    present = true
+                            if not present:
+                                aggregate.initialize(module, context, scope.aggregates, members[field_index], field.type_id)
+                            field_index += 1
                 for argument in fields:
                     value = mir_expression(module, context, scope, argument.value)
                     for record in module.records:
@@ -211,7 +221,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
 # remain visible to the existing ownership pipeline, including loop backedges.
 def callable_exclusive_parameter(parameter: universal.FunctionParameter) -> bool:
     for modifier in parameter.modifiers:
-        if modifier.name == "borrow mut":
+        if modifier.name in ["borrow mut", "inferred write"]:
             return true
     return false
 

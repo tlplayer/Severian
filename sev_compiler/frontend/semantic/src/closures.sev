@@ -1,0 +1,40 @@
+import universal
+
+
+class Closure:
+    type_id: universal.TypeId
+    parameters: list[string]
+    body: universal.Expression
+    captures: list[string]
+
+
+def names(value: universal.Expression, result: list[string]):
+    match value.kind:
+        case Name:
+            if name not in result:
+                result.append(name)
+        case Binary:
+            names(left, result)
+            names(right, result)
+        case Unary:
+            names(operand, result)
+        case Ownership:
+            names(value, result)
+        case Member:
+            names(object, result)
+        case Subscript:
+            names(object, result)
+            names(index, result)
+        case Call:
+            names(callee, result)
+            for argument in arguments:
+                names(argument.value, result)
+        case Conditional:
+            names(condition, result)
+            names(then_value, result)
+            names(else_value, result)
+        case ListLiteral:
+            for element in elements:
+                names(element, result)
+        case _:
+            pass

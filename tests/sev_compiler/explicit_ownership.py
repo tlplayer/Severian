@@ -32,6 +32,81 @@ class ExplicitOwnership(MigrationCase):
         ''')
         OwnedRecords.check_allocations(self)
 
+    def test_owned_builder_initializes_fields_before_escape(self):
+        path = ROOT / 'docs/examples/06-ownership/02-owned-builder.sev'
+        self.native(path.read_text())
+        for body, diagnostic in [
+            ('item := Pair()\n    print(item.name)', 'uninitialized field'),
+            ('item := Pair()\n    item.name = "set"\n    return item', 'partially initialized'),
+            ('item := Pair()\n    if flag:\n        item.name = "set"\n    item.count = 1\n    return item', 'partially initialized'),
+        ]:
+            with self.subTest(body=body):
+                self.rejects('class Pair:\n    name: string\n    count: int\n'
+                             'def make(flag: bool) -> Pair:\n    ' + body, diagnostic)
+
+    def test_inferred_parameter_effects_example(self):
+        path = ROOT / 'docs/examples/06-ownership/04-inferred-parameter-effects.sev'
+        self.native(path.read_text())
+
+    def test_owned_string_collection_storage_and_returns(self):
+        self.native('''
+            def make() -> list[string]:
+                return ["a" + "λ", "😀", ""]
+            test:
+                values := make()
+                assert(len(values) == 3)
+                assert(values[0] == "aλ")
+                assert(values[1] == "😀")
+                saved = clone values
+                values[0] = "changed"
+                values.append("tail" + "!")
+                assert(saved[0] == "aλ")
+                assert(values[1] == "😀")
+                assert(values[2] == "")
+                assert(values[3] == "tail!")
+                values.clear()
+                assert(len(values) == 0)
+                assert(len(saved) == 3)
+        ''')
+        OwnedRecords.check_allocations(self)
+
+    def test_collection_moves_leave_other_elements_available(self):
+        path = ROOT / 'docs/examples/06-ownership/06-collections.sev'
+        self.native(path.read_text())
+        self.native('''
+            test:
+                values := ["a", "b"]
+                removed = move values[0]
+                assert(values[1] == "b")
+                reject:
+                    print(values[0])
+                values[0] = "replacement"
+                assert(values.length() == 2)
+                assert(values[0] == "replacement")
+                for value in borrow values:
+                    assert(value.length() > 0)
+                values.append("after iteration")
+                assert(values.length() == 3)
+        ''')
+        OwnedRecords.check_allocations(self)
+
+    def test_scalar_closure_captures_snapshot_values(self):
+        path = ROOT / 'docs/examples/06-ownership/08-closures.sev'
+        self.native(path.read_text())
+        self.native('''
+            def argument() -> int:
+                print("once")
+                return 4
+            test:
+                offset := 3
+                add = lambda value: value + offset
+                offset = 99
+                assert(add(argument()) == 7)
+                assert(add(value=5) == 8)
+                product = lambda left, right: left * right
+                assert(product(6, 7) == 42)
+        ''', expected='once\n')
+
     def test_move_and_borrow_rejections_reach_semantics(self):
         cases = [
             ('value := "owned"\n    consumed = move value\n    print(value)', 'use after drop or move'),

@@ -13,6 +13,9 @@ def buffer_element(id: TypeId, records: list[RecordDeclaration]) -> TypeId:
 
 
 def indirect_value(id: TypeId, records: list[RecordDeclaration]) -> bool:
+    for record in records:
+        if record.type_id.index == id.index and record.representation == "OwnedBuffer":
+            return true
     return id.index >= 1000 and buffer_element(id, records).index == 0
 
 

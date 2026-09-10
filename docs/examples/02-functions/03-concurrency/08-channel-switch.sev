@@ -5,7 +5,7 @@ def handle(command: string):
     print("command:", command)
 
 def main():
-    messages = channel[string](16) #buffer size 16
+    messages = channel[string,16B] #buffer size 16
     commands = channel[string] # unbounded channel
 
     message_producer = async messages.send("hello")

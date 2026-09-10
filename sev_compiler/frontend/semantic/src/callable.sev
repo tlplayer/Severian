@@ -18,6 +18,8 @@ import * from "../../../universal/type/integer_spelling.sev" as integer_spelling
 import * from "test_modes.sev" as test_modes
 import * from "../../../universal/primitive/slicing.sev" as slicing
 import * from "loans.sev" as loans
+import * from "parameter_effects.sev" as parameter_effects
+import * from "closures.sev" as closures
 
 
 class TransitionState:
@@ -53,6 +55,12 @@ class CallableAnalysis:
     readonly: list[int] = []
     borrowed_parameters: list[int] = []
     result_mode: string = ""
+    uninitialized: list[tuple[int, int]] = []
+    moved_elements: list[tuple[int, int]] = []
+    projecting: bool = false
+    initializing: bool = false
+    parameter_effects: list[parameter_effects.CachedEffect] = []
+    closures: list[closures.Closure] = []
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -73,13 +81,94 @@ def callable_parameter_value(state: CallableAnalysis, parameter: universal.Funct
             return callable_expression(state, wrapped, expected)
     value = callable_expression(state, expression, expected)
     root = loans.binding(value)
-    if root >= 0 and (storage_types.buffer_element(value.type_id, state.records).index != 0 or storage_types.indirect_value(value.type_id, state.records)):
-        # An unqualified mutable aggregate boundary has no shared-view contract.
-        # Until effects are inferred, require exclusive access conservatively.
-        loans.access(state.loans, root, true, expression.span)
-        if root in state.readonly:
+    effect := 0 if value.type_id.index == 3 else 1
+    for modifier in parameter.modifiers:
+        if modifier.name == "inferred read":
+            effect = 0
+        if modifier.name == "inferred move":
+            effect = 2
+    if root >= 0 and (value.type_id.index == 3 or storage_types.buffer_element(value.type_id, state.records).index != 0 or storage_types.indirect_value(value.type_id, state.records)):
+        loans.access(state.loans, root, effect != 0, expression.span)
+        if effect != 0 and root in state.readonly:
             return error(callable_diagnostic("shared borrow requires a shared parameter contract", expression.span))
+        if effect == 2:
+            match value.kind:
+                case Ownership:
+                    if mode == "move":
+                        return value
+                case _:
+                    pass
+            return callable_expression(state, universal.Expression(universal.Ownership("move", value), expression.span), expected)
     return value
+
+
+def callable_inferred_signature(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.FunctionDeclaration:
+    if function.body == None or function.operator_syntax != None:
+        return function
+    parameters: list[universal.FunctionParameter] = []
+    index := 0
+    candidates = state.functions[:]
+    for generic in state.generics:
+        candidates.append(generic)
+    for parameter in function.parameters:
+        explicit := false
+        for modifier in parameter.modifiers:
+            if modifier.name in ["borrow", "borrow mut", "move", "inferred read", "inferred write", "inferred move"]:
+                explicit = true
+        owning = parameter.type_id.index == 3 or storage_types.buffer_element(parameter.type_id, state.records).index != 0 or storage_types.owned_record(parameter.type_id, state.records) or callable_has_drop(state, parameter.type_id)
+        if owning and not explicit:
+            key = string(function.id.value) + ":" + parameter.name
+            effect := -1
+            for cached in state.parameter_effects:
+                if cached.key == key:
+                    effect = cached.effect
+            if effect < 0:
+                effect = parameter_effects.infer(function, index, candidates, state.parameter_effects)
+                state.parameter_effects.append(parameter_effects.CachedEffect(key, effect))
+            parameter.modifiers = parameter.modifiers[:]
+            parameter.modifiers.append(universal.BoundaryModifier("inferred move" if effect == 2 else ("inferred write" if effect == 1 else "inferred read")))
+        parameters.append(parameter)
+        index += 1
+    function.parameters = parameters
+    return function
+
+
+def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, receiver: universal.Expression, arguments: list[universal.CallArgument], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    parameters: list[universal.FunctionParameter] = []
+    operands: list[universal.CallArgument] = []
+    for record in state.records:
+        if record.type_id.index == closure.type_id.index:
+            index := 0
+            for field in record.fields:
+                parameters.append(field)
+                value = universal.Expression(universal.FieldReference(receiver, index), span, type_id=field.type_id)
+                operands.append(universal.CallArgument(field.name, value, span))
+                index += 1
+    inputs: list[universal.FunctionParameter] = []
+    for name in closure.parameters:
+        inputs.append(universal.FunctionParameter(name, universal.named_type("int", [], span), None, span))
+    bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=inputs), arguments)
+    if bound.message != "":
+        return error(callable_diagnostic(bound.message, span))
+    for argument in bound.arguments:
+        value = callable_expression(state, argument.value, universal.TypeId(0))
+        operands.append(universal.CallArgument(argument.name, value, argument.span))
+    for parameter in inputs:
+        for argument in operands:
+            if argument.name == parameter.name:
+                parameter.type_id = argument.value.type_id
+                parameter.annotation = universal.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
+        parameters.append(parameter)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants)
+    for parameter in parameters:
+        local.names.append(parameter.name)
+        local.types.append(parameter.type_id)
+        local.mutables.append(false)
+    result = callable_expression(local, closure.body, expected)
+    ordinal = len(state.functions) + 1
+    function = universal.FunctionDeclaration(name="$lambda$" + string(ordinal), parameters=parameters, parameter_types=local.types, result_type=result.type_id, body=universal.Block([universal.Return(result, span)]), span=span, id=universal.FunctionId(u128(ordinal)), definition=universal.DefId(0, 0, universal.DeclarationId(u128(ordinal))), lookup=state.namespace)
+    state.functions.append(function)
+    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), operands), span, type_id=result.type_id)
 
 
 def callable_require_unsafe(state: CallableAnalysis, span: source.Span) -> unit | diagnostics.Diagnostic:
@@ -396,7 +485,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     instance_name = template.name + "$pack$" + string(count) + suffix
     for function in state.functions:
         if function.name == instance_name:
-            return CallableSelection(function, bound.arguments)
+            return CallableSelection(callable_inferred_signature(state, function), bound.arguments)
     if callable_specialization_count(state) >= 512:
         return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup)
@@ -445,7 +534,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
             message = bound.message
             continue
         if len(candidates) == 1:
-            return CallableOptionalSelection(CallableSelection(function, bound.arguments))
+            return CallableOptionalSelection(CallableSelection(callable_inferred_signature(state, function), bound.arguments))
         compatible := true
         for argument in bound.arguments:
             typed = callable_expression(callable_scope(state), argument.value, universal.TypeId(0))
@@ -456,7 +545,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
                         compatible = false
                 index += 1
         if compatible:
-            return CallableOptionalSelection(CallableSelection(function, bound.arguments))
+            return CallableOptionalSelection(CallableSelection(callable_inferred_signature(state, function), bound.arguments))
     return error(callable_diagnostic(message, arguments[0].span if len(arguments) != 0 else None))
 
 
@@ -557,6 +646,26 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
     result_type := expected
     kind := expression.kind
     match expression.kind:
+        case Lambda:
+            mentioned: list[string] = []
+            closures.names(body, mentioned)
+            captures: list[string] = []
+            fields: list[universal.FunctionParameter] = []
+            values: list[universal.CallArgument] = []
+            for name in mentioned:
+                if name in state.names and name not in parameters:
+                    reference = universal.Expression(universal.Name(name), expression.span)
+                    value = callable_expression(state, reference, universal.TypeId(0))
+                    if not storage_types.copy_storage(value.type_id, state.records):
+                        return error(callable_diagnostic("owned closure captures require a capture ownership contract", expression.span))
+                    captures.append(name)
+                    annotation = universal.named_type(definitions.type_name(value.type_id, state.records), [], expression.span)
+                    fields.append(universal.FunctionParameter(name, annotation, None, expression.span, type_id=value.type_id))
+                    values.append(universal.CallArgument(name, value, expression.span))
+            type_id = universal.TypeId(u32(1000 + len(state.records)))
+            state.records.append(universal.RecordDeclaration("$closure$" + string(type_id.index), fields, [], expression.span, type_id=type_id))
+            state.closures.append(closures.Closure(type_id, parameters, body, captures))
+            return universal.Expression(universal.RecordValue(values), expression.span, type_id=type_id)
         case Ownership:
             if expression.type_id.index != 0:
                 return expression
@@ -583,6 +692,13 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 match operand.kind:
                     case BindingReference:
                         state.dead.append(binding_index)
+                    case IndexReference:
+                        position = loans.constant_index(index)
+                        if position < 0:
+                            return error(callable_diagnostic("element move requires a constant nonnegative index", expression.span))
+                        state.moved_elements.append((binding_index, position))
+                    case FieldReference:
+                        state.uninitialized.append((binding_index, index))
                     case _:
                         return error(callable_diagnostic("partial moves require field initialization tracking", expression.span))
             else:
@@ -678,7 +794,16 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if position < 0 or position >= len(pack.values):
                     return error(callable_diagnostic("field pack index is out of bounds", index.span))
                 return callable_expression(state, pack.values[position], expected)
+            projecting = state.projecting
+            state.projecting = true
             receiver = callable_expression(state, object, universal.TypeId(0))
+            state.projecting = projecting
+            if not state.initializing:
+                for moved in state.moved_elements:
+                    if moved[0] == loans.binding(receiver):
+                        position = loans.constant_index(index)
+                        if position < 0 or moved[1] == position:
+                            return error(callable_diagnostic("use after move of collection element", expression.span))
             pointee = callable_pointer_element(state, receiver.type_id)
             if pointee.index != 0:
                 callable_require_unsafe(state, expression.span)
@@ -809,7 +934,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case FieldReference:
             result_type = expression.type_id
         case Member:
+            projecting = state.projecting
+            state.projecting = true
             receiver = callable_expression(state, object, universal.TypeId(0))
+            state.projecting = projecting
             for record in state.records:
                 if record.type_id.index == receiver.type_id.index and len(universal.union_variants(record)) != 0:
                     return callable_union_member(state, receiver, record, name, expression.span, expected)
@@ -820,6 +948,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     index := 0
                     for field in record.fields:
                         if field.name == name:
+                            if not state.initializing:
+                                for missing in state.uninitialized:
+                                    if missing[0] == loans.binding(receiver) and missing[1] == index:
+                                        return error(callable_diagnostic("read of uninitialized field " + name, expression.span))
                             if field.name.starts_with("__") and state.owner.index != record.type_id.index:
                                 return error(callable_diagnostic("field is private: " + name, expression.span))
                             if expected.index != 0 and expected.index != field.type_id.index:
@@ -835,6 +967,13 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             index := 0
             for known in state.names:
                 if known == name:
+                    if not state.projecting:
+                        for moved in state.moved_elements:
+                            if moved[0] == index:
+                                return error(callable_diagnostic("use of partially moved collection " + name, expression.span))
+                        for missing in state.uninitialized:
+                            if missing[0] == index:
+                                return error(callable_diagnostic("use of partially initialized value " + name, expression.span))
                     if index in state.dead:
                         return error(callable_diagnostic("use after drop or move: " + name, expression.span))
                     loans.access(state.loans, index, false, expression.span)
@@ -1049,6 +1188,14 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if argument.spread:
                     return error(callable_diagnostic("call-site expansion requires a compile-time expression pack", argument.span))
             name = callable_path(callee)
+            local_index := 0
+            for local_name in state.names:
+                if local_name == name:
+                    for closure in state.closures:
+                        if closure.type_id.index == state.types[local_index].index:
+                            receiver = callable_expression(state, callee, closure.type_id)
+                            return callable_closure_call(state, closure, receiver, arguments, expression.span, expected)
+                local_index += 1
             if name == "free":
                 callable_require_unsafe(state, expression.span)
                 if len(arguments) != 1 or arguments[0].name != None:
@@ -1111,6 +1258,16 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             return callable_expression(state, universal.Expression(universal.Call(target, arguments), expression.span), expected)
                     bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=record.fields), arguments)
                     if bound.message != "":
+                        creation ?= state.resource_creation
+                        if creation != None:
+                            if len(arguments) == 0 and creation.start == expression.span.start and creation.end == expression.span.end and creation.source.index == expression.span.source.index:
+                                defaults: list[universal.CallArgument] = []
+                                for field in record.fields:
+                                    default ?= field.default
+                                    if default != None:
+                                        typed_default = callable_expression(state, default, field.type_id)
+                                        defaults.append(universal.CallArgument(field.name, typed_default, field.span))
+                                return universal.Expression(universal.RecordValue(defaults), expression.span, type_id=record.type_id)
                         return error(callable_diagnostic(bound.message, expression.span))
                     resolved: list[universal.CallArgument] = []
                     for argument in bound.arguments:
@@ -1136,8 +1293,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         index += 1
                 return callable_resolved_operator(state, type_function, operands, expression.span, expected)
             method_lookup = callable_method(state, callee)
-            method ?= method_lookup.function
-            if method != None:
+            source_method ?= method_lookup.function
+            if source_method != None:
+                method = callable_inferred_signature(state, source_method)
                 receiver = callable_receiver(state, callee)
                 if receiver.type_id.index >= 100000:
                     supplied: list[universal.Expression] = [receiver]
@@ -1341,6 +1499,21 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     state.types.append(value.type_id)
     state.mutables.append(binding.mutable)
     match value.kind:
+        case RecordValue:
+            for record in state.records:
+                if record.type_id.index == value.type_id.index:
+                    field_index := 0
+                    for field in record.fields:
+                        present := false
+                        for argument in fields:
+                            if argument.name == field.name:
+                                present = true
+                        if not present:
+                            state.uninitialized.append((int(id.index), field_index))
+                        field_index += 1
+        case _:
+            pass
+    match value.kind:
         case Ownership:
             if mode in ["borrow", "borrow mut"]:
                 root = loans.owner(state.loans, loans.binding(value))
@@ -1516,7 +1689,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         state.resources.append(int(typed_binding.id.index))
                     output.statements.append(universal.BindingStatement(typed_binding))
             case FieldSet:
+                state.initializing = update == None
                 resolved = callable_expression(state, target, universal.TypeId(0))
+                state.initializing = false
                 root = loans.binding(resolved)
                 if root >= 0:
                     loans.access(state.loans, root, true, span)
@@ -1539,6 +1714,21 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     case _:
                         return error(callable_diagnostic("assignment requires a writable place", span))
                 typed = callable_expression(state, value, resolved.type_id)
+                match resolved.kind:
+                    case FieldReference:
+                        remaining: list[tuple[int, int]] = []
+                        for missing in state.uninitialized:
+                            if missing[0] != root or missing[1] != index:
+                                remaining.append(missing)
+                        state.uninitialized = remaining
+                    case IndexReference:
+                        remaining: list[tuple[int, int]] = []
+                        for moved in state.moved_elements:
+                            if moved[0] != root or moved[1] != loans.constant_index(index):
+                                remaining.append(moved)
+                        state.moved_elements = remaining
+                    case _:
+                        pass
                 match resolved.kind:
                     case BindingReference:
                         callable_transition(state, int(binding.index), typed, span, true)
@@ -1667,6 +1857,22 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 callable_join_transitions(state, then_state, else_state)
                 then_exits = callable_terminates(then_typed)
                 else_exits = callable_terminates(else_typed)
+                state.uninitialized.clear()
+                state.moved_elements.clear()
+                if not then_exits:
+                    for moved in then_state.moved_elements:
+                        if moved[0] < len(state.names):
+                            state.moved_elements.append(moved)
+                    for missing in then_state.uninitialized:
+                        if missing[0] < len(state.names):
+                            state.uninitialized.append(missing)
+                if not else_exits:
+                    for moved in else_state.moved_elements:
+                        if moved[0] < len(state.names):
+                            state.moved_elements.append(moved)
+                    for missing in else_state.uninitialized:
+                        if missing[0] < len(state.names):
+                            state.uninitialized.append(missing)
                 if not then_exits and not else_exits:
                     for binding in state.resources:
                         if (binding in then_state.dead) != (binding in else_state.dead):
@@ -2102,9 +2308,10 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 return error(callable_diagnostic("declaration is outside the scalar bootstrap subset", None))
     index := int(len(visible))
     while index < len(state.functions):
-        function = state.functions[index]
+        function := state.functions[index]
         index += 1
         if function.body != None:
+            function = callable_inferred_signature(state, function)
             function.body = callable_body(state, function)
         module.functions.append(function)
         if function.name == "main" and not include_tests:
@@ -2191,7 +2398,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2267,6 +2474,11 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
     loop_body = callable_block(local, statements, result_type, false)
     advance = callable_control(state, "Assign", [cursor, next], [], span)
     output.statements.append(callable_control(state, "For", [condition], [loop_body, universal.Block([advance])], span))
+    remaining: list[loans.Loan] = []
+    for loan in state.loans:
+        if loan.borrower != int(receiver_binding.id.index):
+            remaining.append(loan)
+    state.loans = remaining
     return output
 
 

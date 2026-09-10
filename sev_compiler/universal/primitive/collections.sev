@@ -139,8 +139,8 @@ def __buffer_store[T](value: T, values: list[T], position: index)
 def __buffer_dimension[T](values: list[T], axis: index) -> index
 
 extend list[T]:
-    def length() -> int:
-        return __list_size(__buffer_dimension(self, 0))
+    def length() -> usize:
+        return usize(__list_size(__buffer_dimension(self, 0)))
 
     def clear():
         self = __buffer_allocate(__list_index(0))

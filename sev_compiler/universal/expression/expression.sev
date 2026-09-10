@@ -29,6 +29,7 @@ enum ResolvedCallee:
 
 
 enum ExpressionKind:
+    Lambda(parameters: list[string], body: Expression)
     Ownership(mode: string, value: Expression)
     AddressOf(value: Expression)
     TypeLayout(subject: TypeId, alignment: bool)

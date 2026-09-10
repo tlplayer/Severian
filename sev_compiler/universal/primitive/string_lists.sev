@@ -1,0 +1,73 @@
+# Owned strings use a packed pool and cumulative character offsets. Both
+# allocations remain ordinary SSA values through aggregate decomposition, so
+# replacement, returns, branches and loops use the normal ownership pipeline.
+# Source protocols provide construction and access just as for scalar buffers.
+operator list_create(size: int, exemplar: string) -> list[string]:
+    assert(size >= 0)
+    ends: list[int] = []
+    for position in range(size):
+        ends.append(0)
+    return list[string]("", ends)
+
+operator len(values: list[string]) -> int:
+    return len(values.ends)
+
+operator size(values: list[string]) -> int:
+    return len(values.ends)
+
+operator element_at(values: list[string], position: int) -> string:
+    assert(position >= 0)
+    assert(position < len(values.ends))
+    start = values.ends[position - 1] if position > 0 else 0
+    return values.data[start:values.ends[position]]
+
+operator element_set(values: list[string], position: int, value: string):
+    assert(position >= 0)
+    assert(position < len(values.ends))
+    start = values.ends[position - 1] if position > 0 else 0
+    end = values.ends[position]
+    difference = value.length() - (end - start)
+    values.data = values.data[:start] + value + values.data[end:]
+    offsets = clone values.ends
+    for index in range(position, len(offsets)):
+        offsets[index] += difference
+    values.ends = offsets
+
+operator iteration_start(values: list[string]) -> int:
+    return 0
+
+operator iteration_more(values: list[string], position: int) -> bool:
+    return position < len(values.ends)
+
+operator iteration_next(values: list[string], position: int) -> int:
+    return position + 1
+
+operator copy(values: list[string]) -> list[string]:
+    return list[string](clone values.data, clone values.ends)
+
+operator ==(left: list[string], right: list[string]) -> bool:
+    if len(left) != len(right):
+        return false
+    for index in range(len(left)):
+        if left[index] != right[index]:
+            return false
+    return true
+
+operator if[G:If](self: list[string]) -> bool:
+    return len(self.ends) != 0
+
+type StringList = list[string]
+
+extend StringList:
+    def length() -> usize:
+        return usize(len(self.ends))
+
+    def clear():
+        self.data = ""
+        self.ends = []
+
+    def append(value: string):
+        self.data = self.data + value
+        offsets = clone self.ends
+        offsets.append(self.data.length())
+        self.ends = offsets

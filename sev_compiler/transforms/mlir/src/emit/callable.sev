@@ -8,7 +8,7 @@ import * from "../../../../universal/declaration/scalar.sev" as boundary
 def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> MlirType:
     for record in records:
         if record.type_id.index == id.index:
-            if record.storage_element.index != 0:
+            if record.storage_element.index != 0 and record.representation != "OwnedBuffer":
                 return memref_type(integer_type(8).scalar, [-1])
             fields: list[MlirType] = []
             for field in record.fields:

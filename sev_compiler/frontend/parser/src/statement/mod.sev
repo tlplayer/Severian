@@ -987,6 +987,19 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
 
 def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
     token = parser_peek(parser)
+    if parser_at_identifier(parser, "lambda"):
+        parser_next(parser)
+        parameters: list[string] = []
+        while not parser_at_symbol(parser, ":"):
+            parameter = parser_identifier(parser, "expected lambda parameter")[0]
+            if parameter in parameters:
+                return error(parser_fail(parser, "duplicate lambda parameter"))
+            parameters.append(parameter)
+            if parser_take_symbol(parser, ",") == None:
+                break
+        parser_expect_symbol(parser, ":", "expected : before lambda body")
+        body = parse_expression(parser, 0)
+        return universal.Expression(universal.Lambda(parameters, body), source.Span(token.span.source, token.span.start, body.span.end))
     # Parenthesized calls keep ordinary callable lookup; prefix ownership forms
     # carry their operation explicitly through parsing and semantic analysis.
     if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move") or parser_at_identifier(parser, "clone"):
