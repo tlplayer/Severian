@@ -4,6 +4,65 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn runtime_helpers_preserve_nested_list_types_in_both_orders() {
+    for declarations in [
+        "integers: list[list[int]] = [[1]]\nstrings: list[list[string]] = [[\"hello\"]]\n",
+        "strings: list[list[string]] = [[\"hello\"]]\nintegers: list[list[int]] = [[1]]\n",
+    ] {
+        run(
+            &format!("{declarations}more: list[list[int]] = [[2]]\nprint(integers[0][0])\nprint(strings[0][0])\nprint(more[0][0])\n"),
+            "1\nhello\n2\n",
+        );
+    }
+}
+
+#[test]
+fn runtime_helper_identity_preserves_buffer_pointer_provenance() {
+    run(
+        r#"def main():
+    values := [10, 20, 30]
+    unsafe:
+        address = &values[1]
+        address[0] = 99
+        assert(address[1] == 30)
+    assert(values[1] == 99)
+    values.clear()
+    assert(len(values) == 0)
+    print("preserved")
+"#,
+        "preserved\n",
+    );
+}
+
+#[test]
+fn runtime_helpers_preserve_integer_buffer_types_in_both_orders() {
+    for declarations in [
+        "narrow: list[i32] = [1, 2]\nwide: list[i64] = [3, 4]\n",
+        "wide: list[i64] = [3, 4]\nnarrow: list[i32] = [1, 2]\n",
+    ] {
+        let body = format!("{declarations}\n{}", r#"narrow.append(5)
+wide.append(6)
+small: list[i8] = [-128, 127]
+unsigned: list[u16] = [65535]
+bits: list[u64] = [18446744073709551615]
+assert(small[0] == -128)
+assert(small[1] == 127)
+small[1] = -1
+assert(small[1] == -1)
+assert(unsigned[0] == 65535)
+assert(bits[0] == 18446744073709551615)
+print(narrow[0], narrow[2], wide[0], wide[2])
+"#);
+        let source = format!("def main():\n{}", body.lines()
+            .map(|line| format!("    {line}\n")).collect::<String>());
+        run(
+            &source,
+            "1 5 3 6\n",
+        );
+    }
+}
+
 fn run(source: &str, expected_stdout: &str) {
     run_with_modules(source, &[], expected_stdout);
 }

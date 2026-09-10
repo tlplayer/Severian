@@ -771,7 +771,8 @@ impl CfgLowering<'_> {
                     .and_then(|candidate| match &candidate.call_type {
                         severian_mir::CallType::External(call)
                             if call.interface.0 == "native-runtime"
-                                && call.symbol.0.contains("_aggregate") =>
+                                && (call.symbol.0.contains("_aggregate")
+                                    || integer_collection_runtime(&call.symbol.0)) =>
                         {
                             Some((call.symbol.0.clone(), candidate.result))
                         }
@@ -779,13 +780,53 @@ impl CfgLowering<'_> {
                     })
                 {
                     let result_type = self.lower_mir_type(external.1)?;
-                    let result =
-                        (result_type != LoweredType::Unit).then(|| self.new_value(result_type));
+                    // The semantic signature stays concrete through MIR. The C
+                    // collection helpers transport integer slots as int64_t.
+                    let integer_abi = integer_collection_runtime(&external.0);
+                    let abi_type = |ty: LoweredType| match ty {
+                        LoweredType::Integer { bits: 1..=64, .. } if integer_abi => {
+                            LoweredType::Integer { bits: 64, signed: true }
+                        }
+                        _ => ty,
+                    };
+                    for argument in &mut lowered_arguments {
+                        let original = self.value_type(*argument);
+                        let transport = abi_type(original.clone());
+                        if original != transport {
+                            let converted = self.new_value(transport);
+                            operations.push(LirOperation::Convert {
+                                operand: *argument,
+                                result: converted,
+                                // Reinterpreting u64 as a signed C slot preserves
+                                // bits, but is not a numeric promotion.
+                                kind: if matches!(original, LoweredType::Integer { bits: 64, .. }) {
+                                    severian_universal::ConversionKind::Lossy
+                                } else {
+                                    severian_universal::ConversionKind::Promote
+                                },
+                            });
+                            *argument = converted;
+                        }
+                    }
+                    let transport_result = abi_type(result_type.clone());
+                    let mut result = (result_type != LoweredType::Unit)
+                        .then(|| self.new_value(transport_result.clone()));
                     operations.push(LirOperation::RuntimeCall {
                         symbol: external.0,
                         arguments: lowered_arguments,
                         result,
                     });
+                    if let Some(value) = result {
+                        if result_type != transport_result {
+                            let converted = self.new_value(result_type);
+                            operations.push(LirOperation::Convert {
+                                operand: value,
+                                result: converted,
+                                kind: severian_universal::ConversionKind::Lossy,
+                            });
+                            result = Some(converted);
+                        }
+                    }
                     if let (Some(result), Some(destination)) = (result, destination) {
                         operations.push(LirOperation::Store {
                             place: self.lower_place(destination),
@@ -1118,6 +1159,11 @@ impl CfgLowering<'_> {
     fn value_type(&self, value: ValueId) -> LoweredType {
         self.values[value.0 as usize].ty.clone()
     }
+}
+
+fn integer_collection_runtime(symbol: &str) -> bool {
+    (symbol.starts_with("__sev_list_") || symbol.starts_with("__sev_set_"))
+        && symbol.ends_with("_i64")
 }
 
 fn cfg_uses_gpu(body: &severian_lir::CfgBody) -> bool {

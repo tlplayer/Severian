@@ -1469,8 +1469,16 @@ struct Analyzer<'a> {
     lowered_classes: Vec<HirClassDeclaration>,
     runtime_functions: Vec<FunctionDeclaration>,
     helper_bindings: Vec<Binding>,
-    runtime_definitions: BTreeMap<String, DefId>,
+    runtime_definitions: BTreeMap<RuntimeFunctionSignature, DefId>,
     next_class_type: u32,
+}
+
+/// Semantic helper identity is distinct from the shared native symbol.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RuntimeFunctionSignature {
+    symbol: String,
+    parameters: Vec<TypeId>,
+    result: TypeId,
 }
 
 #[derive(Debug, Clone)]
@@ -5738,7 +5746,8 @@ impl Analyzer<'_> {
         let severian_hir::Callee::Direct { function, .. } = callee else {
             return false;
         };
-        self.runtime_definitions.iter().any(|(symbol, definition)| {
+        self.runtime_definitions.iter().any(|(signature, definition)| {
+            let symbol = &signature.symbol;
             definition == function
                 && (symbol == "__sev_list_clear"
                     || symbol.contains("_push_")
@@ -13492,7 +13501,8 @@ impl Analyzer<'_> {
                 arguments,
                 ..
             } => {
-                self.runtime_definitions.iter().any(|(symbol, definition)| {
+                self.runtime_definitions.iter().any(|(signature, definition)| {
+                    let symbol = &signature.symbol;
                     definition == function
                         && (symbol == "__sev_list_address"
                             || (symbol.contains("__sev_pointer_") && symbol.ends_with("_slot_u8")))
@@ -16260,23 +16270,24 @@ impl Analyzer<'_> {
         parameter_types: &[TypeId],
         result_type: TypeId,
     ) -> DefId {
-        let signature = if symbol.contains("_aggregate") {
-            format!(
-                "{symbol}({})->{}",
-                parameter_types
-                    .iter()
-                    .map(|ty| ty.0.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                result_type.0
-            )
-        } else {
-            symbol.to_owned()
+        let signature = RuntimeFunctionSignature {
+            symbol: symbol.to_owned(),
+            parameters: parameter_types.to_vec(),
+            result: result_type,
         };
         if let Some(definition) = self.runtime_definitions.get(&signature) {
             return *definition;
         }
-        let definition = synthetic_runtime_definition(&signature);
+        let identity = format!(
+            "{symbol}({})->{}",
+            parameter_types
+                .iter()
+                .map(|ty| ty.0.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            result_type.0
+        );
+        let definition = synthetic_runtime_definition(&identity);
         let id = FunctionId(definition.declaration.0);
         let parameters = parameter_types
             .iter()
@@ -22645,6 +22656,45 @@ def interpolate(text: string) -> string:
         assert!(symbols.contains(&"__sev_any_string"));
         assert!(symbols.contains(&"__sev_list_append_any"));
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn runtime_helpers_preserve_each_nested_list_signature() {
+        for declarations in [
+            "integers: list[list[int]] = [[1]]\nstrings: list[list[string]] = [[\"hello\"]]\n",
+            "strings: list[list[string]] = [[\"hello\"]]\nintegers: list[list[int]] = [[1]]\n",
+        ] {
+            let (program, _) = analyze_source(&format!(
+                "{declarations}more: list[list[int]] = [[2]]\nprint(integers[0][0])\nprint(strings[0][0])\nprint(more[0][0])\n"
+            ));
+            severian_mir::build(&program).unwrap();
+            for symbol in ["__sev_list_append_list", "__sev_list_index_list"] {
+                let helpers = program.modules[0]
+                    .functions
+                    .iter()
+                    .filter(|function| {
+                        matches!(&function.call_type, severian_hir::CallType::External(call)
+                            if call.symbol.0 == symbol)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(helpers.len(), 2, "deduplicate each typed {symbol} signature");
+                assert_ne!(helpers[0].definition, helpers[1].definition);
+                assert_ne!(helpers[0].id, helpers[1].id);
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_helpers_do_not_accept_incompatible_list_elements() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "wrong-element.sev",
+            "def use():\n    values: list[int] = [1]\n    values.append(\"wrong\")\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert!(error.to_string().contains("expected type"));
     }
 
     #[test]
