@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+launcher=$(readlink -f -- "$0")
+repository=$(dirname -- "$(dirname -- "$launcher")")
+if [ "${1:-}" = update ]; then
+    shift
+    exec python3 "$repository/tools/compiler/update.py" "$@"
+fi
+compiler="$repository/package.pkg/release/sev"
+if [ ! -x "$compiler" ]; then
+    compiler="$repository/package.pkg/debug/sev"
+fi
+if [ ! -x "$compiler" ]; then
+    printf '%s\n' 'Build the Rust seed first: cargo build -p severian-driver --bin sev' >&2
+    exit 1
+fi
+if [ "${1:-}" = --version ]; then
+    printf '%s\n' 'sev_rust (Rust seed compiler)'
+fi
+exec "$compiler" "$@"

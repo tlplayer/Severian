@@ -26,6 +26,10 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case BlockValue:
+            local = CallableMirScope(scope.bindings[:], scope.loops, scope.update_operands, scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+            mir_block(module, context, body, local)
+            return mir_expression(module, context, local, value)
         case Evaluate:
             evaluated = mir_expression(module, context, scope, value)
             return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records), body)

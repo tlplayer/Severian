@@ -36,6 +36,8 @@ enum ExpressionKind:
     Member(object: Expression, name: string)
     Call(callee: Expression, arguments: list[CallArgument])
     ListLiteral(elements: list[Expression])
+    MatchExpression(subject: Expression, arms: list[MatchArm])
+    BlockValue(body: Block, value: Expression)
     Evaluate(value: Expression, body: Expression)
     Fallback(value: Expression, alternative: Expression)
     ThrowValue(value: Expression)

@@ -19,6 +19,11 @@ import "test_modes.sev" as test_modes
 import "../../../universal/primitive/slicing.sev" as slicing
 
 
+class TransitionState:
+    binding: int
+    variants: list[int]
+
+
 class CallableAnalysis:
     names: list[string] = []
     types: list[universal.TypeId] = []
@@ -35,6 +40,7 @@ class CallableAnalysis:
     generics: list[universal.FunctionDeclaration] = []
     contract: universal.FunctionDeclaration | None = None
     refinements: list[tuple[int, int]] = []
+    transitions: list[TransitionState] = []
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -314,12 +320,25 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
 
 def callable_expression(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
     for record in state.records:
-        if record.type_id.index == expected.index and len(universal.outcome_variants(record)) != 0:
+        if record.type_id.index == expected.index and record.representation == "TaggedAggregate":
             value = callable_expression_inner(state, expression, universal.TypeId(0))
             if value.type_id.index == expected.index:
                 return value
             index := 0
-            for variant in universal.outcome_variants(record):
+            for field in record.fields[1:]:
+                if field.type_id.index == value.type_id.index:
+                    return universal.Expression(universal.OutcomeValue(value, index), expression.span, type_id=expected)
+                index += 1
+            return error(callable_diagnostic("value is not a variant of the expected enum", expression.span))
+        if record.type_id.index == expected.index and (len(universal.outcome_variants(record)) != 0 or len(universal.union_variants(record)) != 0):
+            value = callable_expression_inner(state, expression, universal.TypeId(0))
+            if value.type_id.index == expected.index:
+                return value
+            index := 0
+            variants := universal.outcome_variants(record)
+            if len(variants) == 0:
+                variants = universal.union_variants(record)
+            for variant in variants:
                 if variant.index == value.type_id.index:
                     return universal.Expression(universal.OutcomeValue(value, index), expression.span, type_id=expected)
                 index += 1
@@ -339,15 +358,17 @@ def callable_tagged_selection(state: CallableAnalysis, expression: universal.Exp
 
 def callable_tagged_value(state: CallableAnalysis, selection: tagged.VariantSelection, arguments: list[universal.CallArgument], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
     record = state.records[selection.record]
-    if expected.index != 0 and expected.index != record.type_id.index:
-        return error(callable_diagnostic("tagged alternative does not match expected type", span))
     payload_type = record.fields[selection.variant + 1].type_id
+    if expected.index != 0 and expected.index != record.type_id.index and expected.index != payload_type.index:
+        return error(callable_diagnostic("tagged alternative does not match expected type", span))
     for payload in state.records:
         if payload.type_id.index == payload_type.index:
             bound = packs.bind_arguments(universal.FunctionDeclaration(parameters=payload.fields), arguments)
             if bound.message != "":
                 return error(callable_diagnostic(bound.message, span))
             value = callable_expression(state, universal.Expression(universal.RecordValue(bound.arguments), span, type_id=payload_type), payload_type)
+            if expected.index == payload_type.index:
+                return value
             return universal.Expression(universal.OutcomeValue(value, selection.variant), span, type_id=record.type_id)
     return error(callable_diagnostic("tagged alternative has no payload layout", span))
 
@@ -370,6 +391,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
     result_type := expected
     kind := expression.kind
     match expression.kind:
+        case MatchExpression:
+            return callable_match_expression(state, subject, arms, expression.span, expected)
+        case BlockValue:
+            return expression
         case Evaluate:
             return expression
         case Fallback:
@@ -543,6 +568,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             result_type = expression.type_id
         case Member:
             receiver = callable_expression(state, object, universal.TypeId(0))
+            for record in state.records:
+                if record.type_id.index == receiver.type_id.index and len(universal.union_variants(record)) != 0:
+                    return callable_union_member(state, receiver, record, name, expression.span, expected)
             if receiver.type_id.index >= 100000:
                 return callable_required_property(state, receiver, name, expression.span, expected)
             for record in state.records:
@@ -948,11 +976,16 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     index := 0
     for name in state.names:
         if name == binding.name:
+            if binding.scoped:
+                state.names[index] = "$shadowed_" + string(index)
+                index += 1
+                continue
             if binding.mutable or binding.annotation != None:
                 return error(callable_diagnostic("duplicate scalar binding " + binding.name, binding.span))
             if not state.mutables[index]:
                 return error(callable_diagnostic("cannot reassign immutable binding " + name, binding.span))
             value = callable_expression(state, binding.value, state.types[index])
+            callable_transition(state, index, value, binding.span, true)
             return universal.Binding(name, None, value, true, false, binding.span, universal.BindingId(u32(index)), value.type_id, true)
         index += 1
     if binding.update:
@@ -970,6 +1003,7 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     state.names.append(binding.name)
     state.types.append(value.type_id)
     state.mutables.append(binding.mutable)
+    callable_transition(state, int(id.index), value, binding.span, false)
     return universal.Binding(binding.name, binding.annotation, value, false, binding.preserve_error, binding.span, id, value.type_id, binding.mutable)
 
 
@@ -1007,7 +1041,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 field ?= callable_implicit_field(state, binding.name, binding.span)
                 implicit := false
                 if field != None:
-                    if binding.name not in state.names and binding.annotation == None and not binding.mutable:
+                    if not binding.scoped and binding.name not in state.names and binding.annotation == None and not binding.mutable:
                         target = callable_expression(state, field, universal.TypeId(0))
                         value = callable_expression(state, binding.value, target.type_id)
                         output.statements.append(callable_control(state, "Assign", [target, value], [], binding.span))
@@ -1031,6 +1065,11 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     case _:
                         return error(callable_diagnostic("assignment requires a writable place", span))
                 typed = callable_expression(state, value, resolved.type_id)
+                match resolved.kind:
+                    case BindingReference:
+                        callable_transition(state, int(binding.index), typed, span, true)
+                    case _:
+                        pass
                 syntax ?= update
                 if syntax != None:
                     operation := ""
@@ -1116,23 +1155,38 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         pass
                 then_typed = callable_block(then_state, then_block.statements, result_type, false)
                 else_typed = callable_block(else_state, else_block.statements, result_type, false)
+                callable_join_transitions(state, then_state, else_state)
                 returned = callable_terminates(universal.Block([universal.If(resolved, then_typed, else_typed, span)]))
                 output.statements.append(callable_control(state, "If", [resolved], [then_typed, else_typed], span, returned))
             case Match:
-                resolved = callable_expression(state, subject, universal.TypeId(0))
-                expanded := universal.empty_block()
-                tagged_match := false
-                for record in state.records:
-                    if record.type_id.index == resolved.type_id.index and record.representation == "TaggedAggregate":
-                        expanded = tagged.expand_match(record, resolved, arms, span)
-                        tagged_match = true
-                if not tagged_match:
-                    expanded.statements.append(matches.expand_match(resolved, arms, span))
-                typed = callable_block(callable_scope(state), expanded.statements, result_type, false)
+                local = callable_scope(state)
+                binding = callable_binding(local, universal.Binding("$match_subject_" + string(span.start), None, subject, false, true, span))
+                resolved_arms = matches.resolve_arms(state.declarations, state.records, state.namespace, binding.id, binding.type_id, arms, span, false)
+                tail := universal.empty_block()
+                cursor := len(resolved_arms)
+                while cursor > 0:
+                    cursor -= 1
+                    arm = resolved_arms[cursor]
+                    # Tagged matches have proven coverage; a final wildcard is
+                    # unconditional for scalar matches as well.
+                    last = arms[cursor]
+                    exhaustive := last.pattern == None and last.annotation == None
+                    for record in state.records:
+                        if record.type_id.index == binding.type_id.index:
+                            if record.representation == "TaggedAggregate" or len(universal.union_variants(record)) != 0 or len(universal.outcome_variants(record)) != 0:
+                                exhaustive = true
+                    if cursor == len(resolved_arms) - 1 and exhaustive:
+                        tail = arm.body
+                    else:
+                        tail = universal.Block([universal.If(arm.condition, arm.body, tail, span)])
+                typed = callable_block(local, tail.statements, result_type, false)
+                output.statements.append(universal.BindingStatement(binding))
                 for nested in typed.statements:
                     output.statements.append(nested)
                 returned = callable_terminates(typed)
+                state.transitions.clear()
             case ForEach:
+                state.transitions.clear()
                 pack = callable_field_pack(state, iterable)
                 expanded := universal.empty_block()
                 if pack.found:
@@ -1142,6 +1196,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 for nested in expanded.statements:
                     output.statements.append(nested)
             case While:
+                # A loop may execute repeatedly; discard straight-line state
+                # facts before checking its body and subsequent statements.
+                state.transitions.clear()
                 resolved = callable_expression(state, condition, universal.TypeId(1))
                 local = callable_scope(state)
                 local.loop_depth += 1
@@ -1318,7 +1375,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
             continue
-        if record.name.starts_with("$outcome$") or record.storage_element.index != 0:
+        if record.name.starts_with("$outcome$") or record.name.starts_with("$union$") or record.storage_element.index != 0:
             continue
         resolved_fields: list[universal.FunctionParameter] = []
         field_names: list[string] = []
@@ -1590,7 +1647,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:])
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:])
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2879,3 +2936,145 @@ def callable_type_method(state: CallableAnalysis, callee: universal.Expression) 
         case _:
             pass
     return CallableOptionalFunction()
+
+
+def callable_match_expression(state: CallableAnalysis, subject: universal.Expression, arms: list[universal.MatchArm], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    local = callable_scope(state)
+    binding = callable_binding(local, universal.Binding("$match_subject_" + string(span.start), None, subject, false, true, span))
+    resolved = matches.resolve_arms(state.declarations, state.records, state.namespace, binding.id, binding.type_id, arms, span, true)
+    values: list[universal.Expression] = []
+    conditions: list[universal.Expression] = []
+    result_type := expected
+    for arm in resolved:
+        scoped = callable_scope(local)
+        statements = arm.body.statements
+        if len(statements) == 0:
+            return error(callable_diagnostic("match expression arm requires a final value", span))
+        body = callable_block(scoped, statements[:-1], universal.TypeId(2), false)
+        if callable_terminates(body):
+            return error(callable_diagnostic("match expression arm must reach its final value", span))
+        last := statements[-1]
+        match last:
+            case Match:
+                last = universal.ExpressionStatement(universal.Expression(universal.MatchExpression(subject, arms), span))
+            case _:
+                pass
+        match last:
+            case ExpressionStatement:
+                value = callable_expression(scoped, expression, result_type)
+                if value.type_id.index == 2:
+                    return error(callable_diagnostic("match expression arm requires a value", expression.span))
+                result_type = value.type_id
+                values.append(universal.Expression(universal.BlockValue(body, value), span, type_id=result_type))
+            case _:
+                return error(callable_diagnostic("match expression arm requires a final value", span))
+        conditions.append(callable_expression(local, arm.condition, universal.TypeId(1)))
+    result := values[-1]
+    cursor := len(values) - 1
+    while cursor > 0:
+        cursor -= 1
+        result = universal.Expression(universal.Conditional(conditions[cursor], values[cursor], result), span, type_id=result_type)
+    return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(binding)]), result), span, type_id=result_type)
+
+
+def callable_union_member(state: CallableAnalysis, receiver: universal.Expression, record: universal.RecordDeclaration, name: string, span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    local = callable_scope(state)
+    binding = callable_binding(local, universal.Binding("$union_subject_" + string(span.start), None, receiver, false, true, span))
+    values: list[universal.Expression] = []
+    types: list[universal.TypeAnnotation] = []
+    index := 0
+    for variant in universal.union_variants(record):
+        projected = universal.Expression(universal.FieldReference(matches.reference(binding.id, binding.type_id, span), index + 1), span, type_id=variant)
+        found := false
+        for member in state.records:
+            if member.type_id.index == variant.index:
+                for field in member.fields:
+                    if field.name == name:
+                        found = true
+        if not found:
+            return error(callable_diagnostic("member " + name + " is not available on every member of narrowed union", span))
+        value = callable_expression(local, universal.Expression(universal.Member(projected, name), span), universal.TypeId(0))
+        values.append(value)
+        known := false
+        for annotation in types:
+            if callable_annotation(annotation, state.records, state.namespace, state.declarations).index == value.type_id.index:
+                known = true
+        if not known:
+            types.append(universal.named_type(definitions.type_name(value.type_id, state.records), [], span))
+        index += 1
+    result_type := values[0].type_id
+    if len(types) > 1:
+        result_type = callable_annotation(universal.TypeAnnotation(universal.Union(types), span), state.records, state.namespace, state.declarations)
+    if expected.index != 0 and expected.index != result_type.index:
+        return error(callable_diagnostic("union member does not match expected type", span))
+    result := callable_expression(local, values[-1], result_type)
+    cursor := len(values) - 1
+    while cursor > 0:
+        cursor -= 1
+        value = callable_expression(local, values[cursor], result_type)
+        result = universal.Expression(universal.Conditional(matches.tag_test(matches.reference(binding.id, binding.type_id, span), cursor, span), value, result), span, type_id=result_type)
+    return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(binding)]), result), span, type_id=result_type)
+
+
+def callable_transition_states(state: CallableAnalysis, index: int, record: universal.RecordDeclaration) -> list[int]:
+    for entry in state.transitions:
+        if entry.binding == index:
+            return entry.variants
+    result: list[int] = []
+    ordinal := 0
+    for alternative in record.alternatives:
+        result.append(ordinal)
+        ordinal += 1
+    return result
+
+
+def callable_set_transition(state: CallableAnalysis, index: int, variants: list[int]):
+    cursor := 0
+    while cursor < len(state.transitions):
+        if state.transitions[cursor].binding == index:
+            state.transitions[cursor] = TransitionState(index, variants)
+            return
+        cursor += 1
+    state.transitions.append(TransitionState(index, variants))
+
+
+def callable_transition(state: CallableAnalysis, index: int, value: universal.Expression, span: source.Span, update: bool) -> unit | diagnostics.Diagnostic:
+    for record in state.records:
+        if record.type_id.index != value.type_id.index:
+            continue
+        constrained := false
+        for alternative in record.alternatives:
+            if len(alternative.transitions) != 0:
+                constrained = true
+        if not constrained:
+            continue
+        destinations: list[int] := []
+        match value.kind:
+            case OutcomeValue:
+                destinations.append(variant)
+            case BindingReference:
+                destinations = callable_transition_states(state, int(binding.index), record)
+            case _:
+                ordinal := 0
+                for alternative in record.alternatives:
+                    destinations.append(ordinal)
+                    ordinal += 1
+        if update:
+            for previous in callable_transition_states(state, index, record):
+                for destination in destinations:
+                    if record.alternatives[destination].name not in record.alternatives[previous].transitions:
+                        return error(diagnostics.Diagnostic("E000213", "invalid state transition " + record.alternatives[previous].name + " -> " + record.alternatives[destination].name, span))
+        callable_set_transition(state, index, destinations)
+
+
+def callable_join_transitions(state: CallableAnalysis, left: CallableAnalysis, right: CallableAnalysis):
+    index := 0
+    for type_id in state.types:
+        for record in state.records:
+            if record.type_id.index == type_id.index and len(record.alternatives) != 0:
+                variants = callable_transition_states(left, index, record)[:]
+                for variant in callable_transition_states(right, index, record):
+                    if variant not in variants:
+                        variants.append(variant)
+                callable_set_transition(state, index, variants)
+        index += 1

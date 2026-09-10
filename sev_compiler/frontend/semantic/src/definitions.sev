@@ -3,6 +3,7 @@ import source
 import universal
 import "../../../universal/type/scalar.sev" as scalar
 import "../../../universal/type/storage.sev" as storage_types
+import "../../../universal/type/tagged.sev" as tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved
@@ -102,6 +103,9 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     if len(arguments) != 0:
                         return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
                     return record.type_id
+            selection = tagged.select(records, namespace, name, universal.TypeId(0), annotation.span)
+            if selection.record != -1:
+                return records[selection.record].fields[selection.variant + 1].type_id
             known ?= scalar.scalar_type_name(name)
             if known != None:
                 return known
@@ -123,8 +127,13 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
             for variant in variants:
                 if int(variant.index) not in [6, 7] and not error_conformance(definitions, records, variant):
                     successes += 1
-            if successes != 1 or len(variants) < 2:
-                return error(diagnostics.diagnostic_at("E000205", "typed outcome requires one success type and missing or Error variants", annotation.span))
+            if len(variants) < 2:
+                return error(diagnostics.diagnostic_at("E000205", "union requires at least two members", annotation.span))
+            if successes != 1:
+                key = "$union" + key[len("$outcome"):]
+            for record in records:
+                if record.name == key:
+                    return record.type_id
             fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.TypeId(64))]
             index := 0
             for variant in variants:

@@ -23,11 +23,19 @@ def layouts(records: list[universal.RecordDeclaration]) -> unit | diagnostics.Di
                 if variant.name in names:
                     return error(diagnostics.diagnostic_at("E000206", "duplicate tagged variant " + variant.name, variant.span))
                 names.append(variant.name)
-                payload_name = record.name + "$variant$" + string(index)
+                payload_name = record.name + "." + variant.name
                 payload = universal.RecordDeclaration(payload_name, variant.fields, [], variant.span, type_id=universal.TypeId(u32(1000 + len(records))), lookup=record.lookup)
                 records.append(payload)
                 fields.append(universal.FunctionParameter("$variant" + string(index), universal.named_type(payload_name, [], variant.span), absent, variant.span))
                 index += 1
+            for variant in record.alternatives:
+                seen: list[string] = []
+                for destination in variant.transitions:
+                    if destination not in names:
+                        return error(diagnostics.diagnostic_at("E000213", "unknown transition destination " + destination, variant.span))
+                    if destination in seen:
+                        return error(diagnostics.diagnostic_at("E000213", "duplicate transition destination " + destination, variant.span))
+                    seen.append(destination)
             record.fields = fields
             records[cursor] = record
         cursor += 1
@@ -61,51 +69,3 @@ def path(expression: universal.Expression) -> string:
             return path(object) + "." + name
         case _:
             return ""
-
-
-def expand_match(record: universal.RecordDeclaration, subject: universal.Expression, arms: list[universal.MatchArm], span: source.Span) -> universal.Block | diagnostics.Diagnostic:
-    indexes: list[int] = []
-    wildcard := false
-    for arm in arms:
-        if wildcard:
-            return error(diagnostics.diagnostic_at("E000206", "match arm after wildcard is unreachable", span))
-        selected := -1
-        pattern ?= arm.pattern
-        if pattern != None:
-            selection = select([record], record.lookup, path(pattern), record.type_id, pattern.span)
-            selected = selection.variant
-            if selected == -1:
-                return error(diagnostics.diagnostic_at("E000206", "pattern is not a variant of " + record.name, pattern.span))
-            if selected in indexes:
-                return error(diagnostics.diagnostic_at("E000206", "duplicate tagged match arm", pattern.span))
-        else:
-            wildcard = true
-        indexes.append(selected)
-    if not wildcard and len(indexes) != len(record.alternatives):
-        return error(diagnostics.diagnostic_at("E000206", "non-exhaustive tagged match", span))
-    name = "$tagged_subject_" + string(span.start)
-    reference = universal.Expression(universal.Name(name), subject.span)
-    tail := universal.empty_block()
-    cursor := len(arms)
-    while cursor > 0:
-        cursor -= 1
-        index = indexes[cursor]
-        body = universal.empty_block()
-        if index != -1:
-            payload = universal.Expression(universal.Member(reference, "$variant" + string(index)), span)
-            for field in record.alternatives[index].fields:
-                value = universal.Expression(universal.Member(payload, field.name), field.span)
-                body.statements.append(universal.BindingStatement(universal.Binding(field.name, None, value, false, false, field.span)))
-        for statement in arms[cursor].body.statements:
-            body.statements.append(statement)
-        if cursor == len(arms) - 1:
-            tail = body
-        else:
-            tag = universal.Expression(universal.Member(reference, "$tag"), span)
-            literal = universal.Expression(universal.LiteralValue(universal.IntegerValue(string(index))), span)
-            condition = universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), tag, literal), span)
-            tail = universal.Block([universal.If(condition, body, tail, span)])
-    result = universal.Block([universal.BindingStatement(universal.Binding(name, None, subject, false, false, subject.span))])
-    for statement in tail.statements:
-        result.statements.append(statement)
-    return result

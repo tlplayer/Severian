@@ -38,6 +38,9 @@ def main():
             cursor += 1
     while cursor < len(arguments):
         argument = arguments[cursor]
+        if argument == "--version":
+            print("sev 0.1.0 (Severian source compiler)")
+            return
         if argument == "--help" or argument == "-h":
             print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean")
             return

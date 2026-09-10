@@ -148,17 +148,30 @@ loops support `break`, `continue`, and early returns. Imported literal constants
 remain visible in their defining callable scopes. Memory views remain in SSA
 across branches and loops so buffer ownership follows their lifetimes.
 
-Value `match` statements support literal patterns with an existing equality
-implementation and a final `_` wildcard. Every arm starts with `case`,
-including `case _:`.
-Semantic analysis evaluates the subject once
-and lowers arms to typed bindings and `if` branches, preserving source order,
-arm-local scopes, mutation, and loop control. Without a wildcard, a match may
-fall through; value-returning functions still require a return on every path.
-Nonliteral patterns and arms after a wildcard produce deliberate diagnostics.
+`match` statements and exhaustive match expressions resolve patterns before CFG
+lowering. Subjects are evaluated once. Literal patterns use ordinary equality;
+every arm starts with `case`, including the final `case _:` wildcard. Enum cases
+have explicit contracts: `case Circle:` ignores the payload,
+`case Circle(radius):` destructures it, and `case circle: Circle:` captures the
+whole nominal variant. `case quad: Trapezoid | Oblong:` captures a narrowed union
+whose members are accessible only when present on every alternative, even when
+field positions differ. Variant types are exposed as `Shape.Circle` and through
+unambiguous short names. General union annotations support typed captures too.
+
+Match expression arms end in a value, may contain preceding statements, and must
+cover the subject. Statements retain arm-local scopes, mutation, loop control,
+and fallthrough for non-exhaustive literal matches. Guards and tuple patterns
+remain unsupported. Run `python3 tests/sev_compiler/enums.py -v` for native and
+rejection regressions.
+
+The source declaration in `universal/primitive/enum.sev` supplies enum syntax.
+Transition arrows such as `Connecting -> Received | Failed` record allowed edges;
+semantic analysis rejects assignments that may use an undeclared edge. Variants
+with no outgoing edges are terminal once any edge is declared. Loop state analysis
+is conservative.
 
 Unsupported declarations and expressions produce diagnostics. General
-collections, constant-generic classes, fallible/enum values, nonliteral parameter
+collections, constant-generic classes, nonliteral parameter
 defaults, nonnumeric conversions, and nonliteral/mutable global captures remain
 outside this slice, apart from the source-defined string-to-integer conversion.
 Recursive value records require indirection. This executable does not yet compile itself. The broader driver remains unfinished; its semantic entry now delegates to the

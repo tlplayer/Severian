@@ -114,6 +114,7 @@ class CallableAlternative:
     name: string
     fields: list[FunctionParameter]
     span: source.Span
+    transitions: list[string] = []
 
 
 class RecordDeclaration:
@@ -134,6 +135,14 @@ class RecordDeclaration:
     representation: string = ""
     declaration_grammar: DefId = DefId(0, 0, DeclarationId(0))
     storage_element: TypeId = TypeId(0)
+
+
+def union_variants(record: RecordDeclaration) -> list[TypeId]:
+    variants: list[TypeId] = []
+    if record.name.starts_with("$union$"):
+        for field in record.fields[1:]:
+            variants.append(field.type_id)
+    return variants
 
 
 def outcome_variants(record: RecordDeclaration) -> list[TypeId]:

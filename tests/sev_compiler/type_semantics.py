@@ -90,7 +90,7 @@ class TypeSemantics(MigrationCase):
                     pair[0],
                 )
                 match packet:
-                    case Data:
+                    case Data(value):
                         assert(value == 42)
                     case Empty:
                         assert(false)
@@ -119,9 +119,9 @@ class TypeSemantics(MigrationCase):
                 match choice:
                     case Empty:
                         return 0
-                    case Number:
+                    case Number(value):
                         return value
-                    case Pair:
+                    case Pair(left, right):
                         return left + right
             test:
                 assert(total(Choice.Empty) == 0)
@@ -149,7 +149,7 @@ class TypeSemantics(MigrationCase):
                 reject:
                     choice = Number(42)
                     match choice:
-                        case Number:
+                        case Number(value):
                             assert(value == 42)
                         case _:
                             pass
@@ -169,7 +169,7 @@ class TypeSemantics(MigrationCase):
                 return Item.Pair(right=mark(2), left=mark(3))
             test:
                 match make():
-                    case Pair:
+                    case Pair(left, right):
                         assert(left == 3)
                         assert(right == 2)
                     case Empty:
@@ -182,7 +182,7 @@ class TypeSemantics(MigrationCase):
                 Value
             def wrong() -> First:
                 return Second.Value
-        ''', "tagged alternative does not match expected type")
+        ''', "value is not a variant of the expected enum")
         self.rejects('''
             enum First:
                 Value

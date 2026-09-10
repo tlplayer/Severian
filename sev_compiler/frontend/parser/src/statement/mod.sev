@@ -685,16 +685,31 @@ def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         arm_start = parser_peek(parser).span
-        if parser_at_identifier(parser, "case"):
-            parser_next(parser)
+        if not parser_at_identifier(parser, "case"):
+            return error(parser_fail(parser, "expected case before match pattern"))
+        parser_next(parser)
+        capture: string | None := None
+        annotation: universal.TypeAnnotation | None := None
         pattern: universal.Expression | None := None
         if parser_at_identifier(parser, "_"):
             parser_next(parser)
         else:
             pattern = parser_expression(parser, 0)
         parser_expect_symbol(parser, ":", "expected colon after match pattern")
+        if not parser_at_simple(parser, Newline):
+            capture = "_"
+            supplied ?= pattern
+            if supplied != None:
+                match supplied.kind:
+                    case Name:
+                        capture = name
+                    case _:
+                        return error(parser_fail(parser, "typed capture requires a binding name"))
+            annotation = parser_type_annotation(parser)
+            pattern = None
+            parser_expect_symbol(parser, ":", "expected colon after capture type")
         body = parser_indented_block(parser, "match arm")
-        arms.append(universal.MatchArm(body[0], span=arm_start, pattern=pattern))
+        arms.append(universal.MatchArm(body[0], binding_name=capture, annotation=annotation, span=arm_start, pattern=pattern))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of match").span.end
     return universal.Match(subject, arms, source.Span(start.source, start.start, end))
@@ -876,6 +891,13 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
 
 
 def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "match"):
+        statement = parser_match_statement(parser)
+        match statement:
+            case Match:
+                return universal.Expression(universal.MatchExpression(subject, arms), span)
+            case _:
+                return error(parser_fail(parser, "expected match expression"))
     token = parser_next(parser)
     for syntax in token.syntaxes:
         if syntax.grammar_form == "Delimited" and lexer.token_is_symbol(token, syntax.symbol):
@@ -1085,7 +1107,13 @@ def parser_named_declaration(parser: Parser, syntax: universal.OperatorSyntax) -
                         break
                     parser_delimited_layout(parser)
                 parser_expect_symbol(parser, ")", "expected closing parameter parenthesis")
-            alternatives.append(universal.CallableAlternative(member[0], parameters, member[1]))
+            transitions: list[string] = []
+            if parser_take_symbol(parser, "->") != None:
+                while true:
+                    transitions.append(parser_identifier(parser, "expected transition destination")[0])
+                    if parser_take_symbol(parser, "|") == None:
+                        break
+            alternatives.append(universal.CallableAlternative(member[0], parameters, member[1], transitions=transitions))
         parser_expect(parser, Newline, "expected newline after declaration member")
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of declaration").span.end

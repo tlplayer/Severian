@@ -1,6 +1,8 @@
 import diagnostics
 import source
 import universal
+import "definitions.sev" as definitions
+import "../../../universal/type/tagged.sev" as tagged
 
 
 def literal_pattern(expression: universal.Expression) -> bool:
@@ -54,3 +56,178 @@ def expand_match(subject: universal.Expression, arms: list[universal.MatchArm], 
         body.statements.append(statement)
     taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
     return universal.If(taken, body, universal.empty_block(), span)
+
+
+class ResolvedArm:
+    condition: universal.Expression
+    body: universal.Block
+
+
+# Resolve pattern identities, payload contracts and coverage before producing
+# ordinary bindings, projections and conditions. No backend pattern protocol.
+def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[universal.RecordDeclaration], namespace: string, subject_id: universal.BindingId, subject_type: universal.TypeId, arms: list[universal.MatchArm], span: source.Span, expression_match: bool) -> list[ResolvedArm] | diagnostics.Diagnostic:
+    variants: list[universal.TypeId] := []
+    alternatives: list[universal.CallableAlternative] := []
+    nominal := ""
+    for record in records:
+        if record.type_id.index == subject_type.index:
+            if record.representation == "TaggedAggregate":
+                nominal = record.name
+                alternatives = record.alternatives
+                for field in record.fields[1:]:
+                    variants.append(field.type_id)
+            else:
+                variants = universal.union_variants(record)
+                if len(variants) == 0:
+                    variants = universal.outcome_variants(record)
+    # A captured single variant is already narrowed to its nominal payload type.
+    single := false
+    if len(variants) == 0:
+        for record in records:
+            for alternative in record.alternatives:
+                if definitions.type_name(subject_type, records) == record.name + "." + alternative.name:
+                    variants.append(subject_type)
+                    alternatives.append(alternative)
+                    nominal = record.name
+                    single = true
+    output: list[ResolvedArm] = []
+    covered: list[int] = []
+    wildcard := false
+    for arm in arms:
+        if wildcard:
+            return error(diagnostics.Diagnostic("E000206", "match arm after wildcard is unreachable", arm.span))
+        selected: list[int] = []
+        body = universal.empty_block()
+        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
+        pattern ?= arm.pattern
+        annotation ?= arm.annotation
+        if annotation != None:
+            annotations = type_members(annotation)
+            for member in annotations:
+                type_id = definitions.type_annotation(declarations, member, records, namespace)
+                found := -1
+                index := 0
+                for variant in variants:
+                    if variant.index == type_id.index:
+                        found = index
+                    index += 1
+                if found == -1:
+                    return error(diagnostics.Diagnostic("E000206", "capture type is not a variant of the match subject", arm.span))
+                if found in selected:
+                    return error(diagnostics.Diagnostic("E000206", "duplicate capture type", arm.span))
+                selected.append(found)
+            capture ?= arm.binding_name
+            if capture != None:
+                if capture != "_":
+                    capture_type = definitions.type_annotation(declarations, annotation, records, namespace)
+                    captured := projection(reference(subject_id, subject_type, span), variants[selected[-1]], selected[-1], single, span)
+                    if len(selected) > 1:
+                        captured = universal.Expression(universal.OutcomeValue(captured, len(selected) - 1), span, type_id=capture_type)
+                        cursor := len(selected) - 1
+                        while cursor > 0:
+                            cursor -= 1
+                            index = selected[cursor]
+                            value = projection(reference(subject_id, subject_type, span), variants[index], index, single, span)
+                            wrapped = universal.Expression(universal.OutcomeValue(value, cursor), span, type_id=capture_type)
+                            captured = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), index, span), wrapped, captured), span, type_id=capture_type)
+                    body.statements.append(universal.BindingStatement(universal.Binding(capture, None, captured, false, true, span, scoped=true)))
+        elif pattern != None:
+            if len(variants) == 0:
+                if not literal_pattern(pattern):
+                    return error(diagnostics.Diagnostic("E000206", "match supports only literal and wildcard patterns", pattern.span))
+                condition = universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), reference(subject_id, subject_type, span), pattern), pattern.span)
+            else:
+                constructor := pattern
+                arguments: list[universal.CallArgument] := []
+                destructure := false
+                match pattern.kind:
+                    case Call:
+                        constructor = callee
+                        destructure = true
+                    case _:
+                        pass
+                arguments = pattern_arguments(pattern)
+                index := 0
+                for alternative in alternatives:
+                    spelling = tagged.path(constructor)
+                    if spelling == alternative.name or spelling == nominal + "." + alternative.name or namespace + spelling == nominal + "." + alternative.name:
+                        selected.append(index)
+                    index += 1
+                if len(selected) != 1:
+                    return error(diagnostics.Diagnostic("E000206", "pattern is not a variant of the match subject", pattern.span))
+                if destructure:
+                    alternative = alternatives[selected[0]]
+                    if len(arguments) != len(alternative.fields):
+                        return error(diagnostics.Diagnostic("E000206", "wrong payload arity in match pattern", pattern.span))
+                    payload = projection(reference(subject_id, subject_type, span), variants[selected[0]], selected[0], single, span)
+                    names: list[string] = []
+                    index = 0
+                    for argument in arguments:
+                        binding = tagged.path(argument.value)
+                        if argument.name != None or argument.spread or binding == "" or "." in binding:
+                            return error(diagnostics.Diagnostic("E000206", "payload pattern requires a binding name or _", argument.span))
+                        if binding != "_":
+                            if binding in names:
+                                return error(diagnostics.Diagnostic("E000206", "duplicate payload binding " + binding, argument.span))
+                            names.append(binding)
+                            value = universal.Expression(universal.Member(payload, alternative.fields[index].name), argument.span)
+                            body.statements.append(universal.BindingStatement(universal.Binding(binding, None, value, false, true, argument.span, scoped=true)))
+                        index += 1
+        else:
+            wildcard = true
+        if len(selected) != 0:
+            reachable := false
+            for index in selected:
+                if index not in covered:
+                    reachable = true
+                    covered.append(index)
+            if not reachable:
+                return error(diagnostics.Diagnostic("E000206", "unreachable tagged match arm", arm.span))
+            if not single:
+                condition = tag_test(reference(subject_id, subject_type, span), selected[-1], span)
+                cursor := len(selected) - 1
+                while cursor > 0:
+                    cursor -= 1
+                    condition = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), selected[cursor], span), universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1)), condition), span, type_id=universal.TypeId(1))
+        for statement in arm.body.statements:
+            body.statements.append(statement)
+        output.append(ResolvedArm(condition, body))
+    if len(output) == 0:
+        return error(diagnostics.Diagnostic("E000206", "match requires at least one arm", span))
+    if not wildcard:
+        if len(variants) != 0:
+            if len(covered) != len(variants):
+                return error(diagnostics.Diagnostic("E000206", "non-exhaustive tagged match", span))
+        elif expression_match:
+            return error(diagnostics.Diagnostic("E000206", "match expression requires exhaustive patterns or a wildcard", span))
+    return output
+
+
+def type_members(annotation: universal.TypeAnnotation) -> list[universal.TypeAnnotation]:
+    match annotation.kind:
+        case Union:
+            return members
+        case _:
+            return [annotation]
+
+
+def pattern_arguments(pattern: universal.Expression) -> list[universal.CallArgument]:
+    match pattern.kind:
+        case Call:
+            return arguments
+        case _:
+            return []
+
+
+def projection(subject: universal.Expression, type_id: universal.TypeId, index: int, single: bool, span: source.Span) -> universal.Expression:
+    if single:
+        return clone(subject)
+    return universal.Expression(universal.FieldReference(clone(subject), index + 1), span, type_id=type_id)
+
+
+def tag_test(subject: universal.Expression, index: int, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.OutcomeTest(clone(subject), index), span, type_id=universal.TypeId(1))
+
+
+def reference(binding: universal.BindingId, type_id: universal.TypeId, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.BindingReference(binding), span, type_id=type_id)

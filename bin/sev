@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+launcher=$(readlink -f -- "$0")
+repository=$(dirname -- "$(dirname -- "$launcher")")
+if [ "${1:-}" = update ]; then
+    shift
+    exec python3 "$repository/tools/compiler/update.py" "$@"
+fi
+exec "$repository/bin/sev_compiler" "$@"

@@ -16,6 +16,7 @@ class Binding:
     id: BindingId = BindingId(0)
     type_id: TypeId = TypeId(0)
     mutable: bool = false
+    scoped: bool = false
 
 
 class Block:

@@ -1,7 +1,15 @@
 
 For an agent friendly representation use to see the call graph/agent friendly IR 
 ```
+sev_rust # Rust compiler
+sev # sev_compiler 
+sev update # Updates to latest version  
+
+#See agent IR
 sev build --emit agent-ir
+
+#test the current package
+sev test
 ```
 
 

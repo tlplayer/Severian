@@ -50,7 +50,7 @@ class DeclarationGrammar(MigrationCase):
                 Number(value: int)
             def read(item: Value) -> int:
                 match item:
-                    case Number:
+                    case Number(value):
                         return value
                     case Empty:
                         return 0
@@ -75,7 +75,7 @@ class DeclarationGrammar(MigrationCase):
                     match item:
                         case Empty:
                             return 0
-                        case Number:
+                        case Number(value):
                             return value
                 test:
                     assert(read(Number(42)) == 42)

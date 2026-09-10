@@ -1,10 +1,10 @@
 
 enum Status:
     Connecting -> Received | Failed
-    Received 
+    Received
     Failed
 
-test with compiler "Connecting cannot go to Received":
+test with compiler "Received cannot go to Connecting":
     state := Received
     reject:
-        state = Connecting 
+        state = Connecting

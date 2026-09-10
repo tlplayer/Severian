@@ -29,7 +29,7 @@ def main():
     assert(counter.get() == 0)
 
 
-test with integ "extension adds new behavior":
+test "extension adds new behavior":
     counter := Counter(42)
 
     assert(counter.get() == 42)

@@ -1,5 +1,7 @@
 # A declaration creates a nominal tagged type. Each named callable describes
 # one alternative and its typed payload; a bare name has an empty payload.
+# Optional -> destinations constrain subsequent state assignments.
+# Bare case names test tags; payload bindings require explicit parentheses.
 # The compiler consumes this G contract through the shared declaration parser.
 trait enum: G:
     symbol: Y = enum

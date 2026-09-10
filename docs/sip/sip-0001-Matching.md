@@ -4,6 +4,42 @@ Status: Proposal
 Feature: `match` / `case`
 Scope: enums, literals, tuples, unions
 
+## Pattern contracts and compiler ownership
+
+| Pattern | Meaning | Bindings |
+| --- | --- | --- |
+| `case Circle:` | Test the tag and ignore the payload | None |
+| `case Circle(radius):` | Test the tag and destructure in declaration order | `radius: float` |
+| `case circle: Circle:` | Capture the whole narrowed variant | `circle: Shape.Circle` |
+| `case quad: Trapezoid \| Oblong:` | Capture either variant under a narrowed union | Only members available on every alternative |
+
+Bare cases never introduce implicit payload bindings. Variant types have nominal
+identities such as `Shape.Circle`; unqualified names are resolved in the current
+scope. Typed captures are case-local and leave the original subject's type intact.
+Common members may occupy different payload positions. Access selects the correct
+projection by tag; missing members are errors. Differing member types form a union
+under ordinary type rules, without match-specific numeric conversion.
+
+[`enum.sev`](../../sev_compiler/universal/primitive/enum.sev) remains the declaration
+authority through its `G` contract. The shared declaration parser records callable
+alternatives, their fields, and optional transition destinations. Semantic analysis
+resolves pattern identities, arity, bindings, narrowed types, member availability,
+and coverage before producing ordinary tag tests, projections, bindings, and CFG.
+No pattern-specific runtime operations are required in MIR or MLIR.
+
+The source compiler implementation covers these four forms, general union captures,
+and exhaustive match expressions whose arms end in values. Guards, tuple patterns,
+and general nonbinding OR patterns below remain proposed. Partially overlapping
+captures retain source order; completely covered arms are errors. Emitting the
+proposed partial-redundancy warning remains future work.
+
+Transition declarations such as `Connecting -> Received | Failed` constrain later
+assignments. Once an enum declares an edge, variants without outgoing edges are
+terminal. Semantic analysis checks all possible source and destination states;
+branch joins combine possibilities, and loop analysis conservatively discards
+straight-line state facts. The seed's legacy implicit payload matching is separate
+from the source compiler's explicit pattern contract.
+
 ## Summary
 
 Add a small, statically typed pattern-matching system centered on Severian's type system.
@@ -952,7 +988,7 @@ Do not initially allow bound OR patterns.
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)
-    Trapezoid(side1: float, side2: float, height: float)
+    Trapezoid(width: float, height: float, side1: float, side2: float)
     Oblong(width: float, height: float)
     Point
 
@@ -990,9 +1026,9 @@ type payload bindings
   ↓
 check exhaustiveness
   ↓
-Pattern MIR
+resolved semantic patterns
   ↓
-CFG switch + payload projections
+ordinary tag tests + payload projections + CFG
   ↓
 MLIR
 ```
@@ -1031,7 +1067,7 @@ So your example becomes:
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)
-    Trapezoid(side1: float, side2: float, height: float)
+    Trapezoid(width: float, height: float, side1: float, side2: float)
     Oblong(width: float, height: float)
     Point
 
