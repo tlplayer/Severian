@@ -15,7 +15,11 @@ Start with storage and views, then growable ownership, then specialized collecti
 | [09-heap.sev](09-heap.sev) | `heap[T]` | Priority order, peeking, empty removal |
 | [10-count.sev](10-count.sev) | `count[T]` | Frequencies, distinct and total counts, subtraction |
 
-Each example includes a `main`, assertions, and expected output comments.
+Each example includes a `main`, named test blocks, and expected output comments.
+Types are inferred from constructor values or subsequent uses; the array example
+also shows an explicit element type and length.
+Tests include inferred mixed values, explicit unions such as `int | string`,
+and `any` elements or mapped values, as well as strings and floating point lanes.
 Methods returning `(value, found)` report whether a lookup or removal succeeded.
 These examples cover the collection APIs being built and planned; compiler
 support is still in progress.

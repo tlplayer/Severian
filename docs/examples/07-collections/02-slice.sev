@@ -1,7 +1,7 @@
 # slice[T]: a non-owning view into contiguous storage.
 def main():
-    readings := array[i32, 5]([10, 20, 30, 40, 50])
-    middle := readings[1:4]  # slice[i32]; start inclusive, stop exclusive.
+    readings := array(10, 20, 30, 40, 50)
+    middle := readings[1:4]  # The slice type is inferred; stop is exclusive.
 
     assert(middle.len() == 3)
     assert(middle[0] == 20)
@@ -12,3 +12,24 @@ def main():
     drop middle
     assert(readings[1] == 99)
     print(readings[1])  # 99: changing the view changed the original storage.
+
+test "slice uses relative indexes and an exclusive stop":
+    values := array(10, 20, 30, 40, 50)
+    middle := values[1:4]
+    assert(middle.len() == 3)
+    assert(middle[0] == 20 and middle[2] == 40)
+
+test "slice writes update only the selected owner region":
+    values := array(10, 20, 30, 40)
+    middle := values[1:3]
+    middle[0] = 99
+    drop middle
+    assert(values[0] == 10 and values[1] == 99)
+    assert(values[2] == 30 and values[3] == 40)
+
+test "slice retains mixed element types from its owner":
+    values := array(10, "ready", true)
+    middle := values[1:3]
+    assert(middle.len() == 2)
+    assert(middle[0] == "ready")
+    assert(middle[1] == true)

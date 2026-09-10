@@ -1,6 +1,6 @@
 # list[T]: a growable owned sequence.
 def main():
-    scores := list[i32](array[i32, 2]([10, 30]))
+    scores := list(10, 30)
     scores.reserve(4)  # Make room without adding elements.
     assert(scores.len() == 2)
 
@@ -13,3 +13,39 @@ def main():
     assert(found and last == 40)
     for score in scores.iter():
         print(score)  # 10, 20, 30 on successive lines.
+
+test "list grows while preserving element order":
+    values := list(10, 30)
+    values.reserve(4)
+    assert(values.len() == 2)
+    values.insert(1, 20)
+    values.append(40)
+    assert(values.len() == 4)
+    assert(values[0] == 10 and values[1] == 20)
+    assert(values[2] == 30 and values[3] == 40)
+
+test "list pop reports presence and then absence":
+    values := list(10)
+    value, found := values.pop()
+    assert(found and value == 10)
+    assert(values.len() == 0)
+    _, found = values.pop()
+    assert(not found)
+
+test "list can declare a union of element types":
+    values := list[int | string](10, "ready")
+    values.append("done")
+    values.append(20)
+    assert(values.len() == 4)
+    assert(values[0] == 10 and values[1] == "ready")
+    assert(values[2] == "done" and values[3] == 20)
+
+test "list of any accepts different value types":
+    values := list[any]()
+    values.append(10)
+    values.append("ready")
+    values.append(true)
+    assert(values.len() == 3)
+    assert(values[0] == 10)
+    assert(values[1] == "ready")
+    assert(values[2] == true)

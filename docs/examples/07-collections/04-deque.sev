@@ -1,6 +1,6 @@
 # deque[T]: add and remove elements at either end.
 def main():
-    jobs := deque[i32]()
+    jobs := deque()
     jobs.push_back(20)
     jobs.push_back(30)
     jobs.push_front(10)
@@ -15,3 +15,32 @@ def main():
     jobs.clear()
     _, found := jobs.pop_front()
     assert(not found)
+
+test "deque preserves order across operations at both ends":
+    values := deque()
+    values.push_back(20)
+    values.push_front(10)
+    values.push_back(30)
+    first, found := values.pop_front()
+    assert(found and first == 10)
+    last, found := values.pop_back()
+    assert(found and last == 30)
+    assert(values.len() == 1 and values[0] == 20)
+
+test "cleared deque reports absence at both ends":
+    values := deque()
+    values.push_back(10)
+    values.clear()
+    _, found := values.pop_front()
+    assert(not found)
+    _, found = values.pop_back()
+    assert(not found)
+
+test "deque can hold a union of element types":
+    values := deque[int | string]()
+    values.push_back("ready")
+    values.push_front(10)
+    first, found := values.pop_front()
+    assert(found and first == 10)
+    last, found := values.pop_back()
+    assert(found and last == "ready")

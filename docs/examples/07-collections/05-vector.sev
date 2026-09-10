@@ -1,7 +1,7 @@
 # vector[T, N]: fixed numeric lanes with element-wise arithmetic.
 def main():
-    left := vector[i32, 3](array[i32, 3]([1, 2, 3]))
-    right := vector[i32, 3](array[i32, 3]([4, 5, 6]))
+    left := vector(1, 2, 3)
+    right := vector(4, 5, 6)
 
     added := left + right
     assert(added[0] == 5 and added[1] == 7 and added[2] == 9)
@@ -10,3 +10,26 @@ def main():
 
     print(added.sum())      # 21
     print(left.dot(right))  # 32
+
+test "vector arithmetic preserves lanes":
+    left := vector(1, 2, 3)
+    right := vector(4, 5, 6)
+    added := left + right
+    assert(added[0] == 5 and added[1] == 7 and added[2] == 9)
+    scaled := left * 2
+    assert(scaled[0] == 2 and scaled[1] == 4 and scaled[2] == 6)
+    assert(left[0] == 1 and left[2] == 3)
+
+test "vector reductions combine all lanes":
+    left := vector(1, 2, 3)
+    right := vector(4, 5, 6)
+    assert(left.sum() == 6)
+    assert(left.dot(right) == 32)
+
+test "vector infers floating point lanes":
+    values := vector(1.5, 2.5, 3.5)
+    scaled := values * 2.0
+    assert(scaled[0] == 3.0)
+    assert(scaled[1] == 5.0)
+    assert(scaled[2] == 7.0)
+    assert(values.sum() == 7.5)

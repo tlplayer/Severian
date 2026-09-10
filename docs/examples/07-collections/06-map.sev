@@ -1,6 +1,6 @@
 # map[K, V]: ordered key/value lookup.
 def main():
-    scores := map[i32, i32]()
+    scores := map()
     scores.set(30, 300)
     scores.set(10, 100)
     scores.set(20, 200)
@@ -14,3 +14,33 @@ def main():
 
     for key in scores.keys():
         print(key)  # 10, 20, 30 on successive lines, in key order.
+
+test "map replacement retains one value per key":
+    values := map()
+    values.set(20, 200)
+    values.set(20, 250)
+    assert(values.len() == 1)
+    value, found := values.get(20)
+    assert(found and value == 250)
+    _, found = values.get(99)
+    assert(not found)
+
+test "map iterates keys in ascending order":
+    values := map()
+    values.set(30, 300)
+    values.set(10, 100)
+    values.set(20, 200)
+    expected := 10
+    for key in values.keys():
+        assert(key == expected)
+        expected += 10
+    assert(expected == 40)
+
+test "map supports string keys and union values":
+    settings := map[string, int | string]()
+    settings.set("retries", 3)
+    settings.set("status", "ready")
+    retries, found := settings.get("retries")
+    assert(found and retries == 3)
+    status, found := settings.get("status")
+    assert(found and status == "ready")

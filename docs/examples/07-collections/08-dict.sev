@@ -1,6 +1,6 @@
 # dict[K, V]: a hash-style key/value table.
 def main():
-    scores := dict[i32, i32]()
+    scores := dict()
     scores[30] = 300
     scores[10] = 100
     scores[20] = 200
@@ -17,3 +17,31 @@ def main():
     assert(scores.set_default(40, 400) == 400)
     print(scores[10])  # 150
     print(scores[40])  # 400
+
+test "dict replaces existing values and reports missing keys":
+    values := dict()
+    values[10] = 100
+    values[10] = 150
+    assert(values.len() == 1)
+    value, found := values.get(10)
+    assert(found and value == 150)
+    _, found = values.get(99)
+    assert(not found)
+
+test "dict defaults insert only absent keys":
+    values := dict()
+    values[10] = 100
+    assert(values.set_default(10, 999) == 100)
+    assert(values.set_default(20, 200) == 200)
+    assert(values[10] == 100 and values[20] == 200)
+    assert(values.len() == 2)
+
+test "dict can store any values under string keys":
+    settings := dict[string, any]()
+    settings["retries"] = 3
+    settings["status"] = "ready"
+    settings["enabled"] = true
+    assert(settings.len() == 3)
+    assert(settings["retries"] == 3)
+    assert(settings["status"] == "ready")
+    assert(settings["enabled"] == true)

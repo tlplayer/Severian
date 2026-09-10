@@ -1,6 +1,6 @@
 # set[T]: unique values, ordered by default.
 def main():
-    levels := set[i32](30, 10, 20, 10)
+    levels := set(30, 10, 20, 10)
     assert(levels.len() == 3)
     assert(levels.contains(20))
 
@@ -14,3 +14,28 @@ def main():
     assert(not levels.contains(30))
     for level in levels.iter():
         print(level)  # 10, 20, 40 on successive lines.
+
+test "set ignores duplicates and reports removal":
+    values := set(30, 10, 20, 10)
+    assert(values.len() == 3)
+    _, inserted := values.add(20)
+    assert(not inserted and values.len() == 3)
+    _, found := values.remove(20)
+    assert(found and not values.contains(20))
+    _, found = values.remove(20)
+    assert(not found)
+
+test "set iterates unique values in ascending order":
+    values := set(30, 10, 20, 10)
+    expected := 10
+    for value in values.iter():
+        assert(value == expected)
+        expected += 10
+    assert(expected == 40)
+
+test "set infers string elements and removes duplicates":
+    names := set("ada", "grace", "ada")
+    assert(names.len() == 2)
+    assert(names.contains("ada"))
+    assert(names.contains("grace"))
+    assert(not names.contains("katherine"))

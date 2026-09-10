@@ -1,6 +1,6 @@
 # count[T]: a frequency map; absent values have frequency zero.
 def main():
-    frequencies := count[i32]()
+    frequencies := count()
     frequencies.add(10)
     frequencies.add(20)
     frequencies.add(10, 2)
@@ -16,3 +16,31 @@ def main():
     assert(not frequencies.contains(10))
     assert(frequencies.len() == 1)
     print(frequencies.total())  # 1
+
+test "count distinguishes unique values from total occurrences":
+    values := count()
+    values.add(10, 3)
+    values.add(20)
+    assert(values[10] == 3 and values[20] == 1)
+    assert(values.len() == 2 and values.total() == 4)
+    assert(values[99] == 0)
+    assert(values.len() == 2)  # Looking up an absent value does not insert it.
+
+test "count subtraction floors at zero and removes exhausted values":
+    values := count()
+    values.add(10, 3)
+    assert(values.subtract(10, 1) == 2)
+    assert(values.total() == 2)
+    assert(values.subtract(10, 10) == 0)
+    assert(not values.contains(10))
+    assert(values.len() == 0 and values.total() == 0)
+
+test "count infers string elements":
+    words := count()
+    words.add("red")
+    words.add("blue")
+    words.add("red")
+    assert(words["red"] == 2)
+    assert(words["blue"] == 1)
+    assert(words["green"] == 0)
+    assert(words.len() == 2 and words.total() == 3)

@@ -1,7 +1,9 @@
 # array[T, N]: fixed-size contiguous storage.
 def main():
     readings := array[i32, 4](10, 20, 30, 40)
-    also := array(10, 20, 30, 40)
+    also := array(10, 20, 30, 40)  # Infer the element type and length.
+    assert(also.len() == readings.len())
+    assert(also[0] == readings[0])
     readings[1] = 25
 
     assert(readings.len() == 4)
@@ -12,3 +14,23 @@ def main():
     assert(readings[0] == 10)
     print(readings[0])  # 10
     print(copied[0])   # 99
+
+test "array infers its element type and length":
+    values := array(10, 20, 30)
+    assert(values.len() == 3)
+    assert(values[0] == 10 and values[2] == 30)
+
+test "array copy owns independent storage":
+    original := array(10, 20, 30)
+    copied := original.copy()
+    copied[1] = 99
+    assert(original[1] == 20)
+    assert(copied[1] == 99)
+    assert(copied.len() == original.len())
+
+test "array infers mixed element types":
+    values := array(10, "ready", true)
+    assert(values.len() == 3)
+    assert(values[0] == 10)
+    assert(values[1] == "ready")
+    assert(values[2] == true)

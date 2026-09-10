@@ -1,6 +1,6 @@
 # heap[T]: a priority queue that removes the smallest value first.
 def main():
-    priorities := heap[i32]()
+    priorities := heap()
     priorities.push(30)
     priorities.push(10)
     priorities.push(20)
@@ -16,3 +16,34 @@ def main():
 
     _, found := priorities.pop()
     assert(not found)
+
+test "heap pops in priority order and retains duplicates":
+    values := heap()
+    values.push(30)
+    values.push(10)
+    values.push(20)
+    values.push(10)
+    for expected in [10, 10, 20, 30]:
+        value, found := values.pop()
+        assert(found and value == expected)
+    _, found := values.pop()
+    assert(not found)
+
+test "heap peek leaves the minimum in place":
+    values := heap()
+    values.push(20)
+    values.push(10)
+    value, found := values.peek()
+    assert(found and value == 10)
+    assert(values.len() == 2)
+    value, found = values.pop()
+    assert(found and value == 10)
+
+test "heap infers ordered string elements":
+    names := heap()
+    names.push("grace")
+    names.push("ada")
+    first, found := names.pop()
+    assert(found and first == "ada")
+    second, found := names.pop()
+    assert(found and second == "grace")
