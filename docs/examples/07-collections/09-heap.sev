@@ -1,0 +1,18 @@
+# heap[T]: a priority queue that removes the smallest value first.
+def main():
+    priorities := heap[i32]()
+    priorities.push(30)
+    priorities.push(10)
+    priorities.push(20)
+
+    next_priority, found := priorities.peek()
+    assert(found and next_priority == 10)
+    assert(priorities.len() == 3)  # Peeking does not remove the value.
+
+    while priorities.len() > 0:
+        priority, found := priorities.pop()
+        assert(found)
+        print(priority)  # 10, 20, 30 on successive lines.
+
+    _, found := priorities.pop()
+    assert(not found)

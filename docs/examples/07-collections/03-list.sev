@@ -1,0 +1,15 @@
+# list[T]: a growable owned sequence.
+def main():
+    scores := list[i32](array[i32, 2]([10, 30]))
+    scores.reserve(4)  # Make room without adding elements.
+    assert(scores.len() == 2)
+
+    scores.insert(1, 20)
+    scores.append(40)
+    assert(scores.len() == 4)
+    assert(scores[1] == 20)
+
+    last, found := scores.pop()
+    assert(found and last == 40)
+    for score in scores.iter():
+        print(score)  # 10, 20, 30 on successive lines.

@@ -1,0 +1,16 @@
+# set[T]: unique values, ordered by default.
+def main():
+    levels := set[i32](30, 10, 20, 10)
+    assert(levels.len() == 3)
+    assert(levels.contains(20))
+
+    _, inserted := levels.add(20)
+    assert(not inserted)
+    _, inserted := levels.add(40)
+    assert(inserted)
+
+    _, found := levels.remove(30)
+    assert(found)
+    assert(not levels.contains(30))
+    for level in levels.iter():
+        print(level)  # 10, 20, 40 on successive lines.

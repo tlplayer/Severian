@@ -1,0 +1,14 @@
+# slice[T]: a non-owning view into contiguous storage.
+def main():
+    readings := array[i32, 5]([10, 20, 30, 40, 50])
+    middle := readings[1:4]  # slice[i32]; start inclusive, stop exclusive.
+
+    assert(middle.len() == 3)
+    assert(middle[0] == 20)
+    middle[0] = 99
+    print(middle[0])  # 99
+
+    # End the view before accessing its owner again.
+    drop middle
+    assert(readings[1] == 99)
+    print(readings[1])  # 99: changing the view changed the original storage.

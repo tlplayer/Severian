@@ -1,0 +1,16 @@
+# map[K, V]: ordered key/value lookup.
+def main():
+    scores := map[i32, i32]()
+    scores.set(30, 300)
+    scores.set(10, 100)
+    scores.set(20, 200)
+    scores.set(20, 250)  # Replace the value for an existing key.
+
+    assert(scores.len() == 3)
+    value, found := scores.get(20)
+    assert(found and value == 250)
+    _, found := scores.get(99)
+    assert(not found)
+
+    for key in scores.keys():
+        print(key)  # 10, 20, 30 on successive lines, in key order.

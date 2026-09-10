@@ -1,0 +1,14 @@
+# array[T, N]: fixed-size contiguous storage.
+def main():
+    readings := array[i32, 4](10, 20, 30, 40)
+    also := array(10, 20, 30, 40)
+    readings[1] = 25
+
+    assert(readings.len() == 4)
+    assert(readings[1] == 25)
+
+    copied := readings.copy()
+    copied[0] = 99
+    assert(readings[0] == 10)
+    print(readings[0])  # 10
+    print(copied[0])   # 99

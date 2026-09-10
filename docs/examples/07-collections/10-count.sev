@@ -1,0 +1,18 @@
+# count[T]: a frequency map; absent values have frequency zero.
+def main():
+    frequencies := count[i32]()
+    frequencies.add(10)
+    frequencies.add(20)
+    frequencies.add(10, 2)
+
+    assert(frequencies[10] == 3)
+    assert(frequencies[99] == 0)
+    assert(frequencies.len() == 2)    # Distinct values.
+    assert(frequencies.total() == 4)  # Total occurrences.
+    print(frequencies[10])  # 3
+
+    remaining := frequencies.subtract(10, 10)  # Cannot go below zero.
+    assert(remaining == 0)
+    assert(not frequencies.contains(10))
+    assert(frequencies.len() == 1)
+    print(frequencies.total())  # 1

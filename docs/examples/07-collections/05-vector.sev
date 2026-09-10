@@ -1,0 +1,12 @@
+# vector[T, N]: fixed numeric lanes with element-wise arithmetic.
+def main():
+    left := vector[i32, 3](array[i32, 3]([1, 2, 3]))
+    right := vector[i32, 3](array[i32, 3]([4, 5, 6]))
+
+    added := left + right
+    assert(added[0] == 5 and added[1] == 7 and added[2] == 9)
+    scaled := left * 2
+    assert(scaled[0] == 2 and scaled[2] == 6)
+
+    print(added.sum())      # 21
+    print(left.dot(right))  # 32

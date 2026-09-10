@@ -1,0 +1,17 @@
+# deque[T]: add and remove elements at either end.
+def main():
+    jobs := deque[i32]()
+    jobs.push_back(20)
+    jobs.push_back(30)
+    jobs.push_front(10)
+    assert(jobs.len() == 3)
+
+    first, found := jobs.pop_front()
+    assert(found and first == 10)
+    last, found := jobs.pop_back()
+    assert(found and last == 30)
+    print(jobs[0])  # 20
+
+    jobs.clear()
+    _, found := jobs.pop_front()
+    assert(not found)

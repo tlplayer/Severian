@@ -1,0 +1,19 @@
+# dict[K, V]: a hash-style key/value table.
+def main():
+    scores := dict[i32, i32]()
+    scores[30] = 300
+    scores[10] = 100
+    scores[20] = 200
+    scores[10] = 150
+    assert(scores.len() == 3)
+
+    value, found := scores.get(10)
+    assert(found and value == 150)
+    _, found := scores.get(99)
+    assert(not found)
+
+    # A default is inserted only when the key is absent.
+    assert(scores.set_default(10, 999) == 150)
+    assert(scores.set_default(40, 400) == 400)
+    print(scores[10])  # 150
+    print(scores[40])  # 400
