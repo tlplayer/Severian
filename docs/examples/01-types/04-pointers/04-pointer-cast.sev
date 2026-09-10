@@ -2,8 +2,8 @@ test:
     value: u32 := 42
 
     unsafe:
-        integer_pointer: *[u32] := &value
-        byte_pointer: *[u8] := [*[u8]](integer_pointer)
+        integer_pointer: pointer[u32] := &value
+        byte_pointer: pointer[u8] := [pointer[u8]](integer_pointer)
 
         #You don't need [0B] [] infers the pointed address without offset
         assert(byte_pointer[] == 42)
