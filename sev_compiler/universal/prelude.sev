@@ -9,5 +9,6 @@ import * from "primitive/numeric/power.sev"
 import * from "primitive/units.sev"
 import * from "primitive/collections.sev"
 import * from "primitive/hosted_memory.sev"
+import * from "primitive/assertion.sev"
 import * from "primitive/string/methods.sev" as string_methods
 import * from "../../library/testing/src/lib.sev"

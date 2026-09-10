@@ -53,6 +53,54 @@ class TestCases(MigrationCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('assert', result.stderr.lower())
 
+    def test_membership_uses_element_and_container_types(self):
+        self.native('''
+            test:
+                assert(2 in [1, 2, 3])
+                assert(4 not in [1, 2, 3])
+                empty: list[int] = []
+                assert(2 not in empty)
+                assert(0.5 in [0.25, 0.5])
+                assert(true in [false, true])
+                assert('λ' in ['a', 'λ'])
+                assert("λ" in "aλz")
+        ''')
+
+    def test_membership_evaluates_each_operand_once_in_order(self):
+        self.native('''
+            def element() -> int:
+                print("element")
+                return 2
+            def container() -> list[int]:
+                print("container")
+                return [1, 2, 3]
+            test:
+                assert(element() in container())
+        ''', expected='element\ncontainer\n')
+
+    def test_assertion_diagnostic_survives_redirected_output(self):
+        from migration import COMPILER
+        path = self.write('''
+            test:
+                assert(false, "specific failure")
+        ''')
+        result = self.invoke([COMPILER, 'test', path, '--sysroot', ROOT,
+                              '-o', self.directory / 'diagnostic'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('assertion failed: specific failure', result.stderr)
+
+    def test_assertion_message_is_lazy_and_condition_runs_once(self):
+        self.native('''
+            def condition() -> bool:
+                print("condition")
+                return true
+            def message() -> string:
+                print("message")
+                return "unexpected"
+            test:
+                assert(condition(), message())
+        ''', expected='condition\n')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,3 +1,4 @@
 # Test syntax is structural compiler input; reusable testing APIs belong here.
 import * from "approximate.sev"
 import * from "modes.sev"
+import * from "runner.sev"

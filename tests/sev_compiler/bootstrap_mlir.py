@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build the source compiler, then verify and execute its emitted MLIR."""
 import os
+import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -164,13 +166,11 @@ def main():
         "false_assertion", "false_test", "main_status", "byte_bounds",
         "negative_byte", "character_bounds", "empty_character", "decode_continuation",
     }
-    function_counts = {}
     for name, (source_path, command) in inputs.items():
         emitted = ARTIFACTS / f"{name}.mlir"
         run([compiler, command, "--emit", "mlir", source_path, "--sysroot", ROOT], output=emitted)
         text = emitted.read_text()
         assert "module {" in text and '"func.return"' in text, "expected executable MLIR"
-        function_counts[name] = sum(line.lstrip().startswith("func.func ") for line in text.splitlines())
         if name in {"example_math", "example_clamp", "scalar_functions"}:
             assert "__sev_scalar_" in text, "source functions must survive lowering"
         if name in {"example_clamp", "scalar_functions"}:
@@ -202,13 +202,22 @@ def main():
             assert checked.stdout == expected_stdout.get(name, "")
             print(f"PASS: {name} under AddressSanitizer/LeakSanitizer", flush=True)
         print(f"PASS: {name} (source -> MLIR -> native)", flush=True)
-    # Symbols use numeric callable IDs. Compare the same subject in both modes
-    # to prove tests are absent from build IR, rather than merely uncalled.
-    assert function_counts["false_test"] == function_counts["build_excludes_tests"] + 1
-    assert function_counts["string_core"] == function_counts["string_core_build"] + 4
-    # Eight integer storage types and f64 generate 9 x 9 conversion cases,
-    # followed by four explicit policy regressions in the source provider.
-    assert function_counts["numeric_conversion"] == function_counts["numeric_conversion_build"] + 85
+    # Check test identities in the emitted graph, not total helper counts:
+    # assertions and test bodies can make additional library functions reachable.
+    # Eight integer storage types and f64 produce 81 numeric cases plus four
+    # explicit policy regressions.
+    for name, expected_count in {
+        "false_test": 1, "build_excludes_tests": 0,
+        "string_core": 4, "string_core_build": 0,
+        "numeric_conversion": 85, "numeric_conversion_build": 0,
+    }.items():
+        source, mode = inputs[name]
+        graph = json.loads(run([compiler, mode, source, "--emit", "agent-ir",
+                               "--sysroot", ROOT]).stdout)
+        tests = {definition['id'] for definition in graph['definitions']
+                 if re.fullmatch(r'__test_\d+', definition['name'])}
+        emitted = {function['definition'] for function in graph['functions']}
+        assert len(tests & emitted) == expected_count, (name, tests & emitted)
     rejected = {
         "numeric_mode": ('int(1.5, checked)\n', "required numeric policy"),
         "numeric_unknown_mode": ('int(1, unknown)\n', "unknown numeric conversion mode"),

@@ -164,6 +164,8 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
     result = universal.empty_block()
     for statement in block.statements:
         match statement:
+            case Defer:
+                result.statements.append(universal.Defer(project(value, names, getters, contexts, bound), span))
             case Unsafe:
                 result.statements.append(universal.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal), span))
             case BindingStatement:
@@ -217,6 +219,57 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
     return result
 
 
+def mode_values(declaration: universal.TestDeclaration, mode: string, count: int) -> list[universal.Expression] | diagnostics.Diagnostic:
+    values: list[universal.Expression] := []
+    for supplied in declaration.mode_arguments:
+        if supplied.name == mode:
+            values = supplied.values
+    if int(len(values)) != count:
+        return error(diagnostics.diagnostic_at("E000215", mode + " requires " + string(count) + " arguments", declaration.span))
+    return values
+
+
+def runner_block(declaration: universal.TestDeclaration, body: universal.Block, ordinal: int) -> universal.Block | diagnostics.Diagnostic:
+    span = declaration.span
+    result := body
+    label := "test " + string(ordinal)
+    supplied ?= declaration.name
+    if supplied != None:
+        label = supplied
+    if "bench" in declaration.source_modes:
+        mode_values(declaration, "bench", 0)
+        # Warmup and measured iterations use the same isolated callable body.
+        # Measurement and reporting remain ordinary source library functions.
+        result = universal.Block(body.statements[:])
+        timer = "$benchmark$" + string(ordinal)
+        result.statements.append(universal.BindingStatement(universal.Binding(timer, None, call("__test_bench_begin", [], span), false, false, span)))
+        zero = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), span)
+        count = call("__test_bench_iterations", [], span)
+        result.statements.append(universal.ForEach("$sample$" + string(ordinal), call("range", [zero, count], span), body, span))
+        label_value = universal.Expression(universal.LiteralValue(universal.StringValue(label)), span)
+        result.statements.append(universal.ExpressionStatement(call("__test_bench_report", [name(timer, span), label_value], span)))
+    if "timeout" in declaration.source_modes:
+        values = mode_values(declaration, "timeout", 1)[:]
+        values.append(universal.Expression(universal.LiteralValue(universal.StringValue(label)), span))
+        ticket = "$deadline$" + string(ordinal)
+        child = universal.Block(result.statements[:])
+        child.statements.append(universal.ExpressionStatement(call("__test_complete", [], span)))
+        result = universal.Block([
+            universal.BindingStatement(universal.Binding(ticket, None, call("__test_start", values, span), false, false, span)),
+            universal.If(call("__test_is_child", [name(ticket, span)], span), child, universal.empty_block(), span),
+            universal.ExpressionStatement(call("__test_wait", [name(ticket, span)], span)),
+        ])
+    if "repeat" in declaration.source_modes:
+        values = mode_values(declaration, "repeat", 1)
+        count = call("__test_repeat", values, span)
+        zero = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), span)
+        result = universal.Block([universal.ForEach("$repeat$" + string(ordinal), call("range", [zero, count], span), result, span)])
+    if "parallel" in declaration.source_modes:
+        # Eligibility metadata: the default runner is serial.
+        mode_values(declaration, "parallel", 0)
+    return result
+
+
 def expand(module: universal.Module, enabled: bool, namespace: string) -> universal.Module | diagnostics.Diagnostic:
     if not enabled:
         return module
@@ -241,7 +294,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                         if supplied != None:
                             label = supplied
                         case_label = f"{label} [{ordinal}]"
-                        expanded.append(universal.Test(universal.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup)))
+                        expanded.append(universal.Test(universal.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup, mode_arguments=declaration.mode_arguments)))
                         ordinal += 1
             case _:
                 pass
@@ -249,15 +302,21 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
             expanded.append(item)
     module.items = expanded
     wanted: list[string] = []
+    runner := false
+    suite_span := source.Span(source.SourceId(0), 0, 0)
     for item in module.items:
         match item:
             case Test:
+                suite_span = declaration.span
                 for mode in declaration.source_modes:
+                    if mode in ["repeat", "timeout", "parallel", "bench"]:
+                        runner = true
+                        continue
                     if mode != "compiler" and mode not in wanted:
                         wanted.append(mode)
             case _:
                 pass
-    if len(wanted) == 0:
+    if len(wanted) == 0 and not runner:
         return module
     policies: list[Policy] = []
     for item in module.items:
@@ -329,6 +388,9 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                     if mode in seen:
                         return error(diagnostics.diagnostic_at("E000215", "duplicate test mode " + mode, declaration.span))
                     seen.append(mode)
+                    if mode in ["repeat", "timeout", "parallel", "bench"]:
+                        continue
+                    mode_values(declaration, mode, 0)
                     for selected in policies:
                         if selected.name != mode:
                             continue
@@ -350,13 +412,15 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                 body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0])
                 function = universal.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
                 items.append(universal.Function(function))
-                suite.statements.append(universal.ExpressionStatement(call(function_name, values, declaration.span)))
+                execution = universal.Block([universal.ExpressionStatement(call(function_name, values, declaration.span))])
                 for statement in cleanup[::-1]:
+                    execution.statements.append(statement)
+                for statement in runner_block(declaration, execution, case_index).statements:
                     suite.statements.append(statement)
             case _:
                 pass
     for selected in policies[::-1]:
         suite.statements.append(universal.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
-    items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], policies[0].span, lookup=namespace)))
+    items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))
     module.items = items
     return module

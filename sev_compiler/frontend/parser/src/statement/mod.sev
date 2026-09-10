@@ -489,10 +489,20 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
     if parser_at_symbol(parser, "[") or (not parser_at_identifier(parser, "with") and parser_peek(parser).kind == Identifier):
         return parser_case_test(parser, start)
     modes: list[string] = []
+    mode_arguments: list[universal.TestModeArguments] = []
     if parser_at_identifier(parser, "with"):
         parser_next(parser)
         while true:
-            modes.append(parser_identifier(parser, "expected test mode")[0])
+            mode = parser_identifier(parser, "expected test mode")[0]
+            modes.append(mode)
+            values: list[universal.Expression] = []
+            if parser_take_symbol(parser, "(") != None:
+                while not parser_at_symbol(parser, ")"):
+                    values.append(parser_expression(parser, 0))
+                    if parser_take_symbol(parser, ",") == None:
+                        break
+                parser_expect_symbol(parser, ")", "expected closing test mode parenthesis")
+            mode_arguments.append(universal.TestModeArguments(mode, values))
             if not parser_at_identifier(parser, "and"):
                 break
             parser_next(parser)
@@ -547,9 +557,9 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
                 cases.append(parsed)
             parser_separators(parser)
         end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
-        return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end))
+        return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
     block = parser_indented_block(parser, "test")
-    return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]))
+    return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments)
 
 
 def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclaration | diagnostics.Diagnostic:
@@ -712,6 +722,14 @@ def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitiali
 
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "defer"):
+        start = parser_next(parser).span
+        value = parser_expression(parser, 0)
+        match value.kind:
+            case Call:
+                return universal.Defer(value, source.Span(start.source, start.start, value.span.end))
+            case _:
+                return error(parser_fail(parser, "defer requires a call"))
     if parser_at_identifier(parser, "unsafe"):
         start = parser_next(parser).span
         parser_expect_symbol(parser, ":", "expected colon after unsafe")
@@ -789,6 +807,22 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
         return universal.Return(value, source.Span(start.source, start.start, value.span.end))
     if parser_at_identifier(parser, "assert"):
         start = parser_next(parser).span
+        if parser_at_symbol(parser, "("):
+            parser.cursor[0] -= 1
+            invocation = parser_postfix(parser)
+            match invocation.kind:
+                case Call:
+                    if len(arguments) < 1 or len(arguments) > 2:
+                        return error(parser_fail(parser, "assert requires a condition and optional message"))
+                    for argument in arguments:
+                        if argument.name != None or argument.spread:
+                            return error(parser_fail(parser, "assert requires positional arguments"))
+                    message: universal.Expression | None := None
+                    if len(arguments) == 2:
+                        message = arguments[1].value
+                    return universal.Assert(arguments[0].value, message, invocation.span, arguments[0].value.span)
+                case _:
+                    return error(parser_fail(parser, "expected assertion arguments"))
         condition = parser_expression(parser, 0)
         message: universal.Expression | None := None
         if parser_take_symbol(parser, ",") != None:

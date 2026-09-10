@@ -86,10 +86,20 @@ binding; `=`, `+=`, `-=`, and `*=` can update it without changing its type.
 Immutable literal globals can be read inside functions. Other global captures
 remain unsupported. Module initializers execute in source order before `main`.
 
-`test --emit mlir` generates an executable test entry for ordinary and named
-tests. It does not invoke a source `main` implicitly. Test modes such as
-integration, property, or benchmark are not implemented by this runner.
-`build --emit mlir` excludes test bodies.
+`test --emit mlir` generates an executable test entry for ordinary, named and
+parameterized tests. It does not invoke a source `main` implicitly.
+Integration and profile policies compose with `repeat(count)` and
+`timeout(duration)`. A timeout supervises a child process and bounds its body
+and deferred cleanup; each repetition receives fresh local bindings and its
+own deadline. `parallel` marks eligibility; the default runner executes serially.
+`bench` performs one warmup and ten measured iterations and reports elapsed
+and mean time. Property generation, fuzzing and other advanced policies remain
+unfinished. `build --emit mlir` excludes test bodies.
+
+Assertions accept an optional string message, evaluate the condition once, and
+evaluate the message only on failure. Failure diagnostics are written to stderr
+before termination, including when stdout is redirected. Native gates are
+`tests/sev_compiler/test_cases.py` and `tests/sev_compiler/test_runner_modes.py`.
 
 Scalar compiler tests can use `test with compiler` with `accept:` and `reject:`
 statement blocks. Each case gets isolated bindings and is checked without
@@ -366,6 +376,13 @@ records still require further ownership lowering. Tagged records keep inactive
 payload fields initialized, allowing optional owned fields to use the same
 storage and lifetime handling.
 
+Deferred calls execute in reverse registration order at scope exit, explicit
+returns, and loop breaks/continues, before local resource destruction. Return
+expressions are evaluated before cleanup. Deferred references are checked again
+at exit, so moving or dropping their owner first is rejected. This covers
+structured exits; traps and process termination do not unwind deferred calls.
+Run `python3 tests/sev_compiler/deferred_cleanup.py -v` for native regressions.
+
 Local records with a `drop` method now receive reverse-order cleanup at scope
 exit and unit returns. Both `drop(value)` and `drop value` invoke cleanup once;
 later uses are diagnosed. The same path handles records containing strings.
@@ -381,7 +398,11 @@ the source `DataSize` quantity. Layout queries obtain Clang's target layout
 through `SEVERIAN_CLANG`, including when emitting MLIR, and preserve it on the
 module. Run `python3 tests/sev_compiler/memory_ownership.py -v` for unchanged
 layout/lifetime examples, native behavior, lifetime rejections and allocation
-checks. Raw allocation and the broader ownership examples remain unfinished.
+checks. Raw `allocate[T]`/`free`, typed pointer access and casts require an
+`unsafe` scope. Explicit borrow/move/clone support is covered by
+`tests/sev_compiler/raw_memory.py` and `tests/sev_compiler/explicit_ownership.py`.
+Owned collection elements, partial moves, inferred ownership transfers and the
+broader ownership examples remain unfinished.
 
 For compiler stage timings and an honest example audit, see
 [`PROFILING.md`](../tests/sev_compiler/PROFILING.md). Missing source files are
@@ -391,6 +412,11 @@ String replacement and string-to-integer conversion are ordinary source
 implementations in `universal/primitive/string/methods.sev`; conversion calls
 resolve the declared operator. Integer parsing accepts signed decimal text and
 ASCII surrounding whitespace, and traps on invalid input or overflow.
+String-to-float conversion uses the hosted decimal parser and checks that all
+input was consumed, allowing surrounding ASCII whitespace. Numeric conversions
+over unions dispatch to the selected member, require every member to support
+the conversion, and evaluate the subject once. Run
+`python3 tests/sev_compiler/union_conversions.py -v` for those regressions.
 
 The acceptance runner uses these subjects:
 

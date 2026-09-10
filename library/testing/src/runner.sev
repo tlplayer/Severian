@@ -1,0 +1,79 @@
+import * from "profile.sev" as clock
+
+@c(symbol="fork")
+def __test_fork() -> i32
+@c(symbol="setpgid")
+def __test_group(process: i32, group: i32) -> i32
+@c(symbol="waitpid")
+def __test_waitpid(process: i32, status: native_ptr, options: i32) -> i32
+@c(symbol="kill")
+def __test_kill(process: i32, signal: i32) -> i32
+@c(symbol="usleep")
+def __test_sleep(microseconds: u32) -> i32
+@c(symbol="fflush")
+def __test_flush(stream: native_ptr) -> i32
+@c(symbol="_exit")
+def __test_exit(status: i32)
+@mlir("memref.extract_aligned_pointer_as_index")
+def __test_status_address(status: buffer[i32]) -> index
+
+class TestDeadline:
+    process: i32
+    started: int
+    nanoseconds: int
+    label: string
+
+def __test_repeat(count: int) -> int:
+    assert(count > 0, "repeat requires a positive count")
+    return count
+
+def __test_bench_iterations() -> int:
+    return 10
+
+def __test_bench_begin() -> int:
+    return clock.begin()
+
+def __test_bench_report(started: int, label: string):
+    elapsed = clock.begin() - started
+    print("benchmark:", label, "iterations:", __test_bench_iterations(), "total:", elapsed, "ns", "mean:", float(elapsed) / float(__test_bench_iterations()), "ns")
+
+def __test_start(limit: Duration, label: string) -> TestDeadline:
+    assert(limit.amount > 0.0 and limit.amount < 9223372036854775808.0, "timeout requires a positive finite duration")
+    nanoseconds = int(limit.amount)
+    assert(nanoseconds > 0, "timeout must be at least one nanosecond")
+    assert(__test_flush(clock.__pointer(0)) == 0)
+    started = clock.begin()
+    child = __test_fork()
+    assert(child >= 0, "could not start isolated test")
+    if child == 0:
+        assert(__test_group(0, 0) == 0)
+    else:
+        # Both sides establish the group to close the scheduling race. The
+        # child may already have exited when the parent gets here.
+        __test_group(child, child)
+    return TestDeadline(child, started, nanoseconds, label)
+
+def __test_is_child(ticket: TestDeadline) -> bool:
+    return ticket.process == 0
+
+def __test_complete():
+    __test_flush(clock.__pointer(0))
+    __test_exit(0)
+
+def __test_wait(ticket: TestDeadline):
+    status = [i32(0)]
+    address = clock.__pointer(clock.__integer(__test_status_address(status)))
+    while true:
+        waited = __test_waitpid(ticket.process, address, 1)
+        if waited == ticket.process:
+            # No descendant of an isolated case may outlive that case.
+            __test_kill(-ticket.process, 9)
+            assert(status[0] == 0, "test failed: " + ticket.label)
+            return
+        assert(waited >= 0, "could not wait for isolated test")
+        if clock.begin() - ticket.started >= ticket.nanoseconds:
+            __test_kill(-ticket.process, 9)
+            __test_kill(ticket.process, 9)
+            __test_waitpid(ticket.process, address, 0)
+            assert(false, "test timeout: " + ticket.label + " exceeded " + string(ticket.nanoseconds) + " ns")
+        __test_sleep(1000)

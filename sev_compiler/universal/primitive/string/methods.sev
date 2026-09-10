@@ -1,9 +1,34 @@
 import * from "core.sev" as text
+import * from "format.sev" as format
 import * from "../slicing.sev" as slicing
 
 
 operator copy(value: string) -> string:
     return text.concat(value, "")
+
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __float_end_address(value: buffer[int]) -> index
+
+@mlir("llvm.ptrtoint")
+def __float_pointer_value(value: native_ptr) -> int
+
+def __parse_float_buffer(value: string, end: buffer[int]) -> float:
+    return format.__parse(format.__address(value), format.__pointer(text.__size(__float_end_address(end))))
+
+operator float(value: string) -> float:
+    buffer = format.__terminated(value)
+    end = [0]
+    result = __parse_float_buffer(buffer, end)
+    consumed := end[0] - __float_pointer_value(format.__address(buffer))
+    assert(consumed > 0, "invalid floating-point string")
+    while consumed < text.byte_count(value):
+        assert(__space(text.byte_at(value, consumed)), "invalid floating-point string")
+        consumed += 1
+    return result
+
+operator f64(value: string) -> f64:
+    return float(value)
 
 
 def __contains_bytes(value: string, needle: string) -> bool:

@@ -10,6 +10,21 @@ from migration import MigrationCase, ROOT
 
 
 class ListGrowth(MigrationCase):
+    def test_length_and_clear_preserve_existing_views(self):
+        self.native('''
+            test:
+                values := [1, 2, 3]
+                retained = values
+                assert(values.length() == 3)
+                values.clear()
+                assert(values.length() == 0)
+                assert(retained.length() == 3)
+                assert(retained[2] == 3)
+                values.append(42)
+                assert(values.length() == 1)
+                assert(values[0] == 42)
+        ''')
+
     def test_method_identity_comes_from_source(self):
         origin = ROOT / "sev_compiler/universal/prelude.sev"
         sysroot = self.directory / "sysroot"

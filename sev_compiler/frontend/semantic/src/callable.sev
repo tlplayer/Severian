@@ -44,6 +44,8 @@ class CallableAnalysis:
     transitions: list[TransitionState] = []
     dead: list[int] = []
     resources: list[int] = []
+    deferred: list[universal.Expression] = []
+    loop_defer_start: int = 0
     test_context: bool = false
     resource_creation: source.Span | None = None
     unsafe_depth: int = 0
@@ -293,6 +295,29 @@ class CallableOptionalSelection:
 
 
 def callable_convert(state: CallableAnalysis, operand: universal.Expression, target: universal.TypeId, mode: string = "") -> universal.Expression | diagnostics.Diagnostic:
+    for record in state.records:
+        if record.type_id.index == operand.type_id.index and len(universal.union_variants(record)) != 0:
+            local = callable_scope(state)
+            span = operand.span
+            binding = callable_binding(local, universal.Binding("$conversion$" + string(state.next_id[0]), None, operand, false, true, span))
+            reference = matches.reference(binding.id, binding.type_id, span)
+            values: list[universal.Expression] = []
+            index := 0
+            target_name = definitions.type_name(target, state.records)
+            for variant in universal.union_variants(record):
+                projected = universal.Expression(universal.FieldReference(reference, index + 1), span, type_id=variant)
+                arguments = [universal.CallArgument(None, projected, span)]
+                if mode != "":
+                    arguments.append(universal.CallArgument(None, universal.Expression(universal.LiteralValue(universal.StringValue(mode)), span), span))
+                invocation = universal.Expression(universal.Call(universal.Expression(universal.Name(target_name), span), arguments), span)
+                values.append(callable_expression(local, invocation, target))
+                index += 1
+            result := values[-1]
+            cursor := len(values) - 1
+            while cursor > 0:
+                cursor -= 1
+                result = universal.Expression(universal.Conditional(matches.tag_test(reference, cursor, span), values[cursor], result), span, type_id=target)
+            return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(binding)]), result), span, type_id=target)
     required = conversions.scalar_conversion_rank(operand.type_id, target)
     if required < 0:
         return error(callable_diagnostic("explicit conversion requires numeric primitive types", operand.span))
@@ -959,7 +984,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             operand_type := universal.TypeId(0) if comparison else expected
             left_hint = callable_hint(state, left)
             right_hint = callable_hint(state, right)
-            aggregate = left_hint.index >= 1000 or right_hint.index >= 1000
+            # Membership has heterogeneous operands: a value and its container.
+            # Do not propagate the element's expected type into the container.
+            aggregate = left_hint.index >= 1000 or right_hint.index >= 1000 or operator.symbol == "in"
             if operand_type.index == 0:
                 operand_type = conversions.scalar_common_numeric(left_hint, right_hint)
             if aggregate:
@@ -1327,16 +1354,35 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     return universal.Binding(binding.name, binding.annotation, value, false, binding.preserve_error, binding.span, id, value.type_id, binding.mutable)
 
 
+def callable_assertion(state: CallableAnalysis, condition: universal.Expression, message: universal.Expression | None, span: source.Span, condition_span: source.Span) -> universal.Statement | diagnostics.Diagnostic:
+    resolved = callable_expression(state, condition, universal.TypeId(1))
+    diagnostic := universal.Expression(universal.LiteralValue(universal.StringValue("condition is false")), span, type_id=universal.TypeId(3))
+    supplied ?= message
+    if supplied != None:
+        diagnostic = callable_expression(state, supplied, universal.TypeId(3))
+    yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
+    no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
+    failed = callable_raw_call(state, "__assert_condition", [no, diagnostic], span, universal.TypeId(1))
+    # Keep the condition single-evaluation and the diagnostic lazy.
+    checked = universal.Expression(universal.Conditional(resolved, yes, failed), span, type_id=universal.TypeId(1))
+    return universal.Assert(checked, None, span, condition_span)
+
+
 def callable_expression_statement(state: CallableAnalysis, expression: universal.Expression) -> universal.Statement | diagnostics.Diagnostic:
     match expression.kind:
         case Call:
             match callee.kind:
                 case Name:
                     if name == "assert":
-                        if len(arguments) != 1 or arguments[0].name != None:
-                            return error(callable_diagnostic("assert requires one positional condition", expression.span))
-                        condition = callable_expression(state, arguments[0].value, universal.TypeId(1))
-                        return universal.Assert(condition, None, expression.span, condition.span)
+                        if len(arguments) < 1 or len(arguments) > 2:
+                            return error(callable_diagnostic("assert requires a condition and optional message", expression.span))
+                        for argument in arguments:
+                            if argument.name != None or argument.spread:
+                                return error(callable_diagnostic("assert requires positional arguments", expression.span))
+                        message: universal.Expression | None := None
+                        if len(arguments) == 2:
+                            message = arguments[1].value
+                        return callable_assertion(state, arguments[0].value, message, expression.span, arguments[0].value.span)
                 case _:
                     pass
             value = callable_expression(state, expression, universal.TypeId(0))
@@ -1397,9 +1443,15 @@ def callable_cleanup(state: CallableAnalysis, output: universal.Block, start: in
             callable_drop(state, value, output, span)
 
 
+def callable_deferred_cleanup(state: CallableAnalysis, output: universal.Block, start: int) -> unit | diagnostics.Diagnostic:
+    for expression in state.deferred[start:][::-1]:
+        output.statements.append(callable_expression_statement(state, expression))
+
+
 def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
     output = universal.empty_block()
     resource_start = int(len(state.resources))
+    defer_start = int(len(state.deferred))
     returned := false
     loop_exit := false
     index := 0
@@ -1410,6 +1462,10 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 break
             return error(callable_diagnostic("statement after unconditional return", None))
         match statement:
+            case Defer:
+                # Validate lexical scope now and check ownership again at exit.
+                callable_expression_statement(callable_scope(state), value)
+                state.deferred.append(value)
             case Unsafe:
                 local = callable_scope(state)
                 local.unsafe_depth += 1
@@ -1537,10 +1593,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if not dropped:
                     output.statements.append(callable_expression_statement(state, expression))
             case Assert:
-                if message != None:
-                    return error(callable_diagnostic("assertion messages are outside the scalar bootstrap subset", span))
-                resolved = callable_expression(state, condition, universal.TypeId(1))
-                output.statements.append(universal.Assert(resolved, None, span, condition_span))
+                output.statements.append(callable_assertion(state, condition, message, span, condition_span))
             case Throw:
                 if len(state.resources) != 0:
                     return error(callable_diagnostic("resource cleanup during error propagation is not supported", span))
@@ -1548,7 +1601,10 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if not definitions.error_conformance(state.declarations, state.records, error_value.type_id):
                     return error(callable_diagnostic("throw requires a value conforming to Error", span))
                 wrapped = callable_expression(state, error_value, result_type)
-                output.statements.append(callable_control(state, "Throw", [wrapped], [], span, true))
+                saved = callable_binding(state, universal.Binding("$throw$" + string(state.next_id[0]), None, wrapped, false, true, span))
+                output.statements.append(universal.BindingStatement(saved))
+                callable_deferred_cleanup(state, output, 0)
+                output.statements.append(callable_control(state, "Throw", [universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id)], [], span, true))
                 returned = true
             case Return:
                 returned_value: universal.Expression | None := None
@@ -1575,7 +1631,13 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if actual != None:
                     if len(state.resources) != 0:
                         return error(callable_diagnostic("returning a value across a resource lifetime is not supported", span))
-                    operands.append(actual)
+                    if len(state.deferred) != 0:
+                        saved = callable_binding(state, universal.Binding("$defer$return$" + string(state.next_id[0]), None, actual, false, true, span))
+                        output.statements.append(universal.BindingStatement(saved))
+                        operands.append(universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id))
+                    else:
+                        operands.append(actual)
+                callable_deferred_cleanup(state, output, 0)
                 callable_cleanup(state, output, 0, span)
                 output.statements.append(callable_control(state, "Return", operands, [], span, true))
                 returned = true
@@ -1663,6 +1725,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 resolved = callable_expression(state, condition, universal.TypeId(1))
                 local = callable_scope(state)
                 local.loop_depth += 1
+                local.loop_defer_start = int(len(local.deferred))
                 typed = callable_block(local, body.statements, result_type, false)
                 output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
@@ -1670,6 +1733,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("break outside a loop", span))
+                callable_deferred_cleanup(state, output, state.loop_defer_start)
                 output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
                 loop_exit = true
@@ -1678,6 +1742,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
+                callable_deferred_cleanup(state, output, state.loop_defer_start)
                 output.statements.append(callable_control(state, "Continue", [], [], span, true))
                 returned = true
                 loop_exit = true
@@ -1685,6 +1750,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
         index += 1
     if not returned:
+        callable_deferred_cleanup(state, output, defer_start)
         callable_cleanup(state, output, resource_start, source.Span(source.SourceId(0), 0, 0))
     if complete and not returned:
         if result_type.index == 6:
@@ -2125,7 +2191,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2193,6 +2259,7 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
     next = callable_protocol(state, "Iteration", "advance", [receiver, cursor], span, cursor.type_id)
     local = callable_scope(state)
     local.loop_depth += 1
+    local.loop_defer_start = int(len(local.deferred))
     iteration = universal.Binding(name, None, item, false, false, span)
     statements: list[universal.Statement] = [universal.BindingStatement(iteration)]
     for statement in body.statements:

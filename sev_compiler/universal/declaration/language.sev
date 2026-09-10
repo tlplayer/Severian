@@ -137,6 +137,11 @@ class TestCaseRow:
     values: list[Expression]
 
 
+class TestModeArguments:
+    name: string
+    values: list[Expression]
+
+
 class TestDeclaration:
     name: string | None
     source_modes: list[string]
@@ -149,6 +154,7 @@ class TestDeclaration:
     lookup: string = ""
     case_names: list[string] = []
     case_rows: list[TestCaseRow] = []
+    mode_arguments: list[TestModeArguments] = []
 
 
 def test_mode_name(mode: TestMode) -> string:

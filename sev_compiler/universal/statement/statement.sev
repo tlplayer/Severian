@@ -37,6 +37,7 @@ class MatchArm:
 
 
 enum Statement:
+    Defer(value: Expression, span: source.Span)
     Unsafe(body: Block, span: source.Span)
     CompilerCheck(reject: bool, body: Block, span: source.Span)
     Drop(value: Expression, span: source.Span)
