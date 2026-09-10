@@ -1,15 +1,22 @@
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)
+    Point
+
 
 def area(shape: Shape) -> float:
-    match shape:
-        Circle:
-            return 3.1415926 * radius ** 2
+    return match shape:
+        case Circle(radius):
+            3.1415926 * radius ** 2
 
-        Rectangle:
-            return width * height
+        case Rectangle(width, height):
+            width * height
 
-test:
+        case Point:
+            0.0
+
+
+test "matches enum variants and destructures payloads":
     assert(area(Circle(2.0)) > 12.5)
     assert(area(Rectangle(3.0, 4.0)) == 12.0)
+    assert(area(Point) == 0.0)
