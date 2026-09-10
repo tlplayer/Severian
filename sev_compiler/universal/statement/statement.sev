@@ -37,6 +37,7 @@ class MatchArm:
 
 
 enum Statement:
+    Unsafe(body: Block, span: source.Span)
     CompilerCheck(reject: bool, body: Block, span: source.Span)
     Drop(value: Expression, span: source.Span)
     GrammarApply(syntax: OperatorSyntax, operands: list[Expression], bodies: list[Block], span: source.Span, exits: bool)

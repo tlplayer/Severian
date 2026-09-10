@@ -26,6 +26,10 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case Ownership:
+            return mir_expression(module, context, scope, value)
+        case AddressOf:
+            return callable_mir_place(module, context, scope, value)
         case TypeLayout:
             result = mir_value(module, universal.TypeId(64))
             cfg.append(context, universal.Operation.TypeLayout(subject, alignment, result))
@@ -173,7 +177,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
                     for declaration in module.functions:
                         if declaration.id.value == function.declaration.value:
                             native = boundary.scalar_boundary(declaration, "mlir") != ""
-                            if aggregate.signature(declaration, module.records) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0):
+                            if aggregate.signature(declaration, module.records) or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0):
                                 return callable_inline_receiver(module, context, scope, declaration, arguments, expression.span)
                     evaluated: list[universal.ValueId] = []
                     for argument in arguments:
@@ -205,6 +209,20 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
 # A source extension borrows its receiver's binding. Inline buffer receivers
 # before SSA promotion so descriptor replacement and all allocation aliases
 # remain visible to the existing ownership pipeline, including loop backedges.
+def callable_exclusive_parameter(parameter: universal.FunctionParameter) -> bool:
+    for modifier in parameter.modifiers:
+        if modifier.name == "borrow mut":
+            return true
+    return false
+
+
+def callable_exclusive_signature(function: universal.FunctionDeclaration) -> bool:
+    for parameter in function.parameters:
+        if callable_exclusive_parameter(parameter):
+            return true
+    return false
+
+
 def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], span: source.Span) -> universal.ValueId | diagnostics.Diagnostic:
     identity = int(function.id.value)
     if identity in scope.inline_functions:
@@ -223,7 +241,10 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
     # each once before entering the callee, including aliased value arguments.
     evaluated: list[universal.ValueId] = []
     for argument in arguments:
-        receiver = function.extension and storage_types.buffer_element(function.parameter_types[0], module.records).index != 0 and argument.name == function.parameters[0].name
+        receiver := function.extension and storage_types.buffer_element(function.parameter_types[0], module.records).index != 0 and argument.name == function.parameters[0].name
+        for parameter in function.parameters:
+            if argument.name == parameter.name and callable_exclusive_parameter(parameter):
+                receiver = true
         if receiver or storage_types.indirect_value(argument.value.type_id, module.records):
             evaluated.append(callable_mir_place(module, context, scope, argument.value))
         else:
@@ -233,7 +254,7 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
         argument_index := 0
         for argument in arguments:
             if argument.name == parameter.name:
-                receiver = function.extension and index == 0 and storage_types.buffer_element(parameter.type_id, module.records).index != 0
+                receiver = (function.extension and index == 0 and storage_types.buffer_element(parameter.type_id, module.records).index != 0) or (callable_exclusive_parameter(parameter) and not storage_types.indirect_value(parameter.type_id, module.records))
                 if receiver or storage_types.owned_record(parameter.type_id, module.records):
                     local.bindings.append(evaluated[argument_index])
                     if storage_types.owned_record(parameter.type_id, module.records):
@@ -267,6 +288,13 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
             return true
         match statement:
             case BindingStatement:
+                match binding.value.kind:
+                    case Ownership:
+                        if mode == "borrow mut" and not binding.update:
+                            scope.bindings.append(callable_mir_place(module, context, scope, value))
+                            continue
+                    case _:
+                        pass
                 value := mir_expression(module, context, scope, binding.value)
                 if storage_types.owned_record(binding.type_id, module.records):
                     if binding.update:
@@ -358,7 +386,7 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
         if selected == -1:
             return error(diagnostics.Diagnostic("E000230", "call graph refers to an unknown function", None))
         function = module.functions[selected]
-        if aggregate.signature(function, module.records):
+        if aggregate.signature(function, module.records) or callable_exclusive_signature(function):
             if function.body == None or boundary.scalar_boundary(function, "mlir") != "":
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
             continue
@@ -391,6 +419,8 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
 
 def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case Ownership:
+            return callable_mir_place(module, context, scope, value)
         case BindingReference:
             if storage_types.owned_record(expression.type_id, module.records):
                 return scope.bindings[binding.index]

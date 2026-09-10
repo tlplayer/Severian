@@ -66,6 +66,10 @@ def rename_optional_expression(expression: universal.Expression | None, names: l
 def rename_expression(expression: universal.Expression, names: list[string], replacements: list[string]) -> universal.Expression:
     kind := expression.kind
     match expression.kind:
+        case Ownership:
+            kind = universal.Ownership(mode, rename_expression(value, names, replacements))
+        case AddressOf:
+            kind = universal.AddressOf(rename_expression(value, names, replacements))
         case Name:
             kind = universal.Name(renamed(name, names, replacements))
         case Member:
@@ -150,6 +154,8 @@ def expand_block(block: universal.Block, pack: string, count: int, names: list[s
                 taken = expand_block(then_block, pack, count, names[:], replacements[:], prefix)
                 otherwise = expand_block(else_block, pack, count, names[:], replacements[:], prefix)
                 result.statements.append(universal.If(rename_expression(condition, names, replacements), taken, otherwise, span))
+            case Unsafe:
+                result.statements.append(universal.Unsafe(expand_block(body, pack, count, names[:], replacements[:], prefix), span))
             case _:
                 throw Error("statement is outside bootstrap variadic specialization")
     return result

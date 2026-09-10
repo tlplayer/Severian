@@ -2,6 +2,10 @@ import "core.sev" as text
 import "../slicing.sev" as slicing
 
 
+operator copy(value: string) -> string:
+    return text.concat(value, "")
+
+
 def __contains_bytes(value: string, needle: string) -> bool:
     offset := 0
     while offset + text.byte_count(needle) <= text.byte_count(value):

@@ -133,6 +133,10 @@ enum TestExpectation:
     Equals(stream: TestStream, value: string)
 
 
+class TestCaseRow:
+    values: list[Expression]
+
+
 class TestDeclaration:
     name: string | None
     source_modes: list[string]
@@ -143,6 +147,8 @@ class TestDeclaration:
     function: FunctionId | None = None
     expectations: list[TestExpectation] = []
     lookup: string = ""
+    case_names: list[string] = []
+    case_rows: list[TestCaseRow] = []
 
 
 def test_mode_name(mode: TestMode) -> string:

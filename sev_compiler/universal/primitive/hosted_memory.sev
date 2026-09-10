@@ -1,0 +1,48 @@
+# The hosted pointer representation retains T in source types. Allocation is
+# explicit: these pointers never participate in managed buffer deallocation.
+class pointer[T]:
+    __address: native_ptr
+
+@c(symbol="calloc")
+def __raw_calloc(count: int, width: int) -> native_ptr
+
+@c(symbol="free")
+def __raw_free(value: native_ptr)
+
+@mlir("llvm.ptrtoint")
+def __raw_integer(value: native_ptr) -> int
+
+@mlir("llvm.inttoptr")
+def __raw_pointer(value: int) -> native_ptr
+
+@mlir("llvm.load")
+def __raw_load[T](value: native_ptr) -> T
+
+@mlir("llvm.store")
+def __raw_store[T](value: T, destination: native_ptr)
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __raw_buffer_address[T](value: buffer[T]) -> index
+
+@mlir("arith.index_cast")
+def __raw_index(value: index) -> int
+
+def __raw_allocate(count: int, width: int) -> native_ptr:
+    assert(count >= 0)
+    assert(width > 0)
+    assert(count <= 9223372036854775807 / width)
+    # A zero-element allocation still has a non-null identity that can be freed.
+    result = __raw_calloc(count if count > 0 else 1, width)
+    assert(__raw_integer(result) != 0)
+    return result
+
+def __raw_offset(base: native_ptr, offset: int) -> native_ptr:
+    return __raw_pointer(__raw_integer(base) + offset)
+
+def __raw_byte_offset(size: DataSize) -> int:
+    bytes = size.amount / 8.0
+    assert(bytes >= 0.0)
+    assert(bytes < 9223372036854775808.0)
+    result = int(bytes)
+    assert(float(result) == bytes)
+    return result

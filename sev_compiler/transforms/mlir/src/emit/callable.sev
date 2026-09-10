@@ -169,7 +169,9 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                             if not callable_buffer_operation(builder, module, callable_source, native_operation, inputs, outputs):
                                 builder_create_operation(builder, operation_name(parts[0], parts[1]), inputs, outputs, attributes)
                         elif symbol != "":
-                            builder_call(builder, symbol, inputs, outputs)
+                            segments = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [integer_attribute(int(len(inputs)), integer_type(32)), integer_attribute(0, integer_type(32))])
+                            bundles = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [])
+                            builder_create_operation(builder, operation_name("llvm", "call"), inputs, outputs, [MlirNamedAttribute("callee", symbol_attribute(symbol)), MlirNamedAttribute("operandSegmentSizes", segments), MlirNamedAttribute("op_bundle_sizes", bundles)])
                         else:
                             builder_call(builder, callable_function_symbol(function), inputs, outputs)
                         found = true
@@ -199,7 +201,16 @@ def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[M
                 position += 1
             return MlirFunctionHandle(index, MlirFunctionName(symbol), MlirBlockHandle(-1, -1), function.arguments, true)
         index += 1
-    return builder_create_function(builder, symbol, private_visibility(), parameters, results, true)
+    # Share the LLVM declaration with memref's allocation/deallocation lowering.
+    # A func.func declaration of free would otherwise be renamed to free_0 when
+    # the buffer pipeline inserts llvm.func @free, leaving an unresolved symbol.
+    handle = builder_create_function(builder, symbol, private_visibility(), parameters, results, true)
+    program := builder.program
+    function := program.functions[handle.function]
+    function.native = true
+    program.functions[handle.function] = function
+    builder.program = program
+    return handle
 
 
 def lower_callables(module: universal.Module) -> MlirProgram:

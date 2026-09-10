@@ -8,5 +8,6 @@ import "primitive/numeric/operators.sev"
 import "primitive/numeric/power.sev"
 import "primitive/units.sev"
 import "primitive/collections.sev"
+import "primitive/hosted_memory.sev"
 import "primitive/string/methods.sev" as string_methods
 import "../../library/testing/src/lib.sev"

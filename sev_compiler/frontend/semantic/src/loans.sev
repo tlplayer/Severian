@@ -1,0 +1,60 @@
+import universal
+import diagnostics
+import source
+
+
+class Loan:
+    owner: int
+    borrower: int
+    exclusive: bool
+
+
+def binding(expression: universal.Expression) -> int:
+    match expression.kind:
+        case BindingReference:
+            return int(binding.index)
+        case Ownership:
+            return binding(value)
+        case FieldReference:
+            return binding(object)
+        case IndexReference:
+            return binding(object)
+        case _:
+            return -1
+
+
+def owner(loans: borrow list[Loan], binding: int) -> int:
+    for loan in borrow loans:
+        if loan.borrower == binding and binding >= 0:
+            return loan.owner
+    return binding
+
+
+def access(loans: borrow list[Loan], binding: int, write: bool, span: source.Span) -> unit | diagnostics.Diagnostic:
+    root := binding
+    cursor := 0
+    while cursor < len(loans):
+        loan = loans[cursor]
+        if loan.borrower == binding and binding >= 0:
+            root = loan.owner
+        cursor += 1
+    cursor = 0
+    while cursor < len(loans):
+        loan = loans[cursor]
+        if loan.owner == root:
+            if loan.borrower == binding and binding >= 0:
+                if write and not loan.exclusive:
+                    return error(diagnostics.Diagnostic("E000200", "cannot mutate through a shared borrow", span))
+            elif write or loan.exclusive:
+                return error(diagnostics.Diagnostic("E000200", "access conflicts with an active borrow", span))
+        cursor += 1
+
+
+def retained(loans: borrow list[Loan], start: int = 0) -> list[Loan]:
+    result: list[Loan] = []
+    index := 0
+    for loan in borrow loans:
+        if loan.borrower >= 0 or index < start:
+            result.append(loan)
+        index += 1
+    return result

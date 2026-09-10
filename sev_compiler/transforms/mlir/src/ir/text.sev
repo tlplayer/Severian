@@ -249,12 +249,14 @@ def print_operation(program: MlirProgram, operation: MlirOperation, indentation:
 def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
     parameters: list[string] = []
     for argument in function.arguments:
-        parameters.append(value_text(argument) + ": " + type_text(argument.type_id))
+        parameters.append(type_text(argument.type_id) if function.native else value_text(argument) + ": " + type_text(argument.type_id))
     result := ""
     if len(function.result_types) != 0:
         result = " -> " + result_types_text(function.result_types)
     visibility = " private" if visibility_name(function.visibility) == "private" else ""
     output := "  func.func" + visibility
+    if function.native:
+        output = "  llvm.func"
     output += " @\"" + escaped(function.name) + "\"("
     output += parameters.join(", ") + ")" + result
     if function.declaration:

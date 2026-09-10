@@ -29,6 +29,8 @@ enum ResolvedCallee:
 
 
 enum ExpressionKind:
+    Ownership(mode: string, value: Expression)
+    AddressOf(value: Expression)
     TypeLayout(subject: TypeId, alignment: bool)
     SourceSymbol(spelling: string, definition: DefId)
     CompilerTerm(name: string, arguments: list[TypeAnnotation])

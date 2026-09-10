@@ -109,6 +109,10 @@ def optional(expression: universal.Expression | None, names: list[string], gette
 def project(expression: universal.Expression, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> universal.Expression:
     kind := expression.kind
     match expression.kind:
+        case Ownership:
+            kind = universal.Ownership(mode, project(value, names, getters, contexts, bound))
+        case AddressOf:
+            kind = universal.AddressOf(project(value, names, getters, contexts, bound))
         case Name:
             index := 0
             for binding in names:
@@ -160,6 +164,8 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
     result = universal.empty_block()
     for statement in block.statements:
         match statement:
+            case Unsafe:
+                result.statements.append(universal.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal), span))
             case BindingStatement:
                 value = project(binding.value, names, getters, contexts, bound)
                 result.statements.append(universal.BindingStatement(universal.Binding(binding.name, binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
@@ -214,6 +220,34 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
 def expand(module: universal.Module, enabled: bool, namespace: string) -> universal.Module | diagnostics.Diagnostic:
     if not enabled:
         return module
+    expanded: list[universal.Item] = []
+    for item in module.items:
+        table := false
+        match item:
+            case Test:
+                if len(declaration.case_rows) != 0:
+                    table = true
+                    ordinal := 0
+                    for row in declaration.case_rows:
+                        body = universal.empty_block()
+                        index := 0
+                        for value in row.values:
+                            body.statements.append(universal.BindingStatement(universal.Binding(declaration.case_names[index], None, value, false, false, value.span)))
+                            index += 1
+                        for statement in declaration.body.statements:
+                            body.statements.append(statement)
+                        label := "cases"
+                        supplied ?= declaration.name
+                        if supplied != None:
+                            label = supplied
+                        case_label = f"{label} [{ordinal}]"
+                        expanded.append(universal.Test(universal.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup)))
+                        ordinal += 1
+            case _:
+                pass
+        if not table:
+            expanded.append(item)
+    module.items = expanded
     wanted: list[string] = []
     for item in module.items:
         match item:

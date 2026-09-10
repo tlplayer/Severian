@@ -88,6 +88,7 @@ class FunctionDeclaration:
     # ABI sentinel for the seed record/list representation; never populated.
     # Executable bodies are indexed in Module.cfg_bodies.
     cfg: CfgBody | None = None
+    result_mode: string = ""
 
 
 def resolved_function(

@@ -393,6 +393,7 @@ class MlirFunctionOp:
     body_region: int
     declaration: bool
     location: MlirLocation | None = None
+    native: bool = false
 
 
 class MlirFunctionName:

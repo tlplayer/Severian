@@ -312,6 +312,10 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
             keyword_only = true
         parameter = parser_identifier(parser, "expected a parameter name")
         parser_expect_symbol(parser, ":", "expected colon after parameter")
+        modifiers: list[universal.BoundaryModifier] = []
+        mode = parser_ownership_mode(parser)
+        if mode != "":
+            modifiers.append(universal.BoundaryModifier(mode))
         annotation = parser_type_annotation(parser)
         default: universal.Expression | absent := absent
         parameter_end := annotation.span.end
@@ -319,14 +323,16 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
             parsed_default = parser_expression(parser, 0)
             default = parsed_default
             parameter_end = parsed_default.span.end
-        parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), variadic=variadic, keyword_only=keyword_only and not variadic))
+        parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), modifiers=modifiers, variadic=variadic, keyword_only=keyword_only and not variadic))
         parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None:
             break
         parser_delimited_layout(parser)
     close = parser_expect_symbol(parser, ")", "expected closing parenthesis").span
     result := universal.named_type("unit", [], close)
+    result_mode := ""
     if parser_take_symbol(parser, "->") != None:
+        result_mode = parser_ownership_mode(parser)
         result = parser_type_annotation(parser)
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
@@ -336,7 +342,16 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
         block = parser_indented_block(parser, "function")
         body = block[0]
         end = block[1]
-    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end))
+    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode)
+
+def parser_ownership_mode(parser: Parser) -> string:
+    if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move"):
+        mode = string(parser_next(parser))
+        if mode == "borrow" and parser_at_identifier(parser, "mut"):
+            parser_next(parser)
+            return "borrow mut"
+        return mode
+    return ""
 
 def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
@@ -467,6 +482,10 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
 
 def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
+    if parser_at_simple(parser, Newline):
+        parser_separators(parser)
+    if parser_at_symbol(parser, "[") or (not parser_at_identifier(parser, "with") and parser_peek(parser).kind == Identifier):
+        return parser_case_test(parser, start)
     modes: list[string] = []
     if parser_at_identifier(parser, "with"):
         parser_next(parser)
@@ -529,6 +548,92 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
         return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end))
     block = parser_indented_block(parser, "test")
     return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]))
+
+
+def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclaration | diagnostics.Diagnostic:
+    names: list[string] = []
+    rows: list[universal.TestCaseRow] := []
+    product = parser_take_symbol(parser, "[") != None
+    label := "cases"
+    if product:
+        initial: list[universal.Expression] = []
+        rows.append(universal.TestCaseRow(initial))
+        parser_delimited_layout(parser)
+        while not parser_at_symbol(parser, "]"):
+            parameter = parser_identifier(parser, "expected case parameter")[0]
+            if parameter in names:
+                return error(parser_fail(parser, "duplicate case parameter"))
+            names.append(parameter)
+            if not parser_at_identifier(parser, "in"):
+                return error(parser_fail(parser, "expected in after case parameter"))
+            parser_next(parser)
+            values = parser_expression(parser, 0)
+            expanded: list[universal.TestCaseRow] = []
+            match values.kind:
+                case ListLiteral:
+                    for row in rows:
+                        for element in elements:
+                            next = row.values[:]
+                            next.append(element)
+                            expanded.append(universal.TestCaseRow(next))
+                case _:
+                    return error(parser_fail(parser, "Cartesian cases require literal lists"))
+            rows = expanded
+            parser_delimited_layout(parser)
+            if parser_take_symbol(parser, ",") == None:
+                break
+            parser_delimited_layout(parser)
+        parser_expect_symbol(parser, "]", "expected closing case bracket")
+    else:
+        label = parser_identifier(parser, "expected case subject")[0]
+        parser_expect_symbol(parser, "(", "expected case parameter list")
+        parser_delimited_layout(parser)
+        while not parser_at_symbol(parser, ")"):
+            name = parser_identifier(parser, "expected case parameter")[0]
+            if name in names:
+                return error(parser_fail(parser, "duplicate case parameter"))
+            names.append(name)
+            parser_delimited_layout(parser)
+            if parser_take_symbol(parser, ",") == None:
+                break
+            parser_delimited_layout(parser)
+        parser_expect_symbol(parser, ")", "expected closing case parameter list")
+    if not parser_at_identifier(parser, "with"):
+        return error(parser_fail(parser, "expected with cases"))
+    parser_next(parser)
+    if not parser_at_identifier(parser, "cases"):
+        return error(parser_fail(parser, "expected cases mode"))
+    parser_next(parser)
+    if parser_peek(parser).kind == String:
+        label = string(parser_next(parser))
+    if not product:
+        parser_delimited_layout(parser)
+        parser_expect_symbol(parser, "{", "expected case table")
+        parser_delimited_layout(parser)
+        while not parser_at_symbol(parser, "}"):
+            parser_expect_symbol(parser, "(", "expected case row")
+            parser_delimited_layout(parser)
+            values: list[universal.Expression] = []
+            while not parser_at_symbol(parser, ")"):
+                values.append(parser_expression(parser, 0))
+                parser_delimited_layout(parser)
+                if parser_take_symbol(parser, ",") == None:
+                    break
+                parser_delimited_layout(parser)
+            parser_expect_symbol(parser, ")", "expected closing case row")
+            if len(values) != len(names):
+                return error(parser_fail(parser, "case row does not match parameter count"))
+            rows.append(universal.TestCaseRow(values))
+            parser_delimited_layout(parser)
+            if parser_take_symbol(parser, ",") == None:
+                break
+            parser_delimited_layout(parser)
+        parser_expect_symbol(parser, "}", "expected closing case table")
+    if len(rows) == 0:
+        return error(parser_fail(parser, "case table must contain at least one case"))
+    parser_expect_symbol(parser, ":", "expected colon after cases")
+    body = parser_indented_block(parser, "cases")
+    return universal.TestDeclaration(label, [], body[0], [], source.Span(start.source, start.start, body[1]), case_names=names, case_rows=rows)
 
 
 def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectation, setup: list[universal.Statement], span: source.Span) -> universal.CompilerTestCase | diagnostics.Diagnostic:
@@ -605,6 +710,11 @@ def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitiali
 
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "unsafe"):
+        start = parser_next(parser).span
+        parser_expect_symbol(parser, ":", "expected colon after unsafe")
+        body = parser_indented_block(parser, "unsafe")
+        return universal.Unsafe(body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "reject") or parser_at_identifier(parser, "accept"):
         rejected = parser_at_identifier(parser, "reject")
         start = parser_next(parser).span
@@ -841,6 +951,19 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
 
 def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
     token = parser_peek(parser)
+    # Parenthesized calls keep ordinary callable lookup; prefix ownership forms
+    # carry their operation explicitly through parsing and semantic analysis.
+    if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move") or parser_at_identifier(parser, "clone"):
+        if parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
+            mode := string(parser_next(parser))
+            if mode == "borrow" and parser_at_identifier(parser, "mut"):
+                parser_next(parser)
+                mode = "borrow mut"
+            value = parse_unary(parser)
+            return universal.Expression(universal.Ownership(mode, value), source.Span(token.span.source, token.span.start, value.span.end))
+    if parser_take_symbol(parser, "&") != None:
+        value = parse_unary(parser)
+        return universal.Expression(universal.AddressOf(value), source.Span(token.span.source, token.span.start, value.span.end))
     operator = token_operator(token, universal.Fixity.Prefix)
     selected ?= operator
     if selected != None:
@@ -873,7 +996,9 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
         elif parser_take_symbol(parser, "[") != None:
             first: universal.Expression | None := None
-            if not parser_at_symbol(parser, ":"):
+            if parser_at_symbol(parser, "]"):
+                first = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), parser_peek(parser).span)
+            elif not parser_at_symbol(parser, ":"):
                 first = parse_expression(parser, 0)
             if parser_take_symbol(parser, ":") != None:
                 stop: universal.Expression | None := None

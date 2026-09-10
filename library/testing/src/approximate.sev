@@ -12,3 +12,7 @@ def approximate(actual: float, expected: float, rtol: float = 1e-5, atol: float 
     if not __finite(actual) or not __finite(expected):
         return false
     return __absolute(actual - expected) <= atol + rtol * __absolute(expected)
+
+
+def expect(condition: bool):
+    assert(condition)
