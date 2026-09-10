@@ -133,7 +133,7 @@ interpolation retains the imported lexical environment. Run an importing subject
 with the source compiler (the Rust seed does not load these extensions):
 
 ```sh
-sev_compiler/target/host/dev/bin/sev_compiler test subject.sev --sysroot .
+sev_compiler/package.pkg/host/dev/bin/sev_compiler test subject.sev --sysroot .
 ```
 
 Whitespace, comments, and structural events remain owned by the standard
@@ -164,11 +164,11 @@ sources and compiler binary. The corresponding operator gate in
 From the repository root:
 
 ```sh
-target/debug/sev test sev_compiler/frontend/lexer
-target/debug/sev test docs/examples/01-types/04-generics/26-lexeme-generic.sev
-target/debug/sev test docs/examples/01-types/04-generics/27-token-generic.sev
+package.pkg/debug/sev test sev_compiler/frontend/lexer
+package.pkg/debug/sev test docs/examples/01-types/04-generics/26-lexeme-generic.sev
+package.pkg/debug/sev test docs/examples/01-types/04-generics/27-token-generic.sev
 cd sev_compiler
-../target/debug/sev build
+../package.pkg/debug/sev build
 cd ..
 python3 tests/sev_compiler/migration.py Gate3SourceSyntax
 python3 tests/sev_compiler/source_contracts.py

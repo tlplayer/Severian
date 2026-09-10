@@ -8,7 +8,7 @@ import os
 import path
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return project.root + "/target/" + safe_name(platform) + "/" + safe_name(profile)
+    return project.root + "/package.pkg/" + safe_name(platform) + "/" + safe_name(profile)
 
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
@@ -109,7 +109,7 @@ def run(project: Project, compiler: Compiler, request: Run) -> int | Error:
     return command(arguments)
 
 def clean(project: Project, request: Clean) -> unit | Error:
-    destination := project.root + "/target"
+    destination := project.root + "/package.pkg"
     if request.profile != "" and request.platform == "":
         throw Error("clean profile requires a platform")
     if request.platform != "":
@@ -118,8 +118,8 @@ def clean(project: Project, request: Clean) -> unit | Error:
         destination += "/" + safe_name(request.profile)
     if os.exists(destination):
         resolved = canonical(destination)
-        if resolved != project.root + "/target" and not resolved.starts_with(project.root + "/target/"):
-            throw Error("target directory escapes project root")
+        if resolved != project.root + "/package.pkg" and not resolved.starts_with(project.root + "/package.pkg/"):
+            throw Error("artifact directory escapes project root")
         remove_tree(destination)
 
 def metadata(project: Project) -> Resolution | Error:

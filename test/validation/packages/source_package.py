@@ -7,7 +7,7 @@ import shutil
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
-COMPILER = Path(os.environ.get("SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"))
+COMPILER = Path(os.environ.get("SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"))
 
 def main():
     with tempfile.TemporaryDirectory(prefix="sev-source-package-") as temporary:
@@ -29,7 +29,12 @@ def main():
         sev("check", cwd=app)
         sev("build", cwd=app)
         assert sev("run", cwd=app).stdout.strip() == "42"
-        assert (app / "target/host/dev/bin/application").is_file()
+        assert (app / "package.pkg/host/dev/bin/application").is_file()
+        assert not (app / "target").exists()
+        # Generated source must not enter resolution or a published source tree.
+        (app / "package.pkg/generated.sev").write_text("invalid generated source")
+        (app / "target").mkdir()
+        (app / "target/keep.sev").write_text("def preserved() -> int:\n    return 7\n")
         assert "shapes = geometry@0.1.0" in sev("tree", cwd=app).stdout
         before = (app / "package.toml").read_bytes(), (app / "sev.lock").read_bytes()
         sev("add", "missing@9", cwd=app, succeeds=False)
@@ -37,6 +42,9 @@ def main():
         (app / "src/main.sev").write_text("test \"answer\":\n    assert(42 == 42)\ndef main():\n    print(42)\n")
         sev("test", cwd=app)
         sev("publish", cwd=app)
+        published_source = root / "registry/packages/application/0.1.0/source"
+        assert not (published_source / "package.pkg").exists()
+        assert (published_source / "target/keep.sev").is_file()
         assert sev("run", "application@0.1.0").stdout.strip() == "42"
         sev("install", "application@0.1.0", "-o", root / "bin")
         assert subprocess.check_output([root / "bin/application"], text=True).strip() == "42"
@@ -66,7 +74,8 @@ def main():
         rejected = sev("check", cwd=transitive, succeeds=False)
         assert "undeclared dependency import matrix" in rejected.stderr
         sev("clean", cwd=app)
-        assert not (app / "target").exists()
+        assert not (app / "package.pkg").exists()
+        assert (app / "target/keep.sev").is_file()
         assert (app / "src/main.sev").exists()
     print("source package lifecycle: passed")
 

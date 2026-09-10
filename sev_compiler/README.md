@@ -16,19 +16,19 @@ Build and audit documentation sections 00–03 through the source package pipeli
 from the repository root:
 
 ```sh
-target/debug/sev run sev_compiler --bin compiler-pipeline
-target/debug/sev test sev_compiler
+package.pkg/debug/sev run sev_compiler --bin compiler-pipeline
+package.pkg/debug/sev test sev_compiler
 ```
 
 The pipeline builds `sev_compiler` with the seed, then uses that binary for every
 example's native build, execution, and test command. `sev test` includes the same
 audit as the `compiler examples 00-03` test. Failures remain failures and cause a
 nonzero exit; independent examples still run. Reports, stage coverage, and raw
-logs live under `sev_compiler/target/pipeline/reports/run-*/`. To audit an existing
-binary, run `sev_compiler/target/host/dev/bin/compiler-pipeline --no-build`.
+logs live under `sev_compiler/package.pkg/pipeline/reports/run-*/`. To audit an existing
+binary, run `sev_compiler/package.pkg/host/dev/bin/compiler-pipeline --no-build`.
 The section inventory is declared in `[package.metadata.pipeline]`.
 
-The compiler target is `target/host/dev/bin/sev_compiler`. The development command
+The compiler target is `package.pkg/host/dev/bin/sev_compiler`. The development command
 in `../bin/sev_compiler` runs that artifact and selects this checkout's source
 libraries. Linking it into a directory on PATH makes subsequent `sev build`
 results immediately available as `sev_compiler`. The Rust seed remains `sev`.
@@ -287,7 +287,7 @@ directory for library sources; use `--sysroot /path/to/Severian` elsewhere.
 The known-good example spine has a focused regression gate:
 
 ```sh
-target/debug/sev build sev_compiler
+package.pkg/debug/sev build sev_compiler
 python3 tests/sev_compiler/known_good_spine.py
 ```
 
@@ -443,7 +443,7 @@ Run the acceptance check with LLVM/MLIR 21 tools available:
 ```sh
 python3 tests/sev_compiler/bootstrap_mlir.py
 # Parser-to-HIR structure and callable/native regressions:
-target/debug/sev test tests/sev_compiler/semantic_ir
+package.pkg/debug/sev test tests/sev_compiler/semantic_ir
 python3 tests/sev_compiler/callable_bodies.py
 # Also check allocated string lifetimes (run outside a ptrace-based sandbox):
 SEVERIAN_SANITIZE=1 python3 tests/sev_compiler/bootstrap_mlir.py
@@ -464,7 +464,7 @@ Unicode, integer limits, subnormal/nonfinite floats, and full-precision decimal
 literals. The optional sanitizer checks exercise returned/borrowed buffers,
 recursive concatenation, and float formatting through the hosted boundary. The native
 outputs link without Severian C string or IO helpers.
-Artifacts are retained in `target/acceptance` beneath this package.
+Artifacts are retained in `package.pkg/acceptance` beneath this package.
 
 ## Generic IR migration in progress
 

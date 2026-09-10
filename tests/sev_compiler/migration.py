@@ -20,7 +20,7 @@ from bootstrap_mlir import ROOT, tool
 
 
 COMPILER = Path(os.environ.get(
-    "SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
+    "SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
 ))
 
 
@@ -605,7 +605,7 @@ class Gate6LibraryAndRetirement(MigrationCase):
         overlay = self.directory / "sysroot"
         (overlay / "sev_compiler").mkdir(parents=True)
         shutil.copytree(ROOT / "sev_compiler/universal", overlay / "sev_compiler/universal",
-                        ignore=shutil.ignore_patterns("target", ".git"))
+                        ignore=shutil.ignore_patterns("package.pkg", ".git"))
         (overlay / "library").symlink_to(ROOT / "library", target_is_directory=True)
         declaration_file = overlay / relative
         content = declaration_file.read_bytes()

@@ -18,7 +18,7 @@ pub(crate) fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Re
         if path.is_dir() {
             if !matches!(
                 path.file_name().and_then(|name| name.to_str()),
-                Some("target" | "errors")
+                Some("package.pkg" | "errors")
             ) {
                 collect_sources(&path, output)?;
             }

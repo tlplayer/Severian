@@ -6,7 +6,7 @@ Current implementation results and outstanding work are recorded in
 Run from the repository root after building the source compiler:
 
 ```sh
-(cd sev_compiler && ../target/debug/sev build)
+(cd sev_compiler && ../package.pkg/debug/sev build)
 python3 tests/sev_compiler/migration.py
 python3 tests/sev_compiler/migration.py Gate3SourceSyntax
 ```

@@ -29,13 +29,13 @@ sev build --emit agent-ir --bin compiler path/to/package
 sev build --emit agent-ir -o /tmp/compiler-ir path/to/compiler.sev
 ```
 
-Without `-o`, the directory is `target/agent-ir` beneath the selected input.
+Without `-o`, the directory is `package.pkg/agent-ir` beneath the selected input.
 The output is deterministic for an unchanged semantic graph.
 
 ## Version 2 layout
 
 ```text
-target/agent-ir/
+package.pkg/agent-ir/
 ├── package.json
 ├── symbols.jsonl
 ├── declarations.jsonl

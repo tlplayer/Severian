@@ -1,2 +1,5 @@
+[build]
+target-dir = "package.pkg"
+
 [alias]
 xtask = "run --quiet -p severian-health --"

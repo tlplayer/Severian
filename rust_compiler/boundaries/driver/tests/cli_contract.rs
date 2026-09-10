@@ -883,7 +883,8 @@ fn build_emits_every_declared_binary_and_library_artifact() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let target = root.join("target/host/dev");
+    let target = root.join("package.pkg/host/dev");
+    assert!(!root.join("target").exists());
     assert!(target.join("bin/mixed").is_file());
     let package = fs::read(target.join("pkg/mixed_core-0.1.0.pkg")).unwrap();
     assert!(package.starts_with(b"SEVPKG\0\x01"));
@@ -937,7 +938,7 @@ fn a_library_only_package_builds_without_a_binary() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root
-        .join("target/host/dev/pkg/library_only-2.4.1.pkg")
+        .join("package.pkg/host/dev/pkg/library_only-2.4.1.pkg")
         .is_file());
     fs::remove_dir_all(root).unwrap();
 }

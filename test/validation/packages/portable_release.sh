@@ -5,7 +5,7 @@ REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/severian-portable-release.XXXXXX")
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-VERSION=$("$REPOSITORY_ROOT/target/debug/sev" --version | awk '{print $2}')
+VERSION=$("$REPOSITORY_ROOT/package.pkg/debug/sev" --version | awk '{print $2}')
 TARGET=$(rustc -vV | awk '/^host:/ {print $2}')
 RELEASE="$TEST_ROOT/severian-$VERSION-$TARGET"
 "$REPOSITORY_ROOT/scripts/release/build_portable_release.sh" \

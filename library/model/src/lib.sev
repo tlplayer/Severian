@@ -114,7 +114,7 @@ def cache_key(locator: string) -> string:
     return locator.replace("https://", "").replace("http://", "").replace("hf://", "").replace("/", "--").replace(":", "-")
 
 def default_root(selected: Reference) -> string:
-    return "target/models/" + cache_key(selected.locator) + "/" + selected.revision
+    return "package.pkg/models/" + cache_key(selected.locator) + "/" + selected.revision
 
 def hugging_face_repository(locator: string) -> string:
     if locator.starts_with("hf://"):
@@ -1217,7 +1217,7 @@ test "OmniVoice checkpoint prompt packing and masked sampling are deterministic"
 test "model references are generic and cache paths are deterministic":
     selected = reference("hf://owner/model", "immutable-revision")
     assert(hugging_face_repository(selected.locator) == "owner/model")
-    assert(default_root(selected) == "target/models/owner--model/immutable-revision")
+    assert(default_root(selected) == "package.pkg/models/owner--model/immutable-revision")
 
 test "local artifacts do not require a model-specific provider":
     selected = artifact("custom/model", "local", "/tmp/severian-model-that-does-not-exist")
@@ -1225,7 +1225,7 @@ test "local artifacts do not require a model-specific provider":
     assert(not ready(selected))
 
 test "downloaded model exposes real mapped SafeTensor metadata and BF16 values":
-    root = "target/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
+    root = "package.pkg/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
     if valid_artifact(root):
         loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
         store = tensors(loaded)
@@ -1238,7 +1238,7 @@ test "downloaded model exposes real mapped SafeTensor metadata and BF16 values":
         assert(tensor.close_safetensors(store))
 
 test "generic linear lowering executes a real SmolLM2 projection":
-    root = "target/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
+    root = "package.pkg/models/SmolLM2-135M-Instruct/" + SmolLm2Revision
     if valid_artifact(root):
         loaded = LoadedModel(artifact(SmolLm2, SmolLm2Revision, root), "LlamaForCausalLM", 134515008, "bf16")
         store = tensors(loaded)

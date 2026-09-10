@@ -10,7 +10,7 @@ from constructors import constructor_gates
 def main():
     if not os.environ.get("SEVERIAN_SKIP_BUILD"):
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
-    compiler = ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
+    compiler = ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
     with tempfile.TemporaryDirectory(prefix="severian-generics-") as temporary:
         directory = Path(temporary)
         # Run outside the checkout: the actual prelude must come from --sysroot.

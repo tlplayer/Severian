@@ -98,7 +98,7 @@ def source_checksum(root: string, manifest_text: string = "") -> string | Error:
         write_text(stage + "/manifest", manifest_text)
     for location in files(root):
         relative = location[int(int(len(root))) + 1:]
-        if relative.starts_with("target/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "sev.lock":
+        if relative.starts_with("package.pkg/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "sev.lock":
             continue
         checksum = digest(stage + "/manifest") if relative == "package.toml" and manifest_text != "" else digest(location)
         lines.append(relative + " " + checksum)

@@ -27,7 +27,7 @@ def check(compiler, directory, name, text, code, message, line, column,
 def main():
     if not os.environ.get("SEVERIAN_SKIP_BUILD"):
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
-    compiler = ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
+    compiler = ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
     directory = ARTIFACTS / "diagnostics"
     directory.mkdir(parents=True, exist_ok=True)
     check(compiler, directory, "syntax",

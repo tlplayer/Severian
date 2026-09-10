@@ -7,7 +7,7 @@ checkpoint_sha256 = "730839316de585f4c8298ec0e1712efc10fb19c6fa4e36eb741cb8d51eb
 audio_tokenizer_sha256 = "fe7c5e8785e0a05833e1bfc3e002ec7f55af21e306b2e7154a448c1f54ccfb0d"
 reference_wav = "fixtures/qwen-voice/reference.wav"
 prompt_text = "The quick brown fox jumps over the lazy dog."
-output_wav = "target/qwen-voice-golden/severian.wav"
+output_wav = "package.pkg/qwen-voice-golden/severian.wav"
 sample_rate = 24000
 seed = 3407
 

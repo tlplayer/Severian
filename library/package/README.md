@@ -13,10 +13,11 @@ The design keeps four things separate:
 | --- | --- | --- |
 | `package.toml` | Desired package, targets, dependencies, and policy | Developer |
 | `sev.lock` | Exact dependency resolution | `sev add/remove/update` |
-| `target/` | Local build cache and development outputs | `sev build` / `sev test` |
+| `package.pkg/` | Local build cache and development outputs | `sev build` / `sev test` |
 | `.pkg` | Versioned distributable realization of a library | `sev build` |
 
-`target/` is disposable. A `.pkg` is the versioned distribution boundary; the
+`package.pkg/` is the disposable artifact directory. Files named
+`<name>-<version>.pkg` are versioned bundles inside that directory.
 `sev build` writes version 1 library bundles. `sev publish` writes version 2
 distributions containing metadata, source fallback, and compatible binaries.
 Neither object is a substitute for the manifest or lockfile.
@@ -166,7 +167,7 @@ sev check --emit mir --bin 05-building
 The current local output layout is:
 
 ```text
-target/
+package.pkg/
 └── <platform>/
     └── <profile>/
         ├── bin/

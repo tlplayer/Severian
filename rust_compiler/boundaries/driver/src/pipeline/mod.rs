@@ -1251,10 +1251,10 @@ fn stage_triton_bridge(output: &Path) -> Result<(), CompileError> {
             .unwrap_or(driver_directory)
             .join(BRIDGE_NAME),
         repository
-            .join("target/severian-triton-native-v5")
+            .join("package.pkg/severian-triton-native-v5")
             .join(BRIDGE_NAME),
         repository
-            .join("target/severian-triton-native")
+            .join("package.pkg/severian-triton-native")
             .join(BRIDGE_NAME),
     ]);
     let source = candidates.into_iter().find(|candidate| candidate.is_file()).ok_or_else(|| {

@@ -126,9 +126,9 @@ def gateway(
 
 def main():
     root = environment.get("PWD", ".")
-    model_root = root + "/target/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
-    executable = root + "/target/host/dev/bin/tiny-llm-worker"
-    bundle_root = root + "/target/oci/tiny-llm"
+    model_root = root + "/package.pkg/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
+    executable = root + "/package.pkg/host/dev/bin/tiny-llm-worker"
+    bundle_root = root + "/package.pkg/oci/tiny-llm"
     if process.run("sev build --bin tiny-llm-worker") != 0:
         print("could not build tiny-llm-worker")
         return

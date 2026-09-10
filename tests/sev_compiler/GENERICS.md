@@ -4,7 +4,7 @@ Run from the checkout root after building the Rust seed:
 
 ```sh
 cargo build -p severian-driver --bin sev
-(cd sev_compiler && ../target/debug/sev build)
+(cd sev_compiler && ../package.pkg/debug/sev build)
 SEVERIAN_SKIP_BUILD=1 python3 tests/sev_compiler/generics.py
 ```
 

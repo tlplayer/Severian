@@ -51,7 +51,7 @@ device = "accelerator"
 vendor = "openxla"
 provides = ["mlir.stablehlo"]
 detect-all = []
-detect-any = ["target/components/bin/severian-stablehlo-opt"]
+detect-any = ["package.pkg/components/bin/severian-stablehlo-opt"]
 
 [[component]]
 id = "compiler.triton-gpu"
@@ -61,8 +61,8 @@ vendor = "any"
 provides = ["compiler.triton"]
 detect-all = []
 detect-any = [
-    "target/components/lib/libseverian_triton_bridge.so",
-    "target/components/bin/severian-triton-bridge",
+    "package.pkg/components/lib/libseverian_triton_bridge.so",
+    "package.pkg/components/bin/severian-triton-bridge",
 ]
 
 [[component]]

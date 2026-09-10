@@ -91,10 +91,10 @@ def sorted_strings(values: list[string]) -> list[string]:
     return result
 
 def files(root: string) -> list[string] | Error:
-    links = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "target", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "l", "-print"])
+    links = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "package.pkg", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "l", "-print"])
     if links != "":
         throw Error("package content may not contain symlinks: " + links)
-    output = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "target", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "f", "-print"])
+    output = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "package.pkg", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "f", "-print"])
     if output == "":
         return []
     return sorted_strings(output.split("\n"))

@@ -44,6 +44,10 @@ binary replaces an older `$HOME/.cargo/bin/sev` instead of being hidden behind
 it on `PATH`. Set `SEV_CARGO_INSTALL_ROOT` to select another Cargo installation
 root. Building the compiler and installing a release remain separate workflows.
 
+Local builds write generated files to `package.pkg/`. Cargo places the seed
+binary at `package.pkg/debug/sev`; Severian packages place binaries at
+`package.pkg/<platform>/<profile>/bin/`. `sev clean` removes package artifacts.
+
 ## Bootstrap compiler checkpoint
 
 ```sh

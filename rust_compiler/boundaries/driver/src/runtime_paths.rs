@@ -46,7 +46,7 @@ pub(crate) fn component_root() -> PathBuf {
             if installed.is_dir() {
                 installed
             } else {
-                home.join("target/components")
+                home.join("package.pkg/components")
             }
         })
 }

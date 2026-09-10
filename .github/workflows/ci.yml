@@ -20,16 +20,16 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Measure line and branch coverage
-        run: cargo llvm-cov --locked --workspace --all-targets --branch --json --output-path target/coverage.json
+        run: cargo llvm-cov --locked --workspace --all-targets --branch --json --output-path package.pkg/coverage.json
 
       - name: Enforce repository health and coverage
-        run: cargo xtask health --all-targets --all-features --coverage target/coverage.json
+        run: cargo xtask health --all-targets --all-features --coverage package.pkg/coverage.json
 
       - name: Enforce changed-code health
         if: github.event_name == 'pull_request'
         env:
           HEALTH_BASE: origin/${{ github.base_ref }}
-        run: cargo xtask health --changed "$HEALTH_BASE" --coverage target/coverage.json
+        run: cargo xtask health --changed "$HEALTH_BASE" --coverage package.pkg/coverage.json
 
   checked-native-core:
     runs-on: ubuntu-24.04

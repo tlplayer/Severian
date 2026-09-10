@@ -101,7 +101,7 @@ make that compiler self-hosting.
 Validation from the repository root:
 
 ```sh
-target/debug/sev test test/validation/packages/api
-target/debug/sev build sev_compiler
+package.pkg/debug/sev test test/validation/packages/api
+package.pkg/debug/sev build sev_compiler
 python3 test/validation/packages/source_package.py
 ```

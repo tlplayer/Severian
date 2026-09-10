@@ -63,7 +63,7 @@ python3 tests/sev_compiler/collection_algorithms.py
 python3 tests/sev_compiler/collection_capabilities.py --record-only
 # Strict acceptance: currently fails on missing language capabilities.
 python3 tests/sev_compiler/collection_capabilities.py
-(cd sev_compiler && ../target/debug/sev build --emit agent-ir)
+(cd sev_compiler && ../package.pkg/debug/sev build --emit agent-ir)
 ```
 
 The 12 algorithm tests execute the actual `.sev` method bodies through
@@ -78,7 +78,7 @@ uninitialized reads and explicit double frees in list/deque operations.
 The compiler runner independently records seed parse/check/test, source
 check/test, source Agent IR and native execution stages. It preserves exact
 commands, source/compiler hashes and raw diagnostics under
-`sev_compiler/target/collection-ledger`. Unsupported stages fail strict mode;
+`sev_compiler/package.pkg/collection-ledger`. Unsupported stages fail strict mode;
 `--record-only` explicitly requests an inventory rather than acceptance.
 [MEASUREMENTS.md](MEASUREMENTS.md) records the measured compiler boundary.
 

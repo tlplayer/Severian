@@ -289,7 +289,7 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         let output = options
             .output
             .clone()
-            .unwrap_or_else(|| input_root(&input).join("target").join("agent-ir"));
+            .unwrap_or_else(|| input_root(&input).join("package.pkg").join("agent-ir"));
         compiler(&config, manifest, false)?
             .emit_agent_ir(targets[0].path(), input_root(&input), &output, package)
             .map_err(|error| error.to_string())?;
@@ -1057,7 +1057,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         .map_err(|error| format!("could not identify test invocation: {error}"))?
         .as_nanos();
     let output_base = if manifest.is_some() {
-        root.join("target")
+        root.join("package.pkg")
     } else {
         std::env::temp_dir().join("severian-tests")
     };
@@ -1221,7 +1221,7 @@ fn input_root(input: &Input) -> &Path {
 
 fn artifact_path(root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) -> PathBuf {
     let base = root
-        .join("target")
+        .join("package.pkg")
         .join(target_directory(&config.target))
         .join(&config.profile);
     match target {

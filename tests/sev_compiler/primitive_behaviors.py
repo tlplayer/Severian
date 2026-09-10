@@ -50,7 +50,7 @@ class PrimitiveBehaviors(MigrationCase):
     def test_source_operator_edit_changes_native_behavior(self):
         sysroot = self.directory / "sysroot"
         for name in ("sev_compiler", "library"):
-            shutil.copytree(ROOT / name, sysroot / name, ignore=shutil.ignore_patterns("target"))
+            shutil.copytree(ROOT / name, sysroot / name, ignore=shutil.ignore_patterns("package.pkg"))
         path = sysroot / "sev_compiler/universal/primitive/numeric/operators.sev"
         program = "test:\n    assert(i32(7) / i32(3) == i32(2))\n"
         self.native(program, sysroot=sysroot)

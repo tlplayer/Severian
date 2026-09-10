@@ -100,7 +100,7 @@ test "ranked Qwen attention MLP decoder and OmniVoice head shapes execute":
 
 
 test "dependency load[T] enters ranked StorageView MLIR without a typed symbol":
-    root = "target/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
+    root = "package.pkg/models/SmolLM2-135M-Instruct/" + model.SmolLm2Revision
     if model.valid_artifact(root):
         loaded = model.LoadedModel(
             model.artifact(model.SmolLm2, model.SmolLm2Revision, root),

@@ -41,7 +41,7 @@
     "programming language"
   ],
   "scripts": {
-    "check": "../../target/debug/sev run . --bin vscode-grammar-check && node --test tests/coverage-data.test.js",
+    "check": "../../package.pkg/debug/sev run . --bin vscode-grammar-check && node --test tests/coverage-data.test.js",
     "package": "vsce package --out severian-language.vsix",
     "publish": "vsce publish"
   },

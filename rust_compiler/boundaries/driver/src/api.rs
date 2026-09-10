@@ -540,7 +540,7 @@ fn collect_named_files(path: &Path, name: &str, output: &mut Vec<PathBuf>) -> Re
     {
         let path = entry.map_err(|error| error.to_string())?.path();
         if path.is_dir() {
-            if path.file_name().and_then(|value| value.to_str()) != Some("target") {
+            if path.file_name().and_then(|value| value.to_str()) != Some("package.pkg") {
                 collect_named_files(&path, name, output)?;
             }
         } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {

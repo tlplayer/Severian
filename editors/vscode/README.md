@@ -32,7 +32,7 @@ then marks executable lines in the gutter:
 
 Hover a mark for its statement-region count. The status bar shows line
 coverage for the active file; hover it for line, region, branch, and function
-percentages. Existing reports under `target/coverage` load automatically, and
+percentages. Existing reports under `package.pkg/coverage` load automatically, and
 **Severian: Load Coverage Gutters** refreshes them manually.
 
 By default the command covers the nearest project containing `package.toml`,

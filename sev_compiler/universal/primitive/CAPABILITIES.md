@@ -14,8 +14,8 @@ seed:
 
 ```sh
 cd sev_compiler
-PATH="$PWD/../target/debug:$PATH" sev build
-PATH="$PWD/../target/debug:$PATH" sev build --emit agent-ir
+PATH="$PWD/../package.pkg/debug:$PATH" sev build
+PATH="$PWD/../package.pkg/debug:$PATH" sev build --emit agent-ir
 cd ..
 python3 tests/sev_compiler/primitives.py --snapshot tests/sev_compiler/fixtures/primitives/checkpoint.json
 python3 tests/sev_compiler/primitive_behaviors.py
@@ -26,7 +26,7 @@ fixtures in `tests/sev_compiler/fixtures/primitives`. It never rebuilds a compil
 `--fail-on-unsupported` makes any unsuccessful stage fail the command; the default
 records the incomplete migration without disguising failures as expected tests.
 
-Artifacts are under `sev_compiler/target/primitive-ledger`: `results.json` records
+Artifacts are under `sev_compiler/package.pkg/primitive-ledger`: `results.json` records
 compiler/source hashes, exact commands and exit codes; each subject directory
 contains unmodified stdout/stderr, seed AST, parsed declaration inventory, source
 MLIR, Agent IR, and native artifacts where those stages succeed. A timeout,

@@ -17,7 +17,7 @@ does not select custom inference code. Architecture code is ordinary typed
 `.sev` code composed from `tensor` operations; the compiler lowers that graph
 through Severian IR and MLIR to the selected host backend.
 
-Artifacts default to `target/models/<model>/<revision>`. Callers can pass an
+Artifacts default to `package.pkg/models/<model>/<revision>`. Callers can pass an
 explicit cache root, and immutable revisions can be supplied with
 `model.reference`.
 

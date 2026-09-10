@@ -18,7 +18,7 @@ from bootstrap_mlir import ROOT, SEED
 
 PRIMITIVES = ROOT / "sev_compiler/universal/primitive"
 COMPILER = Path(os.environ.get(
-    "SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"))
+    "SEVERIAN_SOURCE_COMPILER", ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"))
 STAGES = ("seed_parse", "seed_check", "source_check", "source_tests", "agent_ir", "native")
 # Top-level test helpers are real parsed declarations, but not primitive API.
 API_FIXTURE_TYPES = {"bool.sev": {"truth_box"}}
@@ -174,7 +174,7 @@ def measure(subject, output, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "sev_compiler/target/primitive-ledger")
+    parser.add_argument("--output", type=Path, default=ROOT / "sev_compiler/package.pkg/primitive-ledger")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--snapshot", type=Path, help="write a portable checkpoint with inline diagnostics")
     parser.add_argument("--fail-on-unsupported", action="store_true")

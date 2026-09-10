@@ -1,7 +1,4 @@
-/target/
-target/
-!compiler/target/
-!compiler/target/**
+package.pkg/
 /bin/examples/
 /bench/.work/
 /bench/results.csv
@@ -31,5 +28,5 @@ tmp*
 docs/examples/setup.bash
 *.*.md
 review.diff
-*target*
 .TODO
+target/debug/*

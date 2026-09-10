@@ -97,7 +97,7 @@ def main():
     if command == "check":
         return
     if output == "":
-        output = "target/" + path.basename(input).replace(".sev", "")
+        output = "package.pkg/" + path.basename(input).replace(".sev", "")
     backend.emit_native(mlir, output)
     if command == "build":
         print("built " + output)

@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--record-only', action='store_true')
     parser.add_argument('--timeout', type=int, default=120)
-    parser.add_argument('--output', type=Path, default=ROOT / 'sev_compiler/target/collection-ledger')
+    parser.add_argument('--output', type=Path, default=ROOT / 'sev_compiler/package.pkg/collection-ledger')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

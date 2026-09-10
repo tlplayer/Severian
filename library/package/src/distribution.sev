@@ -76,7 +76,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
     if include_source:
         for location in files(project.root):
             relative = location[int(len(project.root)) + 1:]
-            if relative.starts_with("target/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "package.toml" or relative == "sev.lock":
+            if relative.starts_with("package.pkg/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "package.toml" or relative == "sev.lock":
                 continue
             if location.ends_with(".sev"):
                 copy_file(location, distribution + "/source/" + relative_path(relative))

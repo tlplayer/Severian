@@ -32,7 +32,7 @@ pub fn cargo_manifests(root: &Path) -> Result<Vec<PathBuf>, String> {
             if file_type.is_dir() {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
-                    Some(".git" | "target" | "third_party")
+                    Some(".git" | "package.pkg" | "third_party")
                 ) {
                     continue;
                 }

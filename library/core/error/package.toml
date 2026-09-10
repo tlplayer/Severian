@@ -33,7 +33,7 @@ max_errors = 50
 message_format = "text" # text or json
 verify_each = false
 # Artifact placement and parallelism are available to build-system clients.
-target_directory = "target"
+target_directory = "package.pkg"
 # jobs = 4
 # Every gate is mandatory and ordered; the list is explicit for discoverability.
 pipeline = [

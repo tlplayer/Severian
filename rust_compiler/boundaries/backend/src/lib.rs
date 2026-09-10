@@ -888,7 +888,7 @@ fn emit_mlir_binary(
             .nth(3)
             .expect("backend crate is nested below the repository root");
         let component_runtime =
-            repository.join("target/components/rocm-runtime/libmlir_rocm_runtime.so");
+            repository.join("package.pkg/components/rocm-runtime/libmlir_rocm_runtime.so");
         if component_runtime.is_file() {
             clang_arguments.push(component_runtime.to_string_lossy().into_owned());
         } else {

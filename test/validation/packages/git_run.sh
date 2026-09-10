@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-SEVERIAN_BIN=${SEVERIAN_BIN:-"$REPOSITORY_ROOT/target/debug/sev"}
+SEVERIAN_BIN=${SEVERIAN_BIN:-"$REPOSITORY_ROOT/package.pkg/debug/sev"}
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/severian-git-run.XXXXXX")
 trap 'rm -rf "$TEST_ROOT"' EXIT
 

@@ -55,7 +55,7 @@ fn ignored(path: &Path) -> bool {
     path.components().any(|component| {
         matches!(
             component.as_os_str().to_str(),
-            Some(".git" | "target" | "third_party" | ".codex" | ".agents")
+            Some(".git" | "package.pkg" | "third_party" | ".codex" | ".agents")
         )
     })
 }

@@ -77,7 +77,7 @@ and at most 32 generated tokens. The lab no longer contains a smoke classifier o
 weights. `model.load` accepts a local path, direct URL, or Hugging Face
 reference. The lab pins revision
 `12fd25f77366fa6b3b4b768ec3050bf629380bac` and acquires `config.json`, the
-official tokenizer, and `model.safetensors` into `target/models` without a
+official tokenizer, and `model.safetensors` into `package.pkg/models` without a
 checkpoint-specific provider.
 
 Readiness requires the complete 269,060,552-byte safetensor artifact. A worker

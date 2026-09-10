@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Preserve the documentation baseline using the built source compiler.
 
-Build first: target/debug/sev build sev_compiler
+Build first: package.pkg/debug/sev build sev_compiler
 Run: python3 tests/sev_compiler/known_good_spine.py
 
 Subjects are compiled in place so relative imports keep their real paths.

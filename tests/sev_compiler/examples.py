@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit documentation examples with the built Severian source compiler.
 
-Build first with `target/debug/sev build sev_compiler`. This runner deliberately
+Build first with `package.pkg/debug/sev build sev_compiler`. This runner deliberately
 keeps native build/run results separate from test results: a build excludes test
 bodies, and unsupported test modes must not count as passing tests.
 """
@@ -103,7 +103,7 @@ def audit(source, compiler, artifacts, timeout):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", help="Files or directories beneath docs/examples; defaults to all")
-    parser.add_argument("--compiler", type=Path, default=ROOT / "sev_compiler/target/host/dev/bin/sev_compiler")
+    parser.add_argument("--compiler", type=Path, default=ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler")
     parser.add_argument("--output", type=Path, help="New artifact directory (default: timestamped under target)")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=30, help="Seconds per build, execution, or test")
@@ -122,7 +122,7 @@ def main():
     if not sources or any(path.suffix != ".sev" for path in sources):
         parser.error("select at least one .sev example")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    artifacts = (args.output or ROOT / "sev_compiler/target/examples" / timestamp).resolve()
+    artifacts = (args.output or ROOT / "sev_compiler/package.pkg/examples" / timestamp).resolve()
     artifacts.mkdir(parents=True, exist_ok=False)
     metadata = dict(compiler=str(compiler), compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
                     timestamp_utc=timestamp, timeout_seconds=args.timeout)

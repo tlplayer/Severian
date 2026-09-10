@@ -4,8 +4,8 @@ set -euo pipefail
 bridge_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 severian_root=$(cd -- "${bridge_dir}/../../../.." && pwd)
 triton_source=${SEVERIAN_TRITON_SOURCE_DIR:-"${severian_root}/../triton"}
-build_dir=${SEVERIAN_TRITON_BUILD_DIR:-"${severian_root}/target/severian-triton-native-v5"}
-cache_dir=${SEVERIAN_TRITON_CACHE_PATH:-"${severian_root}/target/severian-triton-cache"}
+build_dir=${SEVERIAN_TRITON_BUILD_DIR:-"${severian_root}/package.pkg/severian-triton-native-v5"}
+cache_dir=${SEVERIAN_TRITON_CACHE_PATH:-"${severian_root}/package.pkg/severian-triton-cache"}
 bridge_library="${build_dir}/libseverian_triton_bridge.so"
 
 # This is a toolchain component, not an application object. Reuse a bridge

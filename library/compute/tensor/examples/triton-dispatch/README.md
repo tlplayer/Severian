@@ -29,7 +29,7 @@ package:
 ```sh
 compiler/boundaries/triton/native/build-native.sh
 cargo build -p severian-driver -p severian-tensor-jit-provider
-target/debug/sev run library/compute/tensor/examples/triton-dispatch
+package.pkg/debug/sev run library/compute/tensor/examples/triton-dispatch
 ```
 
 The first command is incremental and returns immediately while the existing

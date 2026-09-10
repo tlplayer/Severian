@@ -370,7 +370,7 @@ fn collect_targets(directory: &Path, root: bool, output: &mut Discovery) -> Resu
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path.file_name().and_then(|name| name.to_str()) != Some("target") {
+            if path.file_name().and_then(|name| name.to_str()) != Some("package.pkg") {
                 collect_targets(&path, false, output)?;
             }
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("sev") {

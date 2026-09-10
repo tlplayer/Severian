@@ -11,8 +11,8 @@ in Rust and does not delegate repository validation to Python.
 cargo xtask health
 cargo xtask health --changed origin/main
 cargo xtask health --all-targets --all-features
-cargo xtask health --coverage target/coverage.json
-cargo xtask health --changed origin/main --coverage target/coverage.json
+cargo xtask health --coverage package.pkg/coverage.json
+cargo xtask health --changed origin/main --coverage package.pkg/coverage.json
 cargo xtask health --mutation-report mutants.out/outcomes.json
 cargo xtask health --format human
 cargo xtask health --format json

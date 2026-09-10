@@ -7,8 +7,8 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ARTIFACTS = ROOT / "sev_compiler/target/acceptance"
-SEED = Path(os.environ.get("SEVERIAN_BIN", ROOT / "target/debug/sev"))
+ARTIFACTS = ROOT / "sev_compiler/package.pkg/acceptance"
+SEED = Path(os.environ.get("SEVERIAN_BIN", ROOT / "package.pkg/debug/sev"))
 SANITIZE = os.environ.get("SEVERIAN_SANITIZE", "0") == "1"
 
 
@@ -40,7 +40,7 @@ def main():
     opt = tool("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = tool("SEVERIAN_CLANG", "clang-21")
-    compiler = ROOT / "sev_compiler/target/host/dev/bin/sev_compiler"
+    compiler = ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
     if not os.environ.get("SEVERIAN_SKIP_BUILD"):
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
     string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"

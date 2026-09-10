@@ -26,8 +26,8 @@ Build the binaries, then create and start a real OCI runtime bundle:
 ```bash
 sev build --bin container-database-server
 sev run --bin container-database-bundle -- \
-  "$PWD/target/host/dev/bin/container-database-server" \
-  "$PWD/target/oci/container-database" \
+  "$PWD/package.pkg/host/dev/bin/container-database-server" \
+  "$PWD/package.pkg/oci/container-database" \
   "$PWD/data"
 sev run --bin container-database-client -- LIST
 ```

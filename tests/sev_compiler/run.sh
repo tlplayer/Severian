@@ -2,7 +2,7 @@
 set -u
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-severian_bin=${SEVERIAN_BIN:-"$repository_root/target/debug/sev"}
+severian_bin=${SEVERIAN_BIN:-"$repository_root/package.pkg/debug/sev"}
 timeout_seconds=${SEVERIAN_TEST_TIMEOUT_SECONDS:-60}
 parallel_jobs=${SEVERIAN_TEST_JOBS:-4}
 show_output=${SEVERIAN_TEST_OUTPUT:-0}

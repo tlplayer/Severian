@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$SCRIPT_DIRECTORY/../../.." && pwd)
-SEVERIAN_BIN=${SEVERIAN_BIN:-"$REPOSITORY_ROOT/target/debug/sev"}
+SEVERIAN_BIN=${SEVERIAN_BIN:-"$REPOSITORY_ROOT/package.pkg/debug/sev"}
 
 if [[ ! -x "$SEVERIAN_BIN" ]]; then
     echo "missing Severian executable: $SEVERIAN_BIN" >&2

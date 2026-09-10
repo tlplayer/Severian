@@ -31,7 +31,7 @@ mod boundary_tests {
         for entry in fs::read_dir(root).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                if path.file_name().is_some_and(|name| name == "target") {
+                if path.file_name().is_some_and(|name| name == "package.pkg") {
                     continue;
                 }
                 source_files(&path, files);

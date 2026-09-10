@@ -98,7 +98,7 @@ function activate(context) {
   async function loadCoverage(showResult = false) {
     const serial = ++refreshSerial;
     const mapUris = await vscode.workspace.findFiles(
-      '**/target/coverage/coverage-map.json',
+      '**/package.pkg/coverage/coverage-map.json',
       '**/{.git,node_modules}/**',
       200,
     );
@@ -290,7 +290,7 @@ function activate(context) {
     refreshTimer = setTimeout(() => void loadCoverage(false), 250);
   }
 
-  const watcher = vscode.workspace.createFileSystemWatcher('**/target/coverage/{coverage-map.json,*.hits}');
+  const watcher = vscode.workspace.createFileSystemWatcher('**/package.pkg/coverage/{coverage-map.json,*.hits}');
   watcher.onDidCreate(scheduleRefresh);
   watcher.onDidChange(scheduleRefresh);
   watcher.onDidDelete(scheduleRefresh);
