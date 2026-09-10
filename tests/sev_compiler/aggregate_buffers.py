@@ -12,7 +12,7 @@ from bootstrap_mlir import tool
 class AggregateBuffers(MigrationCase):
     def test_record_generic_examples(self):
         for number in (7, 11, 13, 14, 19, 21):
-            path, = (ROOT / "docs/examples/01-types/04-generics").glob(f"{number:02d}-*.sev")
+            path, = (ROOT / "docs/examples/01-types/05-generics").glob(f"{number:02d}-*.sev")
             with self.subTest(example=path.name):
                 self.native(path.read_text(), name=path.name)
 
@@ -258,7 +258,8 @@ class AggregateBuffers(MigrationCase):
                 def drop():
                     print(handle)
             def main():
-                values = [Resource(1)]
+                resource = Resource(1)
+                values = [resource]
         ''', "owned elements require destruction lowering")
 
 

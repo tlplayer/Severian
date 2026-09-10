@@ -29,6 +29,7 @@ enum ResolvedCallee:
 
 
 enum ExpressionKind:
+    TypeLayout(subject: TypeId, alignment: bool)
     SourceSymbol(spelling: string, definition: DefId)
     CompilerTerm(name: string, arguments: list[TypeAnnotation])
     LiteralValue(value: LiteralValue)

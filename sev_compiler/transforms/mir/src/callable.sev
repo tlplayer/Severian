@@ -26,6 +26,10 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
+        case TypeLayout:
+            result = mir_value(module, universal.TypeId(64))
+            cfg.append(context, universal.Operation.TypeLayout(subject, alignment, result))
+            return result
         case BlockValue:
             local = CallableMirScope(scope.bindings[:], scope.loops, scope.update_operands, scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
             mir_block(module, context, body, local)
@@ -300,7 +304,19 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
 
     return true
 
-def build_callables(module: universal.Module) -> universal.Module | diagnostics.Diagnostic:
+def required_calls(body: universal.CfgBody, required: list[string]):
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Call:
+                    identity = string(function.value)
+                    if identity not in required:
+                        required.append(identity)
+                case _:
+                    pass
+
+
+def build_callables(module: universal.Module, library_sources: list[int] = []) -> universal.Module | diagnostics.Diagnostic:
     scope = CallableMirScope()
     context := cfg.ExecutionContext(universal.empty_cfg(universal.TypeId(2)))
     mir_block(module, context, module.initializer, scope)
@@ -309,7 +325,39 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
     module.cfg_bodies.append(context.body)
     module.globals = scope.bindings
     functions: list[universal.FunctionDeclaration] = []
+    required: list[string] = []
+    required_calls(context.body, required)
+    # All application declarations remain roots, including library exports and
+    # unused functions that still need lowering diagnostics. Only prelude bodies
+    # are demand driven. Scan lowered calls so inlined ownership operations,
+    # recursive calls and source grammar-generated calls use the same graph.
     for function in module.functions:
+        identity = string(function.id.value)
+        # External declarations are ABI contracts even when no call is live.
+        # Keep them so conflicting native signatures cannot disappear in DCE.
+        if boundary.scalar_boundary(function, "c") != "" and identity not in required:
+            required.append(identity)
+        origin ?= function.span
+        if origin != None:
+            if int(origin.source.index) not in library_sources and identity not in required:
+                required.append(identity)
+        else:
+            if identity not in required:
+                required.append(identity)
+    cursor := 0
+    while cursor < len(required):
+        identity = required[cursor]
+        cursor += 1
+        selected := -1
+        index := 0
+        for candidate in module.functions:
+            if string(candidate.id.value) == identity:
+                selected = index
+                break
+            index += 1
+        if selected == -1:
+            return error(diagnostics.Diagnostic("E000230", "call graph refers to an unknown function", None))
+        function = module.functions[selected]
         if aggregate.signature(function, module.records):
             if function.body == None or boundary.scalar_boundary(function, "mlir") != "":
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
@@ -333,6 +381,7 @@ def build_callables(module: universal.Module) -> universal.Module | diagnostics.
                 span = declared
             cfg.finish(module, context, span, function.values)
             ownership.analyze_ownership(module, context.body, function.values)
+            required_calls(context.body, required)
             function.cfg_index = int(len(module.cfg_bodies))
             module.cfg_bodies.append(context.body)
         functions.append(function)

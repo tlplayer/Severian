@@ -52,6 +52,20 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
     for operation in block.operations:
         cursor += 1
         match operation:
+            case TypeLayout:
+                # GEP offsets are evaluated by the selected LLVM target layout.
+                # {i8, T}'s second field offset is T's ABI alignment.
+                measured := callable_storage_type(callable_mlir_type(subject, module.records))
+                indices := [integer_attribute(1, integer_type(32))]
+                if alignment:
+                    measured = struct_type([integer_type(8), measured])
+                    indices = [integer_attribute(0, integer_type(32)), integer_attribute(1, integer_type(32))]
+                base = builder_new_value(builder, pointer_type())
+                offset = builder_new_value(builder, pointer_type())
+                builder_create_operation(builder, operation_name("llvm", "mlir.zero"), [], [base])
+                positions = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], indices)
+                builder_create_operation(builder, operation_name("llvm", "getelementptr"), [base], [offset], [MlirNamedAttribute("rawConstantIndices", positions), MlirNamedAttribute("elem_type", type_attribute(measured))])
+                builder_create_operation(builder, operation_name("llvm", "ptrtoint"), [offset], [callable_mlir_value(module, result)])
             case IsVariant:
                 input = callable_mlir_value(module, value)
                 tag := input

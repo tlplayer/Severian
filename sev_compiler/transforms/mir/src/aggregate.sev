@@ -34,9 +34,8 @@ def allocate(module: universal.Module, context: cfg.ExecutionContext, state: Agg
     members: list[universal.ValueId] = []
     for record in module.records:
         if record.type_id.index == type_id.index:
-            for method in record.methods:
-                if method.name == "drop":
-                    return error(diagnostics.Diagnostic("E000230", "custom aggregate destructors require effect cleanup lowering", record.span))
+            # Semantic lifetime checking has already inserted destructor calls.
+            # Keep their string/buffer fields visible to MLIR deallocation too.
             for field in record.fields:
                 members.append(allocate(module, context, state, field.type_id))
     state.places.append(AggregatePlace(handle, members))

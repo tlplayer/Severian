@@ -16,8 +16,12 @@ from migration import COMPILER, ROOT, MigrationCase, tool
 class KnownGoodSpine(MigrationCase):
     def check_example(self, relative, expected="", *, tests=True):
         subject = ROOT / "docs/examples" / relative
+        self.check_source(subject, expected, tests=tests)
+
+    def check_source(self, subject, expected="", *, tests=True):
+        self.assertTrue(subject.is_file(), f'missing regression subject: {subject}')
         for mode in ("build", "test") if tests else ("build",):
-            with self.subTest(example=relative, mode=mode):
+            with self.subTest(example=str(subject), mode=mode):
                 arguments = [COMPILER, mode, subject, "--sysroot", ROOT]
                 emitted = self.directory / f"{mode}.mlir"
                 emitted.write_text(self.succeeds(arguments + ["--emit", "mlir"]))
@@ -45,10 +49,10 @@ class KnownGoodSpine(MigrationCase):
         self.check_example("03-testing/01-basics/01-ordinary-and-named.sev")
 
     def test_building_library(self):
-        self.check_example("05-building/src/lib.sev")
+        self.check_source(ROOT / "tests/sev_compiler/fixtures/building/lib.sev")
 
     def test_building_binary(self):
-        self.check_example("05-building/src/main.sev", "42\n")
+        self.check_source(ROOT / "tests/sev_compiler/fixtures/building/main.sev", "42\n")
 
 
 if __name__ == "__main__":

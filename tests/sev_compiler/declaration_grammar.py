@@ -32,7 +32,7 @@ class DeclarationGrammar(MigrationCase):
         self.rejects('enum Color:\n    Red\n    Blue\n',
                      "expected a type name", sysroot=sysroot)
         target.write_text("".join(providers) + enum_provider)
-        example = ROOT / "docs/examples/01-types/05-enums/01-enum-basics.sev"
+        example = ROOT / "docs/examples/01-types/06-enums/01-enum-basics.sev"
         self.native(example.read_text(), sysroot=sysroot)
 
     def test_declaration_symbol_can_be_punctuation(self):

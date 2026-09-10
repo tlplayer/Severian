@@ -41,7 +41,7 @@ class OwnedRecords(MigrationCase):
         ''', sysroot=sysroot)
 
     def test_unchanged_examples(self):
-        examples = ROOT / 'docs/examples/01-types/04-generics'
+        examples = ROOT / 'docs/examples/01-types/05-generics'
         for number in (26, 27):
             path, = examples.glob(f'{number:02d}-*.sev')
             with self.subTest(example=path.name):

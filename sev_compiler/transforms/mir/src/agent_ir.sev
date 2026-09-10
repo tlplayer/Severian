@@ -54,6 +54,8 @@ def values_json(values: list[universal.ValueId]) -> string:
 
 def operation_kind(operation: universal.Operation) -> string:
     match operation:
+        case TypeLayout:
+            return "TypeLayout"
         case IsVariant:
             return "IsVariant"
         case Allocate:
@@ -158,6 +160,9 @@ def operation_json(operation: universal.Operation) -> string:
     operands: list[universal.ValueId] := []
     results: list[universal.ValueId] = []
     match operation:
+        case TypeLayout:
+            fields = ",\"type\":" + string(subject.index) + ",\"alignment\":" + ("true" if alignment else "false")
+            results.append(result)
         case IsVariant:
             operands.append(value)
             results.append(result)

@@ -15,7 +15,9 @@ enum Shape:
 
 class EnumPatterns(MigrationCase):
     def test_documented_examples(self):
-        for path in sorted((ROOT / 'docs/examples/01-types/05-enums').glob('*.sev')):
+        examples = sorted((ROOT / 'docs/examples/01-types/06-enums').glob('*.sev'))
+        self.assertTrue(examples, 'the enum example directory must not silently disappear')
+        for path in examples:
             with self.subTest(path=path.name):
                 self.native(path.read_text())
 

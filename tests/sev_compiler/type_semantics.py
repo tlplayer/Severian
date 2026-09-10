@@ -40,7 +40,7 @@ class TypeSemantics(MigrationCase):
         ''', "unknown name index")
 
     def test_symbol_generic_example(self):
-        path = ROOT / "docs/examples/01-types/04-generics/23-symbol-generic.sev"
+        path = ROOT / "docs/examples/01-types/05-generics/23-symbol-generic.sev"
         self.native(path.read_text())
 
     def test_wrapped_parameters_arguments_and_source_delimiters(self):
@@ -106,7 +106,7 @@ class TypeSemantics(MigrationCase):
     def test_enum_examples(self):
         for name in ("01-enum-basics", "02-enum-payloads"):
             with self.subTest(example=name):
-                path = ROOT / f"docs/examples/01-types/05-enums/{name}.sev"
+                path = ROOT / f"docs/examples/01-types/06-enums/{name}.sev"
                 self.native(path.read_text())
 
     def test_enum_payloads_and_match_scopes(self):
@@ -193,7 +193,7 @@ class TypeSemantics(MigrationCase):
         ''', "ambiguous tagged variant")
 
     def test_additive_extension_example(self):
-        path = ROOT / "docs/examples/01-types/07-extend/01-basic-extend.sev"
+        path = ROOT / "docs/examples/01-types/08-extend/01-basic-extend.sev"
         self.native(path.read_text())
         self.rejects('''
             class Counter:
@@ -225,7 +225,7 @@ class TypeSemantics(MigrationCase):
         ''')
 
     def test_list_size_and_named_source_operator(self):
-        path = ROOT / "docs/examples/01-types/04-generics/17-block-generic.sev"
+        path = ROOT / "docs/examples/01-types/05-generics/17-block-generic.sev"
         self.native(path.read_text())
         self.native('''
             operator doubled(value: int) -> int:
@@ -237,7 +237,7 @@ class TypeSemantics(MigrationCase):
         ''')
 
     def test_none_return_and_drawable_example(self):
-        path = ROOT / "docs/examples/01-types/03-traits/01-point-drawable.sev"
+        path = ROOT / "docs/examples/01-types/07-traits/01-point-drawable.sev"
         self.native(path.read_text())
         self.native('''
             def implicit() -> None:
@@ -283,7 +283,7 @@ class TypeSemantics(MigrationCase):
     def test_unsigned_generic_examples(self):
         for name in ("06-type-generic", "22-kind-generic", "25-compiler-term-generic"):
             with self.subTest(example=name):
-                path = ROOT / f"docs/examples/01-types/04-generics/{name}.sev"
+                path = ROOT / f"docs/examples/01-types/05-generics/{name}.sev"
                 self.native(path.read_text())
 
     def test_power(self):
@@ -330,7 +330,7 @@ test:
         ''', "unknown name value")
 
     def test_expression_generic_name_is_not_a_compiler_capability(self):
-        path = ROOT / "docs/examples/01-types/04-generics/09-expression-generic.sev"
+        path = ROOT / "docs/examples/01-types/05-generics/09-expression-generic.sev"
         self.native(path.read_text())
 
 

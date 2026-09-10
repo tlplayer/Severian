@@ -2,6 +2,27 @@ import environment
 import file
 import path
 import process
+import package
+
+
+class HostedLayout:
+    data_layout: string
+    triple: string
+
+
+def hosted_layout() -> HostedLayout:
+    compiler = environment.get("SEVERIAN_CLANG", "clang-21")
+    metadata = package.capture([compiler, "-S", "-emit-llvm", "-x", "c", "/dev/null", "-o", "-"])
+    layout := ""
+    triple := ""
+    for line in metadata.split("\n"):
+        if line.starts_with("target datalayout = "):
+            layout = line.split("\"")[1]
+        elif line.starts_with("target triple = "):
+            triple = line.split("\"")[1]
+    if layout == "" or triple == "":
+        throw Error("native compiler did not report its target data layout")
+    return HostedLayout(layout, triple)
 
 
 # Hosted toolchain boundary, shared by the compiler command and native checks.

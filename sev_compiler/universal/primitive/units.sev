@@ -5,6 +5,9 @@
 class DataSize:
     amount: float
 
+    operator string() -> string:
+        return string(self.amount / 8.0) + "B"
+
 
     operator ==[G:Equal](other: Self) -> bool:
         return self.amount == other.amount

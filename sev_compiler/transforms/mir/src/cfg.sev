@@ -181,6 +181,8 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
 
 def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
+        case TypeLayout:
+            return [result]
         case IsVariant:
             return [result]
         case Allocate:

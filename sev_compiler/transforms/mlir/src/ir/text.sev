@@ -264,7 +264,10 @@ def print_function(program: MlirProgram, function: MlirFunctionOp) -> string:
 
 
 def print_program_unchecked(program: MlirProgram) -> string:
-    output := "module {\n"
+    output := "module"
+    if len(program.attributes) != 0:
+        output += " attributes" + attributes_text(program.attributes)
+    output += " {\n"
     for operation in program.operations:
         output += print_operation(program, operation, "  ")
     for function in program.functions:

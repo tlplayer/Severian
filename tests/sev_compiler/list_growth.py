@@ -43,7 +43,7 @@ class ListGrowth(MigrationCase):
 
     def test_unchanged_generic_examples(self):
         for number in (12, 16, 18, 24):
-            path, = (ROOT / "docs/examples/01-types/04-generics").glob(f"{number:02d}-*.sev")
+            path, = (ROOT / "docs/examples/01-types/05-generics").glob(f"{number:02d}-*.sev")
             with self.subTest(example=path.name):
                 self.native(path.read_text(), name=path.name)
 

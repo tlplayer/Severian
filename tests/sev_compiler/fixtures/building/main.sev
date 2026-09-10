@@ -1,0 +1,7 @@
+import "lib.sev" as library
+
+def main():
+    print(library.answer())
+
+test:
+    assert(library.answer() == 42)

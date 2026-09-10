@@ -605,6 +605,16 @@ def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitiali
 
 
 def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    if parser_at_identifier(parser, "reject") or parser_at_identifier(parser, "accept"):
+        rejected = parser_at_identifier(parser, "reject")
+        start = parser_next(parser).span
+        parser_expect_symbol(parser, ":", "expected colon after compiler expectation")
+        body = parser_indented_block(parser, "compiler expectation")
+        return universal.CompilerCheck(rejected, body[0], source.Span(start.source, start.start, body[1]))
+    if parser_at_identifier(parser, "drop"):
+        start = parser_next(parser).span
+        value = parser_expression(parser, 0)
+        return universal.Drop(value, source.Span(start.source, start.start, value.span.end))
     for syntax in parser_peek(parser).syntaxes:
         if syntax.grammar_form in ["Body", "ConditionBody"]:
             start = parser_next(parser).span

@@ -41,6 +41,10 @@ class CallableAnalysis:
     contract: universal.FunctionDeclaration | None = None
     refinements: list[tuple[int, int]] = []
     transitions: list[TransitionState] = []
+    dead: list[int] = []
+    resources: list[int] = []
+    test_context: bool = false
+    resource_creation: source.Span | None = None
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -66,6 +70,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
     if named_tagged_variant.record != -1:
         return state.records[named_tagged_variant.record].type_id
     match expression.kind:
+        case TypeLayout:
+            return universal.TypeId(64)
         case Name:
             index := 0
             for name_value in state.names:
@@ -79,6 +85,12 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             if field != None:
                 return callable_hint(state, field)
         case Call:
+            match callee.kind:
+                case Subscript:
+                    if callable_path(object) in ["bytes", "alignment"]:
+                        return callable_expression(state, expression, universal.TypeId(0)).type_id
+                case _:
+                    pass
             variant = callable_tagged_selection(state, callee)
             if variant.record != -1:
                 return state.records[variant.record].type_id
@@ -343,7 +355,18 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
                     return universal.Expression(universal.OutcomeValue(value, index), expression.span, type_id=expected)
                 index += 1
             return error(callable_diagnostic("value is not a declared outcome variant", expression.span))
-    return callable_expression_inner(state, expression, expected)
+    resolved = callable_expression_inner(state, expression, expected)
+    if callable_has_drop(state, resolved.type_id):
+        match resolved.kind:
+            case BindingReference:
+                return resolved
+            case _:
+                allowed ?= state.resource_creation
+                if allowed != None:
+                    if allowed.source.index == expression.span.source.index and allowed.start == expression.span.start and allowed.end == expression.span.end:
+                        return resolved
+                return error(callable_diagnostic("resource temporary requires a local binding", expression.span))
+    return resolved
 
 
 def callable_tagged_selection(state: CallableAnalysis, expression: universal.Expression) -> tagged.VariantSelection | diagnostics.Diagnostic:
@@ -564,6 +587,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             kind = universal.RecordValue(resolved_fields)
         case BindingReference:
             result_type = expression.type_id
+        case TypeLayout:
+            result_type = universal.TypeId(64)
         case FieldReference:
             result_type = expression.type_id
         case Member:
@@ -593,6 +618,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             index := 0
             for known in state.names:
                 if known == name:
+                    if index in state.dead:
+                        return error(callable_diagnostic("use after drop or move: " + name, expression.span))
                     result_type = state.types[index]
                     kind = universal.BindingReference(universal.BindingId(u32(index)))
                     for refinement in state.refinements:
@@ -735,6 +762,20 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol, expression.span))
             return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
         case Call:
+            match callee.kind:
+                case Subscript:
+                    query = callable_path(object)
+                    if query in ["bytes", "alignment"]:
+                        if len(arguments) != 0:
+                            return error(callable_diagnostic("type layout queries take no value arguments", expression.span))
+                        subject = callable_annotation(callable_type_expression(index), state.records, state.namespace, state.declarations)
+                        if int(subject.index) in [0, 2, 6, 7] or subject.index >= 100000:
+                            return error(callable_diagnostic("type layout requires a concrete storage type", expression.span))
+                        layout = universal.Expression(universal.TypeLayout(subject, query == "alignment"), expression.span, type_id=universal.TypeId(64))
+                        quantity = universal.Expression(universal.Name("data_size"), expression.span)
+                        return callable_expression(state, universal.Expression(universal.Call(quantity, [universal.CallArgument(None, layout, expression.span)]), expression.span), expected)
+                case _:
+                    pass
             variant = callable_tagged_selection(state, callee)
             if variant.record != -1:
                 return callable_tagged_value(state, variant, arguments, expression.span, expected)
@@ -994,7 +1035,10 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     annotation ?= binding.annotation
     if annotation != None:
         expected = callable_annotation(annotation, state.records, state.namespace, state.declarations)
+    previous_creation = state.resource_creation
+    state.resource_creation = binding.value.span
     value := callable_expression(state, binding.value, expected)
+    state.resource_creation = previous_creation
     if not binding.preserve_error and binding.annotation == None:
         value = callable_success(state, value)
     if value.type_id.index == 2:
@@ -1026,8 +1070,46 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
     return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
 
 
+def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
+    index = int(type_id.index) - 1000
+    if index >= 0 and index < len(state.records):
+        for method in state.records[index].methods:
+            if method.name == "drop" or method.name.ends_with(".drop"):
+                return true
+    return false
+
+
+def callable_drop(state: CallableAnalysis, value: universal.Expression, output: universal.Block, span: source.Span) -> unit | diagnostics.Diagnostic:
+    if state.loop_depth != 0:
+        return error(callable_diagnostic("resource cleanup in loops is not supported", span))
+    resolved = callable_expression(state, value, universal.TypeId(0))
+    match resolved.kind:
+        case BindingReference:
+            index = int(binding.index)
+            if callable_has_drop(state, resolved.type_id):
+                if index not in state.resources:
+                    return error(callable_diagnostic("cannot drop a borrowed resource parameter", span))
+                member = universal.Expression(universal.Member(value, "drop"), span)
+                call = universal.Expression(universal.Call(member, []), span)
+                output.statements.append(universal.ExpressionStatement(callable_expression(state, call, universal.TypeId(2))))
+            state.dead.append(index)
+        case _:
+            return error(callable_diagnostic("drop requires a local binding", span))
+
+
+def callable_cleanup(state: CallableAnalysis, output: universal.Block, start: int, span: source.Span) -> unit | diagnostics.Diagnostic:
+    cursor := int(len(state.resources))
+    while cursor > start:
+        cursor -= 1
+        binding = state.resources[cursor]
+        if binding not in state.dead:
+            value = universal.Expression(universal.Name(state.names[binding]), span)
+            callable_drop(state, value, output, span)
+
+
 def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
     output = universal.empty_block()
+    resource_start = int(len(state.resources))
     returned := false
     loop_exit := false
     index := 0
@@ -1037,6 +1119,22 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 break
             return error(callable_diagnostic("statement after unconditional return", None))
         match statement:
+            case CompilerCheck:
+                if not state.test_context:
+                    return error(callable_diagnostic("compiler expectations require a test body", span))
+                isolated = callable_scope(state)
+                isolated.functions = state.functions[:]
+                isolated.records = state.records[:]
+                isolated.generics = state.generics[:]
+                isolated.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
+                checked ?= callable_check_compiler_case(isolated, body)
+                rejected := false
+                if checked is Diagnostic:
+                    rejected = true
+                if rejected != reject:
+                    return error(callable_diagnostic("compiler test expectation failed", span))
+            case Drop:
+                callable_drop(state, value, output, span)
             case BindingStatement:
                 field ?= callable_implicit_field(state, binding.name, binding.span)
                 implicit := false
@@ -1047,9 +1145,23 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         output.statements.append(callable_control(state, "Assign", [target, value], [], binding.span))
                         implicit = true
                 if not implicit:
-                    output.statements.append(universal.BindingStatement(callable_binding(state, binding)))
+                    typed_binding = callable_binding(state, binding)
+                    if callable_has_drop(state, typed_binding.type_id):
+                        if typed_binding.update:
+                            return error(callable_diagnostic("resource rebinding requires an explicit drop before replacement", binding.span))
+                        match typed_binding.value.kind:
+                            case BindingReference:
+                                return error(callable_diagnostic("resource aliases require an explicit ownership transfer", typed_binding.span))
+                            case FieldReference:
+                                return error(callable_diagnostic("resource field transfers are not supported", binding.span))
+                            case _:
+                                pass
+                        state.resources.append(int(typed_binding.id.index))
+                    output.statements.append(universal.BindingStatement(typed_binding))
             case FieldSet:
                 resolved = callable_expression(state, target, universal.TypeId(0))
+                if callable_has_drop(state, resolved.type_id):
+                    return error(callable_diagnostic("resource replacement requires ownership transfer support", span))
                 match resolved.kind:
                     case BindingReference:
                         if not state.mutables[binding.index]:
@@ -1102,13 +1214,30 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 else:
                     output.statements.append(callable_control(state, "Assign", [resolved, typed], [], span))
             case ExpressionStatement:
-                output.statements.append(callable_expression_statement(state, expression))
+                dropped := false
+                match expression.kind:
+                    case Call:
+                        match callee.kind:
+                            case Member:
+                                if name == "drop":
+                                    if len(arguments) != 0:
+                                        return error(callable_diagnostic("drop takes no arguments after its receiver", expression.span))
+                                    callable_drop(state, object, output, expression.span)
+                                    dropped = true
+                            case _:
+                                pass
+                    case _:
+                        pass
+                if not dropped:
+                    output.statements.append(callable_expression_statement(state, expression))
             case Assert:
                 if message != None:
                     return error(callable_diagnostic("assertion messages are outside the scalar bootstrap subset", span))
                 resolved = callable_expression(state, condition, universal.TypeId(1))
                 output.statements.append(universal.Assert(resolved, None, span, condition_span))
             case Throw:
+                if len(state.resources) != 0:
+                    return error(callable_diagnostic("resource cleanup during error propagation is not supported", span))
                 error_value = callable_expression(state, value, universal.TypeId(0))
                 if not definitions.error_conformance(state.declarations, state.records, error_value.type_id):
                     return error(callable_diagnostic("throw requires a value conforming to Error", span))
@@ -1121,7 +1250,11 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if expression_value != None:
                     if result_type.index == 2:
                         return error(callable_diagnostic("unit function cannot return a value", span))
+                    previous_creation = state.resource_creation
+                    if callable_has_drop(state, result_type):
+                        state.resource_creation = expression_value.span
                     returned_value = callable_expression(state, expression_value, result_type)
+                    state.resource_creation = previous_creation
                 elif result_type.index == 6:
                     returned_value = callable_expression(state, universal.Expression(universal.LiteralValue(universal.NoneValue()), span), result_type)
                 elif result_type.index != 2:
@@ -1129,7 +1262,10 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 operands: list[universal.Expression] = []
                 actual ?= returned_value
                 if actual != None:
+                    if len(state.resources) != 0:
+                        return error(callable_diagnostic("returning a value across a resource lifetime is not supported", span))
                     operands.append(actual)
+                callable_cleanup(state, output, 0, span)
                 output.statements.append(callable_control(state, "Return", operands, [], span, true))
                 returned = true
             case GrammarApply:
@@ -1156,6 +1292,20 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 then_typed = callable_block(then_state, then_block.statements, result_type, false)
                 else_typed = callable_block(else_state, else_block.statements, result_type, false)
                 callable_join_transitions(state, then_state, else_state)
+                then_exits = callable_terminates(then_typed)
+                else_exits = callable_terminates(else_typed)
+                if not then_exits and not else_exits:
+                    for binding in state.resources:
+                        if (binding in then_state.dead) != (binding in else_state.dead):
+                            return error(callable_diagnostic("conditional resource drop requires matching branch lifetimes", span))
+                if not then_exits:
+                    for binding in then_state.dead:
+                        if binding < len(state.names) and binding not in state.dead:
+                            state.dead.append(binding)
+                if not else_exits:
+                    for binding in else_state.dead:
+                        if binding < len(state.names) and binding not in state.dead:
+                            state.dead.append(binding)
                 returned = callable_terminates(universal.Block([universal.If(resolved, then_typed, else_typed, span)]))
                 output.statements.append(callable_control(state, "If", [resolved], [then_typed, else_typed], span, returned))
             case Match:
@@ -1205,12 +1355,16 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 typed = callable_block(local, body.statements, result_type, false)
                 output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
+                if len(state.resources) != 0:
+                    return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("break outside a loop", span))
                 output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
                 loop_exit = true
             case Continue:
+                if len(state.resources) != 0:
+                    return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
                 output.statements.append(callable_control(state, "Continue", [], [], span, true))
@@ -1219,6 +1373,8 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
             case _:
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
         index += 1
+    if not returned:
+        callable_cleanup(state, output, resource_start, source.Span(source.SourceId(0), 0, 0))
     if complete and not returned:
         if result_type.index == 6:
             span = source.Span(source.SourceId(0), 0, 0)
@@ -1317,6 +1473,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
 
 
 def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block) -> bool | diagnostics.Diagnostic:
+    state.test_context = true
     index = int(len(state.functions))
     callable_block(state, block.statements, universal.TypeId(2))
     cursor := index
@@ -1419,6 +1576,9 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             state.functions.append(callable_signature(method, int(len(state.functions)), state.records, state.declarations))
     for record in state.records:
         callable_record_layout(state.records, record.type_id, [])
+        for field in record.fields:
+            if callable_has_drop(state, field.type_id):
+                return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
     module.records = state.records
     callable_register_operators(state, module)
     for item in module.items:
@@ -1507,6 +1667,8 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 if binding.name in function_names:
                     return error(callable_diagnostic("binding conflicts with function " + binding.name, binding.span))
                 resolved = callable_binding(state, binding)
+                if callable_has_drop(state, resolved.type_id):
+                    return error(callable_diagnostic("global resource cleanup is not supported", binding.span))
                 module.bindings.append(resolved)
                 module.initializer.statements.append(universal.BindingStatement(resolved))
             case ExpressionItem:
@@ -1575,6 +1737,11 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for record in state.records:
         callable_record_layout(state.records, record.type_id, [])
         callable_validate_record_arguments(state, record)
+        # Function signatures and specializations can introduce outcome and
+        # aggregate layouts after the initial declaration pass.
+        for field in record.fields:
+            if callable_has_drop(state, field.type_id):
+                return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
     module.records = state.records
     return module
 
@@ -1647,7 +1814,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:])
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], test_context=state.test_context)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -1726,6 +1893,8 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
 
 
 def callable_body(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.Block | diagnostics.Diagnostic:
+    if callable_has_drop(state, function.result_type) and not function.constructor:
+        return error(callable_diagnostic("resource returns require ownership transfer support", function.span))
     origin ?= function.template
     if origin != None:
         for template in state.generics:
@@ -1736,6 +1905,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
     local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract)
+    local.test_context = function.name.starts_with("__test_") or function.name.starts_with("$case$")
     namespace ?= function.lookup
     if namespace != None:
         local.namespace = namespace

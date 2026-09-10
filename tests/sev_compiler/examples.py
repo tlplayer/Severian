@@ -50,12 +50,18 @@ def source_code(text):
     return "".join(masked)
 
 
-def execute(command, directory, stem, timeout):
+def execute(command, directory, stem, timeout, timings=False):
     started = time.monotonic()
+    environment = os.environ.copy()
+    environment.pop('SEVERIAN_TIMINGS', None)
+    timing_path = directory / f'{stem}.timings.tsv'
+    if timings:
+        environment['SEVERIAN_TIMINGS'] = str(timing_path)
     with (directory / f"{stem}.stdout").open("wb") as stdout, (directory / f"{stem}.stderr").open("wb") as stderr:
         process = subprocess.Popen(
             list(map(str, command)), cwd=directory, stdout=stdout, stderr=stderr,
             start_new_session=True,
+            env=environment,
         )
         try:
             code = process.wait(timeout=timeout)
@@ -68,11 +74,17 @@ def execute(command, directory, stem, timeout):
     first_error = next((line for line in diagnostic.splitlines() if "error:" in line.lower()), "")
     if not first_error and code:
         first_error = next(iter(diagnostic.splitlines()), f"process exited {code}")
-    return dict(status=status, exit_code=code, seconds=round(time.monotonic() - started, 3),
-                command=list(map(str, command)), diagnostic=first_error)
+    result = dict(status=status, exit_code=code, seconds=round(time.monotonic() - started, 3),
+                  command=list(map(str, command)), diagnostic=first_error)
+    if timings and timing_path.exists():
+        result['compiler_seconds'] = {
+            stage: float(seconds) for stage, seconds in
+            (line.split('\t') for line in timing_path.read_text().splitlines()[1:])
+        }
+    return result
 
 
-def audit(source, compiler, artifacts, timeout):
+def audit(source, compiler, artifacts, timeout, timings=False):
     relative = source.relative_to(EXAMPLES)
     directory = artifacts / relative.with_suffix("")
     directory.mkdir(parents=True)
@@ -82,7 +94,7 @@ def audit(source, compiler, artifacts, timeout):
                   test_modes=re.findall(r"^test with ([^:\n]+)", text, re.M))
     # Each command has its own output path, including identically named examples.
     result["build"] = execute([compiler, "build", source, "--sysroot", ROOT,
-                               "-o", directory / "program"], directory, "build", timeout)
+                               "-o", directory / "program"], directory, "build", timeout, timings)
     if result["build"]["status"] == "pass":
         result["run"] = execute([directory / "program"], directory, "run", timeout)
         for stream in ("stdout", "stderr"):
@@ -93,7 +105,7 @@ def audit(source, compiler, artifacts, timeout):
         result["run"] = dict(status="blocked")
     if re.search(r"^test(?:\s|:)", text, re.M):
         result["test"] = execute([compiler, "test", source, "--sysroot", ROOT,
-                                  "-o", directory / "tests"], directory, "test", timeout)
+                                  "-o", directory / "tests"], directory, "test", timeout, timings)
     else:
         result["test"] = dict(status="absent")
     print(f"{relative}: build={result['build']['status']} run={result['run']['status']} test={result['test']['status']}", flush=True)
@@ -107,6 +119,7 @@ def main():
     parser.add_argument("--output", type=Path, help="New artifact directory (default: timestamped under target)")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=30, help="Seconds per build, execution, or test")
+    parser.add_argument("--timings", action="store_true", help="Capture compiler stage timings; use --jobs 1 for profiling")
     args = parser.parse_args()
     compiler = args.compiler.resolve()
     if not compiler.is_file() or not os.access(compiler, os.X_OK):
@@ -125,9 +138,10 @@ def main():
     artifacts = (args.output or ROOT / "sev_compiler/package.pkg/examples" / timestamp).resolve()
     artifacts.mkdir(parents=True, exist_ok=False)
     metadata = dict(compiler=str(compiler), compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
-                    timestamp_utc=timestamp, timeout_seconds=args.timeout)
+                    timestamp_utc=timestamp, timeout_seconds=args.timeout, jobs=args.jobs,
+                    timings=args.timings)
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(lambda source: audit(source, compiler, artifacts, args.timeout), sorted(sources)))
+        results = list(pool.map(lambda source: audit(source, compiler, artifacts, args.timeout, args.timings), sorted(sources)))
     counts = {stage: dict(Counter(result[stage]["status"] for result in results))
               for stage in ("build", "run", "test")}
     (artifacts / "results.json").write_text(json.dumps(dict(metadata=metadata, counts=counts, results=results), indent=2) + "\n")
@@ -146,6 +160,16 @@ def main():
         failure = failure.replace("|", "\\|").replace("\n", " ")
         log = Path(result["path"]).relative_to("docs/examples").with_suffix("")
         lines.append(f"| [{result['path']}]({log}/) | {result['build']['status']} | {result['run']['status']} | {result['test']['status']} | {failure} |")
+    if args.timings:
+        lines += ['', '## Slowest compiler commands', '',
+                  'Times include failed commands; partial stage timings remain available in the logs.', '',
+                  '| Example | Command | Status | Wall seconds | Compiler stages (seconds) |',
+                  '| --- | --- | --- | ---: | --- |']
+        commands = [(result['path'], stage, result[stage]) for result in results
+                    for stage in ('build', 'test') if 'seconds' in result[stage]]
+        for path, stage, result in sorted(commands, key=lambda row: row[2]['seconds'], reverse=True)[:20]:
+            stages = ', '.join(f'{name}: {seconds:.6f}' for name, seconds in result.get('compiler_seconds', {}).items())
+            lines.append(f"| {path} | {stage} | {result['status']} | {result['seconds']:.3f} | {stages} |")
     (artifacts / "REPORT.md").write_text("\n".join(lines) + "\n")
     print(json.dumps(counts, indent=2))
     print(f"Report: {artifacts / 'REPORT.md'}")

@@ -1,0 +1,29 @@
+import environment
+import package
+
+@c(symbol="__sev_time_monotonic")
+def __compiler_profile_clock() -> float
+
+
+# One file per invocation keeps compiler output (including emitted IR) intact.
+# Flush after each completed stage so failures retain their partial profile.
+class Timings:
+    path: string
+    previous: float
+    rows: list[string]
+
+
+def begin() -> Timings:
+    path = environment.get("SEVERIAN_TIMINGS", "")
+    if path != "":
+        package.write_text(path, "stage\tseconds\n")
+    return Timings(path, __compiler_profile_clock() if path != "" else 0.0, ["stage\tseconds"])
+
+
+def finish_stage(timings: Timings, stage: string):
+    if timings.path == "":
+        return
+    now = __compiler_profile_clock()
+    timings.rows.append(stage + "\t" + string(now - timings.previous))
+    package.write_text(timings.path, timings.rows.join("\n") + "\n")
+    timings.previous = __compiler_profile_clock()

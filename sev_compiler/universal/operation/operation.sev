@@ -6,6 +6,7 @@ import "../statement/statement.sev"
 
 
 enum Operation:
+    TypeLayout(subject: TypeId, alignment: bool, result: ValueId)
     Coverage(point: CoveragePoint)
     # Accepts a tagged aggregate or its decomposed integer tag.
     IsVariant(value: ValueId, variant: int, result: ValueId)

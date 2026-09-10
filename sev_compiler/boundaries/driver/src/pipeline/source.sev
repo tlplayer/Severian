@@ -12,6 +12,8 @@ import "../../../../transforms/mir/src/callable.sev" as mir
 import "../../../../transforms/mlir/src/emit/callable.sev" as mlir
 import "../../../../transforms/mlir/src/ir/text.sev" as text
 import "../../../../frontend/modules/src/source.sev"
+import "timing.sev" as timing
+import "../../../backend/src/native_mlir.sev" as native
 
 
 def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
@@ -38,6 +40,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
 
 
 def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], "")) -> string | diagnostics.Diagnostic:
+    timings = timing.begin()
     registry = lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
     if working_directory == "":
@@ -68,6 +71,13 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         for item in library.items:
             parsed.items.append(item)
         subject_loaded = subject_loaded or is_subject
+    timing.finish_stage(timings, "prelude")
+    library_paths: list[string] = []
+    if emit != "agent-ir":
+        for file in files:
+            canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
+            if canonical != subject_path:
+                library_paths.append(canonical)
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
     # A direct provider keeps its original namespace and declaration identity.
@@ -78,9 +88,39 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution)
         for item in application.items:
             parsed.items.append(item)
+    # Relative imports may register another source ID for a prelude file.
+    # Classify by its resolved path, while retaining diagnostic source spelling.
+    library_sources: list[int] = []
+    if emit != "agent-ir":
+        for file in files:
+            canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
+            if canonical in library_paths:
+                library_sources.append(int(file.id.index))
+    timing.finish_stage(timings, "subject")
     typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace)
-    lowered = mir.build_callables(typed)
+    timing.finish_stage(timings, "semantic")
+    lowered = mir.build_callables(typed, library_sources)
+    timing.finish_stage(timings, "mir")
     if emit == "agent-ir":
-        return agent_ir.emit(lowered, files)
+        result = agent_ir.emit(lowered, files)
+        timing.finish_stage(timings, "agent-ir")
+        return result
     program = mlir.lower_callables(lowered)
-    return text.print_program(program)
+    timing.finish_stage(timings, "mlir")
+    layout_query := false
+    for body in lowered.cfg_bodies:
+        for block in body.blocks:
+            for operation in block.operations:
+                match operation:
+                    case TypeLayout:
+                        layout_query = true
+                    case _:
+                        pass
+    if layout_query:
+        layout = native.hosted_layout()
+        program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))
+        program.attributes.append(mlir.MlirNamedAttribute("llvm.target_triple", mlir.string_attribute_value(layout.triple)))
+        timing.finish_stage(timings, "target-layout")
+    result = text.print_program(program)
+    timing.finish_stage(timings, "print")
+    return result

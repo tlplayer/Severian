@@ -6,7 +6,7 @@ then reads and compiles new source files without invoking Rust or `sev`.
 
 ```sh
 cd sev_compiler
-sev build
+sev_rust build --bin sev_compiler
 sev_compiler ../docs/examples/00-getting-started/01-hello.sev
 sev_compiler build --emit mlir ../docs/examples/00-getting-started/01-hello.sev -o /tmp/hello.mlir
 sev_compiler test ../docs/examples/03-testing/01-basics/01-ordinary-and-named.sev
@@ -31,7 +31,8 @@ The section inventory is declared in `[package.metadata.pipeline]`.
 The compiler target is `package.pkg/host/dev/bin/sev_compiler`. The development command
 in `../bin/sev_compiler` runs that artifact and selects this checkout's source
 libraries. Linking it into a directory on PATH makes subsequent `sev build`
-results immediately available as `sev_compiler`. The Rust seed remains `sev`.
+results immediately available as `sev_compiler`. `sev` runs the source compiler;
+use `sev_rust build sev_compiler --bin sev_compiler` to rebuild it with the Rust seed.
 Direct executable invocation accepts `--sysroot /path/to/Severian`, or reads
 `SEVERIAN_SYSROOT`; its fallback `..` supports invocation from this package.
 Package directories now use [`import package`](../library/package/API.md) for discovery, resolution, build/test planning, dependency edits, publication and installation. Bare file invocation runs the program. `build` writes a native executable;
@@ -305,11 +306,11 @@ python3 tests/sev_compiler/known_good_spine.py
 ```
 
 Run these commands from the repository root. The gate uses the source compiler
-to build all six unchanged examples: hello, conversion, conditional expression,
-ordinary/named tests, and `05-building/src/{lib,main}.sev`. It verifies emitted
+to build four unchanged examples: hello, conversion, conditional expression,
+and ordinary/named tests, plus the library and binary fixtures in
+`tests/sev_compiler/fixtures/building/`. It verifies emitted
 MLIR, checks native stdout exactly, and runs the five subjects with supported
-ordinary/compiler tests. Hello's integration test mode remains unsupported;
-its output is checked by running the built program. Set
+ordinary/compiler tests. Hello's output is checked by running the built program. Set
 `SEVERIAN_SOURCE_COMPILER` to select another source compiler executable.
 
 `python3 tests/sev_compiler/example_progress.py` also checks the string and
@@ -347,16 +348,38 @@ can infer type parameters from declared fields.
 
 The same gate checks branches, loops, returned records, AddressSanitizer, and
 balanced allocations. Recursive owned record calls, whole-parameter rebinding,
-foreign owned record boundaries, custom destructors, and buffers of owned
+foreign owned record boundaries, and buffers of owned
 records still require further ownership lowering. Tagged records keep inactive
 payload fields initialized, allowing optional owned fields to use the same
 storage and lifetime handling.
+
+Local records with a `drop` method now receive reverse-order cleanup at scope
+exit and unit returns. Both `drop(value)` and `drop value` invoke cleanup once;
+later uses are diagnosed. The same path handles records containing strings.
+Resource aliases, nested resource fields, globals, resource returns, temporaries
+outside local bindings, loop cleanup and error cleanup remain unsupported.
+Conditional explicit drops require matching lifetimes on continuing branches.
+This is scoped resource cleanup, not the complete ownership/borrow checker.
+Ordinary tests can contain isolated `accept:` and `reject:` blocks; those blocks
+are checked without executing their statements.
+
+`bytes[T]()` and `alignment[T]()` query the hosted LLVM storage layout and return
+the source `DataSize` quantity. Layout queries obtain Clang's target layout
+through `SEVERIAN_CLANG`, including when emitting MLIR, and preserve it on the
+module. Run `python3 tests/sev_compiler/memory_ownership.py -v` for unchanged
+layout/lifetime examples, native behavior, lifetime rejections and allocation
+checks. Raw allocation and the broader ownership examples remain unfinished.
+
+For compiler stage timings and an honest example audit, see
+[`PROFILING.md`](../tests/sev_compiler/PROFILING.md). Missing source files are
+errors; a missing fixture can no longer pass by compiling an empty program.
+
 String replacement and string-to-integer conversion are ordinary source
 implementations in `universal/primitive/string/methods.sev`; conversion calls
 resolve the declared operator. Integer parsing accepts signed decimal text and
 ASCII surrounding whitespace, and traps on invalid input or overflow.
 
-The acceptance runner uses these existing files unchanged:
+The acceptance runner uses these subjects:
 
 | Example | Mode | Coverage |
 | --- | --- | --- |
@@ -370,9 +393,9 @@ The acceptance runner uses these existing files unchanged:
 | `docs/examples/01-types/01-basic/02-inference.sev` | build | Mixed interpolation and type names |
 | `docs/examples/02-functions/01-basic/02-signatures.sev` | build | Float defaults, keyword calls, and string conversion |
 | `docs/examples/01-types/01-basic/03-conversion.sev` | build/test | Mixed arithmetic, explicit conversions, policies, and a compiler rejection case |
-| `docs/examples/05-building/src/math.sev` | build | Typed integer function and return |
-| `docs/examples/05-building/src/lib.sev` | build/test | Library root and relative private-module import |
-| `docs/examples/05-building/src/main.sev` | build/test | Binary imports its library root; prints `42` |
+| `tests/sev_compiler/fixtures/building/math.sev` | build | Typed integer function and return |
+| `tests/sev_compiler/fixtures/building/lib.sev` | build/test | Library root and relative private-module import |
+| `tests/sev_compiler/fixtures/building/main.sev` | build/test | Binary imports its library root; prints `42` |
 | `docs/examples/03-testing/01-basics/01-ordinary-and-named.sev` | test | Calls, comparisons, early returns, ordinary and named tests |
 | `docs/examples/03-testing/02-with-tests/08-compile.sev` | test | Accepted/rejected fragments and isolated case bindings |
 

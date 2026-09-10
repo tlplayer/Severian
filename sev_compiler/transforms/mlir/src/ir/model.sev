@@ -449,6 +449,7 @@ class MlirProgram:
     next_region: int
     next_block: int
     operations: list[MlirOperation] = []
+    attributes: list[MlirNamedAttribute] = []
 
 
 def empty_program(first_generated_value: int = 0) -> MlirProgram:
