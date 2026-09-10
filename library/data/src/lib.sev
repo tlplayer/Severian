@@ -1,8 +1,8 @@
 import tensor
-import "expression.sev" as expression
-import "query.sev" as query
-import "schema.sev" as schema_logic
-import "sql.sev" as sql_parser
+import * from "expression.sev" as expression
+import * from "query.sev" as query
+import * from "schema.sev" as schema_logic
+import * from "sql.sev" as sql_parser
 
 class Schema:
     columns: list[string]

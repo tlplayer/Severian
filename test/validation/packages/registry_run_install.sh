@@ -38,7 +38,7 @@ def message() -> string:
     return "hello from packaged executable"
 SEV
 cat > "$TOOL_ROOT/src/main.sev" <<'SEV'
-import "lib.sev" as hello_tool_api
+import * from "lib.sev" as hello_tool_api
 
 print(hello_tool_api.message())
 SEV

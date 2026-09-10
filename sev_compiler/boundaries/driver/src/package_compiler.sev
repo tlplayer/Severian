@@ -1,7 +1,7 @@
 import package
 import source
-import "pipeline/source.sev" as pipeline
-import "../../backend/src/native_mlir.sev" as backend
+import * from "pipeline/source.sev" as pipeline
+import * from "../../backend/src/native_mlir.sev" as backend
 
 # This private entry consumes the package library's immutable resolved graph.
 # It performs one compilation unit and never discovers or resolves packages.

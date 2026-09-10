@@ -1,9 +1,9 @@
 import diagnostics
 import source
 import universal
-import "../../../universal/type/scalar.sev" as scalar
-import "../../../universal/type/storage.sev" as storage_types
-import "../../../universal/type/tagged.sev" as tagged
+import * from "../../../universal/type/scalar.sev" as scalar
+import * from "../../../universal/type/storage.sev" as storage_types
+import * from "../../../universal/type/tagged.sev" as tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved

@@ -1,6 +1,6 @@
-import "model.sev"
-import "config.sev"
-import "host.sev"
+import * from "model.sev"
+import * from "config.sev"
+import * from "host.sev"
 import file
 import path
 import os

@@ -1,11 +1,11 @@
 import universal
 import source
 import diagnostics
-import "cfg.sev" as cfg
-import "ownership.sev" as ownership
-import "aggregate.sev" as aggregate
-import "../../../universal/type/storage.sev" as storage_types
-import "../../../universal/declaration/scalar.sev" as boundary
+import * from "cfg.sev" as cfg
+import * from "ownership.sev" as ownership
+import * from "aggregate.sev" as aggregate
+import * from "../../../universal/type/storage.sev" as storage_types
+import * from "../../../universal/declaration/scalar.sev" as boundary
 
 
 class CallableMirScope:

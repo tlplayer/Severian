@@ -1,1 +1,1 @@
-import "../../frontend/modules/src/source.sev"
+import * from "../../frontend/modules/src/source.sev"

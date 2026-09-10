@@ -1,4 +1,4 @@
-import "c:random-c" as native
+import * from "c:random-c" as native
 
 @c(symbol = "sev_abi_v1_random_float")
 def random() -> float

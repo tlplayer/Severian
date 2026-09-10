@@ -1,5 +1,5 @@
 import io
-import "ffi.sev" as externs
+import * from "ffi.sev" as externs
 
 class NetworkError: Error
     message: string

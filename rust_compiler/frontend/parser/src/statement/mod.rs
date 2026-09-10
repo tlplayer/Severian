@@ -1791,20 +1791,38 @@ impl Parser<'_> {
                 span: Span::new(start.source, start.start, end),
             });
         }
+        let wildcard = self.take(&TokenKind::Star).is_some();
+        if wildcard {
+            if !self.at_identifier("from") {
+                return Err(self.error("expected `from` after `import *`"));
+            }
+            self.next();
+        }
         let subject_token = self.next();
         let subject = match subject_token.kind {
-            TokenKind::Identifier(name) => ImportSubject::Name(name),
-            TokenKind::String(locator) => ImportSubject::Locator(locator),
+            TokenKind::Identifier(name) if !wildcard => ImportSubject::Name(name),
+            TokenKind::String(locator) if wildcard => ImportSubject::Locator(locator),
+            TokenKind::String(_) => {
+                return Err(Diagnostic::new(
+                    "E000118",
+                    "file imports require explicit `import * from \"path.sev\"`",
+                    Some(subject_token.span),
+                ));
+            }
             _ => {
                 return Err(Diagnostic::new(
                     "E000118",
-                    "expected an import name or locator string",
+                    if wildcard {
+                        "expected a locator string after `import * from`"
+                    } else {
+                        "expected an import name or `* from` followed by a locator string"
+                    },
                     Some(subject_token.span),
                 ))
             }
         };
         let mut end = subject_token.span.end;
-        let source = if self.at_identifier("from") {
+        let source = if !wildcard && self.at_identifier("from") {
             self.next();
             let (source, span) = self.identifier("expected an import source after `from`")?;
             end = span.end;

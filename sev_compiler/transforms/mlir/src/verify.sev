@@ -1,7 +1,7 @@
 import artifact
 import target
 import universal
-import "emit/mod.sev"
+import * from "emit/mod.sev"
 
 class VerifiedMlirArtifact:
     id: universal.ArtifactId

@@ -1,4 +1,4 @@
-import "../type/type.sev"
+import * from "../type/type.sev"
 
 enum PrimitiveCategory:
     Boolean

@@ -1,9 +1,9 @@
-import "compiler.sev"
-import "host.sev"
-import "model.sev"
-import "manifest.sev"
-import "resolve.sev"
-import "archive.sev"
+import * from "compiler.sev"
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import * from "resolve.sev"
+import * from "archive.sev"
 import os
 import path
 

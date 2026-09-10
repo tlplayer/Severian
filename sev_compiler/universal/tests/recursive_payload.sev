@@ -1,6 +1,6 @@
 import source
-import "../expression/expression.sev"
-import "../cfg/cfg.sev"
+import * from "../expression/expression.sev"
+import * from "../cfg/cfg.sev"
 
 
 def returned_expression(span: source.Span) -> Expression:

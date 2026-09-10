@@ -1,6 +1,6 @@
 import universal
 import diagnostics
-import "../callable.sev" as callable
+import * from "../callable.sev" as callable
 
 
 # Both driver entries lower through the same executable CFG builder.

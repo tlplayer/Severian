@@ -1,1 +1,1 @@
-import "queue.sev"
+import * from "queue.sev"

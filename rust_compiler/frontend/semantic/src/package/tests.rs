@@ -110,10 +110,10 @@ fn package_reexports_reach_the_same_fixed_point_in_reverse_graph_order() {
         "class Leaf:\n    value: i32\ndef make_leaf(value: i32) -> Leaf:\n    return Leaf(value)\n",
     )
     .unwrap();
-    std::fs::write(root.join("middle.sev"), "import \"leaf.sev\"\n").unwrap();
+    std::fs::write(root.join("middle.sev"), "import * from \"leaf.sev\"\n").unwrap();
     std::fs::write(
         root.join("entry.sev"),
-        "import \"middle.sev\"\ndef selected() -> Leaf:\n    return make_leaf(7)\n",
+        "import * from \"middle.sev\"\ndef selected() -> Leaf:\n    return make_leaf(7)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("entry.sev")).unwrap();
@@ -137,10 +137,10 @@ fn imported_enums_keep_their_identity_and_defining_module_payload_types() {
         "class Span:\n    start: u64\nenum Token:\n    Name(span: Span)\n    Text(value: string)\ndef name(start: u64) -> Token:\n    return Name(Span(start))\n",
     )
     .unwrap();
-    std::fs::write(root.join("facade.sev"), "import \"tokens.sev\"\n").unwrap();
+    std::fs::write(root.join("facade.sev"), "import * from \"tokens.sev\"\n").unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"facade.sev\" as syntax\ndef retain(token: syntax.Token) -> syntax.Token:\n    return token\ndef selected() -> syntax.Token:\n    return retain(syntax.Token.Name(syntax.Span(3)))\n",
+        "import * from \"facade.sev\" as syntax\ndef retain(token: syntax.Token) -> syntax.Token:\n    return token\ndef selected() -> syntax.Token:\n    return retain(syntax.Token.Name(syntax.Span(3)))\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -167,10 +167,10 @@ fn imported_declarations_resolve_nested_traits_in_their_defining_module() {
         "trait Tag:\n    def id() -> u64\nclass Envelope:\n    tags: list[Tag]\ndef retain(tags: list[Tag]) -> list[Tag]:\n    return tags\n",
     )
     .unwrap();
-    std::fs::write(root.join("facade.sev"), "import \"model.sev\"\n").unwrap();
+    std::fs::write(root.join("facade.sev"), "import * from \"model.sev\"\n").unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"facade.sev\" as model\ndef forward(tags: list[model.Tag]) -> list[model.Tag]:\n    return model.retain(tags)\n",
+        "import * from \"facade.sev\" as model\ndef forward(tags: list[model.Tag]) -> list[model.Tag]:\n    return model.retain(tags)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -229,7 +229,7 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
     .unwrap();
     std::fs::write(
         root.join("a.sev"),
-        "import \"b.sev\" as b\ndef selected(value: i32) -> i32:\n    return b.choose(value)\n",
+        "import * from \"b.sev\" as b\ndef selected(value: i32) -> i32:\n    return b.choose(value)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("a.sev")).unwrap();
@@ -258,7 +258,7 @@ fn imported_trait_namespace_dispatch_keeps_the_package_qualifier() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"models.sev\" as ai\ndef selected() -> string:\n    return ai.model.load(\"tiny\")\n",
+        "import * from \"models.sev\" as ai\ndef selected() -> string:\n    return ai.model.load(\"tiny\")\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -293,7 +293,7 @@ fn qualified_imported_types_resolve_in_annotations_and_constructors() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"model.sev\" as model\ndef read(item: model.Item) -> i32:\n    return item.value\ndef build(value: i32) -> model.Item:\n    return model.Item(value)\ndef selected() -> i32:\n    return read(model.make(7))\n",
+        "import * from \"model.sev\" as model\ndef read(item: model.Item) -> i32:\n    return item.value\ndef build(value: i32) -> model.Item:\n    return model.Item(value)\ndef selected() -> i32:\n    return read(model.make(7))\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -313,17 +313,17 @@ fn transitively_reachable_class_methods_keep_origin_types_and_functions() {
     .unwrap();
     std::fs::write(
         root.join("codec.sev"),
-        "import \"storage.sev\" as storage\nclass Decoder:\n    parameters: storage.Store\n    def close() -> bool:\n        return storage.close_store(parameters)\n",
+        "import * from \"storage.sev\" as storage\nclass Decoder:\n    parameters: storage.Store\n    def close() -> bool:\n        return storage.close_store(parameters)\n",
     )
     .unwrap();
     std::fs::write(
         root.join("model.sev"),
-        "import \"codec.sev\" as codec\nclass Model:\n    decoder: codec.Decoder\n    def close() -> bool:\n        return decoder.close()\n",
+        "import * from \"codec.sev\" as codec\nclass Model:\n    decoder: codec.Decoder\n    def close() -> bool:\n        return decoder.close()\n",
     )
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"model.sev\" as model\ndef selected(value: model.Model) -> bool:\n    return value.close()\n",
+        "import * from \"model.sev\" as model\ndef selected(value: model.Model) -> bool:\n    return value.close()\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -343,7 +343,7 @@ fn package_signatures_preserve_named_parameters_and_defaults() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"math.sev\" as math\ndef local(value: float, factor: float = 3.0) -> float:\n    return value * factor\ndef selected() -> float:\n    first = local(value=4.0)\n    return math.scale(value=first)\n",
+        "import * from \"math.sev\" as math\ndef local(value: float, factor: float = 3.0) -> float:\n    return value * factor\ndef selected() -> float:\n    first = local(value=4.0)\n    return math.scale(value=first)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -362,7 +362,7 @@ fn imported_fallible_results_keep_success_and_error_representations() {
     ).unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"reader.sev\" as reader\ndef selected() -> i32:\n    tokens = reader.scan(true)\n    return tokens[0].value\n",
+        "import * from \"reader.sev\" as reader\ndef selected() -> i32:\n    tokens = reader.scan(true)\n    return tokens[0].value\n",
     ).unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
     let universal = severian_bootstrap::load().unwrap();
@@ -377,20 +377,20 @@ fn imported_class_defaults_resolve_constructors_in_the_defining_module() {
     std::fs::write(root.join("ids.sev"), "class HirId:\n    index: u32\n").unwrap();
     std::fs::write(
         root.join("expression.sev"),
-        "import \"ids.sev\"\nclass Expression:\n    id: HirId = HirId(7)\n    label: string = \"default\"\n",
+        "import * from \"ids.sev\"\nclass Expression:\n    id: HirId = HirId(7)\n    label: string = \"default\"\n",
     )
     .unwrap();
     std::fs::write(
         root.join("wrapper.sev"),
-        "import \"expression.sev\" as syntax\nclass Wrapper:\n    expression: syntax.Expression = syntax.Expression()\n",
+        "import * from \"expression.sev\" as syntax\nclass Wrapper:\n    expression: syntax.Expression = syntax.Expression()\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();
     for source in [
-        "import \"expression.sev\" as syntax\ndef selected() -> u32:\n    return syntax.Expression().id.index\n",
+        "import * from \"expression.sev\" as syntax\ndef selected() -> u32:\n    return syntax.Expression().id.index\n",
         // The caller's constructor remains visible in explicit arguments and
         // after a nested default returns, but cannot shadow the default's ID.
-        "import \"wrapper.sev\" as wrapper\nimport \"expression.sev\" as syntax\nclass HirId:\n    label: string\ndef selected() -> u32:\n    wrapped = wrapper.Wrapper()\n    expression = syntax.Expression(label=HirId(\"argument\").label)\n    after = HirId(\"after\")\n    return wrapped.expression.id.index + expression.id.index\n",
+        "import * from \"wrapper.sev\" as wrapper\nimport * from \"expression.sev\" as syntax\nclass HirId:\n    label: string\ndef selected() -> u32:\n    wrapped = wrapper.Wrapper()\n    expression = syntax.Expression(label=HirId(\"argument\").label)\n    after = HirId(\"after\")\n    return wrapped.expression.id.index + expression.id.index\n",
     ] {
         std::fs::write(root.join("app.sev"), source).unwrap();
         let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -406,9 +406,9 @@ fn imported_field_defaults_keep_their_enum_namespace() {
     let root = temporary();
     std::fs::write(root.join("syntax.sev"), "enum Fixity:\n    Prefix\n    Infix\n").unwrap();
     std::fs::write(root.join("operator.sev"),
-        "import \"syntax.sev\"\nclass Operator:\n    fixity: Fixity = Fixity.Infix\n").unwrap();
+        "import * from \"syntax.sev\"\nclass Operator:\n    fixity: Fixity = Fixity.Infix\n").unwrap();
     std::fs::write(root.join("app.sev"),
-        "import \"operator.sev\" as operators\ndef selected():\n    operator = operators.Operator()\n").unwrap();
+        "import * from \"operator.sev\" as operators\ndef selected():\n    operator = operators.Operator()\n").unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
     let universal = severian_bootstrap::load().unwrap();
     let typed = analyze_package(&graph, &universal).unwrap();
@@ -438,7 +438,7 @@ fn imported_union_parameters_preserve_members_and_accept_injections() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"convert.sev\" as convert\ndef selected() -> float:\n    return convert.to_float(\"4.5\") + convert.to_float(4) + convert.to_float(4.5)\n",
+        "import * from \"convert.sev\" as convert\ndef selected() -> float:\n    return convert.to_float(\"4.5\") + convert.to_float(4) + convert.to_float(4.5)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -480,7 +480,7 @@ fn imported_classes_and_list_results_keep_package_wide_types() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"filesystem.sev\" as filesystem\ndef selected() -> int:\n    information = filesystem.stat(\"/tmp/example\")\n    values = filesystem.entries()\n    assert(size(values) == 0)\n    return information.size\n",
+        "import * from \"filesystem.sev\" as filesystem\ndef selected() -> int:\n    information = filesystem.stat(\"/tmp/example\")\n    values = filesystem.entries()\n    assert(size(values) == 0)\n    return information.size\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -565,7 +565,7 @@ fn imported_generic_overload_is_specialized_after_declaration_collection() {
     .unwrap();
     std::fs::write(
         root.join("a.sev"),
-        "import \"b.sev\" as b\ndef selected(value: i32) -> i32:\n    return b.choose(value)\n",
+        "import * from \"b.sev\" as b\ndef selected(value: i32) -> i32:\n    return b.choose(value)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("a.sev")).unwrap();
@@ -608,7 +608,7 @@ fn explicit_type_arguments_specialize_imported_and_nested_generic_calls() {
     .unwrap();
     std::fs::write(
         root.join("app.sev"),
-        "import \"generic.sev\" as generic\ndef selected(value: i32) -> i32:\n    return generic.forward[i32](value)\n",
+        "import * from \"generic.sev\" as generic\ndef selected(value: i32) -> i32:\n    return generic.forward[i32](value)\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
@@ -1567,12 +1567,12 @@ fn declaration_only_module_cycles_can_resolve_mutually_recursive_bodies() {
     let root = temporary();
     std::fs::write(
         root.join("a.sev"),
-        "import \"b.sev\" as b\ndef a() -> int:\n    return b.b()\n",
+        "import * from \"b.sev\" as b\ndef a() -> int:\n    return b.b()\n",
     )
     .unwrap();
     std::fs::write(
         root.join("b.sev"),
-        "import \"a.sev\" as a\ndef b() -> int:\n    return a.a()\n",
+        "import * from \"a.sev\" as a\ndef b() -> int:\n    return a.a()\n",
     )
     .unwrap();
     let graph = severian_modules::resolve(&root.join("a.sev")).unwrap();
@@ -1631,12 +1631,12 @@ fn package_class_fields_survive_diamond_relative_imports() {
     .unwrap();
     std::fs::write(
         root.join("operator.sev"),
-        "import \"ids.sev\"\nclass Signature:\n    declaration: DeclarationId\n",
+        "import * from \"ids.sev\"\nclass Signature:\n    declaration: DeclarationId\n",
     )
     .unwrap();
     std::fs::write(
         root.join("lib.sev"),
-        "import \"ids.sev\"\nimport \"operator.sev\"\n",
+        "import * from \"ids.sev\"\nimport * from \"operator.sev\"\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();
@@ -1655,7 +1655,7 @@ fn package_class_fields_resolve_qualified_classes_inside_lists() {
     std::fs::write(root.join("query.sev"), "class Step:\n    name: string\n").unwrap();
     std::fs::write(
         root.join("lib.sev"),
-        "import \"query.sev\" as query\nclass Data:\n    steps: list[query.Step]\n",
+        "import * from \"query.sev\" as query\nclass Data:\n    steps: list[query.Step]\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();
@@ -1683,7 +1683,7 @@ fn tensor_intrinsics_do_not_consume_other_package_namespaces_as_receivers() {
     .unwrap();
     std::fs::write(
         root.join("lib.sev"),
-        "import \"paths.sev\" as path\nimport \"tensor.sev\" as tensor\ndef ready(value: string) -> bool:\n    return path.exists(value)\n",
+        "import * from \"paths.sev\" as path\nimport * from \"tensor.sev\" as tensor\ndef ready(value: string) -> bool:\n    return path.exists(value)\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();

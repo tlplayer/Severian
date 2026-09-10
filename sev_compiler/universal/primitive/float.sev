@@ -1,8 +1,8 @@
-import "primitive.sev"
+import * from "primitive.sev"
 
-import "../operator/trait/arithmetic.sev"
-import "../operator/trait/equatable.sev"
-import "../operator/trait/ordered.sev"
+import * from "../operator/trait/arithmetic.sev"
+import * from "../operator/trait/equatable.sev"
+import * from "../operator/trait/ordered.sev"
 
 
 '''

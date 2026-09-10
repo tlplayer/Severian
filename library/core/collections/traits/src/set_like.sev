@@ -1,4 +1,4 @@
-import "collection.sev"
+import * from "collection.sev"
 
 
 trait SetLike[T]: Collection[T]

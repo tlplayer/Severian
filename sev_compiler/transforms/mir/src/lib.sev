@@ -1,12 +1,12 @@
 import artifact
 import universal
-import "cfg.sev"
-import "model/operation/mod.sev"
-import "model/value/mod.sev"
-import "ownership.sev"
-import "passes.sev"
-import "verify.sev"
-import "build/mod.sev"
+import * from "cfg.sev"
+import * from "model/operation/mod.sev"
+import * from "model/value/mod.sev"
+import * from "ownership.sev"
+import * from "passes.sev"
+import * from "verify.sev"
+import * from "build/mod.sev"
 
 def empty_module() -> universal.Module:
     return universal.empty_module()

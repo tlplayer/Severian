@@ -1,4 +1,4 @@
 import source
 import universal
-import "model/expression/mod.sev"
-import "model/statement/mod.sev"
+import * from "model/expression/mod.sev"
+import * from "model/statement/mod.sev"

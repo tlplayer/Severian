@@ -1,4 +1,4 @@
-import "collection.sev"
+import * from "collection.sev"
 
 
 trait Sequence[T]: Collection[T]

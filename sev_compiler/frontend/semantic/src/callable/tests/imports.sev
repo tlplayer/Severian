@@ -1,4 +1,4 @@
-import "fixtures/constants.sev" as constants
+import * from "fixtures/constants.sev" as constants
 
 test "method bodies retain defining module constants":
     value = constants.Counter()

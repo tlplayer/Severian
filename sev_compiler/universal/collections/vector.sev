@@ -1,5 +1,5 @@
-import "../primitive/primitive.sev"
-import "../primitive/array.sev"
+import * from "../primitive/primitive.sev"
+import * from "../primitive/array.sev"
 
 
 '''

@@ -1,6 +1,6 @@
-import "../id/compiler.sev"
-import "../operation/operation.sev"
-import "branch.sev"
+import * from "../id/compiler.sev"
+import * from "../operation/operation.sev"
+import * from "branch.sev"
 
 
 class BasicBlock:

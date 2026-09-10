@@ -4,10 +4,10 @@ import path
 import process
 import source
 import package
-import "../boundaries/driver/src/package_command.sev"
-import "../boundaries/driver/src/package_compiler.sev"
-import "../boundaries/driver/src/pipeline/source.sev" as compiler
-import "../boundaries/backend/src/native_mlir.sev" as backend
+import * from "../boundaries/driver/src/package_command.sev"
+import * from "../boundaries/driver/src/package_compiler.sev"
+import * from "../boundaries/driver/src/pipeline/source.sev" as compiler
+import * from "../boundaries/backend/src/native_mlir.sev" as backend
 
 @c(symbol="exit")
 def exit_status(status: i32)

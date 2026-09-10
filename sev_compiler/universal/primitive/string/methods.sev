@@ -1,5 +1,5 @@
-import "core.sev" as text
-import "../slicing.sev" as slicing
+import * from "core.sev" as text
+import * from "../slicing.sev" as slicing
 
 
 operator copy(value: string) -> string:

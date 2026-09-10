@@ -805,7 +805,7 @@ fn package_default_run_and_dependency_initialization_are_deterministic() {
     fs::write(root.join("src/client.sev"), "print(\"client\")\n").unwrap();
     fs::write(
         root.join("src/server.sev"),
-        "import \"dependency.sev\" as dependency\nprint(\"server\")\ndef main():\n    print(\"main\")\n",
+        "import * from \"dependency.sev\" as dependency\nprint(\"server\")\ndef main():\n    print(\"main\")\n",
     )
     .unwrap();
     let output = sev().arg(&root).output().unwrap();
@@ -1437,7 +1437,7 @@ fn recursive_test_discovery_does_not_run_imported_test_modules_twice() {
     let root = temporary("deduplicated-test-roots");
     fs::write(
         root.join("a.sev"),
-        "import \"b.sev\" as b\n\ntest \"root test\":\n    assert(true)\n",
+        "import * from \"b.sev\" as b\n\ntest \"root test\":\n    assert(true)\n",
     )
     .unwrap();
     fs::write(

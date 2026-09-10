@@ -191,7 +191,7 @@ def main():
     assert(result.low == 3)
     assert(result.high == usize(-1, lossy))
 ''', "bound\nbound\n"),
-        "constructor_list_inputs": (f'import "{ROOT / "sev_compiler/universal/collections/list.sev"}"\n' + '''def main():
+        "constructor_list_inputs": (f'import * from "{ROOT / "sev_compiler/universal/collections/list.sev"}"\n' + '''def main():
     input = array[i32, 3]([1, 2, 3])
     values := list[i32](input)
     assert(values.len() == 3)

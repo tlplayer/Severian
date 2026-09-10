@@ -1,4 +1,4 @@
-import "../pipeline.sev" as examples
+import * from "../pipeline.sev" as examples
 
 test "compiler examples 00-03":
     report = examples.run()

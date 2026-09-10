@@ -1,4 +1,4 @@
-import "scalar.sev"
+import * from "scalar.sev"
 
 
 # Port of rust_compiler/universal/src/conversion.rs for the scalar slice.

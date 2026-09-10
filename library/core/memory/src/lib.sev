@@ -1,1 +1,1 @@
-import "allocation.sev"
+import * from "allocation.sev"

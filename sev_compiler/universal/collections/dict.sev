@@ -1,6 +1,6 @@
-import "../primitive/primitive.sev"
-import "list.sev"
-import "map.sev"
+import * from "../primitive/primitive.sev"
+import * from "list.sev"
+import * from "map.sev"
 
 
 '''

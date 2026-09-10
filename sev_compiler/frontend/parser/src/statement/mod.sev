@@ -217,16 +217,18 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
 
 def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
-    match parser_peek(parser).kind:
-        case String:
-            value = string(parser_next(parser))
-            alias: string | None := None
-            if parser_at_identifier(parser, "as"):
-                parser_next(parser)
-                alias = parser_identifier(parser, "expected an import alias")[0]
-            return universal.ImportDeclaration(universal.Locator(value), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
-        case _:
-            pass
+    if parser_take_symbol(parser, "*") != None:
+        if not parser_at_identifier(parser, "from"):
+            return error(parser_fail(parser, "expected `from` after `import *`"))
+        parser_next(parser)
+        token = parser_expect(parser, String, "expected a locator string after `import * from`")
+        alias: string | None := None
+        if parser_at_identifier(parser, "as"):
+            parser_next(parser)
+            alias = parser_identifier(parser, "expected an import alias")[0]
+        return universal.ImportDeclaration(universal.Locator(string(token)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+    if parser_at_simple(parser, String):
+        return error(parser_fail(parser, "file imports require explicit `import * from` followed by a locator string"))
     first = parser_identifier(parser, "expected an import name")
     if parser_at_identifier(parser, "from"):
         parser_next(parser)

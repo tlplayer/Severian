@@ -34,7 +34,7 @@ test:
                               '-o', self.directory / 'missing'])
         self.assertGreater(result.returncode, 0)
         self.assertIn('source file does not exist', result.stderr)
-        result = self.invoke([COMPILER, 'check', self.write('import "missing.sev"'),
+        result = self.invoke([COMPILER, 'check', self.write('import * from "missing.sev"'),
                               '--sysroot', ROOT])
         self.assertGreater(result.returncode, 0)
         self.assertIn('source file does not exist', result.stderr)

@@ -377,7 +377,7 @@ mod tests {
         std::fs::write(root.join("dependency.sev"), "value := 1\n").unwrap();
         std::fs::write(
             root.join("root.sev"),
-            "import \"dependency.sev\" as dependency\n",
+            "import * from \"dependency.sev\" as dependency\n",
         )
         .unwrap();
         let graph = resolve(&root.join("root.sev")).unwrap();
@@ -392,12 +392,12 @@ mod tests {
         let root = temporary();
         std::fs::write(
             root.join("a.sev"),
-            "import \"b.sev\" as b\ndef a():\n    pass\n",
+            "import * from \"b.sev\" as b\ndef a():\n    pass\n",
         )
         .unwrap();
         std::fs::write(
             root.join("b.sev"),
-            "import \"a.sev\" as a\ndef b():\n    pass\n",
+            "import * from \"a.sev\" as a\ndef b():\n    pass\n",
         )
         .unwrap();
         let graph = resolve(&root.join("a.sev")).unwrap();
@@ -408,8 +408,8 @@ mod tests {
     #[test]
     fn cycles_with_runtime_initializers_are_rejected() {
         let root = temporary();
-        std::fs::write(root.join("a.sev"), "import \"b.sev\" as b\nvalue := 1\n").unwrap();
-        std::fs::write(root.join("b.sev"), "import \"a.sev\" as a\n").unwrap();
+        std::fs::write(root.join("a.sev"), "import * from \"b.sev\" as b\nvalue := 1\n").unwrap();
+        std::fs::write(root.join("b.sev"), "import * from \"a.sev\" as a\n").unwrap();
         let error = resolve(&root.join("a.sev")).unwrap_err();
         assert_eq!(error.code, "E000122");
         std::fs::remove_dir_all(root).unwrap();

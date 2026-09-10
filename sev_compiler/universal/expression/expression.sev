@@ -1,8 +1,8 @@
 import source
-import "../id/compiler.sev"
-import "../literal/value.sev"
-import "../operator/kind.sev"
-import "../type/expression_conversion.sev"
+import * from "../id/compiler.sev"
+import * from "../literal/value.sev"
+import * from "../operator/kind.sev"
+import * from "../type/expression_conversion.sev"
 
 
 class Expression:

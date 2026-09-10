@@ -1,4 +1,4 @@
-import "syntax.sev"
+import * from "syntax.sev"
 
 
 # Y is the compiler-term kind for an interned, resolved symbol. Operator tags

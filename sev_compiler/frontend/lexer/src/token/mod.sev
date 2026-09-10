@@ -1,6 +1,6 @@
 import source
 import universal
-import "../lexeme.sev"
+import * from "../lexeme.sev"
 
 enum TokenKind:
     Identifier

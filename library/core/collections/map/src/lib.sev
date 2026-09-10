@@ -1,1 +1,1 @@
-import "map.sev"
+import * from "map.sev"

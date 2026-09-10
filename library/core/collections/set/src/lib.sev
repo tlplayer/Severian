@@ -1,1 +1,1 @@
-import "set.sev"
+import * from "set.sev"

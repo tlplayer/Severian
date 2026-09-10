@@ -1,5 +1,5 @@
-import "capture.sev" as capture
-import "profile.sev" as profile
+import * from "capture.sev" as capture
+import * from "profile.sev" as profile
 
 
 trait TestMode:

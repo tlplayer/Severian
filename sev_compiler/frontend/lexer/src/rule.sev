@@ -1,6 +1,6 @@
 import source
 import diagnostics
-import "token/mod.sev"
+import * from "token/mod.sev"
 
 
 class LexemeInput:

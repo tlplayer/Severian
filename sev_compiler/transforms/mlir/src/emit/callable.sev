@@ -1,8 +1,8 @@
 import universal
-import "../../../../universal/type/scalar.sev" as scalar
-import "../ir/lib.sev"
-import "strings.sev"
-import "../../../../universal/declaration/scalar.sev" as boundary
+import * from "../../../../universal/type/scalar.sev" as scalar
+import * from "../ir/lib.sev"
+import * from "strings.sev"
+import * from "../../../../universal/declaration/scalar.sev" as boundary
 
 
 def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> MlirType:

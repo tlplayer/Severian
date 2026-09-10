@@ -1,7 +1,7 @@
 import diagnostics
-import "token/mod.sev"
-import "rule.sev"
-import "identifier.sev"
+import * from "token/mod.sev"
+import * from "rule.sev"
+import * from "identifier.sev"
 
 
 # Integer and float share one recognizer, including exponent validation.

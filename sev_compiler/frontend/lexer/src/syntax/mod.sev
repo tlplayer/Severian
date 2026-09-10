@@ -1,8 +1,8 @@
 import source
 import diagnostics
 import universal
-import "../token/mod.sev"
-import "../runtime.sev"
+import * from "../token/mod.sev"
+import * from "../runtime.sev"
 
 
 class SyntaxProperty:

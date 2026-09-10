@@ -23,12 +23,12 @@ class ListGrowth(MigrationCase):
         provider.write_text(body.replace("def append(", "def grow("))
         imports = []
         for line in origin.read_text().splitlines():
-            match = re.fullmatch(r'import "([^"]+)"(.*)', line)
+            match = re.fullmatch(r'import \* from "([^"]+)"(.*)', line)
             if match:
                 path = (origin.parent / match[1]).resolve()
                 if path == collection_source:
                     path = provider
-                imports.append(f'import "{os.path.relpath(path, prelude.parent)}"{match[2]}\n')
+                imports.append(f'import * from "{os.path.relpath(path, prelude.parent)}"{match[2]}\n')
         prelude.write_text("".join(imports))
         program = '''
             def read() -> int:

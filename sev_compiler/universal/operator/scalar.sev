@@ -1,4 +1,4 @@
-import "../id/compiler.sev"
+import * from "../id/compiler.sev"
 
 
 # A grammar's operations: {T: ScalarOperation} map supplies these descriptors.

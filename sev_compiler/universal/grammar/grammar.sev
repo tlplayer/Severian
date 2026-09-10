@@ -1,6 +1,6 @@
 import source
-import "../declaration/function.sev"
-import "../operator/syntax.sev"
+import * from "../declaration/function.sev"
+import * from "../operator/syntax.sev"
 
 
 trait G:

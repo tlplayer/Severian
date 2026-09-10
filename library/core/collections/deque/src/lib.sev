@@ -1,1 +1,1 @@
-import "deque.sev"
+import * from "deque.sev"

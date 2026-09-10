@@ -17,11 +17,11 @@ class DeclarationGrammar(MigrationCase):
         providers = []
         enum_provider = ""
         for line in origin.read_text().splitlines():
-            match = re.fullmatch(r'import "([^"]+)"(.*)', line)
+            match = re.fullmatch(r'import \* from "([^"]+)"(.*)', line)
             if not match:
                 continue
             path = (origin.parent / match[1]).resolve()
-            entry = f'import "{os.path.relpath(path, target.parent)}"{match[2]}\n'
+            entry = f'import * from "{os.path.relpath(path, target.parent)}"{match[2]}\n'
             if path.name == "enum.sev":
                 enum_provider = entry
             else:
@@ -44,7 +44,7 @@ class DeclarationGrammar(MigrationCase):
                 representation: PrimitiveRepresentation = PrimitiveRepresentation.TaggedAggregate
         ''', "language.sev")
         self.native('''
-            import "language.sev"
+            import * from "language.sev"
             <| Value:
                 Empty
                 Number(value: int)
@@ -67,7 +67,7 @@ class DeclarationGrammar(MigrationCase):
             self.write(primitive.replace("symbol: Y = enum", f"symbol: Y = {word}"),
                        "language.sev")
             self.native(f'''
-                import "language.sev"
+                import * from "language.sev"
                 {word} Value:
                     Empty
                     Number(value: int)
@@ -88,7 +88,7 @@ class DeclarationGrammar(MigrationCase):
                                   "PrimitiveRepresentation.RecordAggregate")
         self.write(product, "language.sev")
         self.native('''
-            import "language.sev"
+            import * from "language.sev"
             product Pair:
                 left: int
                 right: int

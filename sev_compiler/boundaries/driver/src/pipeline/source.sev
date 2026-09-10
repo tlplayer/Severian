@@ -1,4 +1,4 @@
-import "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
+import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
 import process
 import package
@@ -7,13 +7,13 @@ import parser
 import universal
 import diagnostics
 from diagnostics import Diagnostic
-import "../../../../frontend/semantic/src/callable.sev" as semantic
-import "../../../../transforms/mir/src/callable.sev" as mir
-import "../../../../transforms/mlir/src/emit/callable.sev" as mlir
-import "../../../../transforms/mlir/src/ir/text.sev" as text
-import "../../../../frontend/modules/src/source.sev"
-import "timing.sev" as timing
-import "../../../backend/src/native_mlir.sev" as native
+import * from "../../../../frontend/semantic/src/callable.sev" as semantic
+import * from "../../../../transforms/mir/src/callable.sev" as mir
+import * from "../../../../transforms/mlir/src/emit/callable.sev" as mlir
+import * from "../../../../transforms/mlir/src/ir/text.sev" as text
+import * from "../../../../frontend/modules/src/source.sev"
+import * from "timing.sev" as timing
+import * from "../../../backend/src/native_mlir.sev" as native
 
 
 def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:

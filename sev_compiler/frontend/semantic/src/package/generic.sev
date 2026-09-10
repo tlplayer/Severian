@@ -1,5 +1,5 @@
 import universal
-import "../package.sev"
+import * from "../package.sev"
 
 class GenericInstance:
     definition: universal.DefId

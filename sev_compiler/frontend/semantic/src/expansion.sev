@@ -1,7 +1,7 @@
 import source
 import diagnostics
 import universal
-import "definitions.sev" as definitions
+import * from "definitions.sev" as definitions
 
 
 # Execute expression-producing source bodies by substitution and pack

@@ -3,7 +3,7 @@
 Source-level external-language integration. XXI resolves languages, declarations, attributes, and symbols without deciding FFI safety or ABI layout.
 
 ```severian
-import "c:libc" as libc
+import * from "c:libc" as libc
 
 @c(repr = "opaque")
 type FILE

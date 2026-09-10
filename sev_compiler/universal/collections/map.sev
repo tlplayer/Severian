@@ -1,5 +1,5 @@
-import "../operator/trait/equatable.sev"
-import "../primitive/primitive.sev"
+import * from "../operator/trait/equatable.sev"
+import * from "../primitive/primitive.sev"
 
 
 '''

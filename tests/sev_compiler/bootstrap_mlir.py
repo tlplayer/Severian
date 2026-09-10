@@ -46,7 +46,7 @@ def main():
     string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
     io_source = ROOT / "library/system/io/src/text.sev"
     scalar_tests = ROOT / "sev_compiler/frontend/semantic/src/scalar/tests"
-    string_import = f'import "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
+    string_import = f'import * from "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
     cases = {
         "generic_identity": "def answer[T](value: T) -> T:\n    return value\nassert(answer(42) == 42)\nassert(answer(2.5) == 2.5)\n",
         "int_add": "left: i32 = 1\nright: i32 = 2\nsum: i32 = left + right\nassert(sum == 3)\n",
@@ -74,7 +74,7 @@ def main():
         "cast_float_nan": 'int(0.0 / 0.0)\n',
         "cast_float_infinity": 'int(1.0 / 0.0)\n',
         "cast_float_negative_infinity": 'int(-1.0 / 0.0)\n',
-        "imported_output": f'import "{os.path.relpath(io_source, ARTIFACTS)}" as io\nio.print("library output")\n',
+        "imported_output": f'import * from "{os.path.relpath(io_source, ARTIFACTS)}" as io\nio.print("library output")\n',
     }
     inputs = {}
     for name, source in cases.items():
@@ -266,7 +266,7 @@ def main():
         "nul_escape": ('value = "\\0"\n', "unsupported literal escape"),
         "unterminated_string": ('value = "hello\n', "unterminated string literal"),
         "byte_overflow": ("value: u8 = 256\n", "outside u8"),
-        "cyclic_import": ('import "cyclic_import.sev"\n', "cyclic source import"),
+        "cyclic_import": ('import * from "cyclic_import.sev"\n', "cyclic source import"),
         "duplicate_alias": (string_import + string_import, "duplicate import alias"),
         "boundary_body": ('@mlir("arith.extui")\ndef convert(value: u8) -> int:\n    return 1\n', "cannot have source bodies"),
         "c_string_abi": ('@c(symbol="puts")\ndef puts(value: string) -> i32\n', "scalar ABI types"),

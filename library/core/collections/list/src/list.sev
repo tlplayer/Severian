@@ -1,6 +1,6 @@
 import storage
 import Sequence from traits
-import "iterator.sev"
+import * from "iterator.sev"
 
 
 class list[T]: Sequence[T]

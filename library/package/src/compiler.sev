@@ -1,7 +1,7 @@
-import "model.sev"
-import "host.sev"
-import "manifest.sev"
-import "edit.sev"
+import * from "model.sev"
+import * from "host.sev"
+import * from "manifest.sev"
+import * from "edit.sev"
 import path
 
 # A versioned compilation-unit protocol keeps package orchestration independent

@@ -1,4 +1,4 @@
-import "../id/compiler.sev"
+import * from "../id/compiler.sev"
 
 
 # Structural types and inference ported from rust_compiler/universal/src/type_system.rs.

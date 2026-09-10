@@ -1,5 +1,5 @@
-import "../id/compiler.sev"
-import "scalar.sev"
+import * from "../id/compiler.sev"
+import * from "scalar.sev"
 
 
 enum OperatorDomain:

@@ -1,4 +1,4 @@
-import "lib.sev" as library
+import * from "lib.sev" as library
 
 def main():
     print(library.answer())

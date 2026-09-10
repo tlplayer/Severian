@@ -1,4 +1,4 @@
-import "../ir/lib.sev"
+import * from "../ir/lib.sev"
 
 
 def utf8_view_type() -> MlirType:

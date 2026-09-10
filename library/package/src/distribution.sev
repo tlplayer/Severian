@@ -1,10 +1,10 @@
-import "host.sev"
-import "model.sev"
-import "manifest.sev"
-import "resolve.sev"
-import "archive.sev"
-import "build.sev"
-import "edit.sev"
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import * from "resolve.sev"
+import * from "archive.sev"
+import * from "build.sev"
+import * from "edit.sev"
 import os
 import path
 import environment

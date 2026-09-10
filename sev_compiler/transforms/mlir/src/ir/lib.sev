@@ -1,4 +1,4 @@
-import "model.sev"
-import "builder.sev"
-import "validate.sev"
-import "text.sev"
+import * from "model.sev"
+import * from "builder.sev"
+import * from "validate.sev"
+import * from "text.sev"

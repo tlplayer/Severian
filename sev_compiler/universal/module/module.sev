@@ -1,12 +1,12 @@
 import source
-import "../id/compiler.sev"
-import "../declaration/language.sev"
-import "../declaration/function.sev"
-import "../expression/expression.sev"
-import "../statement/statement.sev"
-import "../cfg/cfg.sev"
-import "../value/lowered.sev"
-import "../grammar/grammar.sev"
+import * from "../id/compiler.sev"
+import * from "../declaration/language.sev"
+import * from "../declaration/function.sev"
+import * from "../expression/expression.sev"
+import * from "../statement/statement.sev"
+import * from "../cfg/cfg.sev"
+import * from "../value/lowered.sev"
+import * from "../grammar/grammar.sev"
 
 
 enum Item:

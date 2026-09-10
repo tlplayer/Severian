@@ -1,4 +1,4 @@
-import "model.sev"
+import * from "model.sev"
 
 
 class MlirBlockHandle:

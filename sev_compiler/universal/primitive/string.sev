@@ -1,9 +1,9 @@
-import "primitive.sev"
-import "slice.sev"
-import "string/core.sev" as utf8_core
+import * from "primitive.sev"
+import * from "slice.sev"
+import * from "string/core.sev" as utf8_core
 
-import "../operator/trait/equatable.sev"
-import "../operator/trait/ordered.sev"
+import * from "../operator/trait/equatable.sev"
+import * from "../operator/trait/ordered.sev"
 
 
 '''

@@ -1,4 +1,4 @@
-import "host.sev" as host
+import * from "host.sev" as host
 import file
 import process
 import os

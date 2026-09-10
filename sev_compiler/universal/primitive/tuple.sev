@@ -1,4 +1,4 @@
-import "../component/services.sev" as compiler
+import * from "../component/services.sev" as compiler
 
 
 trait TupleSyntax: G:

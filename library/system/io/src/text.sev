@@ -1,5 +1,5 @@
-import "../../../../sev_compiler/universal/primitive/string/core.sev" as text
-import "../../../../sev_compiler/universal/primitive/string/format.sev" as format
+import * from "../../../../sev_compiler/universal/primitive/string/core.sev" as text
+import * from "../../../../sev_compiler/universal/primitive/string/format.sev" as format
 
 # Only a byte leaves the source-owned implementation at this hosted boundary.
 # putchar belongs to the platform C library; no Severian C helper is linked.

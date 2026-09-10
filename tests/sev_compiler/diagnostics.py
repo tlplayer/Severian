@@ -11,7 +11,7 @@ def check(compiler, directory, name, text, code, message, line, column,
     entry = subject
     if imported:
         entry = directory / (name + "_entry.sev")
-        entry.write_text(f'import "{subject.name}"\n')
+        entry.write_text(f'import * from "{subject.name}"\n')
     # Match invocation from the directory containing the user's test file.
     result = run([compiler, "test", entry.name, "--sysroot", ROOT],
                  cwd=directory, succeeds=False)

@@ -1,13 +1,13 @@
 import source
 import diagnostics
-import "token/mod.sev"
-import "rule.sev"
-import "identifier.sev"
-import "number.sev"
-import "string.sev"
-import "symbol.sev"
-import "trivia.sev"
-import "runtime.sev"
+import * from "token/mod.sev"
+import * from "rule.sev"
+import * from "identifier.sev"
+import * from "number.sev"
+import * from "string.sev"
+import * from "symbol.sev"
+import * from "trivia.sev"
+import * from "runtime.sev"
 
 
 # Built-in rules are specialized; imported rules execute source bodies through

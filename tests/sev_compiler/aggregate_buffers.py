@@ -160,10 +160,10 @@ class AggregateBuffers(MigrationCase):
         providers = []
         complete = []
         for line in origin.read_text().splitlines():
-            match = re.fullmatch(r'import "([^"]+)"(.*)', line)
+            match = re.fullmatch(r'import \* from "([^"]+)"(.*)', line)
             if match:
                 path = (origin.parent / match[1]).resolve()
-                entry = f'import "{os.path.relpath(path, target.parent)}"{match[2]}\n'
+                entry = f'import * from "{os.path.relpath(path, target.parent)}"{match[2]}\n'
                 complete.append(entry)
                 if path.name != "collections.sev":
                     providers.append(entry)
@@ -225,7 +225,7 @@ class AggregateBuffers(MigrationCase):
     def test_alias_arguments_keep_the_callers_scope(self):
         self.write('type Sequence[T] = list[T]\n', "container.sev")
         self.native('''
-            import "container.sev" as container
+            import * from "container.sev" as container
             class Local:
                 value: int
             def identity[V](values: container.Sequence[V]) -> container.Sequence[V]:

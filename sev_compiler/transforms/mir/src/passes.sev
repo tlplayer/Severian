@@ -1,4 +1,4 @@
-import "cfg.sev"
+import * from "cfg.sev"
 
 enum IrStage:
     Constructed

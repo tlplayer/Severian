@@ -9,7 +9,7 @@ import modules
 import ownership
 import parser
 import semantic
-import "../../../../frontend/semantic/src/definitions.sev" as semantic_definitions
+import * from "../../../../frontend/semantic/src/definitions.sev" as semantic_definitions
 import source
 import target
 import universal

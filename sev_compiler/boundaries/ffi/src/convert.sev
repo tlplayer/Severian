@@ -1,7 +1,7 @@
 import abi
 import universal
-import "model.sev"
-import "validate.sev"
+import * from "model.sev"
+import * from "validate.sev"
 
 enum Conversion:
     Direct

@@ -1,6 +1,6 @@
-import "../../../universal/cfg/cfg.sev"
+import * from "../../../universal/cfg/cfg.sev"
 import universal
-import "../../../universal/type/storage.sev" as storage_types
+import * from "../../../universal/type/storage.sev" as storage_types
 import source
 import diagnostics
 

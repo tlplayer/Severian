@@ -1,4 +1,4 @@
-import "conversion.sev"
+import * from "conversion.sev"
 
 enum Size:
     Fixed(bytes: u64)

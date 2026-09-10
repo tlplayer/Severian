@@ -1,7 +1,7 @@
-import "host.sev"
-import "model.sev"
-import "manifest.sev"
-import "resolve.sev"
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import * from "resolve.sev"
 import file
 import path
 import os

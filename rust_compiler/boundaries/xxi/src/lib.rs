@@ -501,7 +501,7 @@ mod tests {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source(
             "ffi.sev",
-            "import \"c:libc\" as libc\n@c(repr = \"opaque\")\ntype FILE\n@c(symbol = \"sev_write\")\ndef write(value: borrowed[string], output: out[FILE]) -> i32\n",
+            "import * from \"c:libc\" as libc\n@c(repr = \"opaque\")\ntype FILE\n@c(symbol = \"sev_write\")\ndef write(value: borrowed[string], output: out[FILE]) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         assert!(matches!(module.items[1], Item::Type(_)));

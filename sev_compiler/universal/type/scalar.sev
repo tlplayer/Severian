@@ -1,4 +1,4 @@
-import "../id/compiler.sev"
+import * from "../id/compiler.sev"
 
 
 # Stable identities for the first source-compiled scalar pipeline. The table

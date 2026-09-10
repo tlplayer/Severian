@@ -1,5 +1,5 @@
-import "validate.sev"
-import "model.sev"
+import * from "validate.sev"
+import * from "model.sev"
 
 
 # Text is a terminal inspection/bootstrap format. Lowering and optimization

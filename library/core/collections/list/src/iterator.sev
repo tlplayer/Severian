@@ -1,4 +1,4 @@
-import "list.sev"
+import * from "list.sev"
 import Iterator from traits
 
 

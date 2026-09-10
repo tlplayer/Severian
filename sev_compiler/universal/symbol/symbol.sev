@@ -8,7 +8,7 @@ enum SymbolKind:
     ThreadLocal
 
 
-import "../id/compiler.sev"
+import * from "../id/compiler.sev"
 
 
 class Symbol:

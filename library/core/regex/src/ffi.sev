@@ -1,4 +1,4 @@
-import "c:regex-posix" as native
+import * from "c:regex-posix" as native
 
 @c(repr = "pointer")
 type Handle

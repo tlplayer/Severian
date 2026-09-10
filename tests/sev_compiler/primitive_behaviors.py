@@ -76,7 +76,7 @@ class PrimitiveBehaviors(MigrationCase):
 
     def test_documentation_and_character_literals(self):
         self.write("'''\nclass Fictional:\n    value: Missing\n'''\ndef answer() -> int:\n    return 42\n", "documented.sev")
-        self.native("import \"documented.sev\"\ntest:\n    assert(answer() == 42)\n    assert('λ' == 'λ')\n    assert('''\n        λ\n        text\n    ''' == \"λ\\ntext\\n\")\n")
+        self.native("import * from \"documented.sev\"\ntest:\n    assert(answer() == 42)\n    assert('λ' == 'λ')\n    assert('''\n        λ\n        text\n    ''' == \"λ\\ntext\\n\")\n")
         self.rejects("value = '''unfinished\n", "unterminated block string")
         self.rejects("value = 'ab'\n", "character literal requires one Unicode scalar")
 
@@ -87,7 +87,7 @@ class PrimitiveBehaviors(MigrationCase):
     def test_invalid_utf8_sequences_fail_in_shared_decoder(self):
         subject = ROOT / "sev_compiler/universal/primitive/char/encoding.sev"
         # Source locators are relative to the fixture, including in a temp dir.
-        prefix = f'import "{os.path.relpath(subject, self.directory)}" as encoding\n'
+        prefix = f'import * from "{os.path.relpath(subject, self.directory)}" as encoding\n'
         for expression in ("decode_two(192, 128)", "decode_two(194, 127)",
                            "decode_three(224, 159, 191)", "decode_three(237, 160, 128)",
                            "decode_three(225, 128, 256)", "decode_four(240, 143, 191, 191)",

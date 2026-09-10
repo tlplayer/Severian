@@ -1,6 +1,6 @@
-import "../primitive/primitive.sev"
-import "../primitive/slice.sev"
-import "dict.sev"
+import * from "../primitive/primitive.sev"
+import * from "../primitive/slice.sev"
+import * from "dict.sev"
 
 
 '''

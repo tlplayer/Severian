@@ -1,4 +1,4 @@
-import "list.sev"
+import * from "list.sev"
 
 
 def extend[T](values: borrow mut list[T], additions: list[T]):

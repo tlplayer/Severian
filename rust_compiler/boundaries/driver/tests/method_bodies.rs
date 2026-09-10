@@ -341,7 +341,7 @@ def main():
 #[test]
 fn callable_body_scopes_retain_imported_constants() {
     run_with_modules(
-        r#"import "settings.sev" as settings
+        r#"import * from "settings.sev" as settings
 class Counter:
     value: int
     def bump() -> int:

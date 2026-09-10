@@ -1,4 +1,4 @@
-import "lib.sev" as database
+import * from "lib.sev" as database
 import environment
 import network
 import process

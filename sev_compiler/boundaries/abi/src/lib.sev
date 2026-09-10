@@ -1,5 +1,5 @@
-import "classify.sev"
-import "layout.sev"
-import "model.sev"
-import "target.sev"
+import * from "classify.sev"
+import * from "layout.sev"
+import * from "model.sev"
+import * from "target.sev"
 

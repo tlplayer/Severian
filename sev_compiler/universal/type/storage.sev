@@ -1,5 +1,5 @@
-import "../declaration/function.sev"
-import "scalar.sev"
+import * from "../declaration/function.sev"
+import * from "scalar.sev"
 
 
 # Storage types retain their element identity independently of value layouts.

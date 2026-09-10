@@ -1,8 +1,8 @@
-import "../id/compiler.sev"
-import "../literal/value.sev"
-import "../operator/kind.sev"
-import "../source/assertion_origin.sev"
-import "../statement/statement.sev"
+import * from "../id/compiler.sev"
+import * from "../literal/value.sev"
+import * from "../operator/kind.sev"
+import * from "../source/assertion_origin.sev"
+import * from "../statement/statement.sev"
 
 
 enum Operation:

@@ -1,4 +1,4 @@
-import "lib.sev"
+import * from "lib.sev"
 import source
 import process
 

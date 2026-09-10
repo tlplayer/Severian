@@ -60,7 +60,7 @@ class Tuples(MigrationCase):
             ("return values[0]", "assert(value == 7)"),
         ]:
             self.native(f'''
-                import "{service}" as builders
+                import * from "{service}" as builders
                 class Bundle[...Elements]:
                     elements: ...Elements
                 trait BundleSyntax: G:
@@ -100,7 +100,7 @@ class Tuples(MigrationCase):
         service = os.path.relpath(ROOT / "sev_compiler/universal/component/services.sev",
                                   self.directory)
         self.native(f'''
-            import "{service}" as builders
+            import * from "{service}" as builders
             class Point:
                 x: int
                 y: int

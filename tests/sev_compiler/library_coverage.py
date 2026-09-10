@@ -17,7 +17,7 @@ class LibraryCoverage(MigrationCase):
     def test_capture_preserves_initializer_and_isolates_cases(self):
         capture = os.path.relpath(ROOT / "library/testing/src/capture.sev", self.directory)
         self.native(f'''
-            import "{capture}" as capture
+            import * from "{capture}" as capture
             @c(symbol="perror")
             def emit_error(prefix: native_ptr)
             test:
@@ -96,7 +96,7 @@ class LibraryCoverage(MigrationCase):
         helper = root / "helper.sev"
         helper.write_text("def library_answer() -> int:\n    return 42\n")
         prelude = root / "sev_compiler/universal/prelude.sev"
-        prelude.write_text(prelude.read_text() + '\nimport "../../helper.sev"\n')
+        prelude.write_text(prelude.read_text() + '\nimport * from "../../helper.sev"\n')
         self.native("test:\n    assert(library_answer() == 42)\n", sysroot=root)
 
 

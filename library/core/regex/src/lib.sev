@@ -1,5 +1,5 @@
 import abi
-import "src/ffi.sev" as externs
+import * from "src/ffi.sev" as externs
 
 def native_handle(value: isize) -> abi.Handle:
     return abi.Handle(value)

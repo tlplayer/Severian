@@ -1,4 +1,4 @@
-import "src/ffi.sev" as externs
+import * from "src/ffi.sev" as externs
 
 def random() -> float:
     return externs.random()

@@ -1,4 +1,4 @@
-import "../pipeline/mod.sev"
+import * from "../pipeline/mod.sev"
 
 class TestResult:
     name: string

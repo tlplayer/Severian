@@ -1,1 +1,1 @@
-import "storage.sev"
+import * from "storage.sev"

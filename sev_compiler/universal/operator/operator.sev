@@ -1,4 +1,4 @@
-import "kind.sev"
+import * from "kind.sev"
 
 
 enum TypePattern:

@@ -1,7 +1,7 @@
-import "host.sev"
-import "model.sev"
-import "manifest.sev"
-import "archive.sev"
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import * from "archive.sev"
 import environment
 import os
 import path
@@ -195,7 +195,7 @@ def dependency_source(resolution: Resolution, importer: string, alias: string) -
         if edge.parent == owner and edge.alias == alias:
             child = resolution.packages[edge.child]
             return inside(child.root, library_target(child.manifest).path)
-    throw Error("undeclared dependency import " + alias + " in " + manifest.name)
+    throw Error("undeclared dependency import * from " + alias + " in " + manifest.name)
 
 def module_source(resolution: Resolution, importer: string, locator: string) -> string | Error:
     if locator.starts_with("/") or locator.contains(":"):

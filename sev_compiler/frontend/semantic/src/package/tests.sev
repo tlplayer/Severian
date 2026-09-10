@@ -1,6 +1,6 @@
 import modules
 import universal
-import "../package.sev"
+import * from "../package.sev"
 
 test "program indexes start with stable empty tables":
     index = ProgramIndex({}, {}, {}, {})

@@ -15,5 +15,5 @@ import source
 import target
 import universal
 import xxi
-import "config.sev"
-import "pipeline/mod.sev"
+import * from "config.sev"
+import * from "pipeline/mod.sev"

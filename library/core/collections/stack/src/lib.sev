@@ -1,1 +1,1 @@
-import "stack.sev"
+import * from "stack.sev"

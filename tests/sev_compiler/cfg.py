@@ -28,7 +28,7 @@ class ExecutableCfg(MigrationCase):
     def test_imported_semantic_branch_edit_changes_execution(self):
         self.write(BRANCH, "control.sev")
         program = '''
-            import "control.sev"
+            import * from "control.sev"
             test:
                 guard true:
                     print("taken")

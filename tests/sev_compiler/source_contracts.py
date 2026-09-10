@@ -23,7 +23,7 @@ class SourceContracts(MigrationCase):
                              name="unregistered.sev")
                 self.write(contract("Pipeline", spelling), "language.sev")
                 self.native(f'''
-                    import "language.sev"
+                    import * from "language.sev"
                     test:
                         assert(4 {spelling} 2 == 42)
                         assert(f"{{4 {spelling} 2}}" == "42")

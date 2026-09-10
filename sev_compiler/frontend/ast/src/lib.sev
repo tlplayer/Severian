@@ -1,4 +1,4 @@
-import "expression/mod.sev"
-import "statement/mod.sev"
-import "types/mod.sev"
+import * from "expression/mod.sev"
+import * from "statement/mod.sev"
+import * from "types/mod.sev"
 import universal

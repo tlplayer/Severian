@@ -1,5 +1,5 @@
-import "model.sev"
-import "target.sev"
+import * from "model.sev"
+import * from "target.sev"
 
 class FieldLayout:
     name: string

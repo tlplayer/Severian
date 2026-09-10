@@ -1,4 +1,4 @@
-import "../char/utf8.sev" as character
+import * from "../char/utf8.sev" as character
 
 # The first compiled representation is an immutable UTF-8 byte view. Literals
 # own static MLIR storage; concatenation returns a newly allocated byte buffer.

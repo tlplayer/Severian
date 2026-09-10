@@ -1,7 +1,7 @@
 import diagnostics
 import universal
-import "definitions.sev" as definitions
-import "../../../universal/type/scalar.sev" as scalar
+import * from "definitions.sev" as definitions
+import * from "../../../universal/type/scalar.sev" as scalar
 
 
 def path(expression: universal.Expression) -> string:

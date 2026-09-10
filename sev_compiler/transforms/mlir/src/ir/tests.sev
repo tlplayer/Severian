@@ -1,4 +1,4 @@
-import "validate.sev"
+import * from "validate.sev"
 
 
 test "open operation identities do not require compiler enum cases":

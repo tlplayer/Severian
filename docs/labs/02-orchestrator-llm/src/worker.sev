@@ -1,9 +1,9 @@
 import model
 import environment
-import "lib.sev" as llm
+import * from "lib.sev" as llm
 import network
 import process
-import "readiness.sev" as readiness
+import * from "readiness.sev" as readiness
 
 def main():
     arguments = process.arguments()

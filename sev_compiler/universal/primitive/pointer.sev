@@ -1,4 +1,4 @@
-import "primitive.sev"
+import * from "primitive.sev"
 
 
 '''

@@ -1,6 +1,6 @@
 import universal
 import diagnostics
-import "cfg.sev" as cfg
+import * from "cfg.sev" as cfg
 
 
 def verify(module: universal.Module, types: universal.TypeContext) -> bool | diagnostics.Diagnostic:

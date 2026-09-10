@@ -1,8 +1,8 @@
 import diagnostics
 import source
 import universal
-import "definitions.sev" as definitions
-import "../../../universal/type/tagged.sev" as tagged
+import * from "definitions.sev" as definitions
+import * from "../../../universal/type/tagged.sev" as tagged
 
 
 def literal_pattern(expression: universal.Expression) -> bool:

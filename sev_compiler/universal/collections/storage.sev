@@ -1,6 +1,6 @@
-import "../primitive/primitive.sev"
-import "../primitive/bool.sev"
-import "../primitive/int.sev"
+import * from "../primitive/primitive.sev"
+import * from "../primitive/bool.sev"
+import * from "../primitive/int.sev"
 
 
 # Explicit lossy conversion produces all bits set at the target's pointer width.

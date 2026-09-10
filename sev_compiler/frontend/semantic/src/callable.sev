@@ -2,22 +2,22 @@ import diagnostics
 from diagnostics import Diagnostic
 import source
 import universal
-import "../../../universal/type/scalar.sev" as scalar
-import "../../../universal/type/storage.sev" as storage_types
-import "grammar_scalar.sev" as grammar_scalar
-import "../../../universal/declaration/scalar.sev" as boundary
-import "packs.sev" as packs
-import "expansion.sev" as expansion
-import "construction.sev" as construction
-import "compiler_cases.sev" as compiler_cases
-import "../../../universal/type/tagged.sev" as tagged
-import "definitions.sev" as definitions
-import "match.sev" as matches
-import "../../../universal/type/scalar_conversion.sev" as conversions
-import "../../../universal/type/integer_spelling.sev" as integer_spelling
-import "test_modes.sev" as test_modes
-import "../../../universal/primitive/slicing.sev" as slicing
-import "loans.sev" as loans
+import * from "../../../universal/type/scalar.sev" as scalar
+import * from "../../../universal/type/storage.sev" as storage_types
+import * from "grammar_scalar.sev" as grammar_scalar
+import * from "../../../universal/declaration/scalar.sev" as boundary
+import * from "packs.sev" as packs
+import * from "expansion.sev" as expansion
+import * from "construction.sev" as construction
+import * from "compiler_cases.sev" as compiler_cases
+import * from "../../../universal/type/tagged.sev" as tagged
+import * from "definitions.sev" as definitions
+import * from "match.sev" as matches
+import * from "../../../universal/type/scalar_conversion.sev" as conversions
+import * from "../../../universal/type/integer_spelling.sev" as integer_spelling
+import * from "test_modes.sev" as test_modes
+import * from "../../../universal/primitive/slicing.sev" as slicing
+import * from "loans.sev" as loans
 
 
 class TransitionState:

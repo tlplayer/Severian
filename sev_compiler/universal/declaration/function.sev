@@ -1,12 +1,12 @@
 import source
-import "../id/compiler.sev"
-import "../type/annotation.sev"
-import "../type/lowered.sev"
-import "../expression/expression.sev"
-import "../operator/kind.sev"
-import "../statement/statement.sev"
-import "../cfg/cfg.sev"
-import "language.sev"
+import * from "../id/compiler.sev"
+import * from "../type/annotation.sev"
+import * from "../type/lowered.sev"
+import * from "../expression/expression.sev"
+import * from "../operator/kind.sev"
+import * from "../statement/statement.sev"
+import * from "../cfg/cfg.sev"
+import * from "language.sev"
 
 
 class CompilerCapability:

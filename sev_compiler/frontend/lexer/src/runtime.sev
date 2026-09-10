@@ -1,8 +1,8 @@
 import source
 import diagnostics
 import universal
-import "rule.sev"
-import "identifier.sev"
+import * from "rule.sev"
+import * from "identifier.sev"
 
 
 # Imported rules retain universal source bodies. This evaluator has no parser

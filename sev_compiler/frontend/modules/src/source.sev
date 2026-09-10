@@ -3,8 +3,8 @@ import diagnostics
 import source
 import universal
 import package
-import "../../semantic/src/macros.sev" as macros
-import "lexical.sev"
+import * from "../../semantic/src/macros.sev" as macros
+import * from "lexical.sev"
 
 def package_dependency(resolution: package.Resolution, importer: string, alias: string) -> string | diagnostics.Diagnostic:
     result ?= package.dependency_source(resolution, importer, alias)
@@ -79,15 +79,25 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         elif token.kind == lexer.TokenKind.Dedent:
             depth -= 1
         if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
-            match tokens[index + 1].kind:
+            subject := index + 1
+            if lexer.token_is_symbol(tokens[subject], "*"):
+                if subject + 2 >= len(tokens) or lexer.token_word(tokens[subject + 1]) != "from":
+                    return error(diagnostics.diagnostic("E000120", "expected `from` after `import *`"))
+                subject += 2
+                match tokens[subject].kind:
+                    case String:
+                        pass
+                    case _:
+                        return error(diagnostics.diagnostic("E000120", "expected a locator string after `import * from`"))
+            match tokens[subject].kind:
                 case String:
-                    child := normalized_path(parent_path(file.path) + "/" + string(tokens[index + 1]))
+                    child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))
                     if len(resolution.packages) > 0:
-                        child = package_module(resolution, file.path, string(tokens[index + 1]))
+                        child = package_module(resolution, file.path, string(tokens[subject]))
                     discover_source_syntax(source.load(child), stack, files, registry, resolution)
                 case _:
                     if len(resolution.packages) > 0:
-                        name = lexer.token_word(tokens[index + 1])
+                        name = lexer.token_word(tokens[subject])
                         child = package_dependency(resolution, file.path, name)
                         discover_source_syntax(source.load(child), stack, files, registry, resolution)
         index += 1

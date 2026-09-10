@@ -1,5 +1,5 @@
-import "error.sev"
-import "model.sev"
-import "planner.sev"
-import "registry.sev"
+import * from "error.sev"
+import * from "model.sev"
+import * from "planner.sev"
+import * from "registry.sev"
 

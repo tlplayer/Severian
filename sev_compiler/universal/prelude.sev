@@ -1,13 +1,13 @@
 # Ordered source providers. Add library behavior here without rebuilding the compiler.
-import "grammar/contracts.sev"
-import "primitive/tuple.sev"
-import "primitive/enum.sev"
-import "../../library/system/io/src/text.sev"
-import "primitive/numeric/conversion.sev" as numeric
-import "primitive/numeric/operators.sev"
-import "primitive/numeric/power.sev"
-import "primitive/units.sev"
-import "primitive/collections.sev"
-import "primitive/hosted_memory.sev"
-import "primitive/string/methods.sev" as string_methods
-import "../../library/testing/src/lib.sev"
+import * from "grammar/contracts.sev"
+import * from "primitive/tuple.sev"
+import * from "primitive/enum.sev"
+import * from "../../library/system/io/src/text.sev"
+import * from "primitive/numeric/conversion.sev" as numeric
+import * from "primitive/numeric/operators.sev"
+import * from "primitive/numeric/power.sev"
+import * from "primitive/units.sev"
+import * from "primitive/collections.sev"
+import * from "primitive/hosted_memory.sev"
+import * from "primitive/string/methods.sev" as string_methods
+import * from "../../library/testing/src/lib.sev"

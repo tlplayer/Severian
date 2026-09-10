@@ -1,6 +1,6 @@
 # Source list construction, access, mutation, truth and iteration protocols.
 # buffer[T] is the typed rank-one MLIR storage boundary.
-import "slicing.sev" as slicing
+import * from "slicing.sev" as slicing
 
 type list[T] = buffer[T]
 

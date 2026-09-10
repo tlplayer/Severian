@@ -1,6 +1,6 @@
-import "model.sev"
-import "host.sev"
-import "manifest.sev"
+import * from "model.sev"
+import * from "host.sev"
+import * from "manifest.sev"
 import path
 import os
 

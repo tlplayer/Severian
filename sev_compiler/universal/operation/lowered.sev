@@ -1,8 +1,8 @@
-import "../id/compiler.sev"
-import "../literal/lowered.sev"
-import "../operator/lowered.sev"
-import "../source/assertion.sev"
-import "../statement/statement.sev"
+import * from "../id/compiler.sev"
+import * from "../literal/lowered.sev"
+import * from "../operator/lowered.sev"
+import * from "../source/assertion.sev"
+import * from "../statement/statement.sev"
 
 
 enum LoweredOperation:

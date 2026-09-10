@@ -1,7 +1,7 @@
 import artifact
 import target
 import universal
-import "../ir/lib.sev"
+import * from "../ir/lib.sev"
 
 
 def lowered_type(type_id: universal.LoweredType) -> MlirType | MlirError:

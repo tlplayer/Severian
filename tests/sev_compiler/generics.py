@@ -25,7 +25,7 @@ def main():
         print("PASS: wide aggregate list storage (seed native)", flush=True)
         array_source = ROOT / "sev_compiler/universal/primitive/array.sev"
         constructor = directory / "constructor_dimension.sev"
-        constructor.write_text(f'import "{array_source}"\n' + """class First[T]:
+        constructor.write_text(f'import * from "{array_source}"\n' + """class First[T]:
     value: T
     def First[N: usize](values: array[T, N]):
         value = values[0]
@@ -40,7 +40,7 @@ def main():
         run([executable], cwd=directory)
         print("PASS: constructor dimension inference (seed native)", flush=True)
         collection = directory / "scalar_list.sev"
-        collection.write_text(f'import "{ROOT / "sev_compiler/universal/collections/list.sev"}"\n' + """def main():
+        collection.write_text(f'import * from "{ROOT / "sev_compiler/universal/collections/list.sev"}"\n' + """def main():
     values := list[i32]()
     values.append(42)
     values.append(7)

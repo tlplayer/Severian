@@ -1,8 +1,8 @@
 import artifact
 import mir
 import universal
-import "error.sev"
-import "model.sev"
+import * from "error.sev"
+import * from "model.sev"
 
 def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:

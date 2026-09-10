@@ -1,4 +1,4 @@
-import "list.sev"
-import "iterator.sev"
-import "builder.sev"
-import "operations.sev"
+import * from "list.sev"
+import * from "iterator.sev"
+import * from "builder.sev"
+import * from "operations.sev"

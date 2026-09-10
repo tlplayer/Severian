@@ -1,6 +1,6 @@
 import modules
 import universal
-import "package.sev"
+import * from "package.sev"
 
 enum QueryError:
     UnknownModule(module: universal.ModuleId)

@@ -1,6 +1,6 @@
-import "ids.sev"
-import "type_system.sev"
-import "types/mod.sev"
+import * from "ids.sev"
+import * from "type_system.sev"
+import * from "types/mod.sev"
 
 class DialectId: StableId
     value: u128

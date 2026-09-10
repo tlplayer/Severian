@@ -4,10 +4,10 @@ from lexer import TokenKind
 import parser
 import source
 import universal
-import "../../../universal/type/scalar.sev" as scalar
-import "../../../universal/type/scalar_conversion.sev" as conversions
-import "../../../universal/type/integer_spelling.sev" as integer_spelling
-import "definitions.sev" as family_definitions
+import * from "../../../universal/type/scalar.sev" as scalar
+import * from "../../../universal/type/scalar_conversion.sev" as conversions
+import * from "../../../universal/type/integer_spelling.sev" as integer_spelling
+import * from "definitions.sev" as family_definitions
 
 
 # Declaration macros enumerate type families before ordinary name resolution.

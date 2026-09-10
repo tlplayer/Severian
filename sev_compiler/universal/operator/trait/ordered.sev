@@ -1,4 +1,4 @@
-import "equatable.sev"
+import * from "equatable.sev"
 
 
 # A total order compatible with equality. Partially ordered values (such as

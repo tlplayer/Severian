@@ -1,16 +1,16 @@
 import diagnostics
-import "block.sev"
-import "branch.sev"
-import "lazy.sev"
-import "effects.sev"
-import "control_flow.sev" as control_flow
+import * from "block.sev"
+import * from "branch.sev"
+import * from "lazy.sev"
+import * from "effects.sev"
+import * from "control_flow.sev" as control_flow
 import source
-import "../operation/operation.sev"
-import "../id/compiler.sev"
-import "../literal/value.sev"
-import "../operator/kind.sev"
-import "../type/expression_conversion.sev"
-import "../source/assertion_origin.sev"
+import * from "../operation/operation.sev"
+import * from "../id/compiler.sev"
+import * from "../literal/value.sev"
+import * from "../operator/kind.sev"
+import * from "../type/expression_conversion.sev"
+import * from "../source/assertion_origin.sev"
 
 
 class LocalDecl:

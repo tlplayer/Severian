@@ -1,4 +1,4 @@
-import "array.sev"
+import * from "array.sev"
 
 
 '''

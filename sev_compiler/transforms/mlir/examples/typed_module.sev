@@ -1,6 +1,6 @@
 # This scenario needs the typed model, builder, and validator. The validator's
 # imports provide that slice without also compiling the independent text view.
-import "../src/ir/validate.sev"
+import * from "../src/ir/validate.sev"
 
 
 def fixed_point_add_program() -> MlirProgram:

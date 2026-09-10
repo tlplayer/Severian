@@ -1,4 +1,4 @@
-import "../id/compiler.sev"
+import * from "../id/compiler.sev"
 
 
 # Lowering retains the same open operation identity. These wrappers describe

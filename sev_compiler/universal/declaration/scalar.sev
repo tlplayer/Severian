@@ -1,4 +1,4 @@
-import "function.sev"
+import * from "function.sev"
 
 
 # Source annotations describe the implementation of an F. The scalar compiler

@@ -1,8 +1,8 @@
 import source
 import universal
-import "../../../lexer/src/lib.sev" as lexer
-import "../../../parser/src/lib.sev" as parser
-import "../callable.sev" as semantic
+import * from "../../../lexer/src/lib.sev" as lexer
+import * from "../../../parser/src/lib.sev" as parser
+import * from "../callable.sev" as semantic
 
 
 def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
@@ -204,7 +204,7 @@ test "generic HIR retains required operator and concrete implementation identiti
     assert(instances == 2)
 
 
-import "../lib.sev" as package_analysis
+import * from "../lib.sev" as package_analysis
 
 
 test "package and executable entries share type and member registration":

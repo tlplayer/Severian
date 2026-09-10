@@ -1,7 +1,7 @@
 import diagnostics
-import "token/mod.sev"
+import * from "token/mod.sev"
 import universal
-import "rule.sev"
+import * from "rule.sev"
 
 
 class LexicalSymbol:

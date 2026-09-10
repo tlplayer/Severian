@@ -2,10 +2,10 @@ import source
 import diagnostics
 from diagnostics import Diagnostic
 import universal
-import "../token/mod.sev"
-import "../lexer.sev"
-import "../indentation.sev"
-import "../syntax/mod.sev"
+import * from "../token/mod.sev"
+import * from "../lexer.sev"
+import * from "../indentation.sev"
+import * from "../syntax/mod.sev"
 
 
 def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int) -> Token:

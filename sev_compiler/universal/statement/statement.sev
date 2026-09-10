@@ -1,9 +1,9 @@
 import source
-import "../id/compiler.sev"
-import "../type/annotation.sev"
-import "../expression/expression.sev"
-import "../operation/operation.sev"
-import "../operation/lowered.sev"
+import * from "../id/compiler.sev"
+import * from "../type/annotation.sev"
+import * from "../expression/expression.sev"
+import * from "../operation/operation.sev"
+import * from "../operation/lowered.sev"
 
 
 class Binding:

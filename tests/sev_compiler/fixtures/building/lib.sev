@@ -1,4 +1,4 @@
-import "math.sev" as math
+import * from "math.sev" as math
 
 def answer() -> int:
     return math.double(21)

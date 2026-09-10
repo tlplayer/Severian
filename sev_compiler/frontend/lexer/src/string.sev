@@ -1,8 +1,8 @@
 import diagnostics
-import "token/mod.sev"
-import "rule.sev"
-import "indentation.sev"
-import "../../../universal/primitive/char/encoding.sev" as utf8
+import * from "token/mod.sev"
+import * from "rule.sev"
+import * from "indentation.sev"
+import * from "../../../universal/primitive/char/encoding.sev" as utf8
 
 
 def literal_escape(value: string) -> string | None:

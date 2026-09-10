@@ -168,7 +168,7 @@ class Gate1Baseline(MigrationCase):
                     return value
         ''', "models.sev")
         self.native('''
-            import "models.sev" as models
+            import * from "models.sev" as models
             test:
                 assert(models.Box(42).get() == 42)
         ''')
@@ -252,13 +252,13 @@ class Gate2Definitions(MigrationCase):
 class Gate3SourceSyntax(MigrationCase):
     def test_01_imported_new_operator_without_rebuild(self):
         self.write(contract(), "syntax.sev")
-        self.native('import "syntax.sev"\ntest:\n    assert(4 <~> 2 == 42)\n')
+        self.native('import * from "syntax.sev"\ntest:\n    assert(4 <~> 2 == 42)\n')
 
     def test_02_longest_symbol_and_word_boundaries(self):
         self.write(contract("Short", "<~>") + "\n" + contract("Long", "<~>=!", body="return left + right")
                    + "\n" + contract("Word", "fuse"), "symbols.sev")
         self.native('''
-            import "symbols.sev"
+            import * from "symbols.sev"
             test:
                 fuse_count = 2
                 assert(4 <~> fuse_count == 42)
@@ -280,14 +280,14 @@ class Gate3SourceSyntax(MigrationCase):
     def test_05_conflicting_imports_are_diagnosed(self):
         self.write(contract("First", precedence=7), "first.sev")
         self.write(contract("Second", precedence=9), "second.sev")
-        self.rejects('import "first.sev"\nimport "second.sev"\n',
+        self.rejects('import * from "first.sev"\nimport * from "second.sev"\n',
                      r"(?i)(conflicting.*syntax|ambiguous.*symbol)")
 
 
 class Gate4SemanticExecution(MigrationCase):
     def test_01_edit_semantic_body_without_rebuild(self):
         self.write('def combine(left: int, right: int) -> int:\n    return left * 10 + right\n', "helper.sev")
-        declaration = 'import "helper.sev"\n' + contract(body="return combine(left, right)")
+        declaration = 'import * from "helper.sev"\n' + contract(body="return combine(left, right)")
         self.native(declaration + '\ntest:\n    assert(4 <~> 2 == 42)\n')
         self.write('def combine(left: int, right: int) -> int:\n    return left + right * 10\n', "helper.sev")
         self.native(declaration + '\ntest:\n    assert(4 <~> 2 == 24)\n')
@@ -560,7 +560,7 @@ class Gate6LibraryAndRetirement(MigrationCase):
             # Relative locators are part of the language's existing import syntax.
             relative = os.path.relpath(real, self.directory)
             with self.subTest(library=filename):
-                self.native(f'import "{relative}"\n' + source('''
+                self.native(f'import * from "{relative}"\n' + source('''
                     test:
                         small: i8 = 21
                         assert(small + small == 42)

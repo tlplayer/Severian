@@ -1,6 +1,6 @@
-import "layout.sev"
-import "model.sev"
-import "target.sev"
+import * from "layout.sev"
+import * from "model.sev"
+import * from "target.sev"
 
 enum RegisterClass:
     Integer

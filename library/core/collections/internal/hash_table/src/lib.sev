@@ -1,1 +1,1 @@
-import "table.sev"
+import * from "table.sev"

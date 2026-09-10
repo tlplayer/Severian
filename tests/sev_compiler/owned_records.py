@@ -23,8 +23,8 @@ class OwnedRecords(MigrationCase):
                 path = (base / match[1]).resolve()
                 if replacement and path == source:
                     path = replacement
-                return f'import "{os.path.relpath(path, target)}"'
-            return re.sub(r'^import "([^"]+)"', rewrite, text, flags=re.MULTILINE)
+                return f'import * from "{os.path.relpath(path, target)}"'
+            return re.sub(r'^import \* from "([^"]+)"', rewrite, text, flags=re.MULTILINE)
 
         body = imports(source.read_text(), source.parent, provider.parent)
         provider.write_text(body.replace('def replace(', 'def substitute(').replace(

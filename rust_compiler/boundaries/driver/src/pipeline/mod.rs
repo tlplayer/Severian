@@ -2863,7 +2863,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("root.sev"),
-            "import \"dependency.sev\" as dependency\ndef main():\n    value: i32 = dependency.choose(42)\n",
+            "import * from \"dependency.sev\" as dependency\ndef main():\n    value: i32 = dependency.choose(42)\n",
         )
         .unwrap();
         Compiler::new(TargetSpec::host())

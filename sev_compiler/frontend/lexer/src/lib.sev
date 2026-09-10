@@ -1,2 +1,2 @@
-import "scanner/mod.sev"
-import "token/mod.sev"
+import * from "scanner/mod.sev"
+import * from "token/mod.sev"

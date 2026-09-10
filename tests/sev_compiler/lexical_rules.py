@@ -31,7 +31,7 @@ class LexicalRules(MigrationCase):
         before = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
         self.write(NUMBER_RULE, 'lexical.sev')
         self.native('''
-            import "lexical.sev"
+            import * from "lexical.sev"
             test:
                 assert(~42 == 42)
                 assert(f"{~42}" == "42")
@@ -39,7 +39,7 @@ class LexicalRules(MigrationCase):
         self.write(NUMBER_RULE.replace(
             'value=lexeme_text(input, start + 1, cursor)', 'value="73"'), 'lexical.sev')
         self.native('''
-            import "lexical.sev"
+            import * from "lexical.sev"
             test:
                 assert(~42 == 73)
         ''')
@@ -65,14 +65,14 @@ class LexicalRules(MigrationCase):
                     return LexemeMatch(cursor + 1, TokenKind.String, value=lexeme_text(input, start + 1, cursor))
         ''', 'lexical.sev')
         self.native(r'''
-            import "lexical.sev"
+            import * from "lexical.sev"
             test:
                 assert("λ" == `λ`)
                 assert(`` == "")
                 assert(`hello` == "hello")
                 assert(`"\q"` == "\"\\q\"")
         ''')
-        self.rejects('import "lexical.sev"\ntest:\n    value = `unterminated\n',
+        self.rejects('import * from "lexical.sev"\ntest:\n    value = `unterminated\n',
                      r'unterminated backtick string')
 
     def test_symbol_rule_resolves_normalized_spelling_through_y_and_g(self):
@@ -84,14 +84,14 @@ class LexicalRules(MigrationCase):
                         return LexemeMatch(start + 3, TokenKind.Symbol, value="+")
                     return LexemeMatch(start, None, false)
         ''', 'lexical.sev')
-        self.native('import "lexical.sev"\ntest:\n    assert(4 `+` 2 == 6)\n')
+        self.native('import * from "lexical.sev"\ntest:\n    assert(4 `+` 2 == 6)\n')
 
     def test_progress_and_bounds_are_checked(self):
         for end in ('start', 'len(input.characters) + 1'):
             self.write(NUMBER_RULE.replace(
                 'LexemeMatch(cursor, TokenKind.Integer,',
                 f'LexemeMatch({end}, TokenKind.Integer,'), 'lexical.sev')
-            self.rejects('import "lexical.sev"\ntest:\n    assert(~42 == 42)\n',
+            self.rejects('import * from "lexical.sev"\ntest:\n    assert(~42 == 42)\n',
                          r'nonempty source range')
 
     def test_ambiguous_rules_and_explicit_priority(self):
@@ -99,7 +99,7 @@ class LexicalRules(MigrationCase):
         second = NUMBER_RULE.replace('SigilInteger', 'OtherInteger').replace(
             'value=lexeme_text(input, start + 1, cursor)', 'value="73"')
         self.write(second, 'second.sev')
-        program = 'import "first.sev"\nimport "second.sev"\ntest:\n    assert(~42 == 73)\n'
+        program = 'import * from "first.sev"\nimport * from "second.sev"\ntest:\n    assert(~42 == 73)\n'
         self.rejects(program, r'ambiguous lexical rules')
         self.write(second.replace('class OtherInteger: LexicalRule:',
                                   'class OtherInteger: LexicalRule:\n    priority: int = 1'), 'second.sev')
@@ -114,16 +114,16 @@ class LexicalRules(MigrationCase):
             '        return LexemeMatch(cursor, TokenKind.Integer,').replace(
                 'value=lexeme_text(input, start + 1, cursor)', 'value="73"')
         self.write(longer, 'second.sev')
-        self.native('import "first.sev"\nimport "second.sev"\ntest:\n    assert(~42! == 73)\n')
+        self.native('import * from "first.sev"\nimport * from "second.sev"\ntest:\n    assert(~42! == 73)\n')
 
     def test_execution_budget_stops_nonterminating_rule(self):
         self.write(NUMBER_RULE.replace('cursor += 1', 'cursor = cursor'), 'lexical.sev')
-        self.rejects('import "lexical.sev"\ntest:\n    assert(~42 == 42)\n',
+        self.rejects('import * from "lexical.sev"\ntest:\n    assert(~42 == 42)\n',
                      r'execution budget exceeded')
 
     def test_missing_scan_is_rejected_at_registration(self):
         self.write('class Missing: LexicalRule:\n    pass\n', 'lexical.sev')
-        self.rejects('import "lexical.sev"\ntest:\n    assert(true)\n',
+        self.rejects('import * from "lexical.sev"\ntest:\n    assert(true)\n',
                      r'missing scan implementation')
 
 
