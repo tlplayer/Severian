@@ -193,12 +193,12 @@ mod tests {
         for (name, text) in [
             (
                 "basic-extend.sev",
-                include_str!("../../../../docs/examples/01-types/07-extend/01-basic-extend.sev"),
+                include_str!("../../../../docs/examples/01-types/08-extend/01-basic-extend.sev"),
             ),
             (
                 "namespace-extensions.sev",
                 include_str!(
-                    "../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"
+                    "../../../../docs/examples/01-types/08-extend/02-namespace-extensions.sev"
                 ),
             ),
         ] {
@@ -1049,6 +1049,46 @@ output = f"""module {{
         assert_eq!(tests.len(), 2);
         assert_eq!(tests[0].modes, ["repeat:3", "timeout:20ms", "parallel"]);
         assert_eq!(tests[1].modes, ["skip:not available"]);
+    }
+
+    #[test]
+    fn parses_explicit_wildcard_file_imports() {
+        for (text, alias) in [
+            ("import * from \"array.sev\"\n", None),
+            ("import * from \"array.sev\" as arrays\n", Some("arrays")),
+        ] {
+            let source = SourceFile::virtual_source("imports.sev", text);
+            let module = parse(&scan(&source).unwrap()).unwrap();
+            let severian_ast::Item::Import(import) = &module.items[0] else {
+                panic!("expected import")
+            };
+            assert_eq!(
+                import.subject,
+                severian_ast::ImportSubject::Locator("array.sev".into())
+            );
+            assert_eq!(import.source, None);
+            assert_eq!(import.alias.as_deref(), alias);
+            assert_eq!(import.span.start, 0);
+            assert_eq!(import.span.end as usize, text.trim_end().len());
+        }
+    }
+
+    #[test]
+    fn rejects_implicit_and_malformed_wildcard_file_imports() {
+        for (text, message) in [
+            ("import \"array.sev\"\n", "file imports require explicit"),
+            (
+                "import \"array.sev\" as arrays\n",
+                "file imports require explicit",
+            ),
+            ("import * \"array.sev\"\n", "expected `from`"),
+            ("import * from array\n", "expected a locator string"),
+            ("import * from\n", "expected a locator string"),
+        ] {
+            let source = SourceFile::virtual_source("imports.sev", text);
+            let error = parse(&scan(&source).unwrap()).unwrap_err();
+            assert!(error.message.contains(message), "{error:?}");
+        }
     }
 
     #[test]

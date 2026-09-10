@@ -89,6 +89,8 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                         pass
                     case _:
                         return error(diagnostics.diagnostic("E000120", "expected a locator string after `import * from`"))
+            elif tokens[subject].kind == lexer.TokenKind.String:
+                return error(diagnostics.diagnostic("E000120", "file imports require explicit `import * from` followed by a locator string"))
             match tokens[subject].kind:
                 case String:
                     child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))

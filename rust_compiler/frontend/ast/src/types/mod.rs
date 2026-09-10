@@ -12,6 +12,8 @@ pub struct ImportDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportSubject {
     Name(String),
+    /// Explicit `import * from "locator"`, optionally qualified with `as`.
+    /// Also used for external locators selected from an import provider.
     Locator(String),
 }
 

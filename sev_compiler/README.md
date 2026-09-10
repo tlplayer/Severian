@@ -1,5 +1,18 @@
 # Severian compiler
 
+File imports explicitly select every exported declaration:
+
+```sev
+import * from "array.sev"
+import * from "array.sev" as arrays
+```
+
+The first form exposes the declarations directly; the second uses the `arrays`
+namespace. Bare quoted imports are rejected. Package namespaces (`import array`)
+and selective package imports (`import Array from array`) keep their existing
+syntax. The wildcard makes the import scope visible; it does not prune unused
+declarations or reduce the modules loaded during compilation.
+
 This is the first executable source-to-MLIR compiler slice. Its implementation
 is Severian: the Rust seed builds the compiler executable, and that executable
 then reads and compiles new source files without invoking Rust or `sev`.

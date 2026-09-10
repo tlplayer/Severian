@@ -21169,12 +21169,12 @@ def interpolate(text: string) -> string:
         for (name, text) in [
             (
                 "basic-extend.sev",
-                include_str!("../../../../docs/examples/01-types/07-extend/01-basic-extend.sev"),
+                include_str!("../../../../docs/examples/01-types/08-extend/01-basic-extend.sev"),
             ),
             (
                 "namespace-extensions.sev",
                 include_str!(
-                    "../../../../docs/examples/01-types/07-extend/02-namespace-extensions.sev"
+                    "../../../../docs/examples/01-types/08-extend/02-namespace-extensions.sev"
                 ),
             ),
         ] {
