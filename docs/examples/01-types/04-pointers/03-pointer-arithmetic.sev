@@ -7,8 +7,6 @@ test:
         values[2] = 30
         values[3] = 40
 
-        #Both valid spellings/invocations
-        value_pointer: pointer[int] = values
         value_pointer: pointer[int] = values
 
         assert(value_pointer[0] == 10)
