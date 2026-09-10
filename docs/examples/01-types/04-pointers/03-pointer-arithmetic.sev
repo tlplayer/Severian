@@ -1,0 +1,32 @@
+test:
+    unsafe:
+        values := allocate[int](4)
+
+        values[0] = 10
+        values[1] = 20
+        values[2] = 30
+        values[3] = 40
+
+        #Both valid spellings/invocations
+        value_pointer: *[int] = values
+        value_pointer: pointer[int] = values
+
+        assert(value_pointer[0] == 10)
+        #Default to type size or with bytes using the bytes of the type to index/offset
+        assert(value_pointer[0+1] == 20)
+        assert(value_pointer[0B+bytes(int)] == 20)
+        assert(value_pointer[3] == 40)
+
+        free(values)
+
+test with compiler:
+    values := [10, 20, 30]
+
+    reject:
+        value_pointer := &values + 1
+    
+test with compiler "Cannot increment pointer by offset":
+    values := [10, 20, 30]
+
+    reject:
+        (value_pointer+1) == &values + 1       

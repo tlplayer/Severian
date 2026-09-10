@@ -2,11 +2,11 @@ test:
     value := 42
 
     unsafe:
-        pointer: *[int] := &value
+        p: pointer[int] := &value
 
         # Indexing keeps raw access explicit; there is no unary dereference.
-        assert(pointer[0] == 42)
+        assert(p[0] == 42)
 
-        pointer[0] = 100
+        p[0] = 100
 
     assert(value == 100)

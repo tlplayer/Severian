@@ -1,5 +1,0 @@
-test:
-    unsafe:
-        pointer: *[int] | None := None
-
-        assert(pointer == None)

@@ -3,9 +3,9 @@ def byte_at(bytes: list[u8], index: int) -> u8 | BoundsError:
         return error(BoundsError(index))
 
     unsafe:
-        pointer: *[u8] = &bytes[0]
+        p: pointer[u8] = &bytes[0]
         # Raw access is always indexed; Severian has no unary `*pointer` form.
-        return pointer[index]
+        return p[index]
 
 test "in bounds":
     

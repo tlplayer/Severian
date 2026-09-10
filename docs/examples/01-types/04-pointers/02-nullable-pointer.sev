@@ -1,0 +1,5 @@
+test:
+    unsafe:
+        p: pointer[int] | None := None
+
+        assert(p == None)
