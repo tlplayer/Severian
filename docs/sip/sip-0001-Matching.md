@@ -898,21 +898,26 @@ Add:
 
 ```sev
 case 0:
+case 0.0:
 case true:
 case "foo":
-case Circle(radius) if radius > 0.0:
+case 'c':
 ```
 
 Verify guards cannot leak bindings.
-
-## Phase 3 — tuples and nesting
+## Phase 3 — guards
 
 Add:
 
 ```sev
-case (x, y):
-case Some((x, y)):
-case Some(Circle(radius)):
+case Circle(radius) if radius > 0.0:
+case Circle(radius) with radius > 0.0:
+case Circle(radius) with 
+{
+    radius > 0.0,
+    radius < 10.0,
+    odd(radius) -> error("radius must be even") 
+}:
 ```
 
 ## Phase 4 — match expressions
@@ -947,6 +952,8 @@ Do not initially allow bound OR patterns.
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)
+    Trapezoid(side1: float, side2: float, height: float)
+    Oblong(width: float, height: float)
     Point
 
 
@@ -958,9 +965,11 @@ def area(shape: Shape) -> float:
         case Rectangle(width, height):
             width * height
 
+        case trapezoid: Trapezoid | Oblong:
+            trapezoid.width * trapezoid.height
+
         case Point:
             0.0
-
 
 test "matches enum variants and destructures payloads":
     assert(area(Circle(2.0)) > 12.5)
@@ -999,3 +1008,557 @@ The core rule is:
 It does not discover structure.
 
 That keeps matching as a type-system and CFG feature rather than creating a second dynamic object protocol.
+
+ADDENDUM:
+Yes. I would add this as a distinct pattern form: a typed capture pattern.
+
+The important semantic rule should be:
+
+```sev
+case shape: T1 | T2:
+```
+
+means:
+
+1. Match if the value is `T1` or `T2`.
+2. Narrow `shape` to `T1 | T2`.
+3. Bind the whole variant, not its payload fields.
+4. Permit `shape.member` only when that member is valid across the narrowed union.
+
+So your example becomes:
+
+```sev
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+    Trapezoid(side1: float, side2: float, height: float)
+    Oblong(width: float, height: float)
+    Point
+
+
+def area(shape: Shape) -> float:
+    return match shape:
+        case Circle(radius):
+            3.1415926 * radius ** 2
+
+        case Rectangle(width, height):
+            width * height
+
+        case trapezoid: Trapezoid | Oblong:
+            trapezoid.width * trapezoid.height
+
+        case Point:
+            0.0
+```
+
+However, that specific `width` access would only compile if both `Trapezoid` and `Oblong` expose `width`. If they don't, the compiler should reject it.
+
+I would add this section to the SIP:
+
+# Typed Capture Patterns
+
+A case may match one or more types while retaining the complete matched value.
+
+```sev
+case value: T:
+```
+
+or:
+
+```sev
+case value: T1 | T2 | T3:
+```
+
+Example:
+
+```sev
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+    Trapezoid(
+        width: float,
+        height: float,
+        side1: float,
+        side2: float,
+    )
+    Oblong(width: float, height: float)
+    Point
+
+
+def area(shape: Shape) -> float:
+    return match shape:
+        case Circle(radius):
+            3.1415926 * radius ** 2
+
+        case Rectangle(width, height):
+            width * height
+
+        case quadrilateral: Trapezoid | Oblong:
+            quadrilateral.width * quadrilateral.height
+
+        case Point:
+            0.0
+```
+
+Within:
+
+```sev
+case quadrilateral: Trapezoid | Oblong:
+```
+
+the compiler narrows:
+
+```text
+quadrilateral: Trapezoid | Oblong
+```
+
+The original variable remains:
+
+```text
+shape: Shape
+```
+
+The new binding is scoped to that case.
+
+## Variant Types
+
+Enum variants are usable as narrowed types.
+
+Given:
+
+```sev
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+```
+
+the compiler recognizes:
+
+```text
+Shape
+├── Shape.Circle
+└── Shape.Rectangle
+```
+
+Within the enum's natural scope, these may be written:
+
+```sev
+Circle
+Rectangle
+```
+
+Therefore:
+
+```sev
+case circle: Circle:
+```
+
+binds:
+
+```text
+circle: Circle
+```
+
+rather than merely:
+
+```text
+circle: Shape
+```
+
+Similarly:
+
+```sev
+case quadrilateral: Trapezoid | Oblong:
+```
+
+binds:
+
+```text
+quadrilateral: Trapezoid | Oblong
+```
+
+## Member Access Through Narrowed Unions
+
+Member access on a narrowed union is allowed when every possible member of the union exposes that member with a compatible type.
+
+Given:
+
+```sev
+Trapezoid(
+    width: float,
+    height: float,
+    side1: float,
+    side2: float,
+)
+
+Oblong(
+    width: float,
+    height: float,
+)
+```
+
+this is valid:
+
+```sev
+case shape: Trapezoid | Oblong:
+    shape.width
+    shape.height
+```
+
+because:
+
+```text
+Trapezoid.width: float
+Oblong.width:    float
+
+Trapezoid.height: float
+Oblong.height:    float
+```
+
+The effective narrowed interface is:
+
+```text
+Trapezoid | Oblong
+
+common:
+    width: float
+    height: float
+```
+
+This is rejected:
+
+```sev
+case shape: Trapezoid | Oblong:
+    shape.side1
+```
+
+because `Oblong` has no `side1`.
+
+Diagnostic:
+
+```text
+TypeError: `side1` is not available on every member of
+Trapezoid | Oblong
+
+available on:
+    Trapezoid
+
+missing on:
+    Oblong
+```
+
+The programmer can narrow again:
+
+```sev
+case shape: Trapezoid | Oblong:
+    match shape:
+        case trapezoid: Trapezoid:
+            use(trapezoid.side1)
+
+        case oblong: Oblong:
+            ...
+```
+
+## Compatible Member Types
+
+Members do not necessarily need identical types if Severian's normal type system can determine a common usable type.
+
+For:
+
+```text
+T1.value: i32
+T2.value: i64
+```
+
+access through:
+
+```sev
+case value: T1 | T2:
+    value.value
+```
+
+uses the normal union/member type rules.
+
+Conceptually:
+
+```text
+value.value: i32 | i64
+```
+
+No special match-specific conversion occurs.
+
+## Typed Capture Versus Destructuring
+
+These forms have intentionally different meanings.
+
+Destructure:
+
+```sev
+case Circle(radius):
+```
+
+produces:
+
+```text
+radius: float
+```
+
+Typed capture:
+
+```sev
+case circle: Circle:
+```
+
+produces:
+
+```text
+circle: Circle
+```
+
+Multiple typed capture:
+
+```sev
+case shape: Circle | Rectangle:
+```
+
+produces:
+
+```text
+shape: Circle | Rectangle
+```
+
+Wildcard type match:
+
+```sev
+case _: Circle | Rectangle:
+```
+
+tests the types without creating a binding.
+
+This gives four simple forms:
+
+```sev
+case Circle(radius):
+    # destructure
+
+case circle: Circle:
+    # capture whole variant
+
+case shape: Circle | Rectangle:
+    # capture narrowed union
+
+case _:
+    # everything else
+```
+
+## Exhaustiveness
+
+A multi-type case contributes every listed type to exhaustiveness analysis.
+
+Given:
+
+```sev
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+    Trapezoid(width: float, height: float)
+    Oblong(width: float, height: float)
+    Point
+```
+
+then:
+
+```sev
+match shape:
+    case Circle(radius):
+        ...
+
+    case Rectangle(width, height):
+        ...
+
+    case quad: Trapezoid | Oblong:
+        ...
+
+    case Point:
+        ...
+```
+
+covers:
+
+```text
+Circle
+Rectangle
+Trapezoid
+Oblong
+Point
+```
+
+and is exhaustive.
+
+Adding:
+
+```sev
+Triangle(...)
+```
+
+would produce:
+
+```text
+MatchError: non-exhaustive match
+
+missing:
+    Triangle
+```
+
+## Overlap Detection
+
+Cases are ordered, but the compiler should diagnose completely unreachable type alternatives.
+
+Rejected:
+
+```sev
+match shape:
+    case trapezoid: Trapezoid:
+        ...
+
+    case quad: Trapezoid | Oblong:
+        ...
+```
+
+The second case is still partially reachable because of `Oblong`, so the compiler should report:
+
+```text
+MatchWarning: partially redundant pattern
+
+Trapezoid was already matched by an earlier case.
+
+remaining:
+    Oblong
+```
+
+Completely unreachable:
+
+```sev
+match shape:
+    case quad: Trapezoid | Oblong:
+        ...
+
+    case trapezoid: Trapezoid:
+        ...
+```
+
+produces:
+
+```text
+MatchError: unreachable case
+
+Trapezoid was completely matched by an earlier case
+```
+
+## Grammar
+
+Extend patterns with:
+
+```text
+pattern
+    := destructure_pattern
+     | typed_capture
+     | literal
+     | tuple
+     | wildcard
+
+typed_capture
+    := identifier ":" type_pattern
+
+type_pattern
+    := type
+     | type ("|" type)+
+```
+
+Therefore:
+
+```sev
+case shape: Trapezoid | Oblong:
+```
+
+does not need a separate OR-pattern mechanism.
+
+It is simply a binding followed by a union type pattern.
+
+## Lowering
+
+Given:
+
+```sev
+case quad: Trapezoid | Oblong:
+    use(quad.width)
+```
+
+semantic analysis produces approximately:
+
+```text
+Pattern:
+    TypedCapture {
+        binding: quad
+        type: Trapezoid | Oblong
+    }
+```
+
+CFG lowering becomes:
+
+```text
+%tag = enum.tag %shape
+
+switch %tag:
+    Trapezoid -> ^quad
+    Oblong    -> ^quad
+    ...
+```
+
+Both edges enter:
+
+```text
+^quad:
+    %quad = %shape narrowed to Trapezoid | Oblong
+    %width = union.project.common %quad, width
+    ...
+```
+
+No runtime type discovery is required.
+
+The discriminant already determines which variant is present.
+
+## Design Rule
+
+A typed capture pattern:
+
+```sev
+case value: T1 | T2 | ...:
+```
+
+means:
+
+> Match any listed type and expose the complete value under their statically known union.
+
+It is not destructuring, reflection, or a runtime pattern protocol.
+
+I prefer this over allowing:
+
+```sev
+case Trapezoid | Oblong:
+```
+
+alone because the binding is useful. It also gives Severian a general narrowing construct that works beyond enums:
+
+```sev
+value: int | float | string
+
+match value:
+    case number: int | float:
+        calculate(number)
+
+    case text: string:
+        parse(text)
+```
+
+That makes `case x: T1 | T2` essentially the match equivalent of a statically checked type narrowing operation, which fits Severian's existing union model well.
