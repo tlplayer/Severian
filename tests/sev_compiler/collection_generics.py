@@ -118,8 +118,12 @@ class CollectionGenerics(MigrationCase):
         self.write('''
             def identity[T](value: T) -> T:
                 return value
+            # provider.__buffer_load has its own qualified identity, even
+            # though the unqualified prelude has a generic with this spelling.
+            def __buffer_load[T](value: T) -> T:
+                return value
             def read() -> int:
-                return identity[T:int](42)
+                return identity[T:int](__buffer_load[T:int](42))
         ''', name='provider.sev')
         self.native('''
             import * from "provider.sev" as provider

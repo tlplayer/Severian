@@ -178,7 +178,8 @@ class AggregateBuffers(MigrationCase):
                 print(read())
         '''
         target.write_text("".join(providers))
-        self.rejects(program, "missing source protocol (implementation )?List.construction", sysroot=sysroot)
+        # The provider now owns the list type alias as well as its operations.
+        self.rejects(program, "unknown type list", sysroot=sysroot)
         target.write_text("".join(complete))
         self.native(program, sysroot=sysroot, expected="42\n")
 

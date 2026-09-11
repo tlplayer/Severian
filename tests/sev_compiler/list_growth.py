@@ -37,6 +37,11 @@ class ListGrowth(MigrationCase):
             '"slicing.sev"',
             f'"{os.path.relpath(collection_source.parent / "slicing.sev", provider.parent)}"')
         provider.write_text(body.replace("def append(", "def grow("))
+        # The packed-string provider consumes the scalar list API too. Keep
+        # that dependency consistent so the failure belongs to the subject.
+        string_list_source = origin.parent / "primitive/string_lists.sev"
+        string_list_provider = prelude.parent / "string_lists.sev"
+        string_list_provider.write_text(string_list_source.read_text().replace(".append(", ".grow("))
         imports = []
         for line in origin.read_text().splitlines():
             match = re.fullmatch(r'import \* from "([^"]+)"(.*)', line)
@@ -44,6 +49,8 @@ class ListGrowth(MigrationCase):
                 path = (origin.parent / match[1]).resolve()
                 if path == collection_source:
                     path = provider
+                elif path == string_list_source:
+                    path = string_list_provider
                 imports.append(f'import * from "{os.path.relpath(path, prelude.parent)}"{match[2]}\n')
         prelude.write_text("".join(imports))
         program = '''

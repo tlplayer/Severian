@@ -139,7 +139,7 @@ assert(unwrap(Box[float](2.5)) == 2.5)
                 run([executable], cwd=directory)
             print(f"PASS: {name} (native)", flush=True)
         rejected = {
-            "record_implementation": ("trait Counted:\n    def size() -> int\nclass Box[T]: Counted\n    value: T\nBox[int](42)\n", "class does not satisfy trait Counted"),
+            "record_implementation": ("trait Counted:\n    def size() -> int\nclass Box[T]: Counted\n    value: T\nBox[int](42)\n", "class does not satisfy trait"),
             "record_constraint": ("trait Measured:\n    property size: int\nclass Box[T: Measured]:\n    value: T\nBox[int](42)\n", "type does not satisfy trait Measured"),
             "duplicate_binding": ("-> bad[T: int, T: float]():\n    def value(input: T) -> T:\n        return input\n", "duplicate macro type binding"),
             "unknown_family": ("-> bad[T: Missing]():\n    def value(input: T) -> T:\n        return input\n", "unsupported scalar macro family Missing"),

@@ -10,6 +10,7 @@ class PreludePolicy(MigrationCase):
         for text in (
             'def max() -> int:\n    return 42\n',
             'def max[T](value: T) -> T:\n    return value\n',
+            'def view(value: borrow string) -> borrow string:\n    return value\n',
             'def len(value: string) -> int:\n    return 42\n',
             'def __buffer_load[T](value: T) -> T:\n    return value\n',
         ):
@@ -45,6 +46,9 @@ class PreludePolicy(MigrationCase):
             [package]
             name = "custom-prelude"
             version = "0.1.0"
+            [[bin]]
+            name = "custom-prelude"
+            path = "main.sev"
             [prelude]
             exclude = ["max", "round"]
         ''', name='package.toml')
@@ -58,6 +62,21 @@ class PreludePolicy(MigrationCase):
                 assert(max() == 42)
                 assert(round(1.5) == 1.5)
         ''')
+
+        self.write('''
+            def max() -> int:
+                return 42
+            def main():
+                print(max())
+        ''', name='main.sev')
+        result = self.invoke([COMPILER, 'run', self.directory, '--sysroot', ROOT])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '42\n')
+        manifest = self.directory / 'package.toml'
+        manifest.write_text(manifest.read_text().replace('["max", "round"]', '[]'))
+        result = self.invoke([COMPILER, 'check', self.directory, '--sysroot', ROOT])
+        self.assertGreater(result.returncode, 0)
+        self.assertIn('reserved prelude function max', result.stderr)
 
     def test_exclusions_are_validated(self):
         for names, diagnostic in (

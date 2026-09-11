@@ -2,7 +2,7 @@ def identity(value: string) -> string:
     return value
 
 
-def view(value: borrow string) -> borrow string:
+def borrowed_identity(value: borrow string) -> borrow string:
     return value
 
 
