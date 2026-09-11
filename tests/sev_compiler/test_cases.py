@@ -88,6 +88,41 @@ class TestCases(MigrationCase):
                               '-o', self.directory / 'diagnostic'])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('assertion failed: specific failure', result.stderr)
+        self.assertIn(f'{path}:2:12', result.stderr)
+        self.assertIn('2 |     assert(false, "specific failure")', result.stderr)
+
+    def test_assertion_reports_original_expression_in_integration_test(self):
+        from migration import COMPILER
+        path = self.write('''
+            test with integ "captured output":
+                print("actual")
+                assert("expected" in stdout)
+        ''')
+        result = self.invoke([COMPILER, 'test', path, '--sysroot', ROOT,
+                              '-o', self.directory / 'integration-diagnostic'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('assertion failed: "expected" in stdout', result.stderr)
+        self.assertIn(f'{path}:3:12', result.stderr)
+        self.assertIn('3 |     assert("expected" in stdout)', result.stderr)
+        self.assertNotIn('$assert$', result.stderr)
+
+    def test_assertion_in_imported_helper_reports_its_source(self):
+        from migration import COMPILER
+        helper = self.write('''
+            def verify():
+                label = "λ😀"
+                assert(label == "wrong")
+        ''', name='helper.sev')
+        path = self.write('''
+            import * from "helper.sev"
+            test "helper failure":
+                verify()
+        ''')
+        result = self.invoke([COMPILER, 'test', path, '--sysroot', ROOT,
+                              '-o', self.directory / 'helper-diagnostic'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('assertion failed: label == "wrong"', result.stderr)
+        self.assertIn(f'{helper}:3:12', result.stderr)
 
     def test_assertion_message_is_lazy_and_condition_runs_once(self):
         self.native('''

@@ -344,18 +344,23 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
         context = "$mode$" + selected.name
         suite.statements.append(universal.BindingStatement(universal.Binding(context, None, call(selected.begin, [], selected.span), false, false, selected.span, mutable=true)))
     items: list[universal.Item] = []
+    bindings: list[string] = []
     for item in module.items:
         match item:
             case ExpressionItem:
                 suite.statements.append(universal.ExpressionStatement(expression))
             case BindingItem:
                 constant := false
-                if not binding.mutable and not binding.update:
+                if binding.name not in bindings and not binding.mutable and not binding.update:
                     match binding.value.kind:
                         case LiteralValue:
                             constant = true
                         case _:
                             pass
+                # Plain `=` is resolved as reassignment by callable analysis.
+                # Only the first binding can be lifted out as a constant.
+                if binding.name not in bindings:
+                    bindings.append(binding.name)
                 if constant:
                     items.append(item)
                 else:

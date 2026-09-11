@@ -61,6 +61,7 @@ class CallableAnalysis:
     initializing: bool = false
     parameter_effects: list[parameter_effects.CachedEffect] = []
     closures: list[closures.Closure] = []
+    source_files: list[source.SourceFile] = []
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -163,7 +164,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
                 parameter.type_id = argument.value.type_id
                 parameter.annotation = universal.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
         parameters.append(parameter)
-    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files)
     for parameter in parameters:
         local.names.append(parameter.name)
         local.types.append(parameter.type_id)
@@ -1534,10 +1535,20 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
 
 def callable_assertion(state: CallableAnalysis, condition: universal.Expression, message: universal.Expression | None, span: source.Span, condition_span: source.Span) -> universal.Statement | diagnostics.Diagnostic:
     resolved = callable_expression(state, condition, universal.TypeId(1))
-    diagnostic := universal.Expression(universal.LiteralValue(universal.StringValue("condition is false")), span, type_id=universal.TypeId(3))
+    description := "condition is false"
+    if int(condition_span.source.index) < len(state.source_files):
+        characters = state.source_files[condition_span.source.index].text.characters()
+        if condition_span.start < condition_span.end and int(condition_span.end) <= len(characters):
+            description = characters[int(condition_span.start):int(condition_span.end)].join("")
+    diagnostic := universal.Expression(universal.LiteralValue(universal.StringValue(description)), span)
     supplied ?= message
     if supplied != None:
-        diagnostic = callable_expression(state, supplied, universal.TypeId(3))
+        diagnostic = supplied
+    location = diagnostics.render_location(condition_span, state.source_files)
+    if location != "":
+        suffix = universal.Expression(universal.LiteralValue(universal.StringValue(location)), span)
+        diagnostic = universal.Expression(universal.Binary(universal.operator_syntax(universal.Add()), diagnostic, suffix), span)
+    diagnostic = callable_expression(state, diagnostic, universal.TypeId(3))
     yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
     no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
     failed = callable_raw_call(state, "__assert_condition", [no, diagnostic], span, universal.TypeId(1))
@@ -2074,10 +2085,10 @@ def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block
     return true
 
 
-def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "") -> universal.Module | diagnostics.Diagnostic:
+def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "", source_files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
     module = test_modes.expand(module, include_tests, initializer_namespace)
     registered = definitions.register_declarations(module, environment)
-    state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace)
+    state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace, source_files=source_files)
     own_index := 0
     function_names: list[string] = []
     for item in module.items:
@@ -2278,12 +2289,12 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     if len(declaration.source_modes) == 1 and declaration.source_modes[0] == "compiler":
                         for compiler_case in declaration.compiler_cases:
                             isolated_definitions = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
-                            isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records[:], declarations=isolated_definitions, generics=state.generics)
+                            isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records[:], declarations=isolated_definitions, generics=state.generics, source_files=state.source_files)
                             rejected := compiler_case.parse_error != ""
                             if not rejected:
                                 if len(compiler_case.declarations) != 0:
                                     subject = compiler_cases.module(module, compiler_case, declaration.lookup)
-                                    module_result ?= analyze_registered_callables(subject, false, visible, [], [], environment, initializer_namespace)
+                                    module_result ?= analyze_registered_callables(subject, false, visible, [], [], environment, initializer_namespace, source_files)
                                     if module_result is Diagnostic:
                                         rejected = true
                                 else:
@@ -2403,7 +2414,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression) -> Ca
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2499,7 +2510,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                     arguments.append(binding.type_id)
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
-    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract)
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files)
     local.test_context = function.name.starts_with("__test_") or function.name.starts_with("$case$")
     local.result_mode = function.result_mode
     namespace ?= function.lookup
@@ -3154,8 +3165,8 @@ def callable_mlir(state: CallableAnalysis, arguments: list[universal.CallArgumen
     return callable_resolved_operator(state, signature, operands, span, expected)
 
 
-def analyze_callables(module: universal.Module, include_tests: bool = false, initializer_namespace: string = "") -> universal.Module | diagnostics.Diagnostic:
-    return analyze_registered_callables(module, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace)
+def analyze_callables(module: universal.Module, include_tests: bool = false, initializer_namespace: string = "", source_files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
+    return analyze_registered_callables(module, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, source_files)
 
 
 def callable_prepend_alias(declarations: definitions.SemanticDefinitions, alias: universal.TypeDeclaration):

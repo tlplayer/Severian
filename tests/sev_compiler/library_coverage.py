@@ -38,6 +38,26 @@ class LibraryCoverage(MigrationCase):
                 print("restored")
         ''', expected="restored\n")
 
+    def test_printing_example_preserves_global_reassignment(self):
+        self.native((ROOT / "docs/examples/00-getting-started/03-printing.sev").read_text())
+
+    def test_integration_cases_share_updated_initializer_prefix(self):
+        self.native('''
+            value := "one"
+            print(value)
+            value = "two"
+            print(value)
+            count := 1
+            count = 2
+            print(count)
+            test with integ "first":
+                print("first")
+                assert(stdout == "one\\ntwo\\n2\\nfirst\\n")
+            test with integ "second":
+                print("second")
+                assert(stdout == "one\\ntwo\\n2\\nsecond\\n")
+        ''')
+
     def test_snapshot_example(self):
         self.check_example("03-testing/02-with-tests/19-snapshots.sev")
 

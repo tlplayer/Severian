@@ -97,7 +97,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             if canonical in library_paths:
                 library_sources.append(int(file.id.index))
     timing.finish_stage(timings, "subject")
-    typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace)
+    typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace, files)
     timing.finish_stage(timings, "semantic")
     lowered = mir.build_callables(typed, library_sources)
     timing.finish_stage(timings, "mir")
