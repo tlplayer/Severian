@@ -11,3 +11,4 @@ def main():
 test with integration:
     main()
     assert("Hello, Severian!" in stdout)
+    assert("Apple".append("s").append('!') == "Apples!")
