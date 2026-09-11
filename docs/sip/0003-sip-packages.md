@@ -1,4 +1,4 @@
-# SIP-0000: Package Interfaces, Realizations, and Incremental Dependency Builds
+# SIP-0003: Package Interfaces, Realizations, and Incremental Dependency Builds
 
 Status: Draft
 
@@ -36,8 +36,9 @@ Its top-level structure is fixed:
 package.pkg/
 ├── package.pkgi
 ├── metadata/
-├── artifacts/
-├── build/ #incremental builds 
+├── artifacts/ # completed reusable compiler outputs
+├── build/ # incremental compiler state NOT EXPORTED TO CLIENTS
+├── cache/ 
 ├── bin/
 ├── debug/
 ├── container/
@@ -92,6 +93,177 @@ export = ["Tensor", "zeros"]
 Both forms update one canonical package export model.
 
 The package standard library SHALL be the source of truth for package operations. CLI commands delegate to the same APIs.
+
+
+# Local package registry
+
+Severian stores locally published packages in the user's XDG data directory:
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/severian/
+```
+
+Canonical layout:
+
+```text
+~/.local/share/severian/
+├── registry/
+│   ├── index/
+│   └── packages/
+│       └── geometry/
+│           └── 1.2.0/
+│               ├── package.toml
+│               ├── package.lock
+│               └── package.pkg/
+│                   ├── package.pkgi/
+│                   ├── metadata/
+│                   ├── artifacts/
+│                   ├── cache/
+│                   ├── bin/
+│                   ├── debug/
+│                   ├── container/
+│                   └── source/
+└── git/
+    ├── checkouts/
+    └── db/
+```
+
+`registry/` is the package source used by:
+
+```text
+sev publish <package> --local
+sev add <package>
+sev update <package>
+```
+
+`registry/index/` contains package/version discovery information.
+
+`registry/packages/` contains immutable published package realizations.
+
+`git/` contains packages resolved directly from Git repositories and is independent from registry-published packages.
+
+## Local publication
+
+```text
+sev publish geometry --local
+```
+
+publishes:
+
+```text
+geometry@1.2.0
+```
+
+to:
+
+```text
+~/.local/share/severian/registry/packages/geometry/1.2.0/
+```
+
+The published package contains:
+
+```text
+package.toml
+package.lock
+package.pkg/
+```
+
+but publication MUST exclude mutable incremental build state:
+
+```text
+package.pkg/build/
+```
+
+`build/` exists in the working package:
+
+```text
+geometry/
+├── package.toml
+├── package.lock
+├── src/
+└── package.pkg/
+    ├── package.pkgi/
+    ├── metadata/
+    ├── build/
+    ├── cache/
+    ├── artifacts/
+    ├── bin/
+    ├── debug/
+    ├── container/
+    └── source/
+```
+
+but the local registry receives the publishable realization:
+
+```text
+package.pkg/
+├── package.pkgi/
+├── metadata/
+├── artifacts/
+├── cache/
+├── bin/
+├── debug/
+├── container/
+└── source/
+```
+
+`build/` describes how the current checkout incrementally produced its outputs. It is not a package artifact and is never published.
+
+## Package resolution
+
+Given:
+
+```text
+sev add geometry
+```
+
+the package system searches:
+
+```text
+registry/index/
+```
+
+selects the requested version, records it in:
+
+```text
+package.toml
+package.lock
+```
+
+and resolves imports against:
+
+```text
+registry/packages/geometry/1.2.0/package.pkg/package.pkgi/
+```
+
+Normal import resolution does not load the package's source or build state.
+
+## Overrides
+
+`SEVERIAN_HOME` MAY override:
+
+```text
+~/.local/share/severian/
+```
+
+For example:
+
+```text
+SEVERIAN_HOME=/tmp/severian-test
+```
+
+produces:
+
+```text
+/tmp/severian-test/
+├── registry/
+└── git/
+```
+
+This is intended for tests, containers, CI, and isolated development environments.
+
+
+# Updates
 
 ---
 
@@ -200,6 +372,7 @@ The generated package realization:
 package.pkg/
 ├── package.pkgi
 ├── artifacts/
+├── metadata/
 ├── bin/
 ├── debug/
 ├── container/
@@ -251,10 +424,6 @@ artifacts/
     ├── llvm/
     └── stablehlo/
 ```
-
-`native`, `gpu`, and `portable` are artifact properties.
-
-They SHALL NOT become additional package-level directories.
 
 `artifacts/` may contain:
 
@@ -340,19 +509,6 @@ A consumer MUST NOT require `source/` merely to import a normal published packag
 
 ---
 
-# Rejected top-level names
-
-The following SHALL NOT be top-level package directories:
-
-```text
-target/
-build/
-native/
-gpu/
-portable/
-metadata/
-cache/
-```
 
 `target/` and `build/` do not describe what they contain.
 
@@ -1746,66 +1902,11 @@ Search for old names and full regression suite.
 
 ---
 
-# Alternatives considered
-
-## No `.pkgi`
-
-Rejected because dependency source would remain necessary for semantic import resolution.
-
-## Compile complete package on import
-
-Rejected because import does not imply implementation reachability.
-
-## `target/`
-
-Rejected because it communicates only that the compiler produced something.
-
-The contents have useful categories and SHALL instead live under:
-
-```text
-artifacts/
-bin/
-debug/
-container/
-source/
-```
-
-## `native/`, `gpu/`, `portable/` at package root
-
-Rejected because these describe kinds of artifacts, not package-level concerns.
-
-They belong under `artifacts/`.
-
-## Separate `.pkgi` beside `package.pkg`
-
-Rejected because the interface is part of the package realization and should not have independent lifecycle management.
-
----
-
-# Risks
-
-| Risk                                           | Impact                            | Mitigation                                                   |
-| ---------------------------------------------- | --------------------------------- | ------------------------------------------------------------ |
-| `.pkgi` lacks required semantics               | Source fallback remains necessary | No-source test                                               |
-| Interface hash changes unnecessarily           | Rebuilds remain excessive         | Canonical hashing                                            |
-| Artifact cache becomes too granular            | Complexity                        | Start declaration-level                                      |
-| Generic specialization needs source            | Missing implementation            | Portable implementation representation or optional `source/` |
-| CLI duplicates package semantics               | Split architecture                | CLI/library equivalence tests                                |
-| Package layout starts accumulating directories | Unclear contract                  | Freeze six top-level entries                                 |
-
----
-
 # Open questions
 
-1. Binary or textual `.pkgi` representation?
-
-2. Exact placement of generic implementation templates beneath `artifacts/`.
-
-3. Exact distinction between portable generic implementation and target-specialized implementation.
-
-4. Whether remote publication includes `debug/` and `source/` by default.
-
-These do not change the fixed package root.
+1. Binary or textual `.pkgi` representation? 
+.pkgi is a directory that houses the information needed to link and build 
+consumers of the packages code. 
 
 ---
 
@@ -1885,18 +1986,6 @@ package.pkg/
 ├── debug/
 ├── container/
 └── source/
-```
-
-## Removed
-
-```text
-sev.lock
-target/
-source parsing for installed imports
-compile-whole-package-on-import
-duplicate package resolution
-duplicate package export semantics
-duplicate CLI package mutation logic
 ```
 
 ## Core invariant
