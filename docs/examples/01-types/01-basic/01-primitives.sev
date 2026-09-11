@@ -4,9 +4,11 @@ def main():
     ratio: f64 = 0.5
     enabled: bool = true
     letter: char = 'a'
+    word: string = "hello"
 
     print(count)
     print(large)
     print(ratio)
     print(enabled)
     print(letter)
+    print(word)
