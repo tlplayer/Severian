@@ -1,0 +1,12 @@
+# Primitive implementations share the same HashKey contract as user classes.
+# Character processing and arithmetic lower through the ordinary MLIR boundary.
+extend int:
+    def hash() -> usize:
+        return usize(self)
+
+extend string:
+    def hash() -> usize:
+        digest := 0
+        for byte in self.bytes():
+            digest = (digest * 257 + int(byte)) % 2147483647
+        return usize(digest)

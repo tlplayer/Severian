@@ -1,0 +1,13 @@
+[package]
+name = "collections"
+version = "0.2.0"
+edition = "2026"
+description = "Collection facade over independently published providers"
+[lib]
+path = "src/lib.sev"
+[dependencies]
+set = { path = "set", version = "0.2.0" }
+map = { path = "map", version = "0.2.0" }
+btree = { path = "btree", version = "0.1.0" }
+hashed = { package = "collections.hash", path = "hash", version = "0.1.0" }
+traits = { package = "collections.traits", path = "traits", version = "0.1.0" }

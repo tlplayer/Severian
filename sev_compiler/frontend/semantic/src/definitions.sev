@@ -50,7 +50,7 @@ def alias_named(definitions: SemanticDefinitions, name: string, namespace: strin
     return None
 
 
-def bind_type_arguments(parameters: list[string], arguments: list[universal.TypeAnnotation], span: source.Span, pack: string = "") -> list[universal.TypeAnnotation] | diagnostics.Diagnostic:
+def bind_type_arguments(parameters: list[string], arguments: list[universal.TypeAnnotation], span: source.Span, pack: string = "", defaults: list[universal.TypeAnnotation] = []) -> list[universal.TypeAnnotation] | diagnostics.Diagnostic:
     ordered: list[universal.TypeAnnotation] = []
     for parameter in parameters:
         ordered.append(universal.named_type("", [], span))
@@ -90,7 +90,13 @@ def bind_type_arguments(parameters: list[string], arguments: list[universal.Type
         if cursor not in filled:
             if parameter == pack:
                 return ordered[:cursor]
-            return error(diagnostics.diagnostic_at("E000205", "missing type argument " + parameter, span))
+            supplied := false
+            for default in defaults:
+                if default.binding == parameter:
+                    ordered[cursor] = replace_annotation(universal.TypeAnnotation(default.kind, default.span), parameters, ordered)
+                    supplied = true
+            if not supplied:
+                return error(diagnostics.diagnostic_at("E000205", "missing type argument " + parameter, span))
         cursor += 1
     return ordered
 
@@ -120,7 +126,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                 return id
             alias ?= alias_named(definitions, name, namespace)
             if alias != None:
-                ordered_arguments = bind_type_arguments(alias.type_parameters, arguments, annotation.span)
+                ordered_arguments = bind_type_arguments(alias.type_parameters, arguments, annotation.span, defaults=scoped_defaults(definitions, alias.type_defaults, alias.lookup))
                 if alias.name in active:
                     return error(diagnostics.diagnostic_at("E000205", "cyclic type alias " + alias.name, annotation.span))
                 if alias.id.index != 0:
@@ -265,7 +271,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
                 return error(diagnostics.diagnostic_at("E000212", "unknown trait " + name, annotation.span))
             if declaration != None:
                 applied := declaration
-                replacements = bind_type_arguments(applied.type_parameters, arguments, annotation.span)
+                replacements = bind_type_arguments(applied.type_parameters, arguments, annotation.span, defaults=scoped_defaults(definitions, applied.type_defaults, applied.lookup))
                 applied.arguments = replacements
                 methods: list[universal.FunctionDeclaration] = []
                 for method in applied.methods:
@@ -408,6 +414,9 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                     return error(diagnostics.diagnostic_at("E000212", "duplicate declaration " + trait_declaration.name, trait_declaration.span))
                 names.append(trait_declaration.name)
                 trait_declaration.definition = definition_id(trait_declaration.name, ordinal)
+                for original in definitions.traits:
+                    if original.source_name != "" and original.source_name == trait_declaration.source_name and original.span.source.index == trait_declaration.span.source.index and original.span.start == trait_declaration.span.start:
+                        trait_declaration.definition = original.definition
                 if trait_declaration.grammar:
                     trait_declaration.definition = universal.DefId(0, u128(trait_declaration.span.source.index) + 2, universal.DeclarationId(u128(trait_declaration.span.start) + 1))
                 ordinal += 1
@@ -442,6 +451,9 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Record:
                 record_declaration := declaration
                 record_declaration.definition = definition_id(declaration.name, 30000 + ordinal)
+                for original in definitions.record_templates:
+                    if original.source_name != "" and original.source_name == record_declaration.source_name and original.span.source.index == record_declaration.span.source.index and original.span.start == record_declaration.span.start:
+                        record_declaration.definition = original.definition
                 if len(declaration.type_parameters) != 0 and not declaration.extension:
                     definitions.record_templates.append(record_declaration)
                 definitions.implementations.append(record_declaration)
@@ -540,15 +552,21 @@ def error_conformance(definitions: SemanticDefinitions, records: list[universal.
 def record_template(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.RecordDeclaration | None:
     for template in definitions.record_templates:
         if template.name == namespace + name:
+            for original in definitions.record_templates:
+                if original.definition.package == template.definition.package and original.definition.module == template.definition.module and original.definition.declaration.value == template.definition.declaration.value:
+                    return original
             return template
     for template in definitions.record_templates:
         if template.name == name:
+            for original in definitions.record_templates:
+                if original.definition.package == template.definition.package and original.definition.module == template.definition.module and original.definition.declaration.value == template.definition.declaration.value:
+                    return original
             return template
     return None
 
 
 def instantiate_record(definitions: SemanticDefinitions, template: universal.RecordDeclaration, arguments: list[universal.TypeAnnotation], records: list[universal.RecordDeclaration], namespace: string, span: source.Span) -> universal.TypeId | diagnostics.Diagnostic:
-    arguments = bind_type_arguments(template.type_parameters, arguments, span, template.type_pack)
+    arguments = bind_type_arguments(template.type_parameters, arguments, span, template.type_pack, scoped_defaults(definitions, template.type_defaults, template.lookup))
     actuals: list[universal.TypeBinding] = []
     constructors: list[universal.TypeConstructorBinding] = []
     replacements: list[universal.TypeAnnotation] = []
@@ -612,8 +630,6 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
             offset := 0
             for replacement in replacements[len(template.type_parameters) - 1:]:
                 type_id = type_annotation(definitions, replacement, records, template.lookup)
-                if scalar.scalar_representation(type_id) == "utf8" or storage_types.buffer_element(type_id, records).index != 0:
-                    return error(diagnostics.diagnostic_at("E000205", "aggregate resource fields require ownership lowering", field.span))
                 if type_id.index == 2:
                     return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
                 fields.append(universal.FunctionParameter(field.name + "$" + string(offset), replacement, None, field.span, type_id=type_id, pack=field.name))
@@ -641,3 +657,30 @@ def record_instance(definitions: SemanticDefinitions, type_id: universal.TypeId)
         if instance.type_id.index == type_id.index:
             return instance
     return None
+
+
+# Defaults are written in the declaration's scope. Actual arguments continue
+# to resolve in the caller's scope, including earlier arguments used by defaults.
+def scoped_default(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string) -> universal.TypeAnnotation:
+    match annotation.kind:
+        case Named:
+            qualified := name
+            alias ?= alias_named(definitions, name, namespace)
+            if alias != None:
+                qualified = alias.name
+            record ?= record_template(definitions, name, namespace)
+            if record != None:
+                qualified = record.name
+            nested: list[universal.TypeAnnotation] = []
+            for argument in arguments:
+                nested.append(scoped_default(definitions, argument, namespace))
+            return universal.TypeAnnotation(universal.Named(qualified, nested), annotation.span, binding=annotation.binding)
+        case _:
+            return annotation
+
+
+def scoped_defaults(definitions: SemanticDefinitions, defaults: list[universal.TypeAnnotation], namespace: string) -> list[universal.TypeAnnotation]:
+    result: list[universal.TypeAnnotation] = []
+    for default in defaults:
+        result.append(scoped_default(definitions, default, namespace))
+    return result

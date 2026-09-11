@@ -37,10 +37,10 @@ def package_module(resolution: package.Resolution, importer: string, locator: st
 
 # Standalone files resolve standard-library imports from the selected sysroot.
 # Package builds continue to use their explicit dependency graph.
-def standard_source(root: string, name: string) -> string | diagnostics.Diagnostic:
+def standard_source(root: string, name: string, importer: string) -> string | diagnostics.Diagnostic:
     if root == "":
         return error(diagnostics.diagnostic("E000124", "named import requires a sysroot or resolved package: " + name))
-    selected ?= package.workspace_library(root + "/library", name)
+    selected ?= package.standalone_dependency(root + "/library", importer, name)
     if selected is string:
         return selected
     if selected is Error:
@@ -51,7 +51,7 @@ def standard_source(root: string, name: string) -> string | diagnostics.Diagnost
 def dependency_source(resolution: package.Resolution, importer: string, name: string, sysroot: string) -> string | diagnostics.Diagnostic:
     if len(resolution.packages) > 0:
         return package_dependency(resolution, importer, name)
-    return standard_source(sysroot, name)
+    return standard_source(sysroot, name, importer)
 
 
 def normalized_path(path: string) -> string:
@@ -181,7 +181,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             child_path = package_module(resolution, path, locator)
                         child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution, sysroot)
                         for child_item in child.items:
-                            result.items.append(child_item)
+                            append_imported_item(result, child_item)
                     case Name:
                         source_name ?= declaration.source_name
                         package_name := name
@@ -200,7 +200,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         module_key = child_path + ":" + child_prefix
                         for child_item in child.items:
                             if module_key not in named_modules:
-                                result.items.append(child_item)
+                                append_imported_item(result, child_item)
                             if source_name != None:
                                 match child_item:
                                     case Function:
@@ -208,8 +208,30 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                             # An alias needs fresh lowering metadata. Sharing
                                             # the values list appends both functions' ABI
                                             # parameters to the same declaration.
-                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode)
+                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:])
                                             result.items.append(universal.Function(imported))
+                                            selected = true
+                                    case Record:
+                                        imported_record: universal.RecordDeclaration = declaration
+                                        if imported_record.name == child_prefix + name:
+                                            if len(imported_record.type_parameters) == 0:
+                                                target = universal.named_type(imported_record.name, [], imported_record.span)
+                                                result.items.append(universal.Type(universal.TypeDeclaration([], prefix + imported_name, [], [], target, imported_record.span, lookup=imported_record.lookup)))
+                                            else:
+                                                imported_record.name = prefix + imported_name
+                                                result.items.append(universal.Record(imported_record))
+                                            selected = true
+                                    case Trait:
+                                        imported_trait: universal.TraitDeclaration = declaration
+                                        if imported_trait.name == child_prefix + name:
+                                            imported_trait.name = prefix + imported_name
+                                            result.items.append(universal.Trait(imported_trait))
+                                            selected = true
+                                    case Type:
+                                        imported_type: universal.TypeDeclaration = declaration
+                                        if imported_type.name == child_prefix + name:
+                                            imported_type.name = prefix + imported_name
+                                            result.items.append(universal.Type(imported_type))
                                             selected = true
                                     case BindingItem:
                                         if binding.name == child_prefix + name:
@@ -226,6 +248,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
             case Trait:
                 trait_declaration := declaration
+                trait_declaration.source_name = declaration.name
                 trait_declaration.name = prefix + declaration.name
                 trait_declaration.lookup = prefix
                 result.items.append(universal.Trait(trait_declaration))
@@ -236,6 +259,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 result.items.append(universal.Type(type_declaration))
             case Record:
                 record_declaration := declaration
+                record_declaration.source_name = declaration.name
                 record_declaration.name = declaration.name if declaration.extension else prefix + declaration.name
                 record_declaration.lookup = prefix
                 result.items.append(universal.Record(record_declaration))
@@ -280,3 +304,33 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
             case _:
                 result.items.append(item)
     return result
+
+
+# Diamond imports share declarations; distinct source declarations still reach
+# semantic duplicate checking, even if their visible names are identical.
+def imported_item_key(item: universal.Item) -> string:
+    match item:
+        case Record:
+            return "record:" + declaration.name + ":" + string(declaration.span.source.index) + ":" + string(declaration.span.start)
+        case Trait:
+            return "trait:" + declaration.name + ":" + string(declaration.span.source.index) + ":" + string(declaration.span.start)
+        case Type:
+            return "type:" + declaration.name + ":" + string(declaration.span.source.index) + ":" + string(declaration.span.start)
+        case Function:
+            span ?= declaration.span
+            if span != None:
+                return "function:" + declaration.name + ":" + string(span.source.index) + ":" + string(span.start)
+            return ""
+        case BindingItem:
+            return "binding:" + binding.name + ":" + string(binding.span.source.index) + ":" + string(binding.span.start)
+        case _:
+            return ""
+
+
+def append_imported_item(module: universal.Module, item: universal.Item):
+    key = imported_item_key(item)
+    if key != "":
+        for previous in module.items:
+            if imported_item_key(previous) == key:
+                return
+    module.items.append(item)

@@ -46,6 +46,8 @@ class Module:
     binding_values: list[tuple[BindingId, ValueId]] = []
     grammars: list[GrammarDeclaration] = []
     reserved_functions: list[string] = []
+    excluded_functions: list[string] = []
+    prelude_sources: list[int] = []
 
 
 class Program:

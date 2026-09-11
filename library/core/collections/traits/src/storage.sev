@@ -1,0 +1,12 @@
+# Provider operations are independent of hashing and ordering. The selected
+# provider adds its own key constraint when C[K,V] is instantiated.
+trait MappingStorage[K, V]:
+    def len() -> usize
+    def empty() -> bool
+    def reserve(minimum: usize)
+    def contains(key: K) -> bool
+    def get(key: K) -> V | None
+    def set(key: K, value: V)
+    def replace(key: K, value: V) -> V | None
+    def remove(key: K) -> V | None
+    def clear()

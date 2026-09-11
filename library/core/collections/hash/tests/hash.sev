@@ -1,0 +1,43 @@
+import Hash from collections.hash
+
+class Collision:
+    value: int
+    def hash() -> usize:
+        return 1
+    operator ==(right: Self) -> bool:
+        return value == right.value
+
+test:
+    table = Hash[Collision,int]()
+    for index in range(64):
+        table.set(Collision(index), index * 3)
+        assert(table.valid())
+    table.reserve(256)
+    assert(table.valid())
+    for index in range(0,64,2):
+        removed ?= table.remove(Collision(index))
+        assert(removed == index * 3)
+        assert(table.valid())
+    for index in range(0,64,2):
+        table.set(Collision(index), index * 4)
+        assert(table.valid())
+    for index in range(64):
+        value ?= table.get(Collision(index))
+        assert(value == index * (4 if index % 2 == 0 else 3))
+    assert(table.keys()[0].value == 1)
+    assert(table.keys()[32].value == 0)
+    missing ?= table.remove(Collision(1000))
+    assert(missing is None)
+    table.clear()
+    assert(table.empty())
+    table.set(Collision(42), 7)
+    assert(table.valid())
+
+test:
+    table = Hash[string,string]()
+    table.set("native", "MLIR")
+    value ?= table.get("native")
+    assert(value == "MLIR")
+    table.set("native", "source")
+    assert(table.len() == 1)
+    assert(table.valid())

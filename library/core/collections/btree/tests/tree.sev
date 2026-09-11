@@ -1,0 +1,48 @@
+import btree
+
+test:
+    tree = btree.BTree[int,int](2)
+    tree.reserve(128)
+    assert(tree.empty())
+    for index in range(96):
+        key = (index * 37) % 96
+        tree.set(key, key * 3)
+        assert(tree.valid())
+    assert(tree.len() == 96)
+    for key in range(96):
+        value ?= tree.get(key)
+        assert(value is not None)
+        if value is not None:
+            assert(value == key * 3)
+    assert(tree.keys() == list(range(96)))
+    first ?= tree.first()
+    last ?= tree.last()
+    assert(first == 0)
+    assert(last == 95)
+    assert(tree.range(31, 39) == [31,32,33,34,35,36,37,38])
+    previous ?= tree.replace(42, 900)
+    assert(previous == 126)
+    for index in range(96):
+        key = (index * 53) % 96
+        removed ?= tree.remove(key)
+        assert(removed is not None)
+        assert(not tree.contains(key))
+        assert(tree.valid())
+    assert(tree.empty())
+    missing ?= tree.remove(0)
+    assert(missing is None)
+    tree.set(7, 42)
+    assert(tree.valid())
+    tree.clear()
+    assert(tree.empty())
+
+test:
+    strings = btree.BTree[string,string](2)
+    for key in ["beta", "alpha", "gamma", "delta"]:
+        strings.set(key, key + " value")
+    assert(strings.keys() == ["alpha", "beta", "delta", "gamma"])
+    value ?= strings.get("beta")
+    assert(value == "beta value")
+    removed ?= strings.remove("alpha")
+    assert(removed == "alpha value")
+    assert(strings.valid())

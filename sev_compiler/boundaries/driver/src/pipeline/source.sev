@@ -54,15 +54,12 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     policy = registered_source(read_source(root + "/sev_compiler/universal/prelude.toml"), files)
     policy_entries = package.parse_document(policy.text)
     reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
-    intrinsic = package.string_array(package.setting(policy_entries, "prelude", "intrinsics", "[]"))
     excluded: list[string] := []
     try:
         excluded = package.prelude_exclusions(resolution, subject_path)
     catch failure: Error:
         return error(diagnostics.diagnostic("E000120", failure.message))
-    for name in excluded:
-        if name in intrinsic:
-            return error(diagnostics.diagnostic("E000120", "prelude exclusion requires extracting compiler intrinsic: " + name))
+    parsed.excluded_functions = excluded
     for name in reserved:
         if name not in excluded:
             parsed.reserved_functions.append(name)
@@ -89,29 +86,18 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     provider_function := declaration
                     if not provider_function.name.contains(".") and provider_function.name not in reserved:
                         reserved.append(provider_function.name)
-                    if provider_function.name in excluded:
-                        continue
                     provider_function.prelude = true
                     parsed.items.append(universal.Function(provider_function))
-                    if not provider_function.name.contains(".") and provider_function.name not in parsed.reserved_functions:
+                    if not provider_function.name.contains(".") and provider_function.name not in excluded and provider_function.name not in parsed.reserved_functions:
                         parsed.reserved_functions.append(provider_function.name)
-                case OperatorItem:
-                    if declaration.syntax.symbol not in excluded:
-                        parsed.items.append(item)
-                case Record:
-                    provider_record := declaration
-                    operators: list[universal.OperatorDeclaration] = []
-                    for operation in provider_record.operators:
-                        if operation.syntax.symbol not in excluded:
-                            operators.append(operation)
-                    provider_record.operators = operators
-                    parsed.items.append(universal.Record(provider_record))
                 case _:
                     parsed.items.append(item)
         subject_loaded = subject_loaded or is_subject
     for name in excluded:
         if name not in reserved:
             return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
+    for file in files:
+        parsed.prelude_sources.append(int(file.id.index))
     timing.finish_stage(timings, "prelude")
     library_paths: list[string] = []
     if emit != "agent-ir":

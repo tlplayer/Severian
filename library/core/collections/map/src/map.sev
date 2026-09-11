@@ -1,38 +1,43 @@
-import table
-import HashKey from traits
+import btree
+import traits
 
+class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]:
+    storage: C[K,V]
 
-class map[K: HashKey, V]:
-    table: table.HashTable[K, V]
-
-    def map(capacity: usize = 0):
-        this.table := table.create[K, V](capacity)
+    def map(*entries: tuple[K,V]):
+        storage = C[K,V]()
+        for entry in entries:
+            storage.set(entry[0], entry[1])
 
     def len() -> usize:
-        return table.len()
+        return storage.len()
 
     def empty() -> bool:
-        return table.empty()
+        return storage.empty()
 
     def reserve(minimum: usize):
-        table.reserve(minimum)
+        storage.reserve(minimum)
 
-    def contains(key: borrow K) -> bool:
-        return table.contains(key)
+    def contains(key: K) -> bool:
+        return storage.contains(key)
 
-    def get(key: borrow K) -> borrow V | None:
-        return table.get(key)
+    def get(key: K) -> V | None:
+        return storage.get(key)
 
     def set(key: K, item: V):
-        previous ?= table.set(key, item)
-        if previous is not None:
-            drop previous
+        storage.set(key, item)
 
     def replace(key: K, item: V) -> V | None:
-        return table.set(key, item)
+        return storage.replace(key, item)
 
-    def remove(key: borrow K) -> V | None:
-        return table.remove(key)
+    def remove(key: K) -> V | None:
+        return storage.remove(key)
 
     def clear():
-        table.clear()
+        storage.clear()
+
+    def keys() -> list[K]:
+        return storage.keys()
+
+    def values() -> list[V]:
+        return storage.values()

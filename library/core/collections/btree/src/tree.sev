@@ -1,0 +1,471 @@
+import traits
+
+# Nodes own integer entry indices. Only the dense arrays own K and V;
+# unused node slots never construct keys or values.
+class TreeNode:
+    count: int
+    leaf: bool
+
+class Location:
+    node: int
+    index: int
+    found: bool
+
+class BTree[K:traits.Ordered, V]:
+    __nodes: list[TreeNode]
+    __slots: list[int]
+    __children: list[int]
+    __free: list[int]
+    __keys: list[K]
+    __values: list[V]
+    __degree: int
+    __width: int
+    __root: int
+
+    def BTree(minimum_degree: int = 8):
+        assert(minimum_degree >= 2 and minimum_degree <= 65536)
+        __nodes = []
+        __slots = []
+        __children = []
+        __free = []
+        __keys = []
+        __values = []
+        __degree = minimum_degree
+        __width = minimum_degree * 2 - 1
+        __root = 0
+
+    def len() -> usize:
+        return usize(len(__keys))
+
+    def empty() -> bool:
+        return len(__keys) == 0
+
+    def __slot(node: int, index: int) -> int:
+        return __slots[node * __width + index]
+
+    def __key(node: int, index: int) -> K:
+        return __keys[__slot(node, index)]
+
+    def __put(node: int, index: int, slot: int):
+        __slots[node * __width + index] = slot
+
+    def __child(node: int, index: int) -> int:
+        return __children[node * (__width + 1) + index]
+
+    def __set_child(node: int, index: int, child: int):
+        __children[node * (__width + 1) + index] = child
+
+    def __set_count(node: int, occupied: int):
+        metadata := __nodes[node]
+        metadata.count = occupied
+        __nodes[node] = metadata
+
+    def __allocate(leaf: bool) -> int:
+        node := len(__nodes)
+        if len(__free) > 0:
+            node = __free[len(__free) - 1]
+            __free = __free[:len(__free) - 1]
+            __nodes[node] = TreeNode(0, leaf)
+        else:
+            __nodes.append(TreeNode(0, leaf))
+            for index in range(__width):
+                __slots.append(-1)
+            for index in range(__width + 1):
+                __children.append(0)
+        return node
+
+    def __release(node: int):
+        for index in range(__width):
+            __put(node, index, -1)
+        __nodes[node] = TreeNode(0, true)
+        __free.append(node)
+
+    def reserve(minimum: usize):
+        # Reserve reusable node rows without manufacturing K/V values.
+        required = int(minimum) / (__degree - 1) + 1
+        while len(__nodes) < required:
+            node = len(__nodes)
+            __nodes.append(TreeNode(0, true))
+            for index in range(__width):
+                __slots.append(-1)
+            for index in range(__width + 1):
+                __children.append(0)
+            __free.append(node)
+
+    def __position(node: int, key: K) -> int:
+        index := 0
+        while index < __nodes[node].count and __key(node, index) < key:
+            index += 1
+        return index
+
+    def __locate(key: K) -> Location:
+        if len(__keys) == 0:
+            return Location(0, 0, false)
+        node := __root
+        while true:
+            index := __position(node, key)
+            if index < __nodes[node].count and not (key < __key(node, index)):
+                return Location(node, index, true)
+            if __nodes[node].leaf:
+                return Location(node, index, false)
+            node = __child(node, index)
+        assert(false)
+        return Location(0, 0, false)
+
+    def contains(key: K) -> bool:
+        return __locate(key).found
+
+    def get(key: K) -> V | None:
+        found = __locate(key)
+        if not found.found:
+            return None
+        return __values[__slot(found.node, found.index)]
+
+    def get_key(key: K) -> K | None:
+        found = __locate(key)
+        if not found.found:
+            return None
+        return __key(found.node, found.index)
+
+    def set(key: K, value: V):
+        previous ?= replace(key, value)
+
+    def replace(key: K, value: V) -> V | None:
+        found = __locate(key)
+        if found.found:
+            slot = __slot(found.node, found.index)
+            previous = __values[slot]
+            __values[slot] = value
+            return previous
+        slot = len(__keys)
+        if slot == 0:
+            __root = __allocate(true)
+        __keys.append(key)
+        __values.append(value)
+        if __nodes[__root].count == __width:
+            old_root = __root
+            __root = __allocate(false)
+            __set_child(__root, 0, old_root)
+            __split_child(__root, 0)
+        __insert_non_full(__root, slot)
+        return None
+
+    def __insert_non_full(start: int, slot: int):
+        key = __keys[slot]
+        node := start
+        while not __nodes[node].leaf:
+            index := __position(node, key)
+            child = __child(node, index)
+            if __nodes[child].count == __width:
+                __split_child(node, index)
+                if __key(node, index) < key:
+                    index += 1
+            node = __child(node, index)
+        index = __position(node, key)
+        cursor := __nodes[node].count
+        while cursor > index:
+            __put(node, cursor, __slot(node, cursor - 1))
+            cursor -= 1
+        __put(node, index, slot)
+        __set_count(node, __nodes[node].count + 1)
+
+    def __extreme(start: int, last: bool) -> int:
+        node := start
+        while not __nodes[node].leaf:
+            node = __child(node, __nodes[node].count if last else 0)
+        return __slot(node, __nodes[node].count - 1 if last else 0)
+
+    def first() -> K | None:
+        if len(__keys) == 0:
+            return None
+        return __keys[__extreme(__root, false)]
+
+    def last() -> K | None:
+        if len(__keys) == 0:
+            return None
+        return __keys[__extreme(__root, true)]
+
+    def __bound(key: K, strict: bool) -> K | None:
+        if len(__keys) == 0:
+            return None
+        node := __root
+        candidate := -1
+        while true:
+            index := __position(node, key)
+            if strict and index < __nodes[node].count and not (key < __key(node, index)):
+                index += 1
+            if index < __nodes[node].count:
+                candidate = __slot(node, index)
+            if __nodes[node].leaf:
+                break
+            node = __child(node, index)
+        if candidate < 0:
+            return None
+        return __keys[candidate]
+
+    def lower_bound(key: K) -> K | None:
+        return __bound(key, false)
+
+    def upper_bound(key: K) -> K | None:
+        return __bound(key, true)
+
+    def remove(key: K) -> V | None:
+        found = __locate(key)
+        if not found.found:
+            return None
+        slot = __slot(found.node, found.index)
+        previous = __values[slot]
+        __delete(__root, key)
+        if __nodes[__root].count == 0:
+            old_root = __root
+            if not __nodes[__root].leaf:
+                __root = __child(__root, 0)
+            __release(old_root)
+        last = len(__keys) - 1
+        if slot != last:
+            moved = __locate(__keys[last])
+            assert(moved.found)
+            __put(moved.node, moved.index, slot)
+            __keys[slot] = __keys[last]
+            __values[slot] = __values[last]
+        __keys = __keys[:last]
+        __values = __values[:last]
+        return previous
+
+    def __delete(node: int, key: K):
+        index := __position(node, key)
+        occupied = __nodes[node].count
+        if index < occupied and not (key < __key(node, index)):
+            if __nodes[node].leaf:
+                cursor := index
+                while cursor + 1 < occupied:
+                    __put(node, cursor, __slot(node, cursor + 1))
+                    cursor += 1
+                __put(node, occupied - 1, -1)
+                __set_count(node, occupied - 1)
+                return
+            left = __child(node, index)
+            right = __child(node, index + 1)
+            if __nodes[left].count >= __degree:
+                replacement = __extreme(left, true)
+                __put(node, index, replacement)
+                __delete(left, __keys[replacement])
+            elif __nodes[right].count >= __degree:
+                replacement = __extreme(right, false)
+                __put(node, index, replacement)
+                __delete(right, __keys[replacement])
+            else:
+                __merge_children(node, index)
+                __delete(left, key)
+            return
+        if __nodes[node].leaf:
+            return
+        child = __child(node, index)
+        if __nodes[child].count < __degree:
+            index = __rebalance(node, index)
+        __delete(__child(node, index), key)
+
+    def __ordered_slots() -> list[int]:
+        result: list[int] = []
+        if len(__keys) == 0:
+            return result
+        nodes := [__root]
+        positions := [0]
+        while len(nodes) > 0:
+            top = len(nodes) - 1
+            node = nodes[top]
+            position = positions[top]
+            if position > __nodes[node].count * 2:
+                nodes = nodes[:top]
+                positions = positions[:top]
+            else:
+                positions[top] += 1
+                if position % 2 == 0:
+                    if not __nodes[node].leaf:
+                        nodes.append(__child(node, position / 2))
+                        positions.append(0)
+                else:
+                    result.append(__slot(node, position / 2))
+        return result
+
+    def keys() -> list[K]:
+        result: list[K] = []
+        for slot in __ordered_slots():
+            result.append(__keys[slot])
+        return result
+
+    def values() -> list[V]:
+        result: list[V] = []
+        for slot in __ordered_slots():
+            result.append(__values[slot])
+        return result
+
+    def range(start: K, stop: K) -> list[K]:
+        result: list[K] = []
+        for slot in __ordered_slots():
+            key = __keys[slot]
+            if not (key < start) and key < stop:
+                result.append(key)
+        return result
+
+    def clear():
+        __nodes = []
+        __slots = []
+        __children = []
+        __free = []
+        __keys = []
+        __values = []
+        __root = 0
+
+    def valid() -> bool:
+        if len(__keys) != len(__values):
+            return false
+        if len(__keys) == 0:
+            return true
+        nodes := [__root]
+        levels := [0]
+        leaf_level := -1
+        count := 0
+        while len(nodes) > 0:
+            top = len(nodes) - 1
+            node = nodes[top]
+            level = levels[top]
+            nodes = nodes[:top]
+            levels = levels[:top]
+            occupied = __nodes[node].count
+            if occupied > __width or occupied < (1 if node == __root else __degree - 1):
+                return false
+            count += occupied
+            for index in range(occupied):
+                slot = __slot(node, index)
+                if slot < 0 or slot >= len(__keys):
+                    return false
+            if __nodes[node].leaf:
+                if leaf_level < 0:
+                    leaf_level = level
+                elif leaf_level != level:
+                    return false
+            else:
+                for index in range(occupied + 1):
+                    child = __child(node, index)
+                    if child < 0 or child >= len(__nodes):
+                        return false
+                    nodes.append(child)
+                    levels.append(level + 1)
+        if count != len(__keys):
+            return false
+        ordered = keys()
+        for index in range(1, len(ordered)):
+            if not (ordered[index - 1] < ordered[index]):
+                return false
+        return true
+
+    def __split_child(parent: int, index: int):
+        left := self.__child(parent, index)
+        right := self.__allocate(self.__nodes[left].leaf)
+        middle := self.__degree - 1
+        offset := int(0)
+        while offset < middle:
+            self.__put(right, offset, self.__slot(left, offset + self.__degree))
+            offset += 1
+        if not self.__nodes[left].leaf:
+            offset = int(0)
+            while offset < self.__degree:
+                self.__set_child(right, offset, self.__child(left, offset + self.__degree))
+                offset += 1
+        occupied := self.__nodes[parent].count
+        cursor := occupied
+        while cursor > index:
+            self.__set_child(parent, cursor + 1, self.__child(parent, cursor))
+            self.__put(parent, cursor, self.__slot(parent, cursor - 1))
+            cursor -= 1
+        self.__set_child(parent, index + 1, right)
+        self.__put(parent, index, self.__slot(left, middle))
+        self.__set_count(parent, occupied + 1)
+        self.__set_count(left, middle)
+        self.__set_count(right, middle)
+        offset = middle
+        while offset < self.__width:
+            self.__put(left, offset, -1)
+            offset += 1
+
+    def __rebalance(parent: int, index: int) -> int:
+        if index > 0 and self.__nodes[self.__child(parent, index - 1)].count >= self.__degree:
+            self.__borrow_left(parent, index)
+        elif index < self.__nodes[parent].count and self.__nodes[self.__child(parent, index + 1)].count >= self.__degree:
+            self.__borrow_right(parent, index)
+        elif index < self.__nodes[parent].count:
+            self.__merge_children(parent, index)
+        else:
+            self.__merge_children(parent, index - 1)
+            return index - 1
+        return index
+
+    def __borrow_left(parent: int, index: int):
+        node := self.__child(parent, index)
+        left := self.__child(parent, index - 1)
+        occupied := self.__nodes[node].count
+        sibling_length := self.__nodes[left].count
+        cursor := occupied
+        while cursor > 0:
+            self.__put(node, cursor, self.__slot(node, cursor - 1))
+            cursor -= 1
+        if not self.__nodes[node].leaf:
+            cursor = occupied + 1
+            while cursor > 0:
+                self.__set_child(node, cursor, self.__child(node, cursor - 1))
+                cursor -= 1
+            self.__set_child(node, 0, self.__child(left, sibling_length))
+        self.__put(node, 0, self.__slot(parent, index - 1))
+        self.__put(parent, index - 1, self.__slot(left, sibling_length - 1))
+        self.__put(left, sibling_length - 1, -1)
+        self.__set_count(node, occupied + 1)
+        self.__set_count(left, sibling_length - 1)
+
+    def __borrow_right(parent: int, index: int):
+        node := self.__child(parent, index)
+        right := self.__child(parent, index + 1)
+        occupied := self.__nodes[node].count
+        sibling_length := self.__nodes[right].count
+        self.__put(node, occupied, self.__slot(parent, index))
+        if not self.__nodes[node].leaf:
+            self.__set_child(node, occupied + 1, self.__child(right, 0))
+            cursor := int(0)
+            while cursor < sibling_length:
+                self.__set_child(right, cursor, self.__child(right, cursor + 1))
+                cursor += 1
+        self.__put(parent, index, self.__slot(right, 0))
+        cursor := int(0)
+        while cursor < sibling_length - 1:
+            self.__put(right, cursor, self.__slot(right, cursor + 1))
+            cursor += 1
+        self.__put(right, sibling_length - 1, -1)
+        self.__set_count(node, occupied + 1)
+        self.__set_count(right, sibling_length - 1)
+
+    def __merge_children(parent: int, index: int):
+        left := self.__child(parent, index)
+        right := self.__child(parent, index + 1)
+        left_length := self.__nodes[left].count
+        right_length := self.__nodes[right].count
+        self.__put(left, left_length, self.__slot(parent, index))
+        cursor := int(0)
+        while cursor < right_length:
+            self.__put(left, left_length + 1 + cursor, self.__slot(right, cursor))
+            cursor += 1
+        if not self.__nodes[left].leaf:
+            cursor = int(0)
+            while cursor < right_length + 1:
+                self.__set_child(left, left_length + 1 + cursor, self.__child(right, cursor))
+                cursor += 1
+        occupied := self.__nodes[parent].count
+        cursor = index
+        while cursor + 1 < occupied:
+            self.__put(parent, cursor, self.__slot(parent, cursor + 1))
+            self.__set_child(parent, cursor + 1, self.__child(parent, cursor + 2))
+            cursor += 1
+        self.__put(parent, occupied - 1, -1)
+        self.__set_child(parent, occupied, 0)
+        self.__set_count(parent, occupied - 1)
+        self.__set_count(left, left_length + right_length + 1)
+        self.__release(right)

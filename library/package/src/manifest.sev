@@ -323,3 +323,31 @@ def prelude_exclusions(resolution: Resolution, importer: string) -> list[string]
             throw Error("duplicate prelude exclusion: " + name)
         seen.append(name)
     return result
+
+# Standalone sysroot compilation still honors the importing library's aliases.
+# Read the manifest without opening an editable project or changing its lock.
+def standalone_dependency(root: string, importer: string, alias: string) -> string | Error:
+    directory := path.dirname(importer)
+    while true:
+        if os.is_file(directory + "/package.toml"):
+            entries = parse_document(read_text(directory + "/package.toml"))
+            for entry in entries:
+                if entry.table == "dependencies" and entry.key == alias:
+                    dependency = parse_dependency(alias, entry.value, false)
+                    reference = dependency.reference
+                    if reference.source == "path":
+                        target_root = canonical(directory + "/" + reference.location)
+                        manifest = parse_manifest(read_text(target_root + "/package.toml"))
+                        if manifest.name != reference.name:
+                            throw Error("dependency package name mismatch: " + alias)
+                        for target in manifest.targets:
+                            if target.kind == "library":
+                                return inside(target_root, target.path)
+                        throw Error("dependency has no library target: " + alias)
+                    return workspace_library(root, reference.name)
+            break
+        parent = path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+    return workspace_library(root, alias)

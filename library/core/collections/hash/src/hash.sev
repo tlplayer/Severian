@@ -1,0 +1,151 @@
+import traits
+
+# Bucket slots index dense initialized entries. -1 is empty, -2 a tombstone.
+# Dense order is insertion order, including after deletion and rehashing.
+class Hash[K:traits.HashKey, V]:
+    __keys: list[K]
+    __values: list[V]
+    __hashes: list[usize]
+    __buckets: list[int]
+    __tombstones: int
+
+    def Hash(capacity: usize = 0):
+        __keys = []
+        __values = []
+        __hashes = []
+        __buckets = []
+        __tombstones = 0
+        reserve(capacity)
+
+    def len() -> usize:
+        return usize(len(__keys))
+
+    def empty() -> bool:
+        return len(__keys) == 0
+
+    def __position(key: K, digest: usize) -> int:
+        if len(__buckets) == 0:
+            return -1
+        index := int(digest % usize(len(__buckets)))
+        for visited in range(len(__buckets)):
+            slot = __buckets[index]
+            if slot == -1:
+                return -1
+            if slot >= 0 and __hashes[slot] == digest and __keys[slot] == key:
+                return index
+            index = (index + 1) % len(__buckets)
+        return -1
+
+    def __insert_slot(slot: int):
+        index := int(__hashes[slot] % usize(len(__buckets)))
+        for visited in range(len(__buckets)):
+            if __buckets[index] < 0:
+                if __buckets[index] == -2:
+                    __tombstones -= 1
+                __buckets[index] = slot
+                return
+            index = (index + 1) % len(__buckets)
+        assert(false)
+
+    def __rehash(capacity: int):
+        __buckets = []
+        for index in range(capacity):
+            __buckets.append(-1)
+        __tombstones = 0
+        for slot in range(len(__keys)):
+            __insert_slot(slot)
+
+    def reserve(minimum: usize):
+        capacity := 8
+        while usize(capacity / 2) < minimum:
+            assert(capacity <= 4611686018427387903)
+            capacity *= 2
+        if capacity > len(__buckets):
+            __rehash(capacity)
+
+    def contains(key: K) -> bool:
+        return __position(key, key.hash()) >= 0
+
+    def get(key: K) -> V | None:
+        position = __position(key, key.hash())
+        if position < 0:
+            return None
+        return __values[__buckets[position]]
+
+    def get_key(key: K) -> K | None:
+        position = __position(key, key.hash())
+        if position < 0:
+            return None
+        return __keys[__buckets[position]]
+
+    def set(key: K, value: V):
+        previous ?= replace(key, value)
+
+    def replace(key: K, value: V) -> V | None:
+        digest = key.hash()
+        position = __position(key, digest)
+        if position >= 0:
+            slot = __buckets[position]
+            previous = __values[slot]
+            __values[slot] = value
+            return previous
+        reserve(usize(len(__keys) + 1))
+        if __tombstones > len(__buckets) / 4:
+            __rehash(len(__buckets))
+        slot = len(__keys)
+        __keys.append(key)
+        __values.append(value)
+        __hashes.append(digest)
+        __insert_slot(slot)
+        return None
+
+    def remove(key: K) -> V | None:
+        position = __position(key, key.hash())
+        if position < 0:
+            return None
+        slot = __buckets[position]
+        previous = __values[slot]
+        __buckets[position] = -2
+        __tombstones += 1
+        # Retain insertion order. Slot indices move; buckets follow them.
+        for index in range(slot, len(__keys) - 1):
+            __keys[index] = __keys[index + 1]
+            __values[index] = __values[index + 1]
+            __hashes[index] = __hashes[index + 1]
+        last = len(__keys) - 1
+        __keys = __keys[:last]
+        __values = __values[:last]
+        __hashes = __hashes[:last]
+        for index in range(len(__buckets)):
+            if __buckets[index] > slot:
+                __buckets[index] -= 1
+        return previous
+
+    def keys() -> list[K]:
+        return __keys[:]
+
+    def values() -> list[V]:
+        return __values[:]
+
+    def clear():
+        __keys = []
+        __values = []
+        __hashes = []
+        __rehash(len(__buckets))
+
+    def valid() -> bool:
+        if len(__keys) != len(__values) or len(__keys) != len(__hashes):
+            return false
+        count := 0
+        for slot in __buckets:
+            if slot >= 0:
+                if slot >= len(__keys):
+                    return false
+                count += 1
+        if count != len(__keys):
+            return false
+        for slot in range(len(__keys)):
+            position = __position(__keys[slot], __hashes[slot])
+            if position < 0 or __buckets[position] != slot:
+                return false
+        return true

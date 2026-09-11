@@ -1,35 +1,38 @@
-import table
-import HashKey from traits
+import btree
+import traits
 
+class set[T, C:traits.MappingStorage[T,bool]=btree.BTree]:
+    storage: C[T,bool]
 
-class set[T: HashKey]:
-    table: table.HashTable[T, bool]
-
-    def set(capacity: usize = 0):
-        this.table := table.create[T, bool](capacity)
+    def set(*values: T):
+        storage = C[T,bool]()
+        for value in values:
+            storage.set(value, true)
 
     def len() -> usize:
-        return table.len()
+        return storage.len()
 
     def empty() -> bool:
-        return table.empty()
+        return storage.empty()
 
     def reserve(minimum: usize):
-        table.reserve(minimum)
+        storage.reserve(minimum)
 
-    def contains(item: borrow T) -> bool:
-        return table.contains(item)
+    def contains(item: T) -> bool:
+        return storage.contains(item)
 
     def add(item: T) -> bool:
-        if contains(borrow item):
-            drop item
+        if storage.contains(item):
             return false
-        table.set(item, true)
+        storage.set(item, true)
         return true
 
-    def remove(item: borrow T) -> bool:
-        removed ?= table.remove(item)
-        return removed is not None
+    def remove(item: T) -> bool:
+        previous ?= storage.remove(item)
+        return previous is not None
 
     def clear():
-        table.clear()
+        storage.clear()
+
+    def values() -> list[T]:
+        return storage.keys()

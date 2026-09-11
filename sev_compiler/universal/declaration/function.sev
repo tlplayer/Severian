@@ -90,6 +90,7 @@ class FunctionDeclaration:
     cfg: CfgBody | None = None
     result_mode: string = ""
     prelude: bool = false
+    type_defaults: list[TypeAnnotation] = []
 
 
 def resolved_function(
@@ -133,10 +134,12 @@ class RecordDeclaration:
     constraints: list[GenericConstraint] = []
     extension: bool = false
     type_pack: string = ""
+    type_defaults: list[TypeAnnotation] = []
     alternatives: list[CallableAlternative] = []
     representation: string = ""
     declaration_grammar: DefId = DefId(0, 0, DeclarationId(0))
     storage_element: TypeId = TypeId(0)
+    source_name: string = ""
 
 
 def union_variants(record: RecordDeclaration) -> list[TypeId]:

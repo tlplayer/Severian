@@ -1,0 +1,9 @@
+[package]
+name = "collections.hash"
+version = "0.1.0"
+edition = "2026"
+description = "Typed open-addressed hash mapping provider"
+[lib]
+path = "src/lib.sev"
+[dependencies]
+traits = { package = "collections.traits", path = "../traits", version = "0.1.0" }

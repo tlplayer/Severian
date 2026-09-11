@@ -54,6 +54,7 @@ class TypeDeclaration:
     interface: InterfaceId | None = None
     lookup: string = ""
 
+    type_defaults: list[TypeAnnotation] = []
 
 class PropertyDeclaration:
     name: string
@@ -99,6 +100,8 @@ class TraitDeclaration:
     scalar_operations: list[ScalarOperation] = []
     scalar_syntax: OperatorSyntax | None = None
     arguments: list[TypeAnnotation] = []
+    type_defaults: list[TypeAnnotation] = []
+    source_name: string = ""
 
 
 enum CompilerExpectation:

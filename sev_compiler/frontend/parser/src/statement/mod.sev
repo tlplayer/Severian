@@ -256,7 +256,7 @@ def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | d
         alias = parser_identifier(parser, "expected an import alias")[0]
     return universal.ImportDeclaration(universal.Name(first[0]), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
 
-def parser_type_parameters(parser: Parser, pack: list[string] = []) -> tuple[list[string], list[universal.GenericConstraint]] | diagnostics.Diagnostic:
+def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: list[universal.TypeAnnotation] = []) -> tuple[list[string], list[universal.GenericConstraint]] | diagnostics.Diagnostic:
     parameters: list[string] = []
     constraints: list[universal.GenericConstraint] = []
     if parser_take_symbol(parser, "[") == None:
@@ -276,6 +276,14 @@ def parser_type_parameters(parser: Parser, pack: list[string] = []) -> tuple[lis
             if parser_take_symbol(parser, ":") != None:
                 bound = parser_type_annotation(parser)
                 constraints.append(universal.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+            if parser_take_symbol(parser, "=") != None:
+                if packed:
+                    return error(parser_fail(parser, "a type pack cannot have a default"))
+                default = parser_type_annotation(parser)
+                default.binding = parameter[0]
+                defaults.append(default)
+            elif len(defaults) != 0:
+                return error(parser_fail(parser, "required type parameter follows a default"))
             parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
                 break
@@ -313,7 +321,8 @@ def parser_declaration_constraints(parser: Parser) -> list[universal.GenericCons
 def parser_function_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a function name")[0]
-    generic_parts = parser_type_parameters(parser)
+    defaults: list[universal.TypeAnnotation] = []
+    generic_parts = parser_type_parameters(parser, defaults=defaults)
     generics = generic_parts[0]
     constraints := generic_parts[1]
     parser_expect_symbol(parser, "(", "expected opening parenthesis")
@@ -358,7 +367,7 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
         block = parser_indented_block(parser, "function")
         body = block[0]
         end = block[1]
-    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode)
+    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults)
 
 def parser_ownership_mode(parser: Parser) -> string:
     if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move"):
@@ -372,7 +381,8 @@ def parser_ownership_mode(parser: Parser) -> string:
 def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a type name")[0]
-    generic_parts = parser_type_parameters(parser)
+    defaults: list[universal.TypeAnnotation] = []
+    generic_parts = parser_type_parameters(parser, defaults=defaults)
     parameters = generic_parts[0]
     constraints := generic_parts[1]
     definition: universal.TypeAnnotation | None := None
@@ -380,13 +390,14 @@ def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator
         definition = parser_type_annotation(parser)
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
-    return universal.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start))
+    return universal.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start), type_defaults=defaults)
 
 def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TraitDeclaration | diagnostics.Diagnostic:
     start_token = parser_next(parser)
     start = start_token.span
     name = parser_identifier(parser, "expected a trait name")[0]
-    generic_parts = parser_type_parameters(parser)
+    defaults: list[universal.TypeAnnotation] = []
+    generic_parts = parser_type_parameters(parser, defaults=defaults)
     constraints := generic_parts[1]
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
@@ -441,7 +452,7 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
                 bases.append(parser_type_annotation(parser))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of trait")
-    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar)
+    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar, type_defaults=defaults)
 
 
 def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
@@ -796,19 +807,7 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
         span = source.Span(start.source, start.start, body[1])
         return parser_initialized_loop(universal.ForEach(name, iterable, body[0], span), initializer, span)
     if parser_at_identifier(parser, "if"):
-        start = parser_next(parser).span
-        condition = parser_expression(parser, 0)
-        parser_expect_symbol(parser, ":", "expected colon after if condition")
-        taken = parser_indented_block(parser, "if")
-        otherwise := universal.empty_block()
-        end := taken[1]
-        if parser_at_identifier(parser, "else"):
-            parser_next(parser)
-            parser_expect_symbol(parser, ":", "expected colon after else")
-            rejected = parser_indented_block(parser, "else")
-            otherwise = rejected[0]
-            end = rejected[1]
-        return universal.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+        return parser_conditional(parser)
     if parser_at_identifier(parser, "throw"):
         start = parser_next(parser).span
         value = parser_expression(parser, 0)
@@ -824,19 +823,7 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
         if parser_at_symbol(parser, "("):
             parser.cursor[0] -= 1
             invocation = parser_postfix(parser)
-            match invocation.kind:
-                case Call:
-                    if len(arguments) < 1 or len(arguments) > 2:
-                        return error(parser_fail(parser, "assert requires a condition and optional message"))
-                    for argument in arguments:
-                        if argument.name != None or argument.spread:
-                            return error(parser_fail(parser, "assert requires positional arguments"))
-                    message: universal.Expression | None := None
-                    if len(arguments) == 2:
-                        message = arguments[1].value
-                    return universal.Assert(arguments[0].value, message, invocation.span, arguments[0].value.span)
-                case _:
-                    return error(parser_fail(parser, "expected assertion arguments"))
+            return universal.ExpressionStatement(invocation)
         condition = parser_expression(parser, 0)
         message: universal.Expression | None := None
         if parser_take_symbol(parser, ",") != None:
@@ -1370,7 +1357,8 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a class name")[0]
     pack: list[string] = []
-    generic_parts = parser_type_parameters(parser, pack)
+    defaults: list[universal.TypeAnnotation] = []
+    generic_parts = parser_type_parameters(parser, pack, defaults)
     parser_expect_symbol(parser, ":", "expected colon after class name")
     traits: list[universal.TypeAnnotation] = []
     if not parser_at_simple(parser, Newline):
@@ -1405,7 +1393,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
                 fields.append(universal.FunctionParameter(field[0], annotation, default, field[1], variadic=packed))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of class")
-    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=generic_parts[0], constraints=generic_parts[1], extension=extension, type_pack=pack[0] if len(pack) != 0 else "")
+    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=generic_parts[0], constraints=generic_parts[1], extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults)
 
 
 def parser_family_declaration(parser: Parser) -> universal.TypeDeclaration | diagnostics.Diagnostic:
@@ -1437,3 +1425,22 @@ def parser_grammar_declaration(parser: Parser) -> universal.GrammarDeclaration |
         syntax = start.syntaxes[0]
         return universal.GrammarDeclaration(declaration.name, declaration.parameters, body, start.span, syntax=syntax, definition=syntax.definition, result=declaration.result)
     return error(parser_fail(parser, "grammar requires a lowering body"))
+
+
+def parser_conditional(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    condition = parser_expression(parser, 0)
+    parser_expect_symbol(parser, ":", "expected colon after if condition")
+    taken = parser_indented_block(parser, "if")
+    otherwise := universal.empty_block()
+    end := taken[1]
+    if parser_at_identifier(parser, "elif"):
+        otherwise.statements.append(parser_conditional(parser))
+        end = parser_peek(parser).span.start
+    elif parser_at_identifier(parser, "else"):
+        parser_next(parser)
+        parser_expect_symbol(parser, ":", "expected colon after else")
+        rejected = parser_indented_block(parser, "else")
+        otherwise = rejected[0]
+        end = rejected[1]
+    return universal.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
