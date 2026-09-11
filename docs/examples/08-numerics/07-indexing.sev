@@ -8,16 +8,16 @@ test "tensor slice":
         [2, 3],
     )
 
-    view = tensor.slice(
+    tensor_view = view tensor.slice(
         value,
         [0, 0],
         [2, 3],
         [1, 2],
     )
 
-    assert(view.shape == [2, 2])
-    assert(view.strides == [3, 2])
-    assert(view.values == [
+    assert(tensor_view.shape == [2, 2])
+    assert(tensor_view.strides == [3, 2])
+    assert(tensor_view.values == [
         1.0, 3.0,
         4.0, 6.0,
     ])
@@ -30,7 +30,7 @@ test "materialize strided view":
         [2, 3],
     )
 
-    view = value.slice([0, 0], [2, 3], [1, 2])
-    contiguous = view.materialize()
+    tensor_view = view value.slice([0, 0], [2, 3], [1, 2])
+    contiguous = tensor_view.materialize()
 
     assert(contiguous.strides == [2, 1])

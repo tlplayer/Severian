@@ -1,5 +1,5 @@
-int MAX_RETRIES = 3
-float PI = 3.1415926
+MAX_RETRIES: int = 3
+PI: float = 3.1415926
 
 def main():
     print(MAX_RETRIES)
