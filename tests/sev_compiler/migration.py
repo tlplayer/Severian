@@ -11,12 +11,12 @@ import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
 import tempfile
 import textwrap
 import unittest
 
 from bootstrap_mlir import ROOT, tool
+from resource_guard import run as guarded_run
 
 
 COMPILER = Path(os.environ.get(
@@ -73,8 +73,10 @@ class MigrationCase(unittest.TestCase):
         return path
 
     def invoke(self, arguments, *, cwd=None):
-        return subprocess.run(list(map(str, arguments)), cwd=cwd or self.directory,
-                              capture_output=True, text=True, timeout=180)
+        result = guarded_run(arguments, cwd=cwd or self.directory, timeout=180)
+        self.assertIsNone(result.resources['limit'],
+                          f"compiler resource budget exceeded: {arguments}\n{result.stderr}")
+        return result
 
     def succeeds(self, arguments):
         result = self.invoke(arguments)

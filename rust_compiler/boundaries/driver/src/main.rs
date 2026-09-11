@@ -1111,6 +1111,13 @@ fn compiler(
         .value
         .parse::<usize>()
         .map_err(|error| format!("invalid diagnostics.max-errors: {error}"))?;
+    let optimization_key = format!("profile.{}.opt-level", config.profile);
+    let optimization = config.values[&optimization_key]
+        .value
+        .parse::<u8>()
+        .ok()
+        .filter(|level| *level <= 3)
+        .ok_or_else(|| format!("{optimization_key} must be between 0 and 3"))?;
     Compiler::new(target)
         .map(|compiler| match manifest {
             Some(manifest) => compiler
@@ -1118,6 +1125,7 @@ fn compiler(
                 .with_packages(manifest.module_graph(include_root_dev)),
             None => compiler.with_max_errors(max_errors),
         })
+        .map(|compiler| compiler.with_native_optimization(optimization))
         .map_err(|error| error.to_string())
 }
 

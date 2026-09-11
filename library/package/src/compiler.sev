@@ -3,6 +3,7 @@ import * from "host.sev"
 import * from "manifest.sev"
 import * from "edit.sev"
 import path
+import * from "../../testing/src/resources.sev" as resources
 
 # A versioned compilation-unit protocol keeps package orchestration independent
 # of the concrete compiler and does not recursively invoke package commands.
@@ -36,13 +37,19 @@ def decode_resolution(text: string) -> Resolution | Error:
             throw Error("compilation graph edge has an invalid package identity")
     return Resolution(packages, edges, "")
 
-def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string) -> Artifact | Error:
+def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false) -> Artifact | Error:
     if unit.output != "":
         mkdir(path.dirname(unit.output))
     stage = temporary("/tmp")
     write_text(stage + "/resolution.toml", encode_resolution(resolution))
     input = inside(resolution.packages[unit.package_index].root, unit.target.path)
-    status = command([compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile])
+    arguments := [compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+    if unit.include_tests or guard_tests:
+        config = resolution.packages[0].manifest.entries
+        memory = resources.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
+        seconds = int(text_setting(config, "test", "timeout-seconds", "60"))
+        arguments = resources.guarded_command(arguments, seconds, memory)
+    status = command(arguments)
     remove_tree(stage)
     if status != 0:
         throw Error("compiler failed for " + unit.target.name + " with status " + string(status))

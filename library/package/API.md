@@ -85,7 +85,11 @@ check exact output. Stage coverage measures passing commands against eligible
 commands, including blocked and pending commands in the denominator; it does
 not claim instrumented line coverage. Dependencies must precede their consumers.
 Commands run through the hosted process boundary with quoted arguments and a
-per-step timeout (60 seconds by default).
+per-step timeout (60 seconds by default) and inherited address-space limit
+(`memory_bytes`, 3 GB by default). Reports retain native CPU time, peak RSS in
+KiB, and raw GNU time measurements. These hosted guards require Linux
+`timeout`, `prlimit`, and `/usr/bin/time`. Package test compilation and execution
+use `[test].memory-max` (4 GB) and `[test].timeout-seconds` (60) instead.
 
 Current limits are explicit: the source compiler emits host executables;
 backend-artifact loading, general `.pkgi` generation/consumption, remote registry

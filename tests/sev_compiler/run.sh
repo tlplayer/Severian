@@ -4,8 +4,14 @@ set -u
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 severian_bin=${SEVERIAN_BIN:-"$repository_root/package.pkg/debug/sev"}
 timeout_seconds=${SEVERIAN_TEST_TIMEOUT_SECONDS:-60}
-parallel_jobs=${SEVERIAN_TEST_JOBS:-4}
+parallel_jobs=${SEVERIAN_TEST_JOBS:-1}
+memory_bytes=${SEVERIAN_TEST_MEMORY_BYTES:-3000000000}
 show_output=${SEVERIAN_TEST_OUTPUT:-0}
+
+if [[ ! "$parallel_jobs" =~ ^[1-9][0-9]*$ || ! "$memory_bytes" =~ ^[1-9][0-9]*$ || ! "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || (( parallel_jobs * memory_bytes > 6000000000 )); then
+    echo "FAILED: positive budgets are required; concurrent memory budgets must total at most 6 GB" >&2
+    exit 1
+fi
 
 if [[ ! -x "$severian_bin" ]]; then
     echo "FAILED: Severian compiler is not executable: $severian_bin" >&2
@@ -65,16 +71,16 @@ run_one() {
 
     local status
     if (( show_output != 0 )); then
-        timeout --verbose "${timeout_seconds}s" "$severian_bin" test "$file" 2>&1 | tee "$log"
+        timeout --verbose --kill-after=2s "${timeout_seconds}s" prlimit --as="$memory_bytes" --core=0 -- "$severian_bin" test "$file" 2>&1 | tee "$log"
         status=${PIPESTATUS[0]}
     else
-        timeout --verbose "${timeout_seconds}s" "$severian_bin" test "$file" >"$log" 2>&1
+        timeout --verbose --kill-after=2s "${timeout_seconds}s" prlimit --as="$memory_bytes" --core=0 -- "$severian_bin" test "$file" >"$log" 2>&1
         status=$?
     fi
     printf '%s\n' "$status" >"$status_file"
 }
 
-echo "sev compiler source tests: $total package/scenario targets, $parallel_jobs jobs, ${timeout_seconds}s per target"
+echo "sev compiler source tests: $total package/scenario targets, $parallel_jobs jobs, ${timeout_seconds}s and $memory_bytes bytes per target"
 
 batch_start=0
 while (( batch_start < total )); do

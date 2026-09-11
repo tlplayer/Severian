@@ -1,0 +1,17 @@
+import package
+import environment
+import * from "../../../pipeline.sev" as examples
+
+
+test "native ownership builder compilation stays within its budget":
+    root = examples.repository()
+    compiler = environment.get("SEVERIAN_SOURCE_COMPILER", root + "/sev_compiler/package.pkg/host/dev/bin/sev_compiler")
+    directory = package.temporary("/tmp", "sev-compile-budget-")
+    subject = root + "/docs/examples/06-ownership/02-owned-builder.sev"
+    command = [compiler, "build", subject, "--sysroot", root, "--emit", "mlir", "-o", directory + "/builder.mlir"]
+    report = package.pipeline([package.Step("ownership builder", command, root, timeout=15, memory_bytes=2000000000)], directory + "/reports")
+    assert(report.failed == 0)
+    assert(report.results[0].peak_rss_kib > 0)
+    assert(report.results[0].peak_rss_kib < 1953125)
+    assert(report.results[0].seconds < 15.0)
+    package.remove_tree(directory)

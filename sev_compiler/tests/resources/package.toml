@@ -1,0 +1,21 @@
+[package]
+name = "compiler-resource-tests"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "limits"
+path = "src/limits.sev"
+
+[[bin]]
+name = "compilation"
+path = "src/compilation.sev"
+
+[dependencies]
+package = { path = "../../../library/package" }
+source = { path = "../../source" }
+lexer = { path = "../../frontend/lexer" }
+
+[test]
+memory-max = "3GB"
+timeout-seconds = 60

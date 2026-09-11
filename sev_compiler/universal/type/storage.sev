@@ -3,36 +3,36 @@ import * from "scalar.sev"
 
 
 # Storage types retain their element identity independently of value layouts.
-def buffer_element(id: TypeId, records: list[RecordDeclaration]) -> TypeId:
+def buffer_element(id: TypeId, records: borrow list[RecordDeclaration]) -> TypeId:
     if scalar_representation(id) == "buffer":
         return TypeId(id.index - 200)
-    for record in records:
+    for record in borrow records:
         if record.type_id.index == id.index:
             return record.storage_element
     return TypeId(0)
 
 
-def indirect_value(id: TypeId, records: list[RecordDeclaration]) -> bool:
-    for record in records:
+def indirect_value(id: TypeId, records: borrow list[RecordDeclaration]) -> bool:
+    for record in borrow records:
         if record.type_id.index == id.index and record.representation == "OwnedBuffer":
             return true
     return id.index >= 1000 and buffer_element(id, records).index == 0
 
 
-def owned_record(id: TypeId, records: list[RecordDeclaration], active: list[int] = []) -> bool:
+def owned_record(id: TypeId, records: borrow list[RecordDeclaration], active: list[int] = []) -> bool:
     if not indirect_value(id, records) or int(id.index) in active:
         return false
     path = active[:]
     path.append(int(id.index))
-    for record in records:
+    for record in borrow records:
         if record.type_id.index == id.index:
-            for field in record.fields:
+            for field in borrow record.fields:
                 if field.type_id.index == 3 or buffer_element(field.type_id, records).index != 0 or owned_record(field.type_id, records, path):
                     return true
     return false
 
 
-def copy_storage(id: TypeId, records: list[RecordDeclaration], active: list[int] = []) -> bool:
+def copy_storage(id: TypeId, records: borrow list[RecordDeclaration], active: list[int] = []) -> bool:
     if id.index == 2:
         return false
     if id.index >= 100000:
@@ -44,14 +44,14 @@ def copy_storage(id: TypeId, records: list[RecordDeclaration], active: list[int]
     representation = scalar_representation(id)
     if representation != "unknown":
         return representation in ["integer", "float", "index", "pointer"]
-    for record in records:
+    for record in borrow records:
         if record.type_id.index == id.index:
-            for method in record.methods:
+            for method in borrow record.methods:
                 if method.name == "drop":
                     return false
             path = active[:]
             path.append(int(id.index))
-            for field in record.fields:
+            for field in borrow record.fields:
                 if not copy_storage(field.type_id, records, path):
                     return false
             return true

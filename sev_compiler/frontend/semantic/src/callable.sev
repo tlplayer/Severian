@@ -107,9 +107,9 @@ def callable_inferred_signature(state: CallableAnalysis, function: universal.Fun
         return function
     parameters: list[universal.FunctionParameter] = []
     index := 0
-    candidates = state.functions[:]
-    for generic in state.generics:
-        candidates.append(generic)
+    # Most signatures need no inference; cached queries must not copy the
+    # complete function/AST inventory either.
+    candidates: list[universal.FunctionDeclaration] := []
     for parameter in function.parameters:
         explicit := false
         for modifier in parameter.modifiers:
@@ -119,10 +119,14 @@ def callable_inferred_signature(state: CallableAnalysis, function: universal.Fun
         if owning and not explicit:
             key = string(function.id.value) + ":" + parameter.name
             effect := -1
-            for cached in state.parameter_effects:
+            for cached in borrow state.parameter_effects:
                 if cached.key == key:
                     effect = cached.effect
             if effect < 0:
+                if len(candidates) == 0:
+                    candidates = state.functions[:]
+                    for generic in borrow state.generics:
+                        candidates.append(generic)
                 effect = parameter_effects.infer(function, index, candidates, state.parameter_effects)
                 state.parameter_effects.append(parameter_effects.CachedEffect(key, effect))
             parameter.modifiers = parameter.modifiers[:]
@@ -1565,10 +1569,10 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
     return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
 
 
-def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
+def callable_has_drop(state: borrow CallableAnalysis, type_id: universal.TypeId) -> bool:
     index = int(type_id.index) - 1000
     if index >= 0 and index < len(state.records):
-        for method in state.records[index].methods:
+        for method in borrow state.records[index].methods:
             if method.name == "drop" or method.name.ends_with(".drop"):
                 return true
     return false

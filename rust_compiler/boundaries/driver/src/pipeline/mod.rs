@@ -75,6 +75,7 @@ pub struct Compiler {
     packages: Option<severian_modules::PackageGraph>,
     coverage: bool,
     max_errors: usize,
+    native_optimization: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +127,7 @@ impl Compiler {
             packages: None,
             coverage: false,
             max_errors: 5,
+            native_optimization: 0,
         }
     }
 
@@ -141,6 +143,11 @@ impl Compiler {
 
     pub fn with_max_errors(mut self, max_errors: usize) -> Self {
         self.max_errors = max_errors.max(1);
+        self
+    }
+
+    pub fn with_native_optimization(mut self, optimization: u8) -> Self {
+        self.native_optimization = optimization;
         self
     }
 
@@ -753,12 +760,17 @@ impl Compiler {
             let lir = severian_lowering::lower(&resumed, types, &self.target)
                 .map_err(CompileError::Lowering)?;
             if severian_backend::supports_direct_lir(&lir) {
-                return severian_backend::emit_executable(&lir, output)
-                    .map_err(CompileError::Backend);
+                return severian_backend::emit_executable_optimized(
+                    &lir,
+                    output,
+                    self.native_optimization,
+                )
+                .map_err(CompileError::Backend);
             }
         }
         let program = self.compile_plan(&plan)?;
         let mut linker_arguments = linker_arguments;
+        linker_arguments.push(format!("-O{}", self.native_optimization));
         if !program.tensor_jit_source.is_empty() {
             stage_tensor_jit_provider(output)?;
             if program.tensor_jit_requires_gpu {

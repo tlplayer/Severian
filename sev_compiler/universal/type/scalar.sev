@@ -13,28 +13,79 @@ class ScalarType:
 
 
 def scalar_types() -> list[ScalarType]:
-    return [ScalarType(TypeId(1), "bool", 1, true), ScalarType(TypeId(2), "unit", 0, false), ScalarType(TypeId(3), "string", 8, false, "utf8"), ScalarType(TypeId(4), "index", 64, false, "index"), ScalarType(TypeId(5), "native_ptr", 64, false, "pointer"), ScalarType(TypeId(6), "None", 64, false, "pointer"), ScalarType(TypeId(7), "absent", 64, false, "pointer"), ScalarType(TypeId(164), "f64", 64, false, "float"), ScalarType(TypeId(108), "u8", 8, false, signed=false), ScalarType(TypeId(516), "u16", 16, false, signed=false), ScalarType(TypeId(532), "u32", 32, false, signed=false), ScalarType(TypeId(564), "u64", 64, false, signed=false), ScalarType(TypeId(132), "char", 32, false, signed=false), ScalarType(TypeId(8), "i8", 8, false), ScalarType(TypeId(16), "i16", 16, false), ScalarType(TypeId(32), "i32", 32, false), ScalarType(TypeId(64), "i64", 64, false)]
+    values: list[ScalarType] = []
+    for identity in [1, 2, 3, 4, 5, 6, 7, 164, 108, 516, 532, 564, 132, 8, 16, 32, 64]:
+        value ?= scalar_type(TypeId(u32(identity)))
+        if value != None:
+            values.append(value)
+    return values
 
 
 def scalar_type_name(name: string) -> TypeId | None:
     if name == "usize":
         return TypeId(564)
-    for element in scalar_types():
-        if name == "$buffer$" + element.name:
-            return TypeId(200 + element.id.index)
-    for scalar in scalar_types():
-        if scalar.name == name or (name == "int" and scalar.name == "i64") or (name == "float" and scalar.name == "f64"):
-            return scalar.id
+    if name == "int":
+        return TypeId(64)
+    if name == "float":
+        return TypeId(164)
+    buffer = name.starts_with("$buffer$")
+    spelling = name[8:] if buffer else name
+    known ?= scalar_descriptor(TypeId(0), spelling)
+    if known != None:
+        return TypeId(known.id.index + 200) if buffer else known.id
+    return None
+
+
+def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
+    # Lookup constructs only the requested descriptor. Semantic analysis asks
+    # this on hot paths; allocating the full catalog here multiplies both
+    # allocation traffic and compile time. scalar_types retains catalog order.
+    if id.index == 1 or name == "bool":
+        return ScalarType(TypeId(1), "bool", 1, true)
+    if id.index == 2 or name == "unit":
+        return ScalarType(TypeId(2), "unit", 0, false)
+    if id.index == 3 or name == "string":
+        return ScalarType(TypeId(3), "string", 8, false, "utf8")
+    if id.index == 4 or name == "index":
+        return ScalarType(TypeId(4), "index", 64, false, "index")
+    if id.index == 5 or name == "native_ptr":
+        return ScalarType(TypeId(5), "native_ptr", 64, false, "pointer")
+    if id.index == 6 or name == "None":
+        return ScalarType(TypeId(6), "None", 64, false, "pointer")
+    if id.index == 7 or name == "absent":
+        return ScalarType(TypeId(7), "absent", 64, false, "pointer")
+    if id.index == 164 or name == "f64":
+        return ScalarType(TypeId(164), "f64", 64, false, "float")
+    if id.index == 108 or name == "u8":
+        return ScalarType(TypeId(108), "u8", 8, false, signed=false)
+    if id.index == 516 or name == "u16":
+        return ScalarType(TypeId(516), "u16", 16, false, signed=false)
+    if id.index == 532 or name == "u32":
+        return ScalarType(TypeId(532), "u32", 32, false, signed=false)
+    if id.index == 564 or name == "u64":
+        return ScalarType(TypeId(564), "u64", 64, false, signed=false)
+    if id.index == 132 or name == "char":
+        return ScalarType(TypeId(132), "char", 32, false, signed=false)
+    if id.index == 8 or name == "i8":
+        return ScalarType(TypeId(8), "i8", 8, false)
+    if id.index == 16 or name == "i16":
+        return ScalarType(TypeId(16), "i16", 16, false)
+    if id.index == 32 or name == "i32":
+        return ScalarType(TypeId(32), "i32", 32, false)
+    if id.index == 64 or name == "i64":
+        return ScalarType(TypeId(64), "i64", 64, false)
     return None
 
 
 def scalar_type(id: TypeId) -> ScalarType | None:
-    for element in scalar_types():
-        if id.index == 200 + element.id.index:
-            return ScalarType(id, "$buffer$" + element.name, element.bits, false, "buffer")
-    for scalar in scalar_types():
-        if scalar.id.index == id.index:
-            return scalar
+    known ?= scalar_descriptor(id)
+    if known != None:
+        return known
+    if id.index > 200 and id.index < 1000:
+        element ?= scalar_type(TypeId(id.index - 200))
+        if element != None:
+            if element.representation != "buffer":
+                return ScalarType(id, "$buffer$" + element.name, element.bits, false, "buffer")
     return None
 
 

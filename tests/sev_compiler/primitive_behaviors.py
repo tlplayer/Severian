@@ -3,10 +3,10 @@
 import os
 import shutil
 import signal
-import subprocess
 import unittest
 
 from migration import COMPILER, MigrationCase, ROOT
+from resource_guard import run as guarded_run
 
 
 class PrimitiveBehaviors(MigrationCase):
@@ -68,10 +68,10 @@ class PrimitiveBehaviors(MigrationCase):
                     result = self.invoke([COMPILER, "check", spelling, "--sysroot", ROOT], cwd=ROOT)
                     self.assertEqual(result.returncode, 0, result.stderr)
         subject = ROOT / "sev_compiler/universal/primitive/numeric/operators.sev"
-        result = subprocess.run([str(COMPILER), "check", os.path.relpath(subject, self.directory),
+        result = guarded_run([str(COMPILER), "check", os.path.relpath(subject, self.directory),
                                  "--sysroot", str(ROOT)], cwd=self.directory,
                                 env={**os.environ, "PWD": "/unrelated"},
-                                capture_output=True, text=True, timeout=180)
+                                timeout=180)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_documentation_and_character_literals(self):

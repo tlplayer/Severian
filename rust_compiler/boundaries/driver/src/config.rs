@@ -1052,6 +1052,9 @@ mod tests {
         let template = catalog.template("hello");
         assert!(template.contains("profile = \"dev\""));
         assert!(template.contains("target = \"host\""));
+        assert!(template.contains("timeout-seconds = 60"));
+        assert_eq!(catalog.default("test.timeout-seconds").unwrap(), "60");
+        assert!(catalog.validate("test.timeout-seconds", "-1").is_err());
         assert!(!template.contains("backend ="));
     }
 

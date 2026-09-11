@@ -11,9 +11,9 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 
 from bootstrap_mlir import ROOT, SEED
+from resource_guard import run as guarded_run
 
 
 PRIMITIVES = ROOT / "sev_compiler/universal/primitive"
@@ -30,20 +30,20 @@ def digest(path):
 
 def invoke(arguments, directory, name, timeout):
     command = list(map(str, arguments))
+    measurements = {}
     try:
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=timeout)
-        code, stdout, stderr = result.returncode, result.stdout, result.stderr
-        status = "pass" if code == 0 else "crash" if code < 0 else "fail"
-    except subprocess.TimeoutExpired as error:
-        code, stdout, stderr = None, error.stdout or b"", error.stderr or b""
-        status = "timeout"
+        result = guarded_run(command, cwd=ROOT, timeout=timeout,
+                             metrics_path=directory / (name + '.resources.txt'))
+        code, stdout, stderr = result.returncode, result.stdout.encode(), result.stderr.encode()
+        measurements = result.resources
+        status = measurements['limit'] or ("pass" if code == 0 else "crash" if code < 0 else "fail")
     except OSError as error:
         code, stdout, stderr = None, b"", str(error).encode()
         status = "unavailable"
     (directory / (name + ".stdout")).write_bytes(stdout)
     (directory / (name + ".stderr")).write_bytes(stderr)
     return {"status": status, "exit": code, "command": command,
-            "stdout": name + ".stdout", "stderr": name + ".stderr"}
+            "stdout": name + ".stdout", "stderr": name + ".stderr", **measurements}
 
 
 def seed_declarations(ast, subject):

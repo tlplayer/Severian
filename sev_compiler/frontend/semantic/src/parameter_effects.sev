@@ -9,7 +9,7 @@ class CachedEffect:
 
 # Effects form a lattice: read < write < transfer. Aliases retain their
 # parameter origin. Traversing a recursive edge again adds no new operation.
-def root(value: universal.Expression) -> string:
+def root(value: borrow universal.Expression) -> string:
     match value.kind:
         case Name:
             return name
@@ -31,11 +31,11 @@ def root(value: universal.Expression) -> string:
     return ""
 
 
-def parameter(function: universal.FunctionDeclaration, index: int, functions: list[universal.FunctionDeclaration], active: list[string] = [], cache: list[CachedEffect] = []) -> int:
+def parameter(function: borrow universal.FunctionDeclaration, index: int, functions: borrow list[universal.FunctionDeclaration], active: list[string] = [], cache: list[CachedEffect] = []) -> int:
     if index >= len(function.parameters):
         return 1
     selected = function.parameters[index]
-    for modifier in selected.modifiers:
+    for modifier in borrow selected.modifiers:
         if modifier.name in ["borrow", "inferred read"]:
             return 0
         if modifier.name in ["borrow mut", "inferred write"]:
@@ -44,7 +44,7 @@ def parameter(function: universal.FunctionDeclaration, index: int, functions: li
             return 2
     identity = function.name + ":" + string(index)
     previous := 0
-    for cached in cache:
+    for cached in borrow cache:
         if cached.key == identity:
             previous = cached.effect
     if identity in active:
@@ -55,11 +55,15 @@ def parameter(function: universal.FunctionDeclaration, index: int, functions: li
     if body != None:
         effect = block_effect(body, [selected.name, "$binding$" + string(index)], functions, path, function.result_mode == "", cache)
         cursor := 0
-        for cached in cache:
+        found := -1
+        for cached in borrow cache:
             if cached.key == identity:
-                cache[cursor] = CachedEffect(identity, max(previous, effect))
-                return max(previous, effect)
+                found = cursor
+                break
             cursor += 1
+        if found >= 0:
+            cache[found] = CachedEffect(identity, max(previous, effect))
+            return max(previous, effect)
         cache.append(CachedEffect(identity, effect))
         return effect
     operation = boundary.scalar_boundary(function, "mlir")
@@ -72,7 +76,7 @@ def parameter(function: universal.FunctionDeclaration, index: int, functions: li
     return 1
 
 
-def effect_callable_path(value: universal.Expression) -> string:
+def effect_callable_path(value: borrow universal.Expression) -> string:
     match value.kind:
         case Name:
             return name
@@ -82,29 +86,29 @@ def effect_callable_path(value: universal.Expression) -> string:
             return ""
 
 
-def call(name: string, index: int, functions: list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
+def call(name: string, index: int, functions: borrow list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
     result := 0
     found := false
-    for function in functions:
+    for function in borrow functions:
         if function.name == name or function.name.ends_with("." + name):
             found = true
             result = max(result, parameter(function, index, functions, active, cache))
     return result if found else 1
 
 
-def expression_effect(value: universal.Expression, aliases: list[string], functions: list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
+def expression_effect(value: borrow universal.Expression, aliases: list[string], functions: borrow list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect]) -> int:
     result := 0
     match value.kind:
         case ResolvedCall:
-            for argument in arguments:
+            for argument in borrow arguments:
                 result = max(result, expression_effect(argument.value, aliases, functions, active, cache))
                 if root(argument.value) in aliases:
                     match callee:
                         case Direct:
-                            for target in functions:
+                            for target in borrow functions:
                                 if target.definition.declaration.value == function.declaration.value:
                                     index := 0
-                                    for input in target.parameters:
+                                    for input in borrow target.parameters:
                                         if argument.name == input.name:
                                             result = max(result, parameter(target, index, functions, active, cache))
                                         index += 1
@@ -129,7 +133,7 @@ def expression_effect(value: universal.Expression, aliases: list[string], functi
                 case _:
                     pass
             index := shift
-            for argument in arguments:
+            for argument in borrow arguments:
                 result = max(result, expression_effect(argument.value, aliases, functions, active, cache))
                 if root(argument.value) in aliases:
                     result = max(result, call(called, index, functions, active, cache))
@@ -153,16 +157,16 @@ def expression_effect(value: universal.Expression, aliases: list[string], functi
         case Subscript:
             result = max(expression_effect(object, aliases, functions, active, cache), expression_effect(index, aliases, functions, active, cache))
         case ListLiteral:
-            for element in elements:
+            for element in borrow elements:
                 result = max(result, expression_effect(element, aliases, functions, active, cache))
         case _:
             pass
     return result
 
 
-def block_effect(body: universal.Block, aliases: list[string], functions: list[universal.FunctionDeclaration], active: list[string], owns_result: bool, cache: list[CachedEffect]) -> int:
+def block_effect(body: borrow universal.Block, aliases: list[string], functions: borrow list[universal.FunctionDeclaration], active: list[string], owns_result: bool, cache: list[CachedEffect]) -> int:
     result := 0
-    for statement in body.statements:
+    for statement in borrow body.statements:
         match statement:
             case BindingStatement:
                 result = max(result, expression_effect(binding.value, aliases, functions, active, cache))
@@ -173,7 +177,7 @@ def block_effect(body: universal.Block, aliases: list[string], functions: list[u
                     if binding.type_id.index != 0:
                         aliases.append("$binding$" + string(binding.id.index))
             case GrammarApply:
-                for operand in operands:
+                for operand in borrow operands:
                     result = max(result, expression_effect(operand, aliases, functions, active, cache))
                 if syntax.grammar_name == "Assign" and len(operands) > 0:
                     if root(operands[0]) in aliases:
@@ -185,7 +189,7 @@ def block_effect(body: universal.Block, aliases: list[string], functions: list[u
                                 result = 2
                         case _:
                             pass
-                for nested in bodies:
+                for nested in borrow bodies:
                     result = max(result, block_effect(nested, aliases, functions, active, owns_result, cache))
             case FieldSet:
                 if root(target) in aliases:
@@ -230,18 +234,18 @@ def block_effect(body: universal.Block, aliases: list[string], functions: list[u
     return result
 
 
-def infer(function: universal.FunctionDeclaration, index: int, functions: list[universal.FunctionDeclaration], cache: list[CachedEffect]) -> int:
+def infer(function: borrow universal.FunctionDeclaration, index: int, functions: borrow list[universal.FunctionDeclaration], cache: list[CachedEffect]) -> int:
     # A pass visits each reachable parameter once. Repeat until the finite
     # lattice stabilizes so recursive and mutually recursive callers agree.
     result := 0
     while true:
         before := 0
         count = len(cache)
-        for cached in cache:
+        for cached in borrow cache:
             before += cached.effect
         result = parameter(function, index, functions, [], cache)
         after := 0
-        for cached in cache:
+        for cached in borrow cache:
             after += cached.effect
         if before == after and count == len(cache):
             return result

@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 import shutil
-import subprocess
+from resource_guard import run as guarded_run
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,10 +23,9 @@ def tool(variable, default):
 
 
 def run(arguments, *, output=None, succeeds=True, cwd=ROOT):
-    result = subprocess.run(
-        [str(argument) for argument in arguments], cwd=cwd,
-        capture_output=True, text=True, timeout=180,
-    )
+    result = guarded_run(arguments, cwd=cwd, timeout=180)
+    if result.resources['limit']:
+        raise AssertionError(f"compiler resource budget exceeded: {arguments}\n{result.stderr}")
     if output:
         output.write_text(result.stdout)
     if (result.returncode == 0) != succeeds:

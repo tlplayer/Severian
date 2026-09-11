@@ -12,6 +12,11 @@ default-run = "sev_compiler"
 
 [package.metadata.pipeline]
 sections = "00-getting-started,01-types,02-functions,03-testing"
+timeout-seconds = "30"
+memory-bytes = "3000000000"
+compiler-timeout-seconds = "180"
+compiler-memory-bytes = "3000000000"
+compiler-profile = "release"
 
 ### TARGETS ############################################################
 
@@ -80,6 +85,8 @@ lto = true
 [test]
 coverage-min = 0
 memory-max = "4GB"
+# The example-suite executable runs many individually guarded pipeline steps.
+timeout-seconds = 1800
 leaks = "deny"
 
 ### PUBLISHING ##########################################################

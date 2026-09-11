@@ -128,7 +128,14 @@ path = "test.memory-max"
 group = "Testing"
 type = "string"
 default = "4GB"
-description = "Maximum memory for a test process."
+description = "Inherited address-space budget for source package test compilation and execution."
+
+[[option]]
+path = "test.timeout-seconds"
+group = "Testing"
+type = "integer"
+default = "60"
+description = "Wall-clock budget for source package test compilation and execution."
 
 [[option]]
 path = "test.leaks"

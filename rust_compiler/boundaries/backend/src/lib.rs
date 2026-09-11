@@ -688,9 +688,18 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
 }
 
 pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact, BackendError> {
+    emit_executable_optimized(module, output, 0)
+}
+
+pub fn emit_executable_optimized(
+    module: &LoweredModule,
+    output: &Path,
+    optimization: u8,
+) -> Result<Artifact, BackendError> {
     let source = render_c(module)?;
     let mut child = Command::new("cc")
         .args(["-std=c11", "-x", "c", "-"])
+        .arg(format!("-O{optimization}"))
         .args(severian_runtime::native_sources())
         .arg("-lm")
         .arg("-o")

@@ -2,6 +2,7 @@ import * from "host.sev" as host
 import file
 import process
 import os
+import * from "../../testing/src/resources.sev" as resources
 
 
 class Step:
@@ -15,6 +16,7 @@ class Step:
     enabled: bool = true
     stdout_fixture: string = ""
     stderr_fixture: string = ""
+    memory_bytes: int = 3000000000
 
 
 class Result:
@@ -25,6 +27,10 @@ class Result:
     diagnostic: string = ""
     stdout: string = ""
     stderr: string = ""
+    peak_rss_kib: int = 0
+    user_seconds: float = 0.0
+    system_seconds: float = 0.0
+    metrics: string = ""
 
 
 class Report:
@@ -61,8 +67,8 @@ def validate(steps: list[Step]) -> unit | Error:
         for dependency in step.dependencies:
             if dependency not in names:
                 throw Error("pipeline dependency must precede its consumer: " + dependency)
-        if step.enabled and (len(step.arguments) == 0 or step.timeout <= 0):
-            throw Error("pipeline step requires a command and a positive timeout: " + step.name)
+        if step.enabled and (len(step.arguments) == 0 or step.timeout <= 0 or step.memory_bytes <= 0):
+            throw Error("pipeline step requires a command and positive time/memory limits: " + step.name)
         names.append(step.name)
 
 
@@ -116,7 +122,7 @@ def save(report: Report) -> unit | Error:
         markdown += " | " + string(counts[0]) + "/" + string(total) + " (" + string(percent) + "%) |\n"
         coverage.append(json_string(stage) + ":{" + values.join(",") + ",\"eligible\":" + string(total) + ",\"success_percent\":" + string(percent) + "}")
     markdown += "\n"
-    markdown += "| Step | Stage | Status | Seconds | Diagnostic |\n| --- | --- | --- | ---: | --- |\n"
+    markdown += "| Step | Stage | Status | Seconds | Peak RSS (KiB) | Diagnostic |\n| --- | --- | --- | ---: | ---: | --- |\n"
     for result in report.results:
         arguments: list[string] = []
         for argument in result.step.arguments:
@@ -127,12 +133,18 @@ def save(report: Report) -> unit | Error:
         row += ",\"status\":" + json_string(result.status)
         row += ",\"exit_code\":" + string(result.exit_code)
         row += ",\"seconds\":" + string(result.seconds)
+        row += ",\"peak_rss_kib\":" + string(result.peak_rss_kib)
+        row += ",\"user_seconds\":" + string(result.user_seconds)
+        row += ",\"system_seconds\":" + string(result.system_seconds)
+        row += ",\"timeout_seconds\":" + string(result.step.timeout)
+        row += ",\"memory_bytes\":" + string(result.step.memory_bytes)
+        row += ",\"metrics\":" + json_string(result.metrics)
         row += ",\"command\":[" + arguments.join(",") + "]"
         row += ",\"diagnostic\":" + json_string(result.diagnostic)
         row += ",\"stdout\":" + json_string(result.stdout)
         row += ",\"stderr\":" + json_string(result.stderr) + "}"
         rows.append(row)
-        markdown += "| " + result.step.name.replace("|", "\\|") + " | " + result.step.stage + " | " + result.status + " | " + string(result.seconds) + " | " + result.diagnostic.replace("|", "\\|").replace("\n", " ") + " |\n"
+        markdown += "| " + result.step.name.replace("|", "\\|") + " | " + result.step.stage + " | " + result.status + " | " + string(result.seconds) + " | " + string(result.peak_rss_kib) + " | " + result.diagnostic.replace("|", "\\|").replace("\n", " ") + " |\n"
     document := "{\"schema_version\":1,\"coverage_kind\":\"example-stage\""
     document += ",\"passed\":" + string(report.passed)
     document += ",\"failed\":" + string(report.failed)
@@ -147,10 +159,9 @@ def save(report: Report) -> unit | Error:
     host.replace_file(report.directory + "/REPORT.md.tmp", report.directory + "/REPORT.md")
 
 
-def execute(step: Step, stdout: string, stderr: string) -> Result:
-    words: list[string] = ["timeout", "--kill-after=2", string(step.timeout)]
-    for argument in step.arguments:
-        words.append(argument)
+def execute(step: Step, stdout: string, stderr: string) -> Result | Error:
+    metrics = stderr + ".resources"
+    words = resources.guarded_command(step.arguments, step.timeout, step.memory_bytes, metrics)
     quoted: list[string] = []
     for word in words:
         quoted.append(host.quote(word))
@@ -159,6 +170,15 @@ def execute(step: Step, stdout: string, stderr: string) -> Result:
     command = "(cd " + host.quote(step.directory) + " && " + quoted.join(" ") + ") > " + host.quote(stdout) + " 2> " + host.quote(stderr)
     code = process.run(command)
     result = Result(step, "pass" if code == 0 else "fail", code, host.monotonic() - started, stdout=stdout, stderr=stderr)
+    result.metrics = metrics
+    if os.is_file(metrics):
+        for line in file.raw(metrics).split("\n"):
+            if line.starts_with("peak_rss_kib="):
+                result.peak_rss_kib = int(line[13:])
+            elif line.starts_with("user_seconds="):
+                result.user_seconds = float(line[13:])
+            elif line.starts_with("system_seconds="):
+                result.system_seconds = float(line[15:])
     if code == 124 or code == 137:
         result.status = "timeout"
     if code != 0:

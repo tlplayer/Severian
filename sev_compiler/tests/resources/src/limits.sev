@@ -1,0 +1,28 @@
+import package
+import * from "../../../../library/testing/src/resources.sev" as resources
+
+
+test "compiler command budgets are applied before execution":
+    directory = package.temporary("/tmp", "sev-resource-test-")
+    steps = [
+        package.Step("success", ["/bin/sh", "-c", "printf guarded"], directory, timeout=2, memory_bytes=64000000),
+        package.Step("failure", ["/bin/sh", "-c", "exit 7"], directory, timeout=2, memory_bytes=64000000),
+        package.Step("timeout", ["/bin/sh", "-c", "sleep 10"], directory, timeout=1, memory_bytes=64000000),
+        package.Step("allocation", ["python3", "-c", "data = bytearray(128 * 1024 * 1024)"], directory, timeout=2, memory_bytes=64000000),
+    ]
+    report = package.pipeline(steps, directory + "/reports")
+    assert(report.results[0].status == "pass")
+    assert(report.results[0].peak_rss_kib > 0)
+    assert(report.results[1].exit_code == 7)
+    assert(report.results[2].status == "timeout")
+    assert(report.results[3].status == "fail")
+    assert(report.passed == 1)
+    assert(report.failed == 3)
+    package.remove_tree(directory)
+
+
+test "compiler guard preserves command arguments":
+    command = resources.guarded_command(["/bin/echo", "space ; literal"], 2, 64000000)
+    assert(command[-1] == "space ; literal")
+    assert(resources.memory_budget("4GB") == 4000000000)
+    assert(resources.memory_budget("64MiB") == 67108864)

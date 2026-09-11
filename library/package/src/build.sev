@@ -6,6 +6,7 @@ import * from "resolve.sev"
 import * from "archive.sev"
 import os
 import path
+import * from "../../testing/src/resources.sev" as resources
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
     return project.root + "/package.pkg/" + safe_name(platform) + "/" + safe_name(profile)
@@ -59,7 +60,7 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
     artifacts: list[Artifact] = []
     for unit in plan.units:
         if unit.package_index != 0 or (plan.mode == "check" and plan.emit == ""):
-            compile_unit(compiler, unit, plan.resolution, "check")
+            compile_unit(compiler, unit, plan.resolution, "check", guard_tests=plan.mode == "test")
         elif unit.target.kind == "library" and not unit.include_tests and plan.emit == "":
             listing = BuildUnit(unit.package_index, unit.target, unit.platform, unit.profile, unit.output + ".sources", false)
             compile_unit(compiler, listing, plan.resolution, "sources")
@@ -87,6 +88,8 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
             unit.output = stage + "/test-" + string(index)
             planned.units[index] = unit
     result = execute(planned, compiler)
+    memory = resources.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))
+    seconds = int(text_setting(project.manifest.entries, "test", "timeout-seconds", "60"))
     tests: list[TestResult] = []
     failed := 0
     for artifact in result.artifacts:
@@ -94,7 +97,7 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
             continue
         if request.emit != "":
             continue
-        status = command([artifact.path])
+        status = command(resources.guarded_command([artifact.path], seconds, memory))
         tests.append(TestResult(artifact.target.name, status))
         if status != 0:
             failed += 1

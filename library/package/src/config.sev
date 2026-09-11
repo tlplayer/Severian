@@ -27,6 +27,7 @@ def default_catalog() -> list[Option]:
         Option("profile.release.lto", "bool", "true", []),
         Option("test.coverage-min", "integer", "0", []),
         Option("test.memory-max", "string", "4GB", []),
+        Option("test.timeout-seconds", "integer", "60", []),
         Option("test.leaks", "enum", "deny", ["allow", "warn", "deny"]),
         Option("publish.registry", "string", "default", []),
         Option("publish.include-source", "bool", "true", []),
