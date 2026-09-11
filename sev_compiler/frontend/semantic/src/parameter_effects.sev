@@ -159,6 +159,8 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
             result = max(expression_effect(left, aliases, functions, active, cache), expression_effect(right, aliases, functions, active, cache))
         case Unary:
             result = expression_effect(operand, aliases, functions, active, cache)
+        case Stringify:
+            result = expression_effect(value, aliases, functions, active, cache)
         case Conditional:
             result = max(expression_effect(condition, aliases, functions, active, cache), max(expression_effect(then_value, aliases, functions, active, cache), expression_effect(else_value, aliases, functions, active, cache)))
         case Member:

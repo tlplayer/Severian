@@ -275,6 +275,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             return callable_expression(state, expression, universal.TypeId(0)).type_id
         case TypeLayout:
             return universal.TypeId(64)
+        case Stringify:
+            return universal.TypeId(3)
         case Name:
             index := 0
             for name_value in state.names:
@@ -369,6 +371,8 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                     return universal.TypeId(164)
                 case StringValue:
                     return universal.TypeId(3)
+                case CharacterValue:
+                    return universal.TypeId(132)
                 case _:
                     pass
         case Conditional:
@@ -972,7 +976,14 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         index += 1
             return error(callable_diagnostic("unknown field " + name, expression.span))
         case Stringify:
-            conversion = universal.Expression(universal.Call(universal.Expression(universal.Name("string"), expression.span), [universal.CallArgument(None, value, value.span)]), expression.span)
+            # Interpolation reads an existing string directly. Calling the
+            # identity conversion would infer an ownership transfer instead.
+            if expected.index != 0 and expected.index != 3:
+                return error(callable_diagnostic("formatted string does not match its expected scalar type", expression.span))
+            operand = callable_expression(state, value, universal.TypeId(0))
+            if operand.type_id.index == 3:
+                return operand
+            conversion = universal.Expression(universal.Call(universal.Expression(universal.Name("string"), expression.span), [universal.CallArgument(None, operand, operand.span)]), expression.span)
             return callable_expression(state, conversion, universal.TypeId(3))
         case Name:
             found := false
@@ -1135,15 +1146,17 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             operand_type := universal.TypeId(0) if comparison else expected
             left_hint = callable_hint(state, left)
             right_hint = callable_hint(state, right)
-            # Membership has heterogeneous operands: a value and its container.
-            # Do not propagate the element's expected type into the container.
-            aggregate = left_hint.index >= 1000 or right_hint.index >= 1000 or operator.symbol == "in"
+            # Resolve heterogeneous operands independently so operator lookup
+            # can select signatures such as +(string, char).
+            common_type = conversions.scalar_common_numeric(left_hint, right_hint)
+            heterogeneous = left_hint.index != 0 and right_hint.index != 0 and left_hint.index != right_hint.index and (not conversions.scalar_numeric(left_hint) or not conversions.scalar_numeric(right_hint))
+            independent = heterogeneous or left_hint.index >= 1000 or right_hint.index >= 1000 or operator.symbol == "in"
             if operand_type.index == 0:
-                operand_type = conversions.scalar_common_numeric(left_hint, right_hint)
-            if aggregate:
+                operand_type = common_type
+            if independent:
                 operand_type = universal.TypeId(0)
             lhs = callable_success(state, callable_operand(state, left, operand_type))
-            rhs = callable_success(state, callable_operand(state, right, universal.TypeId(0) if aggregate else lhs.type_id))
+            rhs = callable_success(state, callable_operand(state, right, universal.TypeId(0) if independent else lhs.type_id))
             operator_lookup = callable_operator(state, operator.symbol, [lhs.type_id, rhs.type_id], expression.span)
             registered ?= operator_lookup.function
             if registered != None:
@@ -1714,7 +1727,12 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                             return error(callable_diagnostic("indexed storage is not writable", span))
                     case _:
                         return error(callable_diagnostic("assignment requires a writable place", span))
-                typed = callable_expression(state, value, resolved.type_id)
+                value_type := resolved.type_id
+                if update != None:
+                    hint = callable_hint(state, value)
+                    if hint.index != 0 and hint.index != resolved.type_id.index and (not conversions.scalar_numeric(hint) or not conversions.scalar_numeric(resolved.type_id)):
+                        value_type = universal.TypeId(0)
+                typed = callable_expression(state, value, value_type)
                 match resolved.kind:
                     case FieldReference:
                         remaining: list[tuple[int, int]] = []

@@ -4,6 +4,7 @@
 # type list and no method-name convention.
 import * from "../char/utf8.sev" as primitive_character
 import * from "../string/core.sev" as primitive_string
+import * from "../string/format.sev" as primitive_format
 
 union NativeInteger:
     i8
@@ -114,6 +115,9 @@ test "character equality and scalar order":
 extend string:
     operator +[G:Add](right: Self) -> Self:
         return primitive_string.concat(self, right)
+
+    operator +[G:Add](right: char) -> Self:
+        return primitive_string.concat(self, primitive_format.string(right))
 
     operator ==[G:Equal](right: Self) -> bool:
         return primitive_string.equal(self, right)
