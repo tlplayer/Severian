@@ -95,6 +95,13 @@ Both forms update one canonical package export model.
 The package standard library SHALL be the source of truth for package operations. CLI commands delegate to the same APIs.
 
 
+# Versions
+
+the package's version: 0.1.0:commit:hash
+The hash is the hash of the package so that if the files change/the source is different we can do a diff of
+the commits for when it breaks without constantly tweaking/poluting the version number
+Or something like that
+
 # Local package registry
 
 Severian stores locally published packages in the user's XDG data directory:
@@ -1991,3 +1998,10 @@ package.pkg/
 ## Core invariant
 
 > Import reads the interface. Reachability requests implementation. Fingerprints decide whether compilation occurs.
+
+
+
+# Commands
+
+sev init should populate all the options of the package and create a golden path pipeline for the package 
+a bad build should be recoverable to a good build easily through the 
