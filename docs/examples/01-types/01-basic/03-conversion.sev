@@ -3,7 +3,7 @@ def main():
     ratio = 0.5
     enabled = true
     name = "severian"
-    character = "!"
+    character = '!'
     combined = string(count + ratio) + character
 
     print(count + int(0.8))
