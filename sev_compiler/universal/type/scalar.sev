@@ -14,7 +14,7 @@ class ScalarType:
 
 def scalar_types() -> list[ScalarType]:
     values: list[ScalarType] = []
-    for identity in [1, 2, 3, 4, 5, 6, 7, 164, 108, 516, 532, 564, 132, 8, 16, 32, 64]:
+    for identity in [1, 2, 3, 4, 5, 6, 7, 163, 164, 108, 516, 532, 564, 132, 8, 16, 32, 64]:
         value ?= scalar_type(TypeId(u32(identity)))
         if value != None:
             values.append(value)
@@ -54,6 +54,8 @@ def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
         return ScalarType(TypeId(6), "None", 64, false, "pointer")
     if id.index == 7 or name == "absent":
         return ScalarType(TypeId(7), "absent", 64, false, "pointer")
+    if id.index == 163 or name == "f32":
+        return ScalarType(TypeId(163), "f32", 32, false, "float")
     if id.index == 164 or name == "f64":
         return ScalarType(TypeId(164), "f64", 64, false, "float")
     if id.index == 108 or name == "u8":

@@ -67,7 +67,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         is_subject = provider_path == subject_path
         if is_subject:
             initializer_namespace = namespace
-        library = load_source_module(input if is_subject else read_source(provider_path), namespace, [], is_subject, files, registry)
+        library = load_source_module(input if is_subject else read_source(provider_path), namespace, [], is_subject, files, registry, sysroot=root)
         for item in library.items:
             parsed.items.append(item)
         subject_loaded = subject_loaded or is_subject
@@ -85,7 +85,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     # makes otherwise valid operator implementations ambiguous.
     if not subject_loaded:
         initializer_namespace = "__subject." if include_tests else ""
-        application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution)
+        application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution, root)
         for item in application.items:
             parsed.items.append(item)
     # Relative imports may register another source ID for a prelude file.

@@ -177,9 +177,10 @@ def __terminated(value: string) -> string:
 
 
 def __prefix(source: string, count: int, destination: string, position: int):
-    if position < count:
-        __store_byte(destination, position, text.byte_at(source, position))
-        __prefix(source, count, destination, position + 1)
+    cursor := position
+    while cursor < count:
+        __store_byte(destination, cursor, text.byte_at(source, cursor))
+        cursor += 1
 
 
 def __float(value: f64, precision: int) -> string:
@@ -205,6 +206,10 @@ def string(value: f64) -> string:
     if value != value:
         return "nan"
     return __float(value, 1)
+
+
+def string(value: f32) -> string:
+    return string(f64(value))
 
 
 def string(value: None) -> string:

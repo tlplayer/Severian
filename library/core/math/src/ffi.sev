@@ -1,0 +1,26 @@
+# Hosted libm boundary; linked by the math package and native source backend.
+@c(symbol="pow")
+def pow(base: f64, exponent: f64) -> f64
+@c(symbol="log")
+def log(value: f64) -> f64
+@c(symbol="log")
+def ln(value: f64) -> f64
+@c(symbol="log2")
+def log2(value: f64) -> f64
+@c(symbol="log10")
+def log10(value: f64) -> f64
+
+@c(symbol="sin")
+def sin(value: f64) -> f64
+@c(symbol="cos")
+def cos(value: f64) -> f64
+@c(symbol="tan")
+def tan(value: f64) -> f64
+
+@c(symbol="floor")
+def __floor(value: f64) -> f64
+@c(symbol="ceil")
+def __ceil(value: f64) -> f64
+@c(symbol="round")
+def __round(value: f64) -> f64
+

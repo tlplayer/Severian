@@ -154,9 +154,10 @@ test "equality compares bytes and lengths":
 
 
 def __copy(source: string, destination: string, offset: int, position: int):
-    if position < byte_count(source):
-        __store(__load(source, __index(position)), destination, __index(offset + position))
-        __copy(source, destination, offset, position + 1)
+    cursor := position
+    while cursor < byte_count(source):
+        __store(__load(source, __index(cursor)), destination, __index(offset + cursor))
+        cursor += 1
 
 
 # The result owns new storage; arguments remain borrowed immutable views.

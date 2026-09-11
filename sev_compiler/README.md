@@ -71,7 +71,9 @@ Supported input consists of integer/boolean bindings, signed `i8`, `i16`,
 binary `+`/`-`/`*`, integer comparisons, Boolean equality, and `assert(condition)`.
 Unsigned `u8` values and comparisons are supported. `char` literals represent
 Unicode scalars; `string` literals represent immutable UTF-8 byte views.
-`f64` (`float`) supports literals, arithmetic, comparisons, and signed zero.
+`f32` and `f64` (`float`) support literals, arithmetic, comparisons, and signed zero.
+Floating conversions retain their storage width; widening `f32` to `f64` is a
+promotion, while narrowing requires the lossy conversion policy.
 Decimal/exponent spellings survive into typed MLIR attributes without passing
 through the seed's lossy decimal formatter. `type(value)` produces the concrete
 type's display name while preserving evaluation of the value expression.
@@ -566,3 +568,14 @@ The scalar/macro path remains present during migration; generic functions now
 use source trait requirements, while the broader compiler-term generic system
 is still incomplete. Numeric-only macro enumeration is
 not the final family/constraint design.
+
+
+The numerics audit is `python3 tests/sev_compiler/numerics_examples.py`; it builds,
+runs, and tests every file in `docs/examples/08-numerics`, preserving failures
+and native artifacts. Focused checks are in `tests/sev_compiler/numerics.py`.
+Standalone named standard-library imports resolve package manifests below the
+selected sysroot's `library` directory. Package builds retain their explicit
+dependency graph. Both selective function import spellings and aliases are
+supported; unsupported selected declaration kinds produce diagnostics.
+The hosted math provider supplies libm bindings through source declarations.
+Tensor shape packs and tensor execution are not connected to this pipeline yet.

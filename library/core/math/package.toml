@@ -18,8 +18,8 @@ ffi = { path = "../../interop/ffi", version = "0.1.0" }
 name = "math-c"
 abi = "c-v1"
 targets = ["linux", "macos"]
-sources = ["native/math.c"]
-include = ["native/include"]
+sources = []
+include = []
 libraries = ["m"]
 
 [package.metadata.library]

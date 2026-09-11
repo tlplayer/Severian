@@ -7,15 +7,15 @@ def main():
     print(value)
 
 
-test "integer to float conversion is explicit":
+test "integer to float conversion can be explicit":
     count: i32 = 4
     ratio: f64 = 0.5
 
     assert(float(count) + ratio == 4.5)
 
-test with compiler:
+test "mixed arithmetic promotes integer operands":
     count: i32 = 4
     ratio: f64 = 0.5
 
-    reject:
-        value = count + ratio
+    assert(count + ratio == 4.5)
+    assert(ratio + count == 4.5)

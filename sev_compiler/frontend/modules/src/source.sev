@@ -35,6 +35,31 @@ def package_module(resolution: package.Resolution, importer: string, locator: st
     return error(diagnostics.diagnostic("E000124", "package source lookup failed"))
 
 
+# Standalone files resolve standard-library imports from the selected sysroot.
+# Package builds continue to use their explicit dependency graph.
+def standard_source(root: string, name: string) -> string | diagnostics.Diagnostic:
+    if root == "":
+        return error(diagnostics.diagnostic("E000124", "named import requires a sysroot or resolved package: " + name))
+    matches = package.capture(["find", "-H", root + "/library", "-maxdepth", "4", "-path", "*/" + name + "/package.toml", "-type", "f"])
+    selected := ""
+    for manifest in matches.split("\n"):
+        if manifest != "":
+            project = package.open(parent_path(manifest))
+            if project.manifest.name == name:
+                if selected != "":
+                    return error(diagnostics.diagnostic("E000124", "ambiguous standard library: " + name))
+                selected = parent_path(manifest) + "/" + package.library_target(project.manifest).path
+    if selected == "":
+        return error(diagnostics.diagnostic("E000124", "unknown standard library: " + name))
+    return selected
+
+
+def dependency_source(resolution: package.Resolution, importer: string, name: string, sysroot: string) -> string | diagnostics.Diagnostic:
+    if len(resolution.packages) > 0:
+        return package_dependency(resolution, importer, name)
+    return standard_source(sysroot, name)
+
+
 def normalized_path(path: string) -> string:
     components: list[string] = []
     for component in path.split("/"):
@@ -72,7 +97,7 @@ def registered_source(input: source.SourceFile, files: list[source.SourceFile]) 
     return registered
 
 
-def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], "")) -> unit | diagnostics.Diagnostic:
+def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> unit | diagnostics.Diagnostic:
     file = registered_source(input, files)
     if file.path in active:
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + file.path))
@@ -90,7 +115,11 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
             depth += 1
         elif token.kind == lexer.TokenKind.Dedent:
             depth -= 1
-        if depth == 0 and lexer.token_word(token) == "import" and index + 1 < len(tokens):
+        if depth == 0 and lexer.token_word(token) == "from" and index + 2 < len(tokens) and lexer.token_word(tokens[index + 2]) == "import":
+            child = dependency_source(resolution, file.path, lexer.token_word(tokens[index + 1]), sysroot)
+            discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
+        from_import = index >= 2 and lexer.token_word(tokens[index - 2]) == "from"
+        if depth == 0 and lexer.token_word(token) == "import" and not from_import and index + 1 < len(tokens):
             subject := index + 1
             if lexer.token_is_symbol(tokens[subject], "*"):
                 if subject + 2 >= len(tokens) or lexer.token_word(tokens[subject + 1]) != "from":
@@ -108,18 +137,20 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                     child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))
                     if len(resolution.packages) > 0:
                         child = package_module(resolution, file.path, string(tokens[subject]))
-                    discover_source_syntax(read_source(child), stack, files, registry, resolution)
+                    discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
                 case _:
-                    if len(resolution.packages) > 0:
-                        name = lexer.token_word(tokens[subject])
-                        child = package_dependency(resolution, file.path, name)
-                        discover_source_syntax(read_source(child), stack, files, registry, resolution)
+                    name := lexer.token_word(tokens[subject])
+                    # `import member from package` chooses the source package.
+                    if subject + 2 < len(tokens) and lexer.token_word(tokens[subject + 1]) == "from":
+                        name = lexer.token_word(tokens[subject + 2])
+                    child = dependency_source(resolution, file.path, name, sysroot)
+                    discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
         index += 1
     lexer.discover_operator_descriptors(tokens, registry)
     registry.discovered.append(file.path)
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], "")) -> universal.Module | diagnostics.Diagnostic:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path in active:
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + path))
@@ -127,13 +158,14 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
         return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
     stack = active[:]
     stack.append(path)
-    discover_source_syntax(input, [], files, registry, resolution)
+    discover_source_syntax(input, [], files, registry, resolution, sysroot)
     lexer.resolve_operator_descriptors(registry)
     discover_lexical_rules(files, registry)
     registered = registered_source(input, files)
     parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
     result = universal.empty_module()
     aliases: list[string] = []
+    named_modules: list[string] = []
     for item in parsed.items:
         match item:
             case Import:
@@ -153,20 +185,49 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_path := normalized_path(parent_path(path) + "/" + locator)
                         if len(resolution.packages) > 0:
                             child_path = package_module(resolution, path, locator)
-                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution)
+                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution, sysroot)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case Name:
-                        if len(resolution.packages) == 0:
-                            return error(diagnostics.diagnostic("E000120", "named imports require a resolved package"))
-                        child_path = package_dependency(resolution, path, name)
+                        source_name ?= declaration.source_name
+                        package_name := name
+                        if source_name != None:
+                            package_name = source_name
+                        child_path = dependency_source(resolution, path, package_name, sysroot)
                         alias ?= declaration.alias
-                        child_prefix := prefix + name + "."
+                        imported_name := name
                         if alias != None:
-                            child_prefix = prefix + alias + "."
-                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution)
+                            imported_name = alias
+                        child_prefix := prefix + package_name + "."
+                        if alias != None and source_name == None:
+                            child_prefix = prefix + imported_name + "."
+                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution, sysroot)
+                        selected := source_name == None
+                        module_key = child_path + ":" + child_prefix
                         for child_item in child.items:
-                            result.items.append(child_item)
+                            if module_key not in named_modules:
+                                result.items.append(child_item)
+                            if source_name != None:
+                                match child_item:
+                                    case Function:
+                                        if declaration.name == child_prefix + name:
+                                            # An alias needs fresh lowering metadata. Sharing
+                                            # the values list appends both functions' ABI
+                                            # parameters to the same declaration.
+                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode)
+                                            result.items.append(universal.Function(imported))
+                                            selected = true
+                                    case BindingItem:
+                                        if binding.name == child_prefix + name:
+                                            imported := binding
+                                            imported.name = prefix + imported_name
+                                            result.items.append(universal.BindingItem(imported))
+                                            selected = true
+                                    case _:
+                                        pass
+                        if not selected:
+                            return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
+                        named_modules.append(module_key)
                     case _:
                         return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
             case Trait:

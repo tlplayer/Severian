@@ -13,3 +13,4 @@ import * from "primitive/hosted_memory.sev"
 import * from "primitive/assertion.sev"
 import * from "primitive/string/methods.sev" as string_methods
 import * from "../../library/testing/src/lib.sev"
+import * from "../../library/core/math/src/lib.sev"

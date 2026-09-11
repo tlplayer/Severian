@@ -157,6 +157,18 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
             if not parser_at_identifier(parser, "def"):
                 return error(parser_fail(parser, "expected function after decorator"))
             result.items.append(universal.Function(parser_function_declaration(parser, decorators)))
+        elif parser_at_identifier(parser, "from"):
+            start = parser_next(parser).span
+            package_name = parser_identifier(parser, "expected an import source")[0]
+            if not parser_at_identifier(parser, "import"):
+                return error(parser_fail(parser, "expected import after source package"))
+            parser_next(parser)
+            member = parser_identifier(parser, "expected an import name")[0]
+            alias: string | None := None
+            if parser_at_identifier(parser, "as"):
+                parser_next(parser)
+                alias = parser_identifier(parser, "expected an import alias")[0]
+            result.items.append(universal.Import(universal.ImportDeclaration(universal.Name(member), package_name, alias, start)))
         elif parser_at_identifier(parser, "import"):
             result.items.append(universal.Import(parser_import_declaration(parser)))
         elif parser_at_identifier(parser, "trait"):
