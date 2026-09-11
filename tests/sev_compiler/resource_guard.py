@@ -6,6 +6,7 @@ CPU and peak-RSS measurements; profiling never invokes an interpreter on Sev.
 """
 import math
 import os
+import resource
 from pathlib import Path
 import signal
 import subprocess
@@ -57,6 +58,9 @@ def run(arguments, *, cwd=None, timeout=None, memory_bytes=None, env=None,
     configured_memory = int(os.environ.get('SEVERIAN_TEST_MEMORY_BYTES', DEFAULT_MEMORY))
     seconds = min(float(timeout), configured_time) if timeout is not None else configured_time
     memory = min(int(memory_bytes), configured_memory) if memory_bytes is not None else configured_memory
+    inherited_hard = resource.getrlimit(resource.RLIMIT_AS)[1]
+    if inherited_hard != resource.RLIM_INFINITY:
+        memory = min(memory, inherited_hard)
     if not math.isfinite(seconds) or seconds <= 0 or memory <= 0:
         raise ValueError('resource limits must be positive and finite')
     command = list(map(str, arguments))
@@ -121,7 +125,7 @@ def run(arguments, *, cwd=None, timeout=None, memory_bytes=None, env=None,
                 captured.append('')
             else:
                 with path.open('rb') as stream:
-                    data = stream.read(MAX_CAPTURE + 1)
+                    data = stream.read(min(path.stat().st_size, MAX_CAPTURE + 1))
                 if len(data) > MAX_CAPTURE:
                     code = code or 125
                     data = data[:MAX_CAPTURE] + b'\nresource guard: captured output limit exceeded\n'

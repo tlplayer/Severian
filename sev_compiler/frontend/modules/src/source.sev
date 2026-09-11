@@ -1,10 +1,22 @@
 import lexer
 import diagnostics
 import source
+from source import SourceFile
 import universal
 import package
+from io import IOError
 import * from "../../semantic/src/macros.sev" as macros
 import * from "lexical.sev"
+
+def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
+    # Normalize IO failures before entering a Diagnostic-only result. Passing
+    # the IOError payload through that result gives render the wrong layout.
+    result ?= source.load(path)
+    if result is SourceFile:
+        return result
+    if result is IOError:
+        return error(diagnostics.diagnostic("E000120", result.message))
+    return error(diagnostics.diagnostic("E000120", "could not read source file: " + path))
 
 def package_dependency(resolution: package.Resolution, importer: string, alias: string) -> string | diagnostics.Diagnostic:
     result ?= package.dependency_source(resolution, importer, alias)
@@ -96,12 +108,12 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                     child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))
                     if len(resolution.packages) > 0:
                         child = package_module(resolution, file.path, string(tokens[subject]))
-                    discover_source_syntax(source.load(child), stack, files, registry, resolution)
+                    discover_source_syntax(read_source(child), stack, files, registry, resolution)
                 case _:
                     if len(resolution.packages) > 0:
                         name = lexer.token_word(tokens[subject])
                         child = package_dependency(resolution, file.path, name)
-                        discover_source_syntax(source.load(child), stack, files, registry, resolution)
+                        discover_source_syntax(read_source(child), stack, files, registry, resolution)
         index += 1
     lexer.discover_operator_descriptors(tokens, registry)
     registry.discovered.append(file.path)
@@ -141,7 +153,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_path := normalized_path(parent_path(path) + "/" + locator)
                         if len(resolution.packages) > 0:
                             child_path = package_module(resolution, path, locator)
-                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry, resolution)
+                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case Name:
@@ -152,7 +164,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_prefix := prefix + name + "."
                         if alias != None:
                             child_prefix = prefix + alias + "."
-                        child = load_source_module(source.load(child_path), child_prefix, stack, false, files, registry, resolution)
+                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution)
                         for child_item in child.items:
                             result.items.append(child_item)
                     case _:

@@ -47,7 +47,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
     if unit.include_tests or guard_tests:
         config = resolution.packages[0].manifest.entries
         memory = resources.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
-        seconds = int(text_setting(config, "test", "timeout-seconds", "60"))
+        seconds = int(setting(config, "test", "timeout-seconds", "60"))
         arguments = resources.guarded_command(arguments, seconds, memory)
     status = command(arguments)
     remove_tree(stage)

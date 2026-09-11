@@ -711,10 +711,7 @@ fn agent_ir_emits_a_queryable_semantic_directory() {
         .unwrap();
     assert_eq!(marker["kind"], "X");
     assert_eq!(marker["declaration_kind"], "class");
-    assert!(marker["id"]
-        .as_str()
-        .unwrap()
-        .starts_with("X:declaration:"));
+    assert!(marker["id"].as_str().unwrap().starts_with("X:declaration:"));
     let tagged = records
         .iter()
         .find(|record| record["name"] == "Tagged")
@@ -731,7 +728,6 @@ fn agent_ir_emits_a_queryable_semantic_directory() {
             .unwrap();
         assert_eq!(symbol["kind"], declaration["kind"]);
     }
-
 
     assert!(declarations.contains("semantic_hash"), "{declarations}");
     assert!(declarations.contains("interface_hash"), "{declarations}");
@@ -983,25 +979,52 @@ fn native_optimization_uses_the_selected_profile() {
         "[package]\nname = \"optimized\"\n[[bin]]\nname = \"optimized\"\npath = \"src/main.sev\"\n[profile.release]\nopt-level = 2\n").unwrap();
     for (name, executable) in [("cc", "/usr/bin/cc"), ("clang", "clang-21")] {
         let shim = root.join("tools").join(name);
-        fs::write(&shim, format!(
+        fs::write(
+            &shim,
+            format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SEVERIAN_OPT_LOG\"\nexec {executable} \"$@\"\n"
-        )).unwrap();
+        ),
+        )
+        .unwrap();
         fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let log = root.join("arguments");
-    for program in ["assert(40 + 2 == 42)\n", "print(\"optimized\")\n"] {
+    for program in ["def main():\n    pass\n", "print(\"optimized\")\n"] {
         fs::write(root.join("src/main.sev"), program).unwrap();
         for (profile, expected) in [("dev", "-O0"), ("release", "-O2")] {
             fs::write(&log, "").unwrap();
-            let output = sev().arg("build").arg(&root).args(["--profile", profile])
-                .env("PATH", format!("{}:{}", root.join("tools").display(), std::env::var("PATH").unwrap()))
+            let output = sev()
+                .arg("build")
+                .arg(&root)
+                .args(["--profile", profile])
+                .env(
+                    "PATH",
+                    format!(
+                        "{}:{}",
+                        root.join("tools").display(),
+                        std::env::var("PATH").unwrap()
+                    ),
+                )
                 .env("SEVERIAN_CLANG", root.join("tools/clang"))
-                .env("SEVERIAN_OPT_LOG", &log).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                .env("SEVERIAN_OPT_LOG", &log)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             let arguments = fs::read_to_string(&log).unwrap();
-            assert!(arguments.lines().any(|argument| argument == expected), "{arguments}");
-            assert!(Command::new(root.join(format!("package.pkg/host/{profile}/bin/optimized")))
-                .status().unwrap().success());
+            assert!(
+                arguments.lines().any(|argument| argument == expected),
+                "{arguments}"
+            );
+            assert!(
+                Command::new(root.join(format!("package.pkg/host/{profile}/bin/optimized")))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         }
     }
     fs::remove_dir_all(root).unwrap();

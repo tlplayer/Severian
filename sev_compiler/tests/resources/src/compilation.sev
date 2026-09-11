@@ -15,3 +15,24 @@ test "native ownership builder compilation stays within its budget":
     assert(report.results[0].peak_rss_kib < 1953125)
     assert(report.results[0].seconds < 15.0)
     package.remove_tree(directory)
+
+
+test "optimized compiler reports missing source files without crashing":
+    root = examples.repository()
+    compiler = environment.get("SEVERIAN_SOURCE_COMPILER", root + "/sev_compiler/package.pkg/host/dev/bin/sev_compiler")
+    directory = package.temporary("/tmp", "sev-missing-source-")
+    package.write_text(directory + "/imports.sev", "import * from \"missing_budget_subject.sev\"\n")
+    package.write_text(directory + "/empty.sev", "")
+    steps = [
+        package.Step("missing input", [compiler, "build", directory + "/missing.sev", "--sysroot", root, "--emit", "mlir"], root, timeout=10),
+        package.Step("missing import", [compiler, "build", directory + "/imports.sev", "--sysroot", root, "--emit", "mlir"], root, timeout=10),
+        package.Step("missing prelude", [compiler, "build", directory + "/empty.sev", "--sysroot", directory, "--emit", "mlir"], root, timeout=10),
+    ]
+    report = package.pipeline(steps, directory + "/reports")
+    assert(report.failed == 3)
+    for result in report.results:
+        assert(result.exit_code == 1)
+        assert(package.read_text(result.stderr).contains("source file does not exist or is not a regular file"))
+    assert(package.read_text(report.results[1].stderr).contains("E000120"))
+    assert(package.read_text(report.results[2].stderr).contains("E000120"))
+    package.remove_tree(directory)

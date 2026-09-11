@@ -1,6 +1,28 @@
 import * from "../type/scalar.sev" as scalar
 
 
+def check_identity(identity: int, catalog: list[scalar.ScalarType]):
+    matches_scalar := false
+    matches_buffer := false
+    for entry in catalog:
+        if identity == int(entry.id.index):
+            matches_scalar = true
+        if identity == int(entry.id.index) + 200:
+            matches_buffer = true
+    catalog_lookup_value ?= scalar.scalar_type(scalar.TypeId(u32(identity)))
+    assert((catalog_lookup_value != None) == (matches_scalar or matches_buffer))
+    if catalog_lookup_value != None:
+        assert((catalog_lookup_value.representation == "buffer") == matches_buffer)
+        for entry in catalog:
+            if identity == int(entry.id.index):
+                assert(catalog_lookup_value.name == entry.name and catalog_lookup_value.bits == entry.bits)
+                assert(catalog_lookup_value.signed == entry.signed and catalog_lookup_value.boolean == entry.boolean)
+                assert(catalog_lookup_value.representation == entry.representation)
+            if identity == int(entry.id.index) + 200:
+                assert(catalog_lookup_value.name == "$buffer$" + entry.name and catalog_lookup_value.bits == entry.bits)
+                assert(catalog_lookup_value.signed and not catalog_lookup_value.boolean)
+
+
 test "scalar lookup preserves the catalog and rejects unknown identities":
     catalog = scalar.scalar_types()
     names: list[string] = []
@@ -13,22 +35,4 @@ test "scalar lookup preserves the catalog and rejects unknown identities":
     assert(scalar.scalar_type_name("int") == scalar.TypeId(64))
     assert(scalar.scalar_type_name("float") == scalar.TypeId(164))
     for identity in range(1100):
-        known := false
-        buffer := false
-        for entry in catalog:
-            if identity == int(entry.id.index):
-                known = true
-            if identity == int(entry.id.index) + 200:
-                buffer = true
-        found ?= scalar.scalar_type(scalar.TypeId(u32(identity)))
-        assert((found != None) == (known or buffer))
-        if found != None:
-            assert((found.representation == "buffer") == buffer)
-            for entry in catalog:
-                if identity == int(entry.id.index):
-                    assert(found.name == entry.name and found.bits == entry.bits)
-                    assert(found.signed == entry.signed and found.boolean == entry.boolean)
-                    assert(found.representation == entry.representation)
-                if identity == int(entry.id.index) + 200:
-                    assert(found.name == "$buffer$" + entry.name and found.bits == entry.bits)
-                    assert(found.signed and not found.boolean)
+        check_identity(identity, catalog)

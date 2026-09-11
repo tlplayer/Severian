@@ -30,7 +30,8 @@ python3 tests/sev_compiler/test_resource_guard.py -v
 
 python3 tests/sev_compiler/resource_guard.py --timeout 180 \
   --memory-bytes 6000000000 --report /tmp/compiler-build.json -- \
-  sev_rust build sev_compiler --bin sev_compiler
+  sev_rust build sev_compiler --bin sev_compiler --profile release \
+  -o sev_compiler/package.pkg/host/dev/bin/sev_compiler
 ```
 
 `prlimit` installs a hard, inherited address-space limit and disables core
@@ -38,6 +39,7 @@ dumps. Native pipeline commands use GNU `timeout` with a two-second kill grace.
 The Python watchdog kills the process session on timeout, cancellation, or an
 aggregate RSS breach, including test children that create their own process
 groups. It cleans up remaining session children after successful commands too.
+An additional native timeout remains active if the Python supervisor exits.
 Never increase parallelism and per-command budgets independently.
 
 These are Linux hosted guards, not a container memory reservation: an address

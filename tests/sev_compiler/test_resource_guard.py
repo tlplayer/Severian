@@ -13,6 +13,15 @@ class ResourceGuard(unittest.TestCase):
         result = run([sys.executable, '-c', 'import os; os.abort()'])
         self.assertEqual(result.returncode, -signal.SIGABRT)
 
+    def test_nested_guard_retains_tighter_inherited_limit(self):
+        source = ('from resource_guard import run\n'
+                  'result = run(["/bin/true"], memory_bytes=128 * 1024 * 1024)\n'
+                  'assert result.resources["memory_bytes"] == 64 * 1024 * 1024\n'
+                  'raise SystemExit(result.returncode)\n')
+        result = run([sys.executable, '-c', source], cwd=Path(__file__).parent,
+                     memory_bytes=64 * 1024 * 1024)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_native_metrics_and_exit_status(self):
         result = run(['/bin/sh', '-c', 'echo hello; exit 7'])
         self.assertEqual(result.returncode, 7)

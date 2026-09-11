@@ -50,7 +50,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     subject_loaded := false
     initializer_namespace := ""
     parsed = universal.empty_module()
-    prelude = registered_source(source.load(root + "/sev_compiler/universal/prelude.sev"), files)
+    prelude = registered_source(read_source(root + "/sev_compiler/universal/prelude.sev"), files)
     providers = prelude_providers(prelude)
     for declaration in providers:
         provider_locator := ""
@@ -67,7 +67,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         is_subject = provider_path == subject_path
         if is_subject:
             initializer_namespace = namespace
-        library = load_source_module(input if is_subject else source.load(provider_path), namespace, [], is_subject, files, registry)
+        library = load_source_module(input if is_subject else read_source(provider_path), namespace, [], is_subject, files, registry)
         for item in library.items:
             parsed.items.append(item)
         subject_loaded = subject_loaded or is_subject

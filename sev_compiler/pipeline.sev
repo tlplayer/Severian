@@ -46,7 +46,7 @@ def plan(root: string, rebuild: bool = true) -> list[package.Step] | Error:
     if section_names == "":
         throw Error("compiler pipeline requires example sections in package metadata")
     compiler = root + "/sev_compiler/package.pkg/host/dev/bin/sev_compiler"
-    seed = environment.get("SEVERIAN_SEED", root + "/package.pkg/debug/sev")
+    seed = environment.get("SEVERIAN_SEED", root + "/bin/sev_rust")
     output = package.temporary(root + "/sev_compiler/package.pkg/pipeline/artifacts", "run-")
     steps: list[package.Step] = []
     dependencies: list[string] = []

@@ -89,7 +89,7 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
             planned.units[index] = unit
     result = execute(planned, compiler)
     memory = resources.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))
-    seconds = int(text_setting(project.manifest.entries, "test", "timeout-seconds", "60"))
+    seconds = int(setting(project.manifest.entries, "test", "timeout-seconds", "60"))
     tests: list[TestResult] = []
     failed := 0
     for artifact in result.artifacts:

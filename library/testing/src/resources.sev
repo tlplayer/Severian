@@ -31,10 +31,13 @@ def guarded_command(arguments: list[string], seconds: int, memory_bytes: int, me
         words.append("wall_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M\nexit_status=%x")
         words.append("-o")
         words.append(metrics)
-    words.append("prlimit")
-    words.append("--as=" + string(memory_bytes))
-    words.append("--core=0")
-    words.append("--")
+    # A nested test must retain a tighter outer hard limit, not attempt to
+    # raise it. Positional arguments preserve the command's exact argv.
+    words.append("/bin/sh")
+    words.append("-c")
+    words.append("sev_limit=$1; shift; sev_hard=$(ulimit -Hv); if [ \"$sev_hard\" != unlimited ]; then sev_hard_bytes=$((sev_hard * 1024)); if [ \"$sev_limit\" -gt \"$sev_hard_bytes\" ]; then sev_limit=$sev_hard_bytes; fi; fi; exec prlimit --as=\"$sev_limit\" --core=0 -- \"$@\"")
+    words.append("sev-resource-guard")
+    words.append(string(memory_bytes))
     for argument in arguments:
         words.append(argument)
     return words

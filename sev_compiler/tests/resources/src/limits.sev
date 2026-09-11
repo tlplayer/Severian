@@ -26,3 +26,33 @@ test "compiler guard preserves command arguments":
     assert(command[-1] == "space ; literal")
     assert(resources.memory_budget("4GB") == 4000000000)
     assert(resources.memory_budget("64MiB") == 67108864)
+
+
+test "nested compiler guard retains a tighter outer memory limit":
+    directory = package.temporary("/tmp", "sev-nested-budget-")
+    inner = resources.guarded_command(["/bin/sh", "-c", "test \"$(ulimit -v)\" = 65536"], 2, 134217728)
+    report = package.pipeline([package.Step("nested", inner, directory, timeout=3, memory_bytes=67108864)], directory + "/reports")
+    assert(report.failed == 0)
+    package.remove_tree(directory)
+
+
+test "package test budgets reach dependency compilation and test executables":
+    directory = package.temporary("/tmp", "sev-package-budget-")
+    package.mkdir(directory + "/dependency")
+    package.write_text(directory + "/package.toml", "[package]\nname = \"budget\"\nversion = \"0.1.0\"\n[[bin]]\nname = \"budget\"\npath = \"main.sev\"\n[dependencies]\nhelper = { path = \"dependency\" }\n[test]\nmemory-max = \"64MiB\"\ntimeout-seconds = 2\n")
+    package.write_text(directory + "/main.sev", "")
+    package.write_text(directory + "/dependency/package.toml", "[package]\nname = \"helper\"\nversion = \"0.1.0\"\n[lib]\npath = \"lib.sev\"\n")
+    package.write_text(directory + "/dependency/lib.sev", "")
+    # A protocol fixture checks limits without depending on subject-language
+    # feature support. Its emitted executable checks the inherited limit too.
+    script = directory + "/compiler.sh"
+    body := "#!/bin/sh\ntest \"$(ulimit -v)\" = 65536 || exit 9\n"
+    body += "printf '%s\\n' \"$4\" >> " + package.quote(directory + "/compiles") + "\n"
+    body += "if [ \"$4\" = check ]; then exit 0; fi\n"
+    body += "printf '%s\\n' '#!/bin/sh' 'test \"$(ulimit -v)\" = 65536' > \"$3\"\nchmod +x \"$3\"\n"
+    package.write_text(script, body)
+    assert(package.command(["chmod", "+x", script]) == 0)
+    report = package.test(package.open(directory), package.Compiler(script, directory), package.Test())
+    assert(report.failed == 0 and len(report.results) == 1)
+    assert(package.read_text(directory + "/compiles") == "check\n\n")
+    package.remove_tree(directory)
