@@ -65,6 +65,11 @@ class TypeBinding:
     type_id: TypeId
 
 
+class TypeConstructorBinding:
+    parameter: GenericParamId
+    definition: DefId
+
+
 class Substitution:
     arguments: list[TypeBinding] = []
 

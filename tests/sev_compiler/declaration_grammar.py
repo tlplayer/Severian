@@ -13,6 +13,7 @@ class DeclarationGrammar(MigrationCase):
         sysroot = self.directory / "sysroot"
         target = sysroot / "sev_compiler/universal/prelude.sev"
         target.parent.mkdir(parents=True)
+        target.with_suffix(".toml").write_text((ROOT / "sev_compiler/universal/prelude.toml").read_text())
         origin = ROOT / "sev_compiler/universal/prelude.sev"
         providers = []
         enum_provider = ""

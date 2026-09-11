@@ -139,12 +139,12 @@ assert(unwrap(Box[float](2.5)) == 2.5)
                 run([executable], cwd=directory)
             print(f"PASS: {name} (native)", flush=True)
         rejected = {
-            "record_implementation": ("trait Counted:\n    def size() -> int\nclass Box[T]: Counted\n    value: T\nBox[int](42)\n", "generic record trait implementations require instantiated trait validation"),
+            "record_implementation": ("trait Counted:\n    def size() -> int\nclass Box[T]: Counted\n    value: T\nBox[int](42)\n", "class does not satisfy trait Counted"),
             "record_constraint": ("trait Measured:\n    property size: int\nclass Box[T: Measured]:\n    value: T\nBox[int](42)\n", "type does not satisfy trait Measured"),
             "duplicate_binding": ("-> bad[T: int, T: float]():\n    def value(input: T) -> T:\n        return input\n", "duplicate macro type binding"),
             "unknown_family": ("-> bad[T: Missing]():\n    def value(input: T) -> T:\n        return input\n", "unsupported scalar macro family Missing"),
             "generic_conflict": ("class Box[T]:\n    value: T\ndef same[T](left: Box[T], right: Box[T]) -> T:\n    return left.value\nsame(Box[int](1), Box[float](2.0))\n", "conflicting generic type arguments"),
-            "record_arity": ("class Box[T]:\n    value: T\nvalue: Box = 1\n", "type argument count mismatch"),
+            "record_arity": ("class Box[T]:\n    value: T\nvalue: Box = 1\n", "missing type argument T"),
             "generic_recursion": ("class Box[T]:\n    value: Box[T]\nvalue: Box[int] = Box[int]()\n", "recursive value record requires indirection"),
         }
         for name, (source, diagnostic) in rejected.items():

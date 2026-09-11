@@ -98,6 +98,7 @@ class TraitDeclaration:
     grammar: bool = false
     scalar_operations: list[ScalarOperation] = []
     scalar_syntax: OperatorSyntax | None = None
+    arguments: list[TypeAnnotation] = []
 
 
 enum CompilerExpectation:

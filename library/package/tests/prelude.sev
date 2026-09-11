@@ -1,0 +1,12 @@
+import * from "../src/lib.sev" as package
+
+
+test "prelude policy follows the compilation unit owner":
+    parent = package.parse_manifest("[package]\nname = \"parent\"\n[prelude]\nexclude = [\"max\"]\n")
+    child = package.parse_manifest("[package]\nname = \"child\"\n[prelude]\nexclude = [\"min\"]\n")
+    graph = package.Resolution([
+        package.ResolvedPackage(package.PackageIdentity("parent", "0.1.0", "path"), "/tmp/policy", parent, ""),
+        package.ResolvedPackage(package.PackageIdentity("child", "0.1.0", "path"), "/tmp/policy/child", child, "")
+    ], [], "")
+    assert(package.prelude_exclusions(graph, "/tmp/policy/main.sev")[0] == "max")
+    assert(package.prelude_exclusions(graph, "/tmp/policy/child/main.sev")[0] == "min")

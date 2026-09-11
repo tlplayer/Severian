@@ -37,6 +37,11 @@ def default_catalog() -> list[Option]:
 def validate_configuration(entries: list[Entry]) -> unit | Error:
     catalog = default_catalog()
     for entry in entries:
+        if entry.table == "prelude":
+            if entry.key != "exclude":
+                throw Error("unknown prelude option: " + entry.key)
+            if not entry.value.starts_with("[") or not entry.value.ends_with("]"):
+                throw Error("prelude.exclude requires an array of names")
         if entry.table not in ["build", "language", "diagnostics", "test", "publish"] and not entry.table.starts_with("profile."):
             continue
         key = entry.table + "." + entry.key

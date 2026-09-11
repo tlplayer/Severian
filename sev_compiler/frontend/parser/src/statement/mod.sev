@@ -268,6 +268,8 @@ def parser_type_parameters(parser: Parser, pack: list[string] = []) -> tuple[lis
             if len(pack) != 0:
                 return error(parser_fail(parser, "a type pack must be the final generic parameter"))
             parameter = parser_identifier(parser, "expected a generic parameter")
+            if parameter[0] in parameters:
+                return error(parser_fail(parser, "duplicate generic parameter " + parameter[0]))
             if packed:
                 pack.append(parameter[0])
             parameters.append(parameter[0])
@@ -1056,6 +1058,14 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             end = parser_expect_symbol(parser, ")", "expected closing parenthesis").span.end
             value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
         elif parser_take_symbol(parser, "[") != None:
+            # Commas distinguish a generic application from an index or slice.
+            # A single colon remains a slice syntactically; declaration lookup
+            # disambiguates it when the receiver is a type constructor.
+            if parser_multiple_type_arguments(parser):
+                types = parser_type_arguments(parser)
+                end = parser_expect_symbol(parser, "]", "expected closing type bracket").span.end
+                value = universal.Expression(universal.TypeApplication(value, types), source.Span(value.span.source, value.span.start, end))
+                continue
             first: universal.Expression | None := None
             if parser_at_symbol(parser, "]"):
                 first = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), parser_peek(parser).span)
@@ -1208,6 +1218,41 @@ def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnost
     return universal.TypeAnnotation(universal.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
 
 
+def parser_multiple_type_arguments(parser: Parser) -> bool:
+    depth := 0
+    cursor := parser.cursor[0]
+    while cursor < len(parser.tokens):
+        token = parser.tokens[cursor]
+        if lexer.token_is_symbol(token, "]") and depth == 0:
+            return false
+        if lexer.token_is_symbol(token, ",") and depth == 0:
+            return true
+        if lexer.token_is_symbol(token, "[") or lexer.token_is_symbol(token, "(") or lexer.token_is_symbol(token, "{"):
+            depth += 1
+        elif lexer.token_is_symbol(token, "]") or lexer.token_is_symbol(token, ")") or lexer.token_is_symbol(token, "}"):
+            depth -= 1
+        cursor += 1
+    return false
+
+
+def parser_type_arguments(parser: Parser) -> list[universal.TypeAnnotation] | diagnostics.Diagnostic:
+    arguments: list[universal.TypeAnnotation] = []
+    parser_delimited_layout(parser)
+    while not parser_at_symbol(parser, "]"):
+        binding := ""
+        if parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], ":"):
+            binding = parser_identifier(parser, "expected type parameter name")[0]
+            parser_next(parser)
+        argument = parse_type_annotation(parser)
+        argument.binding = binding
+        arguments.append(argument)
+        parser_delimited_layout(parser)
+        if parser_take_symbol(parser, ",") == None:
+            break
+        parser_delimited_layout(parser)
+    return arguments
+
+
 def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
     if parser_at_symbol(parser, "{"):
         start = parser_next(parser).span
@@ -1220,16 +1265,10 @@ def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics
     qualified := name[0]
     while parser_take_symbol(parser, ".") != None:
         qualified += "." + parser_identifier(parser, "expected qualified type name")[0]
-    arguments: list[universal.TypeAnnotation] = []
+    arguments: list[universal.TypeAnnotation] := []
     end := name[1].end
     if parser_take_symbol(parser, "[") != None:
-        parser_delimited_layout(parser)
-        while not parser_at_symbol(parser, "]"):
-            arguments.append(parse_type_annotation(parser))
-            parser_delimited_layout(parser)
-            if parser_take_symbol(parser, ",") == None:
-                break
-            parser_delimited_layout(parser)
+        arguments = parser_type_arguments(parser)
         end = parser_expect_symbol(parser, "]", "expected closing type bracket").span.end
     return universal.named_type(qualified, arguments, source.Span(name[1].source, name[1].start, end))
 

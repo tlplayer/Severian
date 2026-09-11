@@ -3,6 +3,7 @@ import source
 class TypeAnnotation:
     kind: TypeAnnotationKind
     span: source.Span
+    binding: string = ""
 
 
 enum TypeAnnotationKind:

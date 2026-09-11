@@ -11,6 +11,7 @@ Every `.sev` file in this directory is a standalone documentation example and va
 | `03-custom-failure.sev` | Function constraints and custom failure |
 | `04-boxed-generic.sev` | Generic class |
 | `05-stack-generic.sev` | Generic collection |
+| `28-container-provider.sev` | Named type bindings, a container type constructor, and applied trait conformance |
 
 ## Compiler-term generic symbols
 

@@ -579,3 +579,32 @@ dependency graph. Both selective function import spellings and aliases are
 supported; unsupported selected declaration kinds produce diagnostics.
 The hosted math provider supplies libm bindings through source declarations.
 Tensor shape packs and tensor execution are not connected to this pipeline yet.
+
+
+Prelude call names are listed in `universal/prelude.toml`; functions supplied by
+unqualified prelude imports also reserve their names. A free `def max()` is a
+declaration error, including in test mode. Qualified APIs such as `file.open`
+have separate identities, and member methods retain their own scope.
+
+Polymorphic operations use ordinary `operator` implementations. Concrete free
+function overloads of existing prelude functions must have the same arity and
+result type, with a distinct parameter type signature; duplicate signatures
+are rejected. Generic free functions cannot silently shadow a prelude template.
+
+A package can select out source callables in `package.toml`:
+
+```toml
+[prelude]
+exclude = ["max", "round"]
+```
+
+This removes the selected source functions/operators and their reservations
+for the compilation unit. Standalone commands read the nearest manifest;
+package compilation uses the owning package in the resolved graph. Unknown and
+duplicate exclusions are errors. Compiler-handled names listed as `intrinsics`
+in the catalog currently reject exclusion explicitly; their handling must be
+extracted before exclusion is supported. This is callable selection, not removal
+of primitive types or their syntax.
+
+Run `python3 tests/sev_compiler/prelude.py` against the installed source compiler
+to exercise collision diagnostics, polymorphism and package exclusions.

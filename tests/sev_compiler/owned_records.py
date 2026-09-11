@@ -15,6 +15,7 @@ class OwnedRecords(MigrationCase):
         sysroot = self.directory / 'sysroot'
         prelude = sysroot / 'sev_compiler/universal/prelude.sev'
         prelude.parent.mkdir(parents=True)
+        prelude.with_suffix(".toml").write_text((ROOT / "sev_compiler/universal/prelude.toml").read_text())
         provider = prelude.parent / 'methods.sev'
         source = origin.parent / 'primitive/string/methods.sev'
 

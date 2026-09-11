@@ -1,0 +1,30 @@
+# An ordinary generic class selects another generic class as its storage.
+# Slot is a one-value provider used to illustrate the contract.
+trait Readable[T]:
+    def get() -> T
+
+class Slot[T]: Readable[T]:
+    value: T
+    def get() -> T:
+        return value
+
+class Collection[T, C:Readable[T]]:
+    storage: C[T]
+    def Collection(value: T):
+        storage = C[T](value)
+    def get() -> T:
+        return storage.get()
+
+type Stored[Element, Backend] = Collection[T:Element, C:Backend]
+
+def main():
+    number = Collection[T:int, C:Slot](42)
+    text = Collection[C:Slot, T:string]("typed")
+    print(number.get())
+    print(text.get())
+
+test "named container bindings preserve input and output types":
+    number = Stored[Backend:Slot, Element:int](42)
+    text = Stored[Element:string, Backend:Slot]("owned")
+    assert(number.get() == 42)
+    assert(text.get() == "owned")

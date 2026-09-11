@@ -1,5 +1,10 @@
 # Core collections
 
+The [implementation plan](IMPLEMENTATION_PLAN.md) defines the migration to a
+re-exporting `collections` package with static provider arguments such as
+`set[T:int,C:BTree](values...)`. The inventory below describes the current
+packages, whose APIs have not yet completed that migration.
+
 This directory is an organizational namespace, not one aggregate package.
 Every public collection has its own manifest and can evolve independently.
 

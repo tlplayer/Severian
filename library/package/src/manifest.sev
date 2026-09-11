@@ -295,3 +295,31 @@ def workspace_library(root: string, name: string) -> string | Error:
     if selected == "":
         throw Error("unknown workspace library: " + name)
     return selected
+
+
+# Select policy from the owning package, not whichever dependency was visited
+# first. Standalone source commands use the nearest manifest without editing it.
+def prelude_exclusions(resolution: Resolution, importer: string) -> list[string] | Error:
+    entries: list[Entry] := []
+    owner := ""
+    for item in resolution.packages:
+        if importer.starts_with(item.root + "/") and int(len(item.root)) > int(len(owner)):
+            owner = item.root
+            entries = item.manifest.entries
+    if owner == "":
+        directory := path.dirname(importer)
+        while true:
+            if os.is_file(directory + "/package.toml"):
+                entries = parse_document(read_text(directory + "/package.toml"))
+                break
+            parent = path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
+    result = string_array(setting(entries, "prelude", "exclude", "[]"))
+    seen: list[string] = []
+    for name in result:
+        if name in seen:
+            throw Error("duplicate prelude exclusion: " + name)
+        seen.append(name)
+    return result

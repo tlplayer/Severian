@@ -45,6 +45,7 @@ class Module:
     traits: list[TraitDeclaration] = []
     binding_values: list[tuple[BindingId, ValueId]] = []
     grammars: list[GrammarDeclaration] = []
+    reserved_functions: list[string] = []
 
 
 class Program:

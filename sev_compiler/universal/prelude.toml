@@ -1,0 +1,6 @@
+# Public spellings belong to the prelude, including operations awaiting extraction.
+[prelude]
+functions = ["assert", "async", "await", "borrow", "clone", "view", "drop", "array", "vector", "dict", "map", "list", "set", "tuple", "import", "compile", "eval", "exe", "parse", "ascii", "bin", "bool", "char", "complex", "float", "format", "hex", "int", "string", "filter", "apply", "breakpoint", "help", "input", "open", "print", "hash", "type", "all", "any", "enumerate", "iterator", "len", "size", "bytes", "next", "range", "slice", "sorted", "zip", "abs", "max", "min", "pow", "round", "sum"]
+# These still require compiler handling. Reject exclusion until it can remove
+# that handling as well as the declaration; never silently ignore an exclusion.
+intrinsics = ["len", "list", "tuple", "assert", "borrow", "clone", "bytes", "string", "type", "bool", "char", "float", "int"]

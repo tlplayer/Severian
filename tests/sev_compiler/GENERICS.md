@@ -14,6 +14,26 @@ compiler outside the checkout.
 
 Implemented and covered:
 
+- Source record, alias and function applications accept named type bindings
+  (`Pair[Right:string, Left:int]`, `identity[T:int](42)`). Binding normalizes to
+  declaration order, rejects unknown/duplicate/missing arguments, and retains
+  ordinary slice parsing. Parameter names are not compiler-reserved roles.
+- Record parameters can bind type constructors: `Collection[T:int, C:Box]`
+  specializes a `storage: C[T]` field using `Box[int]`. Constructor bindings
+  retain declaration identities separately from concrete type bindings and
+  survive enclosing generic aliases. They do not acquire a runtime layout.
+- Applied trait contracts substitute method parameters/results, properties,
+  operators and inherited traits. Generic records are checked for conformance;
+  generic functions can require `C:Readable[T]`. A constructor parameter with
+  that bound checks its application `C[T]`. Conformance-discovered methods are
+  compiled before module finalization.
+
+These cases run through the source compiler with:
+
+```sh
+python3 tests/sev_compiler/collection_generics.py
+```
+
 - Direct enumerative macros (`-> int_lists[T: int]():`) bind `T` in their bodies.
   Multiple parameters can enumerate the same family. Duplicate bindings and
   unknown families are errors. The older `with` spelling remains compatible.
@@ -69,7 +89,8 @@ Still required to complete the broader migration:
 
 - General constant-generic class fields in both compilers (beyond the seed array
   specialization), source constant-generic syntax, structural interner integration,
-  generic methods/operators and record trait implementations, borrowed receivers,
+  constructor-argument inference in generic functions, provider defaults,
+  generic methods/operators, constrained trait parameters, borrowed receivers,
   and complete capability checking
   of generic class bodies. Current record specialization is a type-argument subset.
 - Source-compiler constructor bodies and fallible constructor execution, together

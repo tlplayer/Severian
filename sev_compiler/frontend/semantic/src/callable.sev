@@ -1248,6 +1248,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if receiver != None:
                         return universal.Expression(universal.Evaluate(receiver, result), expression.span, type_id=result.type_id)
                     return result
+            explicit = callable_explicit_generic(state, callee)
+            specialization ?= explicit.function
+            if specialization != None:
+                target = universal.Expression(universal.Name(specialization.name), callee.span)
+                return callable_expression(state, universal.Expression(universal.Call(target, arguments), expression.span), expected)
             alias_type := callable_constructor_type(state, callee)
             if alias_type.index == 0:
                 alias_type = callable_infer_field_pack(state, callee, arguments, expected)
@@ -2183,41 +2188,62 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for item in module.items:
         match item:
             case Function:
-                result ?= declaration.result
+                function_declaration := declaration
+                # Qualified package APIs have distinct identities. The test
+                # namespace is an implementation detail, not a shadowing escape.
+                public_name = function_declaration.name[10:] if function_declaration.name.starts_with("__subject.") else function_declaration.name
+                reserved = not function_declaration.prelude and public_name in module.reserved_functions
+                if reserved:
+                    if len(function_declaration.type_parameters) != 0 or len(function_declaration.parameters) == 0:
+                        return error(callable_diagnostic("reserved prelude function " + public_name + "; use a polymorphic operator or exclude it in the package prelude", function_declaration.span))
+                    candidate = callable_signature(function_declaration, int(len(state.functions)), state.records, state.declarations)
+                    overload := false
+                    for previous in state.functions:
+                        if previous.prelude and previous.name == public_name and len(previous.parameter_types) == len(candidate.parameter_types) and previous.result_type.index == candidate.result_type.index:
+                            distinct := false
+                            index := 0
+                            for type_id in candidate.parameter_types:
+                                if type_id.index != previous.parameter_types[index].index:
+                                    distinct = true
+                                index += 1
+                            if distinct:
+                                overload = true
+                    if not overload:
+                        return error(callable_diagnostic("reserved prelude function " + public_name + "; declaration is not a distinct polymorphic overload", function_declaration.span))
+                    function_declaration.name = public_name
+                result ?= function_declaration.result
                 if result != None:
-                    if len(declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
+                    if len(function_declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
                         continue
-                if declaration.name == "assert" or declaration.name == "type" or declaration.name == "string":
-                    return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
-                if len(declaration.type_parameters) != 0:
-                    callable_register_generic(state, declaration)
-                    function_names.append(declaration.name)
+                if len(function_declaration.type_parameters) != 0:
+                    callable_register_generic(state, function_declaration)
+                    function_names.append(function_declaration.name)
                     continue
                 variadic := false
-                for parameter in declaration.parameters:
+                for parameter in function_declaration.parameters:
                     if parameter.variadic:
                         variadic = true
                 if variadic:
-                    if len(declaration.decorators) != 0 or len(declaration.type_parameters) != 0 or len(declaration.constraints) != 0:
-                        return error(callable_diagnostic("decorated or constrained packs are outside the bootstrap subset", declaration.span))
-                    if len(declaration.parameters) == 0 or not declaration.parameters[0].variadic:
-                        return error(callable_diagnostic("bootstrap variadic packs must be the first parameter", declaration.span))
-                    if declaration.name in function_names:
-                        return error(callable_diagnostic("duplicate variadic function " + declaration.name, declaration.span))
-                    if declaration.parameters[0].default != None:
-                        return error(callable_diagnostic("variadic packs cannot have defaults", declaration.span))
+                    if len(function_declaration.decorators) != 0 or len(function_declaration.type_parameters) != 0 or len(function_declaration.constraints) != 0:
+                        return error(callable_diagnostic("decorated or constrained packs are outside the bootstrap subset", function_declaration.span))
+                    if len(function_declaration.parameters) == 0 or not function_declaration.parameters[0].variadic:
+                        return error(callable_diagnostic("bootstrap variadic packs must be the first parameter", function_declaration.span))
+                    if function_declaration.name in function_names:
+                        return error(callable_diagnostic("duplicate variadic function " + function_declaration.name, function_declaration.span))
+                    if function_declaration.parameters[0].default != None:
+                        return error(callable_diagnostic("variadic packs cannot have defaults", function_declaration.span))
                     parameter_names: list[string] = []
-                    for parameter in declaration.parameters:
+                    for parameter in function_declaration.parameters:
                         if parameter.name in parameter_names:
                             return error(callable_diagnostic("duplicate parameter " + parameter.name, parameter.span))
                         parameter_names.append(parameter.name)
-                    state.templates.append(declaration)
-                    function_names.append(declaration.name)
+                    state.templates.append(function_declaration)
+                    function_names.append(function_declaration.name)
                     continue
                 for template in state.templates:
-                    if template.name == declaration.name:
-                        return error(callable_diagnostic("variadic overload sets are not supported", declaration.span))
-                signature = callable_signature(declaration, int(len(state.functions)), state.records, state.declarations)
+                    if template.name == function_declaration.name:
+                        return error(callable_diagnostic("variadic overload sets are not supported", function_declaration.span))
+                signature = callable_signature(function_declaration, int(len(state.functions)), state.records, state.declarations)
                 if own_index < len(own_ids):
                     signature.id = own_ids[own_index]
                     signature.definition = universal.DefId(0, 0, universal.DeclarationId(signature.id.value))
@@ -2231,9 +2257,9 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                                 duplicate = false
                             index += 1
                         if duplicate:
-                            return error(callable_diagnostic("duplicate or reserved function " + declaration.name, declaration.span))
-                if declaration.name not in function_names:
-                    function_names.append(declaration.name)
+                            return error(callable_diagnostic("duplicate or reserved function " + function_declaration.name, function_declaration.span))
+                if function_declaration.name not in function_names:
+                    function_names.append(function_declaration.name)
                 state.functions.append(signature)
             case _:
                 pass
@@ -2323,25 +2349,31 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case _:
                 return error(callable_diagnostic("declaration is outside the scalar bootstrap subset", None))
     index := int(len(visible))
-    while index < len(state.functions):
-        function := state.functions[index]
-        index += 1
-        if function.body != None:
-            function = callable_inferred_signature(state, function)
-            function.body = callable_body(state, function)
-        module.functions.append(function)
-        if function.name == "main" and not include_tests:
-            if len(function.parameters) != 0 or (function.result_type.index != 2 and function.result_type.index != 32):
-                return error(callable_diagnostic("main must take no arguments and return unit or i32", function.span))
-            module.entry = function.id
-    for record in state.records:
-        callable_record_layout(state.records, record.type_id, [])
-        callable_validate_record_arguments(state, record)
-        # Function signatures and specializations can introduce outcome and
-        # aggregate layouts after the initial declaration pass.
-        for field in record.fields:
-            if callable_has_drop(state, field.type_id):
-                return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
+    record_index := 0
+    # Conformance can discover provider methods and their specializations.
+    # Process those bodies before finalizing the module as well.
+    while index < len(state.functions) or record_index < len(state.records):
+        while index < len(state.functions):
+            function := state.functions[index]
+            index += 1
+            if function.body != None:
+                function = callable_inferred_signature(state, function)
+                function.body = callable_body(state, function)
+            module.functions.append(function)
+            if function.name == "main" and not include_tests:
+                if len(function.parameters) != 0 or (function.result_type.index != 2 and function.result_type.index != 32):
+                    return error(callable_diagnostic("main must take no arguments and return unit or i32", function.span))
+                module.entry = function.id
+        if record_index < len(state.records):
+            record = state.records[record_index]
+            record_index += 1
+            callable_record_layout(state.records, record.type_id, [])
+            callable_validate_record_arguments(state, record)
+            # Function signatures and specializations can introduce outcome and
+            # aggregate layouts after the initial declaration pass.
+            for field in record.fields:
+                if callable_has_drop(state, field.type_id):
+                    return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
     module.records = state.records
     return module
 
@@ -2755,6 +2787,18 @@ def callable_requirement_signature(state: CallableAnalysis, function: universal.
     return function
 
 
+def callable_trait(state: CallableAnalysis, bound: universal.TypeAnnotation, namespace: string) -> universal.TraitDeclaration | diagnostics.Diagnostic:
+    match bound.kind:
+        case Named:
+            resolved: list[universal.TypeAnnotation] = []
+            for argument in arguments:
+                type_id = callable_annotation(argument, state.records, namespace, state.declarations)
+                resolved.append(universal.TypeAnnotation(universal.Named(definitions.type_name(type_id, state.records), []), argument.span, binding=argument.binding))
+            return definitions.trait_application(state.declarations, universal.named_type(name, resolved, bound.span), namespace)
+        case _:
+            return error(callable_diagnostic("constraint must name a trait", bound.span))
+
+
 def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId) -> list[universal.TraitDeclaration] | diagnostics.Diagnostic:
     result: list[universal.TraitDeclaration] = []
     contract ?= state.contract
@@ -2766,12 +2810,9 @@ def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId
                     match constraint:
                         case Parameter:
                             if parameter == parameter_name:
-                                name ?= universal.simple_type_name(bound)
-                                if name != None:
-                                    trait ?= definitions.trait_named(state.declarations, name, state.namespace)
-                                    if trait != None:
-                                        for inherited in definitions.inherited_traits(state.declarations, trait):
-                                            result.append(inherited)
+                                trait = callable_trait(state, bound, state.namespace)
+                                for inherited in definitions.inherited_traits(state.declarations, trait):
+                                    result.append(inherited)
                         case _:
                             pass
             index += 1
@@ -2911,9 +2952,18 @@ def callable_required_member(state: CallableAnalysis, owner: universal.TypeId, n
 def callable_satisfies(state: CallableAnalysis, type_id: universal.TypeId, trait: universal.TraitDeclaration) -> bool | diagnostics.Diagnostic:
     if type_id.index >= 100000:
         for available in callable_parameter_traits(state, type_id):
-            if available.definition.declaration.value == trait.definition.declaration.value:
-                return true
+            if expansion.same(available.definition, trait.definition) and len(available.arguments) == len(trait.arguments):
+                equal := true
+                index := 0
+                for argument in available.arguments:
+                    left = callable_annotation(argument, state.records, available.lookup, state.declarations)
+                    right = callable_annotation(trait.arguments[index], state.records, trait.lookup, state.declarations)
+                    equal = equal and left.index == right.index
+                    index += 1
+                if equal:
+                    return true
         return false
+    callable_register_record_methods(state, type_id)
     for required in definitions.inherited_traits(state.declarations, trait):
         for operation in required.operators:
             signature = callable_requirement_signature(state, callable_operator_function(operation, type_id, required.lookup, state.records))
@@ -2968,16 +3018,10 @@ def callable_validate_implementations(state: CallableAnalysis) -> unit | diagnos
                     owners.append(record.type_id)
         for owner in owners:
             for bound in declaration.traits:
-                name ?= universal.simple_type_name(bound)
-                if name == None:
-                    return error(diagnostics.diagnostic_at("E000212", "expected a trait name", bound.span))
-                if name != None:
-                    trait ?= definitions.trait_named(state.declarations, name, declaration.lookup)
-                    if trait == None:
-                        return error(diagnostics.diagnostic_at("E000212", "unknown trait " + name, bound.span))
-                    if trait != None:
-                        if not callable_satisfies(state, owner, trait):
-                            return error(diagnostics.diagnostic_at("E000212", "class does not satisfy trait " + name, bound.span))
+                trait = callable_trait(state, bound, declaration.lookup)
+                if not callable_satisfies(state, owner, trait):
+                    return error(diagnostics.diagnostic_at("E000212", "class does not satisfy trait " + trait.name, bound.span))
+
 
 
 def callable_register_generic(state: CallableAnalysis, function: universal.FunctionDeclaration) -> unit | diagnostics.Diagnostic:
@@ -3000,12 +3044,7 @@ def callable_register_generic(state: CallableAnalysis, function: universal.Funct
             case Parameter:
                 if parameter not in names:
                     return error(diagnostics.diagnostic_at("E000219", "constraint names an unknown parameter", span))
-                name ?= universal.simple_type_name(bound)
-                if name == None:
-                    return error(diagnostics.diagnostic_at("E000219", "constraint must name a trait", span))
-                if name != None:
-                    if definitions.trait_named(state.declarations, name, namespace) == None:
-                        return error(diagnostics.diagnostic_at("E000219", "unknown trait " + name, span))
+                definitions.trait_application(state.declarations, bound, namespace)
             case _:
                 return error(diagnostics.diagnostic("E000219", "predicate constraints require compile-time evaluation"))
     for previous in state.generics:
@@ -3104,18 +3143,16 @@ def callable_specialize_generic(state: CallableAnalysis, template: universal.Fun
     lookup ?= template.lookup
     if lookup != None:
         namespace = lookup
+    local = callable_generic_environment(state, template, actuals)
     for constraint in template.constraints:
         match constraint:
             case Parameter:
                 constraint_index := 0
                 for name in template.type_parameters:
                     if parameter == name:
-                        bound_name ?= universal.simple_type_name(bound)
-                        if bound_name != None:
-                            trait ?= definitions.trait_named(state.declarations, bound_name, namespace)
-                            if trait != None:
-                                if not callable_satisfies(state, actuals[constraint_index], trait):
-                                    return error(diagnostics.diagnostic_at("E000219", "type does not satisfy trait " + bound_name, span))
+                        trait = callable_trait(local, bound, namespace)
+                        if not callable_satisfies(state, actuals[constraint_index], trait):
+                            return error(diagnostics.diagnostic_at("E000219", "type does not satisfy trait " + trait.name, span))
                     constraint_index += 1
             case _:
                 pass
@@ -3123,7 +3160,6 @@ def callable_specialize_generic(state: CallableAnalysis, template: universal.Fun
     for function in state.functions:
         if function.name == instance_name:
             return function
-    local = callable_generic_environment(state, template, actuals)
     signature := callable_replace_signature(template, [], [])
     signature.name = instance_name
     signature = callable_signature(signature, int(len(state.functions)), state.records, local.declarations)
@@ -3289,15 +3325,69 @@ def callable_protocol(state: CallableAnalysis, contract: string, property: strin
 
 
 # Type-valued subscripts in constructor position use the annotation resolver.
+def callable_application_target(expression: universal.Expression) -> string:
+    match expression.kind:
+        case TypeApplication:
+            return callable_path(target)
+        case Subscript:
+            return callable_path(object)
+        case Slice:
+            return callable_path(object)
+        case _:
+            return ""
+
+
+def callable_explicit_generic(state: CallableAnalysis, callee: universal.Expression) -> CallableOptionalFunction | diagnostics.Diagnostic:
+    name = callable_application_target(callee)
+    if name == "" or name in state.names:
+        return CallableOptionalFunction(None)
+    lookup := name
+    for template in state.generics:
+        if template.name == state.namespace + name:
+            lookup = template.name
+            break
+    for template in state.generics:
+        if template.name == lookup:
+            annotation = callable_type_expression(callee)
+            match annotation.kind:
+                case Named:
+                    ordered = definitions.bind_type_arguments(template.type_parameters, arguments, annotation.span)
+                    actuals: list[universal.TypeId] = []
+                    for argument in ordered:
+                        actuals.append(callable_annotation(argument, state.records, state.namespace, state.declarations))
+                    return CallableOptionalFunction(callable_specialize_generic(state, template, actuals))
+                case _:
+                    pass
+    return CallableOptionalFunction(None)
+
+
 def callable_type_expression(expression: universal.Expression) -> universal.TypeAnnotation | diagnostics.Diagnostic:
     match expression.kind:
         case Name:
             return universal.named_type(name, [], expression.span)
         case Member:
             return universal.named_type(callable_path(expression), [], expression.span)
+        case Binary:
+            if operator.symbol == "|":
+                return universal.TypeAnnotation(universal.Union([callable_type_expression(left), callable_type_expression(right)]), expression.span)
+            return error(callable_diagnostic("expected a type argument", expression.span))
         case Subscript:
             argument = callable_type_expression(index)
             return universal.named_type(callable_path(object), [argument], expression.span)
+        case TypeApplication:
+            return universal.named_type(callable_path(target), arguments, expression.span)
+        case Slice:
+            parameter ?= start
+            argument ?= stop
+            if parameter != None:
+                if argument != None:
+                    if step == None:
+                        name = callable_path(parameter)
+                        if name != "":
+                            annotation = callable_type_expression(argument)
+                            annotation.binding = name
+                            return universal.named_type(callable_path(object), [annotation], expression.span)
+            return error(callable_diagnostic("expected a named type argument", expression.span))
         case _:
             return error(callable_diagnostic("expected a type argument", expression.span))
 
@@ -3309,6 +3399,20 @@ def callable_constructor_type(state: CallableAnalysis, callee: universal.Express
                 if expansion.same(record.definition, definition) and definitions.record_instance(state.declarations, record.type_id) == None:
                     return record.type_id
         case Subscript:
+            name = callable_path(object)
+            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+                annotation = callable_type_expression(callee)
+                resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
+                callable_record_layout(state.records, resolved, [])
+                return resolved
+        case TypeApplication:
+            name = callable_path(target)
+            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+                annotation = callable_type_expression(callee)
+                resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
+                callable_record_layout(state.records, resolved, [])
+                return resolved
+        case Slice:
             name = callable_path(object)
             if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
                 annotation = callable_type_expression(callee)
@@ -3331,13 +3435,25 @@ def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId
             instance ?= definitions.record_instance(state.declarations, record.type_id)
             if instance != None:
                 for template in state.declarations.record_templates:
-                    if template.definition.declaration.value == instance.template.declaration.value:
+                    if expansion.same(template.definition, instance.template):
                         index := 0
                         for name in template.type_parameters:
                             if name == template.type_pack:
                                 continue
-                            alias = universal.TypeDeclaration([], record.lookup + name, [], [], None, record.span, id=instance.arguments[index].type_id, lookup=record.lookup)
-                            callable_prepend_alias(state.declarations, alias)
+                            for binding in instance.arguments:
+                                if binding.parameter.index == u32(index):
+                                    alias = universal.TypeDeclaration([], record.lookup + name, [], [], None, record.span, id=binding.type_id, lookup=record.lookup)
+                                    callable_prepend_alias(state.declarations, alias)
+                            for binding in instance.constructors:
+                                if binding.parameter.index == u32(index):
+                                    for constructor in state.declarations.record_templates:
+                                        if expansion.same(constructor.definition, binding.definition):
+                                            arguments: list[universal.TypeAnnotation] = []
+                                            for parameter in constructor.type_parameters:
+                                                arguments.append(universal.named_type(parameter, [], record.span))
+                                            target = universal.named_type(constructor.name, arguments, record.span)
+                                            alias = universal.TypeDeclaration([], record.lookup + name, constructor.type_parameters, [], target, record.span, lookup=constructor.lookup)
+                                            callable_prepend_alias(state.declarations, alias)
                             index += 1
 
 
@@ -3440,29 +3556,39 @@ def callable_validate_record_arguments(state: CallableAnalysis, record: universa
     instance ?= definitions.record_instance(state.declarations, record.type_id)
     if instance == None:
         return
+    local = callable_scope(state)
+    local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances, expression_functions=state.declarations.expression_functions)
+    callable_record_environment(local, record.type_id)
+    for bound in record.traits:
+        trait = callable_trait(local, bound, record.lookup)
+        if not callable_satisfies(local, record.type_id, trait):
+            return error(callable_diagnostic("class does not satisfy trait " + trait.name, bound.span))
     if instance != None:
         for template in state.declarations.record_templates:
-            if template.definition.declaration.value != instance.template.declaration.value:
+            if not expansion.same(template.definition, instance.template):
                 continue
             for constraint in template.constraints:
                 match constraint:
                     case Parameter:
-                        bound_name ?= universal.simple_type_name(bound)
-                        if bound_name == None:
-                            return error(callable_diagnostic("constraint must name a trait", span))
-                        if bound_name != None:
-                            trait ?= definitions.trait_named(state.declarations, bound_name, template.lookup)
-                            if trait == None:
-                                return error(callable_diagnostic("unknown trait " + bound_name, span))
-                            if trait != None:
-                                index := 0
-                                for name in template.type_parameters:
-                                    if parameter == name:
-                                        actual = instance.arguments[index].type_id
-                                        if actual.index < 100000:
-                                            if not callable_satisfies(state, actual, trait):
-                                                return error(callable_diagnostic("type does not satisfy trait " + bound_name, span))
-                                    index += 1
+                        trait = callable_trait(local, bound, template.lookup)
+                        index := 0
+                        found := false
+                        for name in template.type_parameters:
+                            if parameter == name:
+                                found = true
+                                for binding in instance.arguments:
+                                    if binding.parameter.index == u32(index):
+                                        if binding.type_id.index < 100000:
+                                            if not callable_satisfies(local, binding.type_id, trait):
+                                                return error(callable_diagnostic("type does not satisfy trait " + trait.name, span))
+                                for binding in instance.constructors:
+                                    if binding.parameter.index == u32(index):
+                                        actual = callable_annotation(universal.named_type(parameter, trait.arguments, span), local.records, template.lookup, local.declarations)
+                                        if not callable_satisfies(local, actual, trait):
+                                            return error(callable_diagnostic("container does not satisfy trait " + trait.name, span))
+                            index += 1
+                        if not found:
+                            return error(callable_diagnostic("constraint names an unknown parameter", span))
                     case _:
                         return error(callable_diagnostic("predicate constraints require compile-time evaluation", template.span))
 

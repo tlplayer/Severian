@@ -1,0 +1,13 @@
+import * from "../src/lib.sev" as package
+
+test "native provider discovery ignores workspace-only ancestors":
+    root = package.temporary("/tmp", "sev-native-workspace-")
+    package.write_text(root + "/package.toml", "[workspace]\nmembers = []\n[build]\npipeline = [\"compile\"]\n")
+    package.write_text(root + "/main.sev", "def main():\n    pass\n")
+    arguments = package.native_arguments(package.Resolution([], [], ""), [root + "/main.sev"])
+    assert(len(arguments) == 0)
+    package.write_text(root + "/package.toml", "[package]\nname = \"invalid\"\n[workspace]\nmembers = []\n[build]\npipeline = [\"compile\"]\n")
+    invalid ?= package.native_arguments(package.Resolution([], [], ""), [root + "/main.sev"])
+    assert(invalid is Error)
+    package.remove_tree(root)
+

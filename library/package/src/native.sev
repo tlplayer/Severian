@@ -11,7 +11,16 @@ def native_package(root: string, seen: list[string], arguments: list[string], fo
     if root in seen:
         return
     seen.append(root)
-    manifest = parse_manifest(read_text(root + "/package.toml"))
+    text = read_text(root + "/package.toml")
+    entries = parse_document(text)
+    # Standalone sources can live beneath a workspace rather than a package.
+    # A workspace supplies no native provider of its own; its build pipeline
+    # settings are not the configuration of every source file below it.
+    if text_setting(entries, "package", "name", "") == "":
+        for entry in entries:
+            if entry.table == "workspace" and entry.key == "members":
+                return
+    manifest = parse_manifest(text)
     for entry in manifest.entries:
         if entry.table == "xxi.c" and entry.key == "sources":
             for value in string_array(entry.value):
