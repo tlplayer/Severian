@@ -84,12 +84,6 @@ const char *__sev_error_call_stack(const char *opaque) {
     return ((const SevError *)opaque)->call_stack;
 }
 
-double __sev_time_monotonic(void) {
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0.0;
-    return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
-}
-
 _Bool __sev_approximate_f64(double actual, double expected, double atol, double rtol) {
     if (atol < 0.0 || rtol < 0.0) return 0;
     double error = fabs(actual - expected);
@@ -106,16 +100,6 @@ _Bool __sev_approximate_f64(double actual, double expected, double atol, double 
     return 0;
 }
 
-void __sev_os_wait(double seconds) {
-    if (!(seconds > 0.0)) return;
-    struct timespec remaining = {
-        .tv_sec = (time_t)seconds,
-        .tv_nsec = (long)((seconds - floor(seconds)) * 1000000000.0),
-    };
-    while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {
-    }
-}
-
 void __sev_throw(const char *error) {
     fflush(stdout);
     fprintf(stderr, "error: %s\n", __sev_error_message(error));
@@ -127,54 +111,6 @@ void __sev_panic(const char *message) {
     fprintf(stderr, "panic: %s\n", message == NULL ? "" : message);
     fflush(stderr);
     abort();
-}
-
-int64_t __sev_process_run(const char *command) {
-    int status = system(command);
-    if (status == -1) return -1;
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128;
-    return status;
-}
-
-int64_t __sev_process_spawn(const char *command) {
-    pid_t process = fork();
-    if (process < 0) return -1;
-    if (process == 0) {
-        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
-        _exit(127);
-    }
-    return (int64_t)process;
-}
-
-_Bool __sev_process_kill(int64_t process) {
-    return kill((pid_t)process, SIGTERM) == 0;
-}
-
-int64_t __sev_process_wait(int64_t process) {
-    int status = 0;
-    if (waitpid((pid_t)process, &status, 0) < 0) return -1;
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128;
-    return status;
-}
-
-const char *__sev_environment_get(const char *name) {
-    const char *value = getenv(name);
-    return value == NULL ? "" : value;
-}
-
-const char *__sev_environment_get_default(const char *name, const char *fallback) {
-    const char *value = getenv(name);
-    return value == NULL ? fallback : value;
-}
-
-_Bool __sev_environment_set(const char *name, const char *value) {
-    return setenv(name, value, 1) == 0;
-}
-
-_Bool __sev_environment_remove(const char *name) {
-    return unsetenv(name) == 0;
 }
 
 double __sev_platform_pointer_bits(void) {

@@ -8,12 +8,9 @@ description = "Source-owned package discovery, resolution, planning and distribu
 path = "src/lib.sev"
 
 [dependencies]
+time = { path = "../core/time" }
 environment = { path = "../system/environment" }
 file = { path = "../system/file" }
 path = { path = "../system/path" }
 process = { path = "../system/process" }
 os = { path = "../system/os" }
-
-[package.unsafe]
-capabilities = ["native-abi"]
-sources = ["src/host.sev"]

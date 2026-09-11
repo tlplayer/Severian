@@ -1,17 +1,40 @@
-@c(symbol = "__sev_path_join")
-def join(left: string, right: string) -> string
+# Lexical path operations are source string/buffer operations. Filesystem
+# queries and canonicalization belong to the os package.
+def join(left: string, right: string) -> string:
+    end := int(len(left))
+    while end > 1 and left[end - 1:end] == "/":
+        end -= 1
+    start := 0
+    while start < int(len(right)) and right[start:start + 1] == "/":
+        start += 1
+    prefix = left[:end]
+    separator = "/" if end != 0 and prefix[end - 1:end] != "/" else ""
+    return prefix + separator + right[start:]
 
-@c(symbol = "__sev_path_basename")
-def basename(value: string) -> string
+def basename(value: string) -> string:
+    end := int(len(value))
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    start := end
+    while start > 0 and value[start - 1:start] != "/":
+        start -= 1
+    return value[start:end]
 
-@c(symbol = "__sev_path_dirname")
-def dirname(value: string) -> string
+def dirname(value: string) -> string:
+    end := int(len(value))
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    while end > 0 and value[end - 1:end] != "/":
+        end -= 1
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    return "." if end == 0 else value[:end]
 
-@c(symbol = "__sev_path_extension")
-def extension(value: string) -> string
-
-@c(symbol = "__sev_path_exists")
-def exists(value: string) -> bool
-
-@c(symbol = "__sev_path_is_dir")
-def is_dir(value: string) -> bool
+def extension(value: string) -> string:
+    end := int(len(value))
+    dot := -1
+    while end > 0 and value[end - 1:end] != "/":
+        if dot < 0 and value[end - 1:end] == ".":
+            dot = end - 1
+        end -= 1
+    return value[dot:] if dot > end else ""

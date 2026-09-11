@@ -8,4 +8,9 @@ description = "Wall and monotonic clocks"
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+system = { path = "../../system", version = "0.1.0" }
+io = { path = "../../system/io", version = "0.1.0" }
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]

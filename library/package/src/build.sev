@@ -6,12 +6,13 @@ import * from "resolve.sev"
 import * from "archive.sev"
 import os
 import path
-import * from "../../testing/src/resources.sev" as resources
+import process
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
     return project.root + "/package.pkg/" + safe_name(platform) + "/" + safe_name(profile)
 
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
+    mutable_project(project.root)
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
     platform = request.platform if request.platform != "" else text_setting(project.manifest.entries, "build", "target", "host")
     profile = request.profile if request.profile != "" else text_setting(project.manifest.entries, "build", "profile", "dev")
@@ -65,7 +66,6 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
             listing = BuildUnit(unit.package_index, unit.target, unit.platform, unit.profile, unit.output + ".sources", false)
             compile_unit(compiler, listing, plan.resolution, "sources")
             bundle(plan.project, unit.target, unit.output, read_text(listing.output).strip().split("\n"))
-            os.remove(listing.output)
             artifacts.append(Artifact(unit.target, unit.platform, unit.profile, "bundle", unit.output))
         else:
             mkdir(path.dirname(unit.output))
@@ -88,7 +88,7 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
             unit.output = stage + "/test-" + string(index)
             planned.units[index] = unit
     result = execute(planned, compiler)
-    memory = resources.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))
+    memory = process.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))
     seconds = int(setting(project.manifest.entries, "test", "timeout-seconds", "60"))
     tests: list[TestResult] = []
     failed := 0
@@ -97,7 +97,7 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
             continue
         if request.emit != "":
             continue
-        status = command(resources.guarded_command([artifact.path], seconds, memory))
+        status = command(process.guarded_command([artifact.path], seconds, memory))
         tests.append(TestResult(artifact.target.name, status))
         if status != 0:
             failed += 1
@@ -112,6 +112,7 @@ def run(project: Project, compiler: Compiler, request: Run) -> int | Error:
     return command(arguments)
 
 def clean(project: Project, request: Clean) -> unit | Error:
+    mutable_project(project.root)
     destination := project.root + "/package.pkg"
     if request.profile != "" and request.platform == "":
         throw Error("clean profile requires a platform")

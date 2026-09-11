@@ -12,6 +12,7 @@ name = "compilation"
 path = "src/compilation.sev"
 
 [dependencies]
+process = { path = "../../../library/system/process" }
 package = { path = "../../../library/package" }
 source = { path = "../../source" }
 lexer = { path = "../../frontend/lexer" }

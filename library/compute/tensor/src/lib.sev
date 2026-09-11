@@ -1,4 +1,4 @@
-import path
+import os
 
 trait TensorElement:
     pass
@@ -58,7 +58,7 @@ def safetensor_byte_end(handle: int, name: string) -> int
 
 def open_safetensors(location: string) -> SafeTensorStore:
     selected = location if location.ends_with(".safetensors") else location + "/model.safetensors"
-    assert(path.exists(selected), "SafeTensor artifact does not exist: " + selected)
+    assert(os.exists(selected), "SafeTensor artifact does not exist: " + selected)
     handle = safetensor_open(selected)
     assert(handle != 0, "SafeTensor artifact is invalid: " + selected)
     return SafeTensorStore(selected, handle)

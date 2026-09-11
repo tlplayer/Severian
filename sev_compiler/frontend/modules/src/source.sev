@@ -40,18 +40,12 @@ def package_module(resolution: package.Resolution, importer: string, locator: st
 def standard_source(root: string, name: string) -> string | diagnostics.Diagnostic:
     if root == "":
         return error(diagnostics.diagnostic("E000124", "named import requires a sysroot or resolved package: " + name))
-    matches = package.capture(["find", "-H", root + "/library", "-maxdepth", "4", "-path", "*/" + name + "/package.toml", "-type", "f"])
-    selected := ""
-    for manifest in matches.split("\n"):
-        if manifest != "":
-            project = package.open(parent_path(manifest))
-            if project.manifest.name == name:
-                if selected != "":
-                    return error(diagnostics.diagnostic("E000124", "ambiguous standard library: " + name))
-                selected = parent_path(manifest) + "/" + package.library_target(project.manifest).path
-    if selected == "":
-        return error(diagnostics.diagnostic("E000124", "unknown standard library: " + name))
-    return selected
+    selected ?= package.workspace_library(root + "/library", name)
+    if selected is string:
+        return selected
+    if selected is Error:
+        return error(diagnostics.diagnostic("E000124", selected.message))
+    return error(diagnostics.diagnostic("E000124", "unknown standard library: " + name))
 
 
 def dependency_source(resolution: package.Resolution, importer: string, name: string, sysroot: string) -> string | diagnostics.Diagnostic:

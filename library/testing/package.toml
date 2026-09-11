@@ -10,3 +10,6 @@ path = "src/lib.sev"
 [package.unsafe]
 capabilities = ["native-abi"]
 sources = ["src/capture.sev"]
+
+[dependencies]
+process = { path = "../system/process", version = "0.1.0" }

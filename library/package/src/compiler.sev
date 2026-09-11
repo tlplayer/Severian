@@ -3,7 +3,9 @@ import * from "host.sev"
 import * from "manifest.sev"
 import * from "edit.sev"
 import path
-import * from "../../testing/src/resources.sev" as resources
+import os
+import environment
+import process
 
 # A versioned compilation-unit protocol keeps package orchestration independent
 # of the concrete compiler and does not recursively invoke package commands.
@@ -37,20 +39,56 @@ def decode_resolution(text: string) -> Resolution | Error:
             throw Error("compilation graph edge has an invalid package identity")
     return Resolution(packages, edges, "")
 
+def cached_inputs_match(location: string) -> bool:
+    try:
+        if not os.is_file(location):
+            return false
+        entries = parse_document(read_text(location))
+        if len(entries) == 0:
+            return false
+        for entry in entries:
+            if not os.is_file(entry.key) or digest(entry.key) != unquote(entry.value):
+                return false
+        return true
+    catch error: Error:
+        # Mutable build state is disposable; a damaged cache requests a build.
+        return false
+
 def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false) -> Artifact | Error:
     if unit.output != "":
         mkdir(path.dirname(unit.output))
     stage = temporary("/tmp")
-    write_text(stage + "/resolution.toml", encode_resolution(resolution))
-    input = inside(resolution.packages[unit.package_index].root, unit.target.path)
-    arguments := [compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
-    if unit.include_tests or guard_tests:
-        config = resolution.packages[0].manifest.entries
-        memory = resources.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
-        seconds = int(setting(config, "test", "timeout-seconds", "60"))
-        arguments = resources.guarded_command(arguments, seconds, memory)
-    status = command(arguments)
+    try:
+        graph = encode_resolution(resolution)
+        write_text(stage + "/resolution.toml", graph)
+        input = inside(resolution.packages[unit.package_index].root, unit.target.path)
+        identity := graph + "\n" + digest(compiler.executable) + "\n" + compiler.sysroot + "\n" + input + "\n" + unit.output + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
+        # Tool identities and source inputs are semantic build inputs too.
+        for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")]:
+            identity += "\n" + tool + "\n" + capture([tool, "--version"])
+        write_text(stage + "/key", identity)
+        cache = resolution.packages[0].root + "/package.pkg/build/units/" + digest(stage + "/key").replace(":", "-")
+        reused := false
+        if cached_inputs_match(cache + "/inputs") and os.is_file(cache + "/output"):
+            recorded = read_text(cache + "/output")
+            reused = recorded == "check" if emit == "check" else os.is_file(unit.output) and digest(unit.output) == recorded
+        if not reused:
+            arguments := [compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+            if unit.include_tests or guard_tests:
+                config = resolution.packages[0].manifest.entries
+                memory = process.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
+                seconds = int(setting(config, "test", "timeout-seconds", "60"))
+                arguments = process.guarded_command(arguments, seconds, memory)
+            status = command(arguments)
+            if status != 0:
+                throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
+            # Only a compiler that reports its actual source inputs can cache.
+            if cached_inputs_match(stage + "/resolution.toml.inputs"):
+                mkdir(cache)
+                copy_file(stage + "/resolution.toml.inputs", cache + "/inputs")
+                write_text(cache + "/output", "check" if emit == "check" else digest(unit.output))
+    catch error: Error:
+        remove_tree(stage)
+        throw Error(error.message)
     remove_tree(stage)
-    if status != 0:
-        throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
     return Artifact(unit.target, unit.platform, unit.profile, emit if emit != "" else "native", unit.output)

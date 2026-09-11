@@ -36,3 +36,14 @@ def lock(path: string) -> int | None:
 
 @c(symbol = "__sev_file_unlock")
 def unlock(lock: int) -> bool
+
+@c(symbol = "__sev_file_error")
+def native_error() -> i32
+
+# Unlike raw(), this checked API distinguishes an empty file from failed IO.
+def read_checked(path: string) -> string | Error:
+    contents = raw(path)
+    code = native_error()
+    if code != 0:
+        throw Error("could not read text file " + path + " (OS error " + string(code) + ")")
+    return contents

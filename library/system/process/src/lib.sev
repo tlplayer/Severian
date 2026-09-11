@@ -17,3 +17,53 @@ def arguments() -> list[string]
 # Hosted working-directory boundary; an empty result indicates an OS failure.
 @c(symbol = "__sev_process_current_directory")
 def current_directory() -> string
+
+import * from "resources.sev"
+
+@c(symbol = "__sev_process_id")
+def id() -> int
+
+@c(symbol = "__sev_command_create")
+def native_command() -> int
+@c(symbol = "__sev_command_argument")
+def native_argument(command: int, argument: string)
+@c(symbol = "__sev_command_execute")
+def native_execute(command: int, capture: bool) -> int
+@c(symbol = "__sev_command_stdout")
+def native_stdout(command: int) -> string
+@c(symbol = "__sev_command_stderr")
+def native_stderr(command: int) -> string
+@c(symbol = "__sev_command_drop")
+def native_drop(command: int)
+
+class Output:
+    status: int
+    stdout: string
+    stderr: string
+
+def command_handle(arguments: list[string]) -> int | Error:
+    if len(arguments) == 0:
+        throw Error("process requires an executable")
+    command = native_command()
+    for argument in arguments:
+        native_argument(command, argument)
+    return command
+
+# Argument arrays preserve spaces, quotes and shell metacharacters literally.
+def run(arguments: list[string]) -> int | Error:
+    command = command_handle(arguments)
+    status = native_execute(command, false)
+    native_drop(command)
+    if status < 0:
+        throw Error("could not execute process: " + arguments[0])
+    return status
+
+def execute(arguments: list[string]) -> Output | Error:
+    command = command_handle(arguments)
+    status = native_execute(command, true)
+    output = native_stdout(command)
+    errors = native_stderr(command)
+    native_drop(command)
+    if status < 0:
+        throw Error("could not execute process: " + arguments[0])
+    return Output(status, output, errors)

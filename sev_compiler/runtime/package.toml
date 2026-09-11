@@ -6,3 +6,10 @@ publish = false
 
 [lib]
 path = "src/lib.sev"
+
+[dependencies]
+file = { path = "../../library/system/file" }
+path = { path = "../../library/system/path" }
+os = { path = "../../library/system/os" }
+process = { path = "../../library/system/process" }
+environment = { path = "../../library/system/environment" }

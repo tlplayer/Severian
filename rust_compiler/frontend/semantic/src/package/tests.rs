@@ -1725,3 +1725,22 @@ fn generic_class_fields_resolve_source_enum_types() {
     severian_mir::build(&typed.hir).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn importing_a_field_only_record_does_not_import_its_modules_functions() {
+    let root = temporary();
+    std::fs::write(
+        root.join("provider.sev"),
+        "class Metadata:\n    size: int\ndef remove_tree(value: string) -> int:\n    return 9\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("app.sev"),
+        "import * from \"provider.sev\" as provider\ndef remove_tree(value: string) -> int:\n    return 7\ndef selected() -> int:\n    metadata = provider.Metadata(1)\n    return remove_tree(\"local\") + metadata.size\n").unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(
+        &severian_modules::resolve(&root.join("app.sev")).unwrap(),
+        &universal,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

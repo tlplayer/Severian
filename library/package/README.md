@@ -328,3 +328,48 @@ warning, but it does not silently bypass the program's safety model.
 
 Keeping this table honest is part of the example. Documentation must not claim
 that a future distribution feature is produced by today’s `sev build`.
+
+## Hosted package operations and publication
+
+The library workspace lists actual manifest paths. Standalone compiler imports
+use that catalog; package builds use their declared resolved graph. Internal
+memory/collection packages may be published as dependencies while retaining
+`metadata.library.public = false` where declared.
+
+Filesystem traversal and temporary directories come from `os`; checked text
+reads come from `file.read_checked`; argument-vector execution and captured
+stdout/stderr come from `process`. Their POSIX implementations are declared by
+`library/system/package.toml`, and both compiler link paths discover native
+providers from package manifests. Resource-budget helpers live in `process`.
+String and UTF-8 manipulation stays in Severian/MLIR; archive decoding does not
+use temporary files or C string conversion helpers.
+
+Publication stages a snapshot, includes native sources and other package
+assets, verifies a content index, and commits the directory without replacement.
+An identical source/configuration/dependency/toolchain identity is a no-op;
+changed content at an existing version produces `PackageVersionConflict`.
+Consumption verifies the snapshot. Opening a release does not create edit
+locks, and build/clean/edit reject published project directories. Interrupted
+publication may leave an unreferenced stage, but never replaces a release.
+
+The source compiler reports the source bytes it actually consumed. Package
+compilation reuses completed outputs only when those input hashes, the resolved
+graph, compiler, native tool versions, target, profile, and output digest match.
+Mutable cache records stay in the consumer's `package.pkg/build/units/`.
+This is compilation-unit reuse; source-free `.pkgi` imports and declaration-level
+invalidation from SIP-0003 remain separate compiler work. The source compiler
+currently accepts scalar native boundaries: lexical path operations and scalar
+native-provider consumers run through it, while the existing file/process APIs
+with C-string signatures still require the Rust seed. This change does not add
+string-to-C ABI lowering.
+
+Run the adjacent contracts with:
+
+```sh
+python3 library/system/tests/native.py
+python3 library/package/tests/workspace.py
+SEVERIAN_SOURCE_COMPILER=/path/to/sev python3 library/package/tests/publication.py
+sev_rust test library/system/file
+sev_rust test library/system/process
+sev_rust test library/package
+```

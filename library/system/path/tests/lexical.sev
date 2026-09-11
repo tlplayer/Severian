@@ -1,0 +1,18 @@
+import * from "../src/lib.sev" as path
+
+test "lexical paths preserve Unicode and separator behavior":
+    assert(path.join("/tmp/", "/λ/😀.sev") == "/tmp/λ/😀.sev")
+    assert(path.dirname("/tmp/λ/😀.sev") == "/tmp/λ")
+    assert(path.basename("/tmp/λ/😀.sev/") == "😀.sev")
+    assert(path.extension("/tmp/λ/😀.sev") == ".sev")
+    assert(path.extension(".hidden") == "")
+    assert(path.dirname("name") == ".")
+    assert(path.dirname("/") == "/")
+    assert(path.join("", "relative") == "relative")
+
+test "lexical paths have no fixed native buffer limit":
+    value := ""
+    for index in range(5000):
+        value += "x"
+    assert(path.basename(value) == value)
+    assert(path.join(value, "file") == value + "/file")

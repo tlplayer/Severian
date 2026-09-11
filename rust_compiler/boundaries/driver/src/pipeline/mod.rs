@@ -808,7 +808,7 @@ impl Compiler {
         source: &Path,
         output: &Path,
     ) -> Result<Vec<String>, CompileError> {
-        let Some(providers) = NativeProviderSources::discover(source, self.packages.as_ref())?
+        let Some(providers) = NativeProviderSources::discover(source, Some(&self.standard_package_graph(source)?))?
         else {
             return Ok(Vec::new());
         };
@@ -1863,14 +1863,12 @@ impl NativeProviderSources {
         source: &Path,
         packages: Option<&severian_modules::PackageGraph>,
     ) -> Result<Option<Self>, CompileError> {
-        let Some(root) = source.parent().and_then(|directory| {
-            directory
-                .ancestors()
-                .find(|ancestor| ancestor.join("package.toml").is_file())
-        }) else {
-            return Ok(None);
-        };
-        let mut roots = BTreeSet::from([root.to_owned()]);
+        let mut roots = BTreeSet::new();
+        if let Some(root) = source.parent().and_then(|directory| {
+            directory.ancestors().find(|ancestor| ancestor.join("package.toml").is_file())
+        }) {
+            roots.insert(root.to_owned());
+        }
         if let Some(packages) = packages {
             roots.extend(
                 packages

@@ -10,8 +10,6 @@ def wait(seconds: duration) -> unit
 @c(symbol = "__sev_os_make_directories")
 def make_directories(path: string) -> bool
 
-def list(path: string) -> list[string]:
-    return []
 
 @c(symbol = "__sev_path_exists")
 def exists(path: string) -> bool
@@ -36,3 +34,65 @@ def rename(source: string, destination: string) -> i32
 
 @c(symbol = "__sev_os_remove")
 def remove(path: string) -> i32
+
+@c(symbol = "__sev_os_is_symlink")
+def is_symlink(path: string) -> bool
+@c(symbol = "__sev_os_temporary")
+def native_temporary(parent: string, prefix: string) -> string
+@c(symbol = "__sev_os_directory_open")
+def native_directory_open(path: string) -> int
+@c(symbol = "__sev_os_directory_next")
+def native_directory_next(handle: int) -> string
+@c(symbol = "__sev_os_directory_error")
+def native_directory_error() -> i32
+@c(symbol = "__sev_os_directory_close")
+def native_directory_close(handle: int) -> i32
+@c(symbol = "__sev_os_publish_directory")
+def native_publish_directory(source: string, destination: string) -> i32
+@c(symbol = "__sev_os_remove_tree")
+def native_remove_tree(path: string) -> i32
+
+def list(path: string) -> list[string] | Error:
+    handle = native_directory_open(path)
+    if handle == 0:
+        throw Error("could not list directory: " + path)
+    result: list[string] = []
+    while true:
+        entry = native_directory_next(handle)
+        if entry == "":
+            code = native_directory_error()
+            closed = native_directory_close(handle)
+            if code != 0 or closed != 0:
+                throw Error("could not finish reading directory: " + path)
+            return result
+        if entry != "." and entry != "..":
+            result.append(entry[:])
+    return result
+
+def temporary(parent: string, prefix: string = ".sev-") -> string | Error:
+    if prefix == "" or prefix.contains("/") or prefix.contains("\\"):
+        throw Error("temporary directory prefix must be a filename prefix")
+    result = native_temporary(parent, prefix)
+    if result == "":
+        throw Error("could not create temporary directory in " + parent)
+    return result
+
+def publish_directory(source: string, destination: string) -> unit | Error:
+    code = native_publish_directory(source, destination)
+    if code != 0:
+        throw Error("could not publish directory without replacement: " + destination + " (OS error " + string(code) + ")")
+
+def remove_tree(path: string) -> unit | Error:
+    if path == "" or path == "/" or path == "." or path == "..":
+        throw Error("refusing to remove an unspecified directory tree")
+    if native_remove_tree(path) != 0:
+        throw Error("could not remove directory tree: " + path)
+
+@c(symbol = "__sev_path_canonical")
+def native_canonical(path: string) -> string
+
+def canonical(path: string) -> string | Error:
+    resolved = native_canonical(path)
+    if resolved == "":
+        throw Error("could not resolve path: " + path)
+    return resolved

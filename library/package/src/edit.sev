@@ -38,6 +38,7 @@ class Edit:
         throw Error("unknown dependency alias: " + alias)
 
     def commit() -> Project | Error:
+        mutable_project(project.root)
         original = project
         text = render_manifest(entries)
         candidate = Project(original.root, parse_manifest(text), text, "")

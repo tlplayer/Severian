@@ -1,0 +1,11 @@
+import * from "../src/lib.sev" as package
+
+test "workspace lookup uses declared manifests at any depth":
+    root = package.temporary("/tmp")
+    package.write_text(root + "/package.toml", "[workspace]\nmembers = [\"unrelated\", \"deep/nested/library\"]\n")
+    package.write_text(root + "/unrelated/package.toml", "[package]\nname = \"other\"\n[build]\nprofile = \"not-supported-here\"\n")
+    package.write_text(root + "/deep/nested/library/package.toml", "[package]\nname = \"chosen\"\nversion = \"1.0.0\"\n[lib]\npath = \"src/lib.sev\"\n")
+    package.write_text(root + "/deep/nested/library/src/lib.sev", "def answer() -> int:\n    return 42\n")
+    assert(package.workspace_library(root, "chosen") == root + "/deep/nested/library/src/lib.sev")
+    assert(not package.exists(root + "/deep/nested/library/.sev-edit.lock"))
+    package.remove_tree(root)

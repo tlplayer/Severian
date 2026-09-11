@@ -3,13 +3,12 @@ name = "core.collections.internal.contiguous_storage"
 version = "0.1.0"
 edition = "2026"
 description = "Private move-aware contiguous storage shared by core sequences"
-publish = false
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-memory = { path = "../../../memory", version = "0.1.0" }
+memory = { package = "core.memory", path = "../../../memory", version = "0.1.0" }
 
 [package.metadata.library]
 category = "internal"

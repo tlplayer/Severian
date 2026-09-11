@@ -55,59 +55,81 @@ def frozen_manifest(project: Project, resolution: Resolution) -> string | Error:
 def publish(project: Project, compiler: Compiler, request: Publish) -> string | Error:
     if setting(project.manifest.entries, "package", "publish") == "false":
         throw Error("package is marked publish = false")
+    mutable_project(project.root)
     root = registry_root(request.registry)
     release = root + "/packages/" + project.manifest.name + "/" + project.manifest.version
-    if os.exists(release):
-        throw Error("registry release already exists: " + release)
+    name = project.manifest.name + "-" + project.manifest.version + ".pkg"
     include_source = request.include_source and setting(project.manifest.entries, "publish", "include-source") != "false"
-    result = build(project, compiler, Build("", request.platform, request.profile, "", "", false))
     if not include_source:
         for target in project.manifest.targets:
             if target.kind == "library":
                 throw Error("source-free libraries require compiler interfaces and compatible library artifacts")
-    stage = temporary(root)
-    distribution = stage + "/distribution"
-    mkdir(distribution)
-    frozen = frozen_manifest(project, result.plan.resolution)
+    resolved = resolve(project, Resolve("publish", false, request.registry))
+    frozen = frozen_manifest(project, resolved)
+    # Resolve the frozen graph before building: sibling checkouts cannot satisfy
+    # an unpublished release dependency.
     published = resolve(Project(project.root, parse_manifest(frozen), frozen, ""), Resolve("publish", false, request.registry))
-    write_text(distribution + "/metadata/build.toml", "architecture = " + toml_quote(capture(["uname", "-m"])) + "\nos = " + toml_quote(capture(["uname", "-s"])) + "\nruntime-abi = \"severian-source-1\"\n")
-    write_text(distribution + "/metadata/package.toml", frozen)
-    write_text(distribution + "/metadata/sev.lock", published.lock)
-    if include_source:
-        for location in files(project.root):
-            relative = location[int(len(project.root)) + 1:]
-            if relative.starts_with("package.pkg/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "package.toml" or relative == "sev.lock":
-                continue
-            if location.ends_with(".sev"):
-                copy_file(location, distribution + "/source/" + relative_path(relative))
-        write_text(distribution + "/source/package.toml", frozen)
-        # Lock the actual published source set, including the frozen manifest.
-        published_source = Project(distribution + "/source", parse_manifest(frozen), frozen, "")
-        source_resolution = resolve(published_source, Resolve("publish", false, request.registry))
-        write_text(distribution + "/source/sev.lock", source_resolution.lock)
-        write_text(distribution + "/metadata/sev.lock", source_resolution.lock)
-    for artifact in result.artifacts:
-        if artifact.format == "native":
-            destination = distribution + "/artifacts/" + artifact.platform + "/" + artifact.profile + "/bin/" + artifact.target.name
-            copy_file(artifact.path, destination)
-            require_command(["chmod", "755", "--", destination])
-    entries: list[ArchiveEntry] = []
-    for location in files(distribution):
-        relative = location[int(len(distribution)) + 1:]
-        entries.append(ArchiveEntry(relative, relative.starts_with("artifacts/"), read_bytes(location)))
-    name = project.manifest.name + "-" + project.manifest.version + ".pkg"
-    write_archive(distribution + "/" + name, Archive(2, project.manifest.name, entries))
-    mkdir(path.dirname(release))
-    lock = file.native_lock(root + "/.sev-publish.lock")
-    if lock < 0:
-        throw Error("could not lock registry publication")
+    checksum = source_checksum(project.root, frozen)
+    identity = "source = " + toml_quote(checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\nprofile = " + toml_quote(request.profile) + "\nplatform = " + toml_quote(request.platform) + "\ninclude-source = " + ("true" if include_source else "false") + "\n" + published.lock
+    if os.exists(release) or os.is_symlink(release):
+        if not os.is_file(release + "/metadata/publication.toml") or read_text(release + "/metadata/publication.toml") != identity:
+            throw Error("PackageVersionConflict: release already exists with different content: " + release)
+        verify_publication(release, name)
+        return release + "/" + name
+    stage = temporary(root)
     try:
-        if os.exists(release):
-            throw Error("registry release already exists: " + release)
-        replace_file(distribution, release)
-        file.unlock(lock)
+        result = build(project, compiler, Build("", request.platform, request.profile, "", "", false))
+        if source_checksum(project.root, frozen) != checksum:
+            throw Error("package source changed during publication")
+        distribution = stage + "/distribution"
+        mkdir(distribution)
+        write_text(distribution + "/metadata/build.toml", "architecture = " + toml_quote(capture(["uname", "-m"])) + "\nos = " + toml_quote(capture(["uname", "-s"])) + "\nruntime-abi = \"severian-source-1\"\n")
+        write_text(distribution + "/metadata/package.toml", frozen)
+        write_text(distribution + "/metadata/sev.lock", published.lock)
+        write_text(distribution + "/metadata/publication.toml", identity)
+        if include_source:
+            for location in files(project.root):
+                relative = location[int(len(project.root)) + 1:]
+                if relative == "package.toml" or relative == "sev.lock":
+                    continue
+                # Include native providers, headers and other package assets.
+                copy_file(location, distribution + "/source/" + relative_path(relative))
+            write_text(distribution + "/source/package.toml", frozen)
+            if source_checksum(distribution + "/source") != checksum:
+                throw Error("package source changed while staging publication")
+            source_project = Project(distribution + "/source", parse_manifest(frozen), frozen, "")
+            source_resolution = resolve(source_project, Resolve("publish", false, request.registry))
+            write_text(distribution + "/source/sev.lock", source_resolution.lock)
+            write_text(distribution + "/metadata/sev.lock", source_resolution.lock)
+        for artifact in result.artifacts:
+            if artifact.format == "native":
+                destination = distribution + "/artifacts/" + artifact.platform + "/" + artifact.profile + "/bin/" + artifact.target.name
+                copy_file(artifact.path, destination)
+                require_command(["chmod", "755", "--", destination])
+        entries: list[ArchiveEntry] = []
+        for location in files(distribution, true):
+            relative = location[int(len(distribution)) + 1:]
+            entries.append(ArchiveEntry(relative, relative.starts_with("artifacts/"), read_bytes(location)))
+        write_archive(distribution + "/" + name, Archive(2, project.manifest.name, entries))
+        write_text(distribution + "/metadata/archive.sha256", digest(distribution + "/" + name) + "\n")
+        write_text(distribution + "/metadata/content.sha256", publication_files(distribution, name))
+        verify_publication(distribution, name)
+        mkdir(path.dirname(release))
+        lock = file.native_lock(root + "/.sev-publish.lock")
+        if lock < 0:
+            throw Error("could not lock registry publication")
+        try:
+            if os.exists(release) or os.is_symlink(release):
+                if not os.is_file(release + "/metadata/publication.toml") or read_text(release + "/metadata/publication.toml") != identity:
+                    throw Error("PackageVersionConflict: release already exists with different content: " + release)
+                verify_publication(release, name)
+            else:
+                os.publish_directory(distribution, release)
+            file.unlock(lock)
+        catch error: Error:
+            file.unlock(lock)
+            throw Error(error.message)
     catch error: Error:
-        file.unlock(lock)
         remove_tree(stage)
         throw Error(error.message)
     remove_tree(stage)

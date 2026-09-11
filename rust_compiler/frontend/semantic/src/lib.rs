@@ -8082,6 +8082,15 @@ impl Analyzer<'_> {
                         return self.expression(&argument.value, Some(runtime_type));
                     }
                 }
+                if callable_path(callee).as_deref() == Some("char")
+                    && arguments.len() == 1 && arguments[0].name.is_none()
+                    && !self.classes.contains_key("char")
+                {
+                    let scalar = self.types.resolve_name("u32").expect("bootstrap defines u32");
+                    let value = self.expression(&arguments[0].value, None)?;
+                    let value = self.coerce(value, scalar, true)?;
+                    return Ok(self.character_value(value, ast.span));
+                }
                 if matches!(arguments.len(), 1 | 2) {
                     if let Some(name) = callable_path(callee) {
                         if let Some(target) = self.types.resolve_name(&name) {
@@ -9747,6 +9756,116 @@ impl Analyzer<'_> {
             .with_help("convert one operand explicitly or use operands with compatible types");
         }
         semantic_error(error.to_string(), span)
+    }
+
+    // The seed lowers Unicode scalar construction to ordinary typed IR. No
+    // C character/string conversion is required; a helper parameter ensures
+    // that an argument with effects is evaluated exactly once.
+    fn character_value(&mut self, value: Expression, span: severian_source::Span) -> Expression {
+        let scalar = self
+            .types
+            .resolve_name("u32")
+            .expect("bootstrap defines u32");
+        let character = self
+            .types
+            .resolve_name("char")
+            .expect("bootstrap defines char");
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let definition = self.ensure_runtime_function("__sev_unicode_scalar", &[scalar], character);
+        let index = self
+            .runtime_functions
+            .iter()
+            .position(|function| function.definition == definition)
+            .unwrap();
+        if self.runtime_functions[index].body.is_none() {
+            let parameter = self.runtime_functions[index].parameters[0].binding;
+            let operand = Expression {
+                id: self.next_id(),
+                type_id: scalar,
+                kind: ExpressionKind::Binding(parameter),
+                span,
+            };
+            let mut comparison = |operator, bound: &str| {
+                let right = Expression {
+                    id: self.next_id(),
+                    type_id: scalar,
+                    kind: ExpressionKind::Literal(LiteralValue::Integer(bound.into())),
+                    span,
+                };
+                Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator,
+                        left: Box::new(operand.clone()),
+                        right: Box::new(right),
+                    },
+                    span,
+                }
+            };
+            let upper = comparison(BinaryOperator::LessEqual, "1114111");
+            let below = comparison(BinaryOperator::Less, "55296");
+            let above = comparison(BinaryOperator::Greater, "57343");
+            let nonsurrogate = Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Or,
+                    left: Box::new(below),
+                    right: Box::new(above),
+                },
+                span,
+            };
+            let condition = Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::And,
+                    left: Box::new(upper),
+                    right: Box::new(nonsurrogate),
+                },
+                span,
+            };
+            let converted = Expression {
+                id: self.next_id(),
+                type_id: character,
+                kind: ExpressionKind::Convert {
+                    operand: Box::new(operand),
+                    conversion: severian_universal::Conversion {
+                        from: scalar,
+                        to: character,
+                        kind: severian_universal::ConversionKind::Identity,
+                    },
+                },
+                span,
+            };
+            let failure = self.throw_expression("invalid Unicode scalar value", character, span);
+            let result = Expression {
+                id: self.next_id(),
+                type_id: character,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(converted),
+                    fallback: Box::new(failure),
+                },
+                span,
+            };
+            self.runtime_functions[index].call_type = severian_hir::CallType::Severian;
+            self.runtime_functions[index].body = Some(Block {
+                statements: vec![Statement::Return(Some(result))],
+                ..Block::default()
+            });
+        }
+        self.runtime_call(
+            "__sev_unicode_scalar",
+            &[scalar],
+            character,
+            vec![value],
+            span,
+        )
     }
 
     fn numeric_primitive(&self, ty: TypeId) -> bool {
@@ -20885,6 +21004,27 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn unicode_scalar_construction_has_an_ir_body_instead_of_a_c_call() {
+        let (program, _) =
+            analyze_source("def scalar(value: u32) -> char:\n    return char(value)\n");
+        let helper = program
+            .modules
+            .iter()
+            .flat_map(|module| &module.functions)
+            .find(|function| function.name == "__sev_unicode_scalar")
+            .unwrap();
+        assert!(matches!(helper.call_type, severian_hir::CallType::Severian));
+        let body = helper.body.as_ref().unwrap();
+        assert!(matches!(
+            &body.statements[0],
+            Statement::Return(Some(Expression {
+                kind: ExpressionKind::Fallback { .. },
+                ..
+            }))
+        ));
     }
 
     #[test]

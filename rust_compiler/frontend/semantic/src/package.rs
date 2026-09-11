@@ -1014,7 +1014,13 @@ fn class_lexical_modules(source: ModuleId, classes: &[PackageClass]) -> BTreeSet
             .collect::<Vec<_>>();
         selected.extend(referenced);
         if selected.len() == previous {
-            modules.extend(selected.iter().map(|index| classes[*index].module));
+            // Field-only records need their type layouts, not the defining
+            // module's callable namespace. Importing Metadata must not make
+            // unrelated os functions compete with the caller's declarations.
+            modules.extend(selected.iter().filter_map(|index| {
+                let class = &classes[*index];
+                (!class.declaration.methods.is_empty()).then_some(class.module)
+            }));
             return modules;
         }
     }

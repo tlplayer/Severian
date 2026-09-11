@@ -5,7 +5,7 @@ the generated test executable cannot protect the compiler that builds it.
 
 The source package testing framework now applies `[test].memory-max` and
 `[test].timeout-seconds` to compilation units and test executables. The shared
-hosted helper is `library/testing/src/resources.sev`. Native pipeline steps
+hosted helper is `library/system/process/src/resources.sev`. Native pipeline steps
 have their own `memory_bytes` and `timeout` budgets, including rebuilding the
 compiler. Configuration for the example pipeline lives in
 `sev_compiler/package.toml` under `[package.metadata.pipeline]`. Its complete example-suite test has a

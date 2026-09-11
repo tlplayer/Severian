@@ -4,40 +4,32 @@ import path
 import process
 import os
 
-# Hosted primitives only. Package decisions remain in ordinary Severian.
-@c(symbol="getpid")
-def process_id() -> i32
+import time
 
-@c(symbol="__sev_time_monotonic")
-def monotonic() -> float
+def process_id() -> int:
+    return process.id()
+
+def monotonic() -> float:
+    return time.monotonic()
 
 def quote(value: string) -> string:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
-def command(arguments: list[string]) -> int:
-    words: list[string] = []
-    for argument in arguments:
-        words.append(quote(argument))
-    return process.run(words.join(" "))
+def command(arguments: list[string]) -> int | Error:
+    return process.run(arguments)
 
 def require_command(arguments: list[string]) -> unit | Error:
     if command(arguments) != 0:
         throw Error("host operation failed: " + arguments[0])
 
 def capture(arguments: list[string]) -> string | Error:
-    directory = temporary("/tmp")
-    words: list[string] = []
-    for argument in arguments:
-        words.append(quote(argument))
-    status = process.run(words.join(" ") + " > " + quote(directory + "/output"))
-    result = file.raw(directory + "/output")
-    remove_tree(directory)
-    if status != 0:
-        throw Error("host operation failed: " + arguments[0])
-    return result.strip()
+    result = process.execute(arguments)
+    if result.status != 0:
+        throw Error("host operation failed: " + arguments[0] + ": " + result.stderr)
+    return result.stdout.strip()
 
 def canonical(value: string) -> string | Error:
-    return capture(["realpath", "-e", "--", value])
+    return os.canonical(value)
 
 def exists(value: string) -> bool:
     return os.exists(value)
@@ -52,26 +44,18 @@ def write_text(destination: string, contents: string) -> unit | Error:
         throw Error("could not write " + destination)
 
 def read_text(location: string) -> string | Error:
-    if not os.is_file(location):
-        throw Error("missing file " + location)
-    return file.raw(location)
+    return file.read_checked(location)
 
 def temporary(parent: string, prefix: string = ".sev-") -> string | Error:
     mkdir(parent)
-    index := 0
-    while index < 10000:
-        candidate = parent + "/" + prefix + string(process_id()) + "-" + string(index)
-        if process.run("mkdir -- " + quote(candidate) + " 2>/dev/null") == 0:
-            return candidate
-        index += 1
-    throw Error("could not allocate package staging directory")
+    return os.temporary(parent, prefix)
 
 def replace_file(source: string, destination: string) -> unit | Error:
     if os.rename(source, destination) != 0:
         throw Error("could not replace " + destination)
 
 def remove_tree(location: string) -> unit | Error:
-    require_command(["rm", "-rf", "--", location])
+    os.remove_tree(location)
 
 def copy_file(source: string, destination: string) -> unit | Error:
     mkdir(path.dirname(destination))
@@ -90,14 +74,26 @@ def sorted_strings(values: list[string]) -> list[string]:
                 result[j] = previous
     return result
 
-def files(root: string) -> list[string] | Error:
-    links = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "package.pkg", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "l", "-print"])
-    if links != "":
-        throw Error("package content may not contain symlinks: " + links)
-    output = capture(["find", root, "-mindepth", "1", "-type", "d", "(", "-name", "package.pkg", "-o", "-name", ".git", "-o", "-name", ".sev-*", ")", "-prune", "-o", "-type", "f", "-print"])
-    if output == "":
-        return []
-    return sorted_strings(output.split("\n"))
+def collect_files(root: string, directory: string, result: list[string], nested_packages: bool) -> unit | Error:
+    for name in os.list(directory):
+        if name == "package.pkg" or name == ".git" or name.starts_with(".sev-"):
+            continue
+        location = directory + "/" + name
+        if os.is_symlink(location):
+            throw Error("package content may not contain symlinks: " + location)
+        if os.is_dir(location):
+            # Nested manifests introduce separate packages, not source folders.
+            if nested_packages or not os.is_file(location + "/package.toml"):
+                collect_files(root, location, result, nested_packages)
+        elif os.is_file(location):
+            result.append(location)
+        else:
+            throw Error("package content must be a regular file: " + location)
+
+def files(root: string, nested_packages: bool = false) -> list[string] | Error:
+    result: list[string] = []
+    collect_files(root, root, result, nested_packages)
+    return sorted_strings(result)
 
 def digest(location: string) -> string | Error:
     return "sha256:" + capture(["sha256sum", "--", location]).split(" ")[0]
@@ -124,3 +120,16 @@ def recover_edit(root: string) -> unit | Error:
     else:
         write_text(root + "/sev.lock", previous)
     remove_tree(stage)
+
+# Published project reads need no recovery lock or writable build directory.
+def published_project(root: string) -> bool:
+    directory := canonical(root)
+    while directory != "/":
+        if os.is_file(directory + "/metadata/publication.toml"):
+            return true
+        directory = path.dirname(directory)
+    return false
+
+def mutable_project(root: string) -> unit | Error:
+    if published_project(root):
+        throw Error("published packages are immutable: " + root)

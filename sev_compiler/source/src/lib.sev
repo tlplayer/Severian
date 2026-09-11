@@ -6,7 +6,12 @@ import os
 def checked_source_text(path: string) -> string | io.IOError:
     if not os.is_file(path):
         return error(io.IOError("source file does not exist or is not a regular file: " + path))
-    return file.raw(path)
+    result ?= file.read_checked(path)
+    if result is string:
+        return result
+    if result is Error:
+        return error(io.IOError(result.message))
+    return error(io.IOError("could not read source file: " + path))
 
 class SourceId:
     index: u32

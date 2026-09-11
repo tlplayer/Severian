@@ -31,6 +31,7 @@ def archive_text(bytes: list[u8], offset: int, count: int) -> string | Error:
     if offset < 0 or count < 0 or offset > int(int(len(bytes))) - count:
         throw Error("truncated package archive path")
     cursor := offset
+    result := ""
     while cursor < offset + count:
         first = int(bytes[cursor])
         width := 1
@@ -52,15 +53,14 @@ def archive_text(bytes: list[u8], offset: int, count: int) -> string | Error:
             second = int(bytes[cursor + 1])
             if (first == 224 and second < 160) or (first == 237 and second >= 160) or (first == 240 and second < 144) or (first == 244 and second >= 144):
                 throw Error("invalid UTF-8 scalar in archive path")
+        scalar := first
+        if width > 1:
+            scalar = first % (32 if width == 2 else 16 if width == 3 else 8)
+            for continuation in range(1, width):
+                scalar = scalar * 64 + int(bytes[cursor + continuation]) - 128
+        result += string(char(u32(scalar)))
         cursor += width
-    # Decode through the file boundary, which retains UTF-8 exactly.
-    stage = temporary("/tmp")
-    write_bytes(stage + "/text", bytes[offset:offset + count])
-    text = read_text(stage + "/text")
-    remove_tree(stage)
-    if int(len(text.bytes())) != count:
-        throw Error("invalid archive path encoding")
-    return text
+    return result
 
 def read_archive(location: string) -> Archive | Error:
     bytes = read_bytes(location)
@@ -169,3 +169,20 @@ def bundle(project: Project, target: Target, destination: string, modules: list[
         if location.starts_with(source_root + "/") and location.ends_with(".sev"):
             entries.append(ArchiveEntry(location[int(int(len(source_root))) + 1:], false, read_bytes(location)))
     write_archive(destination, Archive(1, target.name, entries))
+
+def publication_files(root: string, archive_name: string) -> string | Error:
+    lines: list[string] = []
+    for location in files(root, true):
+        relative = location[int(len(root)) + 1:]
+        if relative != "metadata/content.sha256" and relative != archive_name:
+            lines.append(toml_quote(relative) + " " + digest(location))
+    return lines.join("\n") + "\n"
+
+def verify_publication(root: string, archive_name: string) -> unit | Error:
+    expected = read_text(root + "/metadata/content.sha256")
+    if publication_files(root, archive_name) != expected:
+        throw Error("PackageIntegrityError: published content changed: " + root)
+    if not os.is_file(root + "/" + archive_name):
+        throw Error("PackageIntegrityError: published archive is missing: " + root)
+    if digest(root + "/" + archive_name) != read_text(root + "/metadata/archive.sha256").strip():
+        throw Error("PackageIntegrityError: published archive changed: " + root)

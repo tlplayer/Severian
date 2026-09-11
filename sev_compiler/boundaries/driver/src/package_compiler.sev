@@ -14,6 +14,11 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
     emit = arguments[4]
     files: list[source.SourceFile] = []
     text = pipeline.compile_to_mlir(source.load(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files)
+    input_records: list[string] = []
+    for file in files:
+        package.write_text(arguments[6] + ".source", file.text)
+        input_records.append(package.toml_quote(file.path) + " = " + package.toml_quote(package.digest(arguments[6] + ".source")))
+    package.write_text(arguments[6] + ".inputs", input_records.join("\n") + "\n")
     if emit == "check":
         return
     if emit == "sources":
@@ -36,4 +41,7 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
         debug_symbols = package.setting(entries, table, "debug-symbols", "false" if profile == "release" else "true") == "true"
         strip = package.setting(entries, table, "strip", "true" if profile == "release" else "false") == "true"
         lto = package.setting(entries, table, "lto", "true" if profile == "release" else "false") == "true"
-        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto)
+        sources: list[string] = []
+        for file in files:
+            sources.append(file.path)
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources))

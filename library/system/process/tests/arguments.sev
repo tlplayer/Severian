@@ -1,0 +1,16 @@
+import * from "../src/lib.sev" as process
+
+test "argument arrays preserve literal shell syntax":
+    result = process.execute(["printf", "%s", "space ' $HOME $(false) ;\nλ"])
+    assert(result.status == 0)
+    assert(result.stdout == "space ' $HOME $(false) ;\nλ")
+    assert(result.stderr == "")
+
+test "captured streams retain whitespace and exit status":
+    result = process.execute(["sh", "-c", "printf ' out\n'; printf ' err\n' >&2; exit 7"])
+    assert(result.status == 7)
+    assert(result.stdout == " out\n")
+    assert(result.stderr == " err\n")
+
+test "missing executable has a failing status":
+    assert(process.execute(["/does-not-exist/severian-contract"]).status == 127)

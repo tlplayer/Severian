@@ -7,3 +7,6 @@ description = "Portable operating-system and runtime boundaries"
 [lib]
 path = "src/lib.sev"
 
+
+[xxi.c]
+sources = ["extern/posix/filesystem.c", "extern/posix/process.c"]

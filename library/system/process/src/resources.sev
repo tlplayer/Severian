@@ -1,0 +1,43 @@
+# Hosted Linux command budgets. These limits apply before compilation starts
+# and are inherited by native tools and test executables launched by it.
+# Keep this helper separate from the target-program prelude.
+def memory_budget(value: string) -> int | Error:
+    units = ["GiB", "MiB", "KiB", "GB", "MB", "KB", "B"]
+    scales = [1073741824, 1048576, 1024, 1000000000, 1000000, 1000, 1]
+    index := 0
+    for unit in units:
+        if value.ends_with(unit):
+            number = value[:int(len(value)) - int(len(unit))].strip()
+            if number == "":
+                throw Error("memory budget requires a positive integer and byte unit")
+            for digit in number.characters():
+                if not "0123456789".contains(string(digit)):
+                    throw Error("memory budget requires a positive integer and byte unit")
+            amount = int(number)
+            if amount <= 0 or amount > 9223372036854775807 / scales[index]:
+                throw Error("memory budget is outside the supported range")
+            return amount * scales[index]
+        index += 1
+    throw Error("memory budget requires B, KB, MB, GB, KiB, MiB or GiB")
+
+
+def guarded_command(arguments: list[string], seconds: int, memory_bytes: int, metrics: string = "") -> list[string] | Error:
+    if len(arguments) == 0 or seconds <= 0 or memory_bytes <= 0:
+        throw Error("resource guard requires a command and positive time/memory limits")
+    words: list[string] = ["timeout", "--kill-after=2s", string(seconds) + "s"]
+    if metrics != "":
+        words.append("/usr/bin/time")
+        words.append("-f")
+        words.append("wall_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M\nexit_status=%x")
+        words.append("-o")
+        words.append(metrics)
+    # A nested test must retain a tighter outer hard limit, not attempt to
+    # raise it. Positional arguments preserve the command's exact argv.
+    words.append("/bin/sh")
+    words.append("-c")
+    words.append("sev_limit=$1; shift; sev_hard=$(ulimit -Hv); if [ \"$sev_hard\" != unlimited ]; then sev_hard_bytes=$((sev_hard * 1024)); if [ \"$sev_limit\" -gt \"$sev_hard_bytes\" ]; then sev_limit=$sev_hard_bytes; fi; fi; exec prlimit --as=\"$sev_limit\" --core=0 -- \"$@\"")
+    words.append("sev-resource-guard")
+    words.append(string(memory_bytes))
+    for argument in arguments:
+        words.append(argument)
+    return words

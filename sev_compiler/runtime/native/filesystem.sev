@@ -1,23 +1,9 @@
-@c(symbol = "__sev_path_join")
-def path_join(left: borrowed[string], right: borrowed[string]) -> borrowed[string]
-
-@c(symbol = "__sev_path_basename")
-def path_basename(value: borrowed[string]) -> borrowed[string]
-
-@c(symbol = "__sev_path_dirname")
-def path_dirname(value: borrowed[string]) -> borrowed[string]
-
-@c(symbol = "__sev_path_extension")
-def path_extension(value: borrowed[string]) -> borrowed[string]
-
-@c(symbol = "__sev_path_exists")
-def path_exists(value: borrowed[string]) -> bool
-
-@c(symbol = "__sev_path_is_dir")
-def path_is_dir(value: borrowed[string]) -> bool
-
-@c(symbol = "__sev_file_write_text")
-def file_write_text(path: borrowed[string], contents: borrowed[string]) -> i32
-
-@c(symbol = "__sev_file_read_text")
-def file_read_text(path: borrowed[string]) -> borrowed[string]
+# Compatibility names retain the library declaration identities.
+from path import join as path_join
+from path import basename as path_basename
+from path import dirname as path_dirname
+from path import extension as path_extension
+from os import exists as path_exists
+from os import is_dir as path_is_dir
+from file import write as file_write_text
+from file import raw as file_read_text

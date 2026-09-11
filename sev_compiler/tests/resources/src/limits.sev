@@ -1,5 +1,5 @@
 import package
-import * from "../../../../library/testing/src/resources.sev" as resources
+import process
 
 
 test "compiler command budgets are applied before execution":
@@ -22,15 +22,15 @@ test "compiler command budgets are applied before execution":
 
 
 test "compiler guard preserves command arguments":
-    command = resources.guarded_command(["/bin/echo", "space ; literal"], 2, 64000000)
+    command = process.guarded_command(["/bin/echo", "space ; literal"], 2, 64000000)
     assert(command[-1] == "space ; literal")
-    assert(resources.memory_budget("4GB") == 4000000000)
-    assert(resources.memory_budget("64MiB") == 67108864)
+    assert(process.memory_budget("4GB") == 4000000000)
+    assert(process.memory_budget("64MiB") == 67108864)
 
 
 test "nested compiler guard retains a tighter outer memory limit":
     directory = package.temporary("/tmp", "sev-nested-budget-")
-    inner = resources.guarded_command(["/bin/sh", "-c", "test \"$(ulimit -v)\" = 65536"], 2, 134217728)
+    inner = process.guarded_command(["/bin/sh", "-c", "test \"$(ulimit -v)\" = 65536"], 2, 134217728)
     report = package.pipeline([package.Step("nested", inner, directory, timeout=3, memory_bytes=67108864)], directory + "/reports")
     assert(report.failed == 0)
     package.remove_tree(directory)

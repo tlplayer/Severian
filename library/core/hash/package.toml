@@ -8,7 +8,7 @@ description = "Deterministic non-secret hashing"
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+platform = { path = "../../system/platform", version = "0.1.0" }
 
 [package.metadata.library]
 category = "security"

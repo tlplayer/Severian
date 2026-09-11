@@ -25,22 +25,14 @@ def hosted_layout() -> HostedLayout:
     return HostedLayout(layout, triple)
 
 
-# Hosted toolchain boundary, shared by the compiler command and native checks.
-# Quote each argument before passing it through process.run's shell boundary.
-def shell_argument(value: string) -> string:
-    return "'" + value.replace("'", "'\"'\"'") + "'"
-
-
+# Native tools receive an argument vector through the process package.
 def run_tool(arguments: list[string]):
-    command := ""
-    for argument in arguments:
-        command += shell_argument(argument) + " "
-    if process.run(command) != 0:
+    if process.run(arguments) != 0:
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false):
-    run_tool(["mkdir", "-p", path.dirname(output)])
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = []):
+    package.mkdir(path.dirname(output))
     if file.write(output + ".mlir", mlir) != 0:
         throw Error("could not write MLIR artifact")
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
@@ -49,6 +41,8 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     run_tool([opt, output + ".mlir", "--verify-each", "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership", "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", output + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", output + ".llvm.mlir", "-o", output + ".ll"])
     arguments = [clang, output + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
+    for argument in native_arguments:
+        arguments.append(argument)
     if debug_symbols:
         arguments.append("-g")
     if strip:
@@ -60,8 +54,7 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
 
 
 def execute_native(executable: string, arguments: list[string]) -> int:
-    command := "./" + executable if not executable.starts_with("/") else executable
-    command = shell_argument(command)
+    command = ["./" + executable if not executable.starts_with("/") else executable]
     for argument in arguments:
-        command += " " + shell_argument(argument)
+        command.append(argument)
     return process.run(command)

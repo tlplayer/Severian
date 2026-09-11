@@ -1,0 +1,10 @@
+import * from "../src/lib.sev" as package
+
+test "archive UTF-8 decoding uses bytes without temporary files":
+    text = "path/λ😀.sev"
+    bytes = text.bytes()
+    assert(package.archive_text(bytes, 0, int(len(bytes))) == text)
+    assert(package.archive_text(bytes, 0, 0) == "")
+    invalid: list[u8] = [192, 128]
+    result ?= package.archive_text(invalid, 0, 2)
+    assert(result is Error)

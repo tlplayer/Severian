@@ -89,7 +89,9 @@ def main():
         if status != 0:
             exit_status(i32(status))
         return
-    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot, emit)
+    files: list[source.SourceFile] = []
+    resolution = package.Resolution([], [], "")
+    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot, emit, resolution, files)
     if emit != "":
         if output == "":
             print(mlir)
@@ -101,7 +103,10 @@ def main():
         return
     if output == "":
         output = "package.pkg/" + path.basename(input).replace(".sev", "")
-    backend.emit_native(mlir, output)
+    sources: list[string] = []
+    for file in files:
+        sources.append(file.path)
+    backend.emit_native(mlir, output, native_arguments=package.native_arguments(resolution, sources))
     if command == "build":
         print("built " + output)
     else:

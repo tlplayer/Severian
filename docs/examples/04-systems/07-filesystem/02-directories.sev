@@ -1,5 +1,4 @@
 import os
-import path
 
 
 test with integ "create and list directory":
@@ -7,8 +6,8 @@ test with integ "create and list directory":
 
     os.make_directories(directory)
 
-    assert(path.exists(directory))
-    assert(path.is_dir(directory))
+    assert(os.exists(directory))
+    assert(os.is_dir(directory))
 
     entries = os.list(directory)
     assert(size(entries) >= 0)

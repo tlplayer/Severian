@@ -48,8 +48,15 @@ def main():
         assert sev("run", "application@0.1.0").stdout.strip() == "42"
         sev("install", "application@0.1.0", "-o", root / "bin")
         assert subprocess.check_output([root / "bin/application"], text=True).strip() == "42"
-        # Missing native artifacts must rebuild the frozen source graph.
-        (root / "registry/packages/application/0.1.0/artifacts/host/release/bin/application").unlink()
+        # A damaged release is an integrity failure, not permission to rebuild
+        # or silently replace the published artifact.
+        binary = root / "registry/packages/application/0.1.0/artifacts/host/release/bin/application"
+        original_binary = binary.read_bytes()
+        binary.unlink()
+        rejected = sev("run", "application@0.1.0", succeeds=False)
+        assert "PackageIntegrityError" in rejected.stderr
+        binary.write_bytes(original_binary)
+        binary.chmod(0o755)
         assert sev("run", "application@0.1.0").stdout.strip() == "42"
         # A transitive dependency is usable only through its declared alias edge.
         sev("new", "matrix", "--lib")
@@ -62,9 +69,8 @@ def main():
         sev("add", "matrix@0", cwd=service)
         (service / "src/lib.sev").write_text("import matrix\ndef answer() -> int:\n    return matrix.answer() * 2\n")
         sev("publish", cwd=service)
-        geometry_release = root / "registry/packages/geometry/0.1.0"
-        shutil.rmtree(geometry_release / "source")
-        shutil.rmtree(geometry_release / "metadata")
+        # Removing a working checkout never affects its published snapshot.
+        shutil.rmtree(root / "geometry")
         sev("new", "transitive")
         transitive = root / "transitive"
         sev("add", "service@0", cwd=transitive)
@@ -72,7 +78,7 @@ def main():
         assert sev("run", cwd=transitive).stdout.strip() == "86"
         (transitive / "src/main.sev").write_text("import matrix\ndef main():\n    print(matrix.answer())\n")
         rejected = sev("check", cwd=transitive, succeeds=False)
-        assert "undeclared dependency import matrix" in rejected.stderr
+        assert "undeclared dependency import" in rejected.stderr and "matrix" in rejected.stderr, rejected.stderr
         sev("clean", cwd=app)
         assert not (app / "package.pkg").exists()
         assert (app / "target/keep.sev").is_file()

@@ -2,7 +2,6 @@ import * from "host.sev" as host
 import file
 import process
 import os
-import * from "../../testing/src/resources.sev" as resources
 
 
 class Step:
@@ -161,7 +160,7 @@ def save(report: Report) -> unit | Error:
 
 def execute(step: Step, stdout: string, stderr: string) -> Result | Error:
     metrics = stderr + ".resources"
-    words = resources.guarded_command(step.arguments, step.timeout, step.memory_bytes, metrics)
+    words = process.guarded_command(step.arguments, step.timeout, step.memory_bytes, metrics)
     quoted: list[string] = []
     for word in words:
         quoted.append(host.quote(word))

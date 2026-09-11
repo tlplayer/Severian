@@ -8,8 +8,8 @@ description = "Generic binary min-heaps"
 path = "src/lib.sev"
 
 [dependencies]
-storage = { path = "../internal/contiguous_storage", version = "0.1.0" }
-traits = { path = "../traits", version = "0.1.0" }
+storage = { package = "core.collections.internal.contiguous_storage", path = "../internal/contiguous_storage", version = "0.1.0" }
+traits = { package = "collections.traits", path = "../traits", version = "0.1.0" }
 
 [package.metadata.library]
 category = "core-collections"

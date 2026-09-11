@@ -8,8 +8,8 @@ description = "Generic unique-value sets"
 path = "src/lib.sev"
 
 [dependencies]
-table = { path = "../internal/hash_table", version = "0.1.0" }
-traits = { path = "../traits", version = "0.1.0" }
+table = { package = "core.collections.internal.hash_table", path = "../internal/hash_table", version = "0.1.0" }
+traits = { package = "collections.traits", path = "../traits", version = "0.1.0" }
 
 [package.metadata.library]
 category = "core-collections"

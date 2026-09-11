@@ -8,4 +8,4 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
-gpu_mlir = { path = "../../../../../sev_compiler/transforms/gpu_mlir" }
+gpu_mlir = { package = "sev-compiler-gpu-mlir", path = "../../../../../sev_compiler/transforms/gpu_mlir" }

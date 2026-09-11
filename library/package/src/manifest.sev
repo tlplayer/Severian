@@ -240,6 +240,13 @@ def open(location: string = ".") -> Project | Error:
         if parent == root:
             throw Error("no package.toml found from " + location)
         root = parent
+    if published_project(root):
+        original = read_text(root + "/package.toml")
+        lock = read_text(root + "/sev.lock") if os.is_file(root + "/sev.lock") else ""
+        manifest = parse_manifest(original)
+        for target in manifest.targets:
+            inside(root, target.path)
+        return Project(root, manifest, original, lock)
     handle = file.native_lock(root + "/.sev-edit.lock")
     if handle < 0:
         throw Error("could not lock project snapshot")
@@ -258,3 +265,33 @@ def open(location: string = ".") -> Project | Error:
     for target in manifest.targets:
         inside(root, target.path)
     return Project(root, manifest, original, lock)
+
+def string_array(value: string) -> list[string] | Error:
+    if not value.starts_with("[") or not value.ends_with("]"):
+        throw Error("expected a string array")
+    result: list[string] = []
+    for field in split_fields(value[1:int(len(value)) - 1], ","):
+        if field.strip() != "":
+            result.append(unquote(field.strip()))
+    return result
+
+# Workspace members are explicit manifest locations, independent of import
+# aliases and organizational directory depth. Reading the catalog is read-only.
+def workspace_library(root: string, name: string) -> string | Error:
+    document = parse_document(read_text(root + "/package.toml"))
+    members = string_array(setting(document, "workspace", "members", "[]"))
+    selected := ""
+    for member in members:
+        manifest_path = inside(root, member + "/package.toml")
+        manifest_text = read_text(manifest_path)
+        entries = parse_document(manifest_text)
+        if text_setting(entries, "package", "name") == name:
+            manifest = parse_manifest(manifest_text)
+            if selected != "":
+                throw Error("ambiguous workspace library: " + name)
+            for target in manifest.targets:
+                if target.kind == "library":
+                    selected = inside(path.dirname(manifest_path), target.path)
+    if selected == "":
+        throw Error("unknown workspace library: " + name)
+    return selected

@@ -6,3 +6,10 @@ description = "Process control available to every Severian compilation"
 
 [lib]
 path = "src/lib.sev"
+
+[dependencies]
+system = { path = "..", version = "0.1.0" }
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]

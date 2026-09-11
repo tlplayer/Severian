@@ -223,6 +223,9 @@ operator slice_at[T](values: list[T], start: int, stop: int, step: int, has_star
 @mlir("memref.dim")
 def __string_dimension(value: string, axis: index) -> index
 
+def len(value: string) -> int:
+    return value.length()
+
 def size(value: string) -> int:
     return __list_size(__string_dimension(value, 0))
 

@@ -8,9 +8,9 @@ description = "Certificate-verified TLS streams"
 path = "src/lib.sev"
 
 [dependencies]
-io = { path = "../io", version = "0.1.0" }
-network = { path = "../network", version = "0.1.0" }
-platform = { path = "../platform", version = "0.1.0" }
+io = { path = "../../system/io", version = "0.1.0" }
+network = { path = "..", version = "0.1.0" }
+platform = { path = "../../system/platform", version = "0.1.0" }
 
 [package.metadata.library]
 category = "networking"

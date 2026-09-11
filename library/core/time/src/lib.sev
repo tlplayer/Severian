@@ -1,16 +1,36 @@
-import platform
+from io import IOError
 
-def time() -> float:
-    return platform.time_seconds()
+@c(symbol = "__sev_time_wall")
+def time() -> float
 
-def sleep(seconds: float):
-    platform.time_sleep(seconds)
+@c(symbol = "__sev_os_wait")
+def sleep(seconds: float)
 
-def monotonic() -> float:
-    return platform.time_monotonic()
+@c(symbol = "__sev_time_monotonic")
+def monotonic() -> float
 
+# ISO calendar parsing belongs to the library, not the platform ABI.
 def parse_date(value: string) -> float | IOError:
-    return platform.time_parse_date(value)
+    if len(value) != 10 or value[4:5] != "-" or value[7:8] != "-":
+        throw IOError("date must use YYYY-MM-DD")
+    for position in [0, 1, 2, 3, 5, 6, 8, 9]:
+        if not "0123456789".contains(value[position:position + 1]):
+            throw IOError("date must use decimal digits")
+    year = int(value[0:4])
+    month = int(value[5:7])
+    day = int(value[8:10])
+    if month < 1 or month > 12:
+        throw IOError("date month is outside 1..12")
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    lengths = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if day < 1 or day > lengths[month - 1]:
+        throw IOError("date day is outside its month")
+    # Gregorian days before this year, relative to 1970-01-01.
+    previous = year - 1
+    days := 365 * previous + previous // 4 - previous // 100 + previous // 400 - 719162
+    for index in range(month - 1):
+        days += lengths[index]
+    return float((days + day - 1) * 86400)
 
 test "calendar dates convert to an epoch timestamp":
     timestamp = parse_date("2020-01-02")

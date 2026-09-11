@@ -12,6 +12,9 @@ def registry_root(selected: string = "") -> string | Error:
     configured = environment.get("SEVERIAN_REGISTRY", "")
     if configured != "":
         return configured
+    severian = environment.get("SEVERIAN_HOME", "")
+    if severian != "":
+        return severian + "/registry"
     home = environment.get("HOME", "")
     if home == "":
         throw Error("registry needs SEVERIAN_REGISTRY or HOME")
@@ -34,13 +37,9 @@ def versions(name: string, registry: string = "") -> list[string] | Error:
     root = registry_root(registry) + "/packages/" + safe_name(name)
     if not os.is_dir(root):
         return []
-    text = capture(["find", root, "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-printf", "%f\n"])
-    if text == "":
-        return []
     result: list[string] = []
-    for value in text.split("\n"):
-        # Registry versions use the same numeric grammar as references.
-        if int(len(value.split("."))) == 3:
+    for value in os.list(root):
+        if os.is_dir(root + "/" + value) and int(len(value.split("."))) == 3:
             reference(name + "@" + value)
             result.append(value)
     return sorted_strings(result)
@@ -70,6 +69,7 @@ def fetch_registry(ref: Reference, registry: string) -> string | Error:
     return materialize_release(release, ref.name, selected, selected_registry)
 
 def materialize_release(release: string, name: string, version: string, registry: string) -> string | Error:
+    verify_publication(release, name + "-" + version + ".pkg")
     if os.is_file(release + "/source/package.toml"):
         return canonical(release + "/source")
     if os.is_file(release + "/metadata/package.toml"):

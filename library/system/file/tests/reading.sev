@@ -1,0 +1,13 @@
+import * from "../src/lib.sev" as file
+import os
+
+test "checked reads distinguish empty files and missing paths":
+    directory = os.temporary("/tmp", "sev-file-test-")
+    location = directory + "/empty.txt"
+    assert(file.write(location, "") == 0)
+    assert(file.read_checked(location) == "")
+    assert(file.write(location, "aλ😀z\n") == 0)
+    assert(file.read_checked(location) == "aλ😀z\n")
+    result ?= file.read_checked(directory + "/missing")
+    assert(result is Error)
+    os.remove_tree(directory)
