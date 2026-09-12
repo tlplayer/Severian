@@ -27,6 +27,7 @@ handle!(MlirDialectHandle, *const c_void);
 handle!(MlirIdentifier, *const c_void);
 handle!(MlirModule, *const c_void);
 handle!(MlirOperation, *mut c_void);
+handle!(MlirOpPrintingFlags, *mut c_void);
 handle!(MlirRegion, *mut c_void);
 handle!(MlirSymbolTable, *mut c_void);
 handle!(MlirType, *const c_void);
@@ -103,8 +104,16 @@ unsafe extern "C" {
         name: MlirStringRef,
         attribute: MlirAttribute,
     );
-    pub fn mlirOperationPrint(
+    pub fn mlirOpPrintingFlagsCreate() -> MlirOpPrintingFlags;
+    pub fn mlirOpPrintingFlagsDestroy(flags: MlirOpPrintingFlags);
+    pub fn mlirOpPrintingFlagsEnableDebugInfo(
+        flags: MlirOpPrintingFlags,
+        enable: bool,
+        pretty: bool,
+    );
+    pub fn mlirOperationPrintWithFlags(
         operation: MlirOperation,
+        flags: MlirOpPrintingFlags,
         callback: MlirStringCallback,
         user_data: *mut c_void,
     );

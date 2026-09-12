@@ -6,10 +6,17 @@ def utf8_view_type() -> MlirType:
     return memref_type(MlirScalarType(IntegerScalar, 8, false, 0), [-1])
 
 
+# Byte attributes are immutable IR values. Reuse the 256 possible descriptors
+# across literals instead of boxing a type and attribute for every byte.
+Utf8ByteAttributes: list[MlirAttributeValue] = []
+
+
 def utf8_byte_attribute(byte: u8) -> MlirAttributeValue:
-    if byte >= 128:
-        return integer_attribute(int(byte) - 256, integer_type(8))
-    return integer_attribute(int(byte), integer_type(8))
+    if len(Utf8ByteAttributes) == 0:
+        type_id = integer_type(8)
+        for value in range(256):
+            Utf8ByteAttributes.append(integer_attribute(value - 256 if value >= 128 else value, type_id))
+    return Utf8ByteAttributes[int(byte)]
 
 
 def string_literal(builder: MlirOpBuilder, value: string, output: MlirValue):

@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include "owned.h"
 
 typedef struct {
     char *message;
@@ -50,14 +51,20 @@ void __sev_task_unlock(void) {
 static char *__sev_copy_text(const char *text) {
     const char *source = text == NULL ? "" : text;
     size_t size = strlen(source) + 1;
-    char *copy = malloc(size);
+    char *copy = __sev_storage_new(size, NULL);
     if (copy == NULL) abort();
     memcpy(copy, source, size);
     return copy;
 }
 
+static void sev_error_destroy(void *value) {
+    SevError *error = value;
+    __sev_storage_release(error->message);
+    __sev_storage_release(error->call_stack);
+}
+
 const char *__sev_error_create(const char *message, const char *function) {
-    SevError *error = malloc(sizeof(SevError));
+    SevError *error = __sev_storage_new(sizeof(SevError), sev_error_destroy);
     if (error == NULL) abort();
     error->message = __sev_copy_text(message);
     error->call_stack = __sev_copy_text(function);
@@ -68,10 +75,12 @@ const char *__sev_error_propagate(const char *opaque, const char *function) {
     SevError *error = (SevError *)opaque;
     size_t current = strlen(error->call_stack);
     size_t frame = strlen(function);
-    char *stack = realloc(error->call_stack, current + frame + 5);
-    if (stack == NULL) abort();
+    if (current > SIZE_MAX - 5 || frame > SIZE_MAX - current - 5) abort();
+    char *stack = __sev_storage_new(current + frame + 5, NULL);
+    memcpy(stack, error->call_stack, current);
     memcpy(stack + current, " -> ", 4);
     memcpy(stack + current + 4, function, frame + 1);
+    __sev_storage_release(error->call_stack);
     error->call_stack = stack;
     return opaque;
 }

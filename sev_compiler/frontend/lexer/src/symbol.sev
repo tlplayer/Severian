@@ -1,3 +1,4 @@
+import profiling
 import diagnostics
 import * from "token/mod.sev"
 import universal
@@ -6,12 +7,15 @@ import * from "rule.sev"
 
 class LexicalSymbol:
     spelling: string
+    characters: list[string]
 
 
 def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
     # Only the declaration/structural bootstrap is closed. Value operations are
     # supplied by registered source descriptors and use one open token category.
-    symbols = [LexicalSymbol("@"), LexicalSymbol(":"), LexicalSymbol(":="), LexicalSymbol("?="), LexicalSymbol("="), LexicalSymbol("->"), LexicalSymbol("("), LexicalSymbol(")"), LexicalSymbol("["), LexicalSymbol("]"), LexicalSymbol("{"), LexicalSymbol("}"), LexicalSymbol("|"), LexicalSymbol(","), LexicalSymbol("."), LexicalSymbol("...")]
+    symbols: list[LexicalSymbol] = []
+    for spelling in ["@", ":", ":=", "?=", "=", "->", "(", ")", "[", "]", "{", "}", "|", ",", ".", "..."]:
+        symbols.append(LexicalSymbol(spelling, spelling.characters()))
     for operation in operators:
         for spelling in [operation.symbol, operation.closing, operation.separator]:
             characters = spelling.characters()
@@ -25,15 +29,18 @@ def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSy
                 if previous.spelling == spelling:
                     found = true
             if not found:
-                symbols.append(LexicalSymbol(spelling))
+                symbols.append(LexicalSymbol(spelling, characters))
     return symbols
 
 
+@record_calls
 def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSymbol]) -> LexicalSymbol | None:
     selected: LexicalSymbol | None := None
     longest := 0
     for symbol in symbols:
-        spelling = symbol.spelling.characters()
+        # Symbol spellings are immutable scanner configuration. Reuse their
+        # decoded characters instead of allocating for every candidate match.
+        spelling = symbol.characters
         if len(spelling) <= longest or cursor + int(len(spelling)) > len(characters):
             continue
         index := 0
@@ -54,5 +61,5 @@ class SymbolLexeme: LexicalRule
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         symbol ?= match_symbol(input.characters, start, symbols)
         if symbol != None:
-            return LexemeMatch(start + int(len(symbol.spelling.characters())), TokenKind.Symbol)
+            return LexemeMatch(start + int(len(symbol.characters)), TokenKind.Symbol)
         return LexemeMatch(start, None, false)

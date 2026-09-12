@@ -2,6 +2,7 @@
 
 mod callable;
 mod constructor;
+mod destruction;
 mod package;
 mod queries;
 
@@ -915,6 +916,7 @@ pub(crate) fn analyze_with_package_functions(
         }
     }
     let mut next_method = 0;
+    analyzer.register_class_destruction()?;
     while next_method < analyzer.pending_methods.len() {
         let (ast_method, mut function, owner, aliases, constructor) =
             analyzer.pending_methods[next_method].clone();
@@ -935,6 +937,7 @@ pub(crate) fn analyze_with_package_functions(
         )?;
         analyzer.active_receiver = None;
         module.functions.push(function);
+        analyzer.register_class_destruction()?;
     }
     module.bindings.append(&mut analyzer.helper_bindings);
     module.functions.extend(analyzer.runtime_functions.clone());
@@ -951,9 +954,9 @@ pub(crate) fn analyze_with_package_functions(
                 .and_then(|effects| effects.get(index))
                 .copied()
                 .unwrap_or(ParameterEffect::Shared);
-            if analyzer
+            if (analyzer
                 .class_instances_by_type
-                .contains_key(&parameter.contract.ty)
+                .contains_key(&parameter.contract.ty) || analyzer.types.destruction(parameter.contract.ty).is_some())
                 && analyzer.types.primitive(parameter.contract.ty).is_none()
                 && effect != ParameterEffect::Move
             {
@@ -1518,8 +1521,8 @@ struct NamespaceTraitHookMember {
 #[derive(Debug, Clone)]
 struct LoweredHook {
     context: BindingId,
-    result_field: Option<u32>,
-    error_field: Option<u32>,
+    result_field: Option<(u32, TypeId)>,
+    error_field: Option<(u32, TypeId)>,
     duration: Option<(u32, Expression)>,
     without_phase: Block,
 }
@@ -4008,6 +4011,16 @@ impl Analyzer<'_> {
                     }
                 }
                 let dropped = explicit_drop_receiver(expression).map(str::to_owned);
+                if let Some(receiver) = &dropped {
+                    if let Some((binding, _, ty)) = self.names.get(receiver).copied() {
+                        if self.class_needs_destruction(ty, &mut BTreeSet::new()) {
+                            self.names.remove(receiver);
+                            self.declarations.remove(receiver);
+                            return Ok(Statement::Destroy(Expression { id: self.next_id(), type_id: ty,
+                                kind: ExpressionKind::Binding(binding), span: expression.span }));
+                        }
+                    }
+                }
                 let mut lowered = match self.class_method_update(expression)? {
                     Some(update) => update,
                     None => Statement::Expression(self.expression(expression, None)?),
@@ -5144,6 +5157,20 @@ impl Analyzer<'_> {
         if value.type_id == boolean {
             return Ok(value);
         }
+        if let Some(none) = self.types.resolve_name("None") {
+            if let Some(ordinal) = self.union_types.get(&value.type_id)
+                .and_then(|members| members.iter().position(|member| *member == none))
+            {
+                let integer = self.tag_type();
+                let tag = Expression { id: self.next_id(), type_id: integer,
+                    kind: ExpressionKind::Field { object: Box::new(value), index: 0 },
+                    span: condition.span };
+                let absent = self.integer_expression(&ordinal.to_string(), integer, condition.span);
+                return Ok(Expression { id: self.next_id(), type_id: boolean,
+                    kind: ExpressionKind::Binary { operator: BinaryOperator::NotEqual,
+                        left: Box::new(tag), right: Box::new(absent) }, span: condition.span });
+            }
+        }
         if let Some(operator) = self
             .class_instances_by_type
             .get(&value.type_id)
@@ -5316,7 +5343,19 @@ impl Analyzer<'_> {
                 let fields = instance
                     .fields
                     .iter()
-                    .map(|field| self.default_expression(field.ty, decorator.span))
+                    .map(|field| {
+                        // Hook result/error start absent. This is an explicit
+                        // active variant, not generic sum default construction.
+                        let none = self.types.resolve_name("None");
+                        if self.union_types.get(&field.ty).is_some_and(|members| {
+                            none.is_some_and(|none| members.contains(&none))
+                        }) {
+                            let absent = self.default_expression(none.unwrap(), decorator.span)?;
+                            self.coerce(absent, field.ty, false)
+                        } else {
+                            self.default_expression(field.ty, decorator.span)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 let context = self.new_binding_id();
                 let variable = severian_hir::VariableId(context.0);
@@ -5349,6 +5388,24 @@ impl Analyzer<'_> {
                         field: field as u32,
                         value: self.string_expression(function.name.clone(), decorator.span),
                     });
+                }
+
+                for (index, field) in instance.fields.iter().enumerate() {
+                    let number = match field.name.as_str() {
+                        "source_id" => Some(function.span.source.0),
+                        "span_start" => Some(function.span.start),
+                        "span_end" => Some(function.span.end),
+                        _ => None,
+                    };
+                    if let Some(number) = number {
+                        if !self.types.primitive(field.ty).is_some_and(|primitive|
+                            matches!(primitive.representation, severian_universal::PrimitiveRepresentation::Integer { .. } | severian_universal::PrimitiveRepresentation::PointerInteger { .. }))
+                        {
+                            return Err(Diagnostic::new("E000218", "hook source span fields must use integer storage", Some(function.span)));
+                        }
+                        entry.statements.push(Statement::FieldSet { binding: context,
+                            field: index as u32, value: self.integer_expression(&number.to_string(), field.ty, function.span) });
+                    }
                 }
 
                 let duration = instance
@@ -5427,15 +5484,17 @@ impl Analyzer<'_> {
                     result_field: instance
                         .fields
                         .iter()
-                        .position(|field| {
-                            field.name == "result" && self.types.assignable(result_type, field.ty)
+                        .enumerate()
+                        .find(|(_, field)| {
+                            field.name == "result" && self.accepts_expression_type(result_type, field.ty)
                         })
-                        .map(|field| field as u32),
+                        .map(|(index, field)| (index as u32, field.ty)),
                     error_field: instance
                         .fields
                         .iter()
-                        .position(|field| field.name == "error")
-                        .map(|field| field as u32),
+                        .enumerate()
+                        .find(|(_, field)| field.name == "error")
+                        .map(|(index, field)| (index as u32, field.ty)),
                     duration,
                     without_phase,
                 });
@@ -5576,11 +5635,11 @@ impl Analyzer<'_> {
                 };
                 direct.max(self.expression_parameter_effect(value, parameter))
             }
-            Statement::Expression(expression) => {
+            Statement::Expression(expression) | Statement::Destroy(expression) => {
                 self.expression_parameter_effect(expression, parameter)
             }
             Statement::Return(Some(expression)) => {
-                let returned = if expression_is_binding(expression, parameter) {
+                let returned = if expression_is_binding(expression, parameter) && self.class_is_affine(expression.type_id, &mut BTreeSet::new()) {
                     ParameterEffect::Move
                 } else {
                     ParameterEffect::Shared
@@ -16407,6 +16466,16 @@ impl Analyzer<'_> {
             result_type.0
         );
         let definition = synthetic_runtime_definition(&identity);
+        if symbol.contains("_aggregate") && severian_universal::native_container_stores_values(symbol) {
+            for (index, ty) in parameter_types.iter().enumerate() {
+                if self.class_is_affine(*ty, &mut BTreeSet::new()) { self.types.register_transferred_argument(definition, index); }
+            }
+        }
+        if symbol.starts_with("__sev_list_") && ["_get_", "_index_", "_first_", "_last_", "_append_"].iter().any(|part| symbol.contains(part))
+            || symbol.starts_with("__sev_map_get_") || symbol.starts_with("__sev_set_append_")
+            || matches!(symbol, "__sev_error_message" | "__sev_error_call_stack" | "__sev_error_propagate") {
+            self.types.register_borrowed_result(definition);
+        }
         let id = FunctionId(definition.declaration.0);
         let parameters = parameter_types
             .iter()
@@ -18594,38 +18663,39 @@ fn insert_before_returns(block: &mut Block, assertions: &[Statement]) {
     block.statements = lowered;
 }
 
-fn insert_hook_exits(block: &mut Block, hooks: &[LoweredHook]) {
+fn insert_hook_exits(analyzer: &mut Analyzer<'_>, bindings: &mut Vec<Binding>, block: &mut Block, hooks: &[LoweredHook], error_exit: bool) -> Result<(), Diagnostic> {
     let mut lowered = Vec::new();
     for mut statement in std::mem::take(&mut block.statements) {
         match &mut statement {
-            Statement::Sequence(nested) => insert_hook_exits(nested, hooks),
+            Statement::Sequence(nested) => insert_hook_exits(analyzer, bindings, nested, hooks, false)?,
             Statement::If {
                 then_block,
                 else_block,
                 ..
             } => {
-                insert_hook_exits(then_block, hooks);
-                insert_hook_exits(else_block, hooks);
+                insert_hook_exits(analyzer, bindings, then_block, hooks, false)?;
+                insert_hook_exits(analyzer, bindings, else_block, hooks, false)?;
             }
-            Statement::While { body, .. } => insert_hook_exits(body, hooks),
+            Statement::While { body, .. } => insert_hook_exits(analyzer, bindings, body, hooks, false)?,
             Statement::Try {
                 body, catch_body, ..
             } => {
-                insert_hook_exits(body, hooks);
-                insert_hook_exits(catch_body, hooks);
+                insert_hook_exits(analyzer, bindings, body, hooks, false)?;
+                insert_hook_exits(analyzer, bindings, catch_body, hooks, false)?;
             }
             Statement::Match { arms, .. } => {
                 for arm in arms {
-                    insert_hook_exits(&mut arm.body, hooks);
+                    insert_hook_exits(analyzer, bindings, &mut arm.body, hooks, false)?;
                 }
             }
             Statement::Return(Some(value)) => {
+                save_hook_value(analyzer, bindings, &mut lowered, value);
                 for hook in hooks {
-                    if let Some(field) = hook.result_field {
+                    if let Some((field, ty)) = hook.result_field {
                         lowered.push(Statement::FieldSet {
                             binding: hook.context,
                             field,
-                            value: value.clone(),
+                            value: analyzer.coerce(value.clone(), ty, false)?,
                         });
                     }
                 }
@@ -18655,13 +18725,27 @@ fn insert_hook_exits(block: &mut Block, hooks: &[LoweredHook]) {
             Statement::Expression(Expression {
                 kind: ExpressionKind::Throw(error),
                 ..
-            }) => {
+            }) if error_exit => {
+                save_hook_value(analyzer, bindings, &mut lowered, error);
                 for hook in hooks {
-                    if let Some(field) = hook.error_field {
+                    if let Some((field, ty)) = hook.error_field {
                         lowered.push(Statement::FieldSet {
                             binding: hook.context,
                             field,
-                            value: error.as_ref().clone(),
+                            value: {
+                                let value = error.as_ref().clone();
+                                let string = analyzer.types.resolve_name("string").unwrap();
+                                let value = if !analyzer.accepts_expression_type(value.type_id, ty)
+                                    && analyzer.accepts_expression_type(string, ty)
+                                {
+                                    if analyzer.types.resolve_name("Error") == Some(value.type_id) {
+                                        analyzer.runtime_call("__sev_error_message", &[value.type_id], string, vec![value], error.span)
+                                    } else {
+                                        analyzer.display_string(value, error.span)?
+                                    }
+                                } else { value };
+                                analyzer.coerce(value, ty, false)?
+                            },
                         });
                     }
                 }
@@ -18681,6 +18765,18 @@ fn insert_hook_exits(block: &mut Block, hooks: &[LoweredHook]) {
         lowered.push(statement);
     }
     block.statements = lowered;
+    Ok(())
+}
+
+fn save_hook_value(analyzer: &mut Analyzer<'_>, bindings: &mut Vec<Binding>, output: &mut Vec<Statement>, value: &mut Expression) {
+    let id = analyzer.new_binding_id();
+    bindings.push(Binding {
+        id, variable: severian_hir::VariableId(id.0), type_id: value.type_id,
+        value: value.clone(), mutable: false, preserve_error: true, span: value.span,
+    });
+    output.push(Statement::Binding(id));
+    *value = Expression { id: analyzer.next_id(), type_id: value.type_id,
+        kind: ExpressionKind::Binding(id), span: value.span };
 }
 
 fn synthetic_definition(

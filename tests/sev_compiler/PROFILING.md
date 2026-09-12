@@ -52,6 +52,29 @@ with literal argument arrays:
   temporary allocations, peak heap consumers, and allocation stacks. Individual
   stacks remain separate to avoid inaccurate merged peak attribution.
 
+Allocation analysis also writes `*.functions.tsv`, ranked by inclusive allocation
+count. Its columns distinguish self/inclusive allocation calls, bytes live at
+the trace's peak, and retained bytes. Inclusive rows overlap and must not be
+summed. These byte columns are not cumulative allocated bytes. Recursive frames
+count once per stack. Both analyzers stream folded traces; the native source
+compiler's system provider retains only distinct function rows and one input
+line, rather than constructing source-language lists for the entire trace.
+
+`*.hints.txt` displays the nearest Severian source frame for each ranked stack,
+its allocation count, file/line, source excerpt and underline. Rust bootstrap
+code generation now preserves source locations through MIR, LIR, MLIR composition,
+LLVM lowering and native DWARF. Hints show source lines, not a recovered expression
+end-column; source files must still match the profiled binary. Keep raw reports
+for complete stacks and native symbols. CPU reports include sample counts and
+source lines when perf can collect them.
+
+Standalone directory tests prepare a prelude snapshot once and fork isolated
+workers from that snapshot. The parent retains only shared preparation, while
+each worker's temporary compiler allocations die with that worker. Timings are
+kept separately in `stages.tsv.unit-N`. This currently reuses parsing for directory
+tests; it does not cache semantic analysis or provide general persistent package
+compilation sessions. Individual file invocations still prepare their own prelude.
+
 Detailed modes require perf permissions or heaptrack/heaptrack_print on PATH.
 They fail explicitly if the profiler is unavailable; they do not silently
 substitute a summary. Capture totals include profiler overhead. Analysis runs
@@ -77,6 +100,27 @@ a hot stack, change that implementation, and repeat serially. Cross-compiler
 timings alone do not establish equivalent work or identify a cause.
 
 ## Earlier source compiler checkpoint
+
+### Lexer symbol allocation checkpoint (2026-09-12)
+
+`LexicalSymbol` now stores its decoded characters when the scanner's symbol
+table is constructed. Both candidate matching and matched-token advancement
+reuse that data. The matching loop no longer calls `characters()` for every
+candidate symbol. Registered spellings, longest-match selection, and Unicode
+character offsets are covered by `tests/sev_compiler/symbol_matching.py`.
+
+Native heaptrack captures of the same test inputs before and after this change:
+
+| Input | Allocation calls before → after | Peak heap before → after |
+| --- | --- | --- |
+| `00-constants.sev` | 12,536,785 → 6,680,203 | 519.23 MB → 399.42 MB |
+| `02-inference.sev` | 20,342,314 → 14,484,413 | 937.78 MB → 817.95 MB |
+
+Heap sizes here are decimal MB from heaptrack, not process RSS. These captures
+measure the compiler's test invocation, including profiler overhead; they are
+not an uninstrumented timing benchmark. This removes one allocation hotspot.
+Package/prelude reuse and general lifetime-driven destruction remain separate
+work.
 
 Rebuild the source compiler from the repository root:
 

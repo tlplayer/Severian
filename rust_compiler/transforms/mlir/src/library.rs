@@ -14,7 +14,7 @@ const STRING_EXPORTS: &[&str] = &[
     "__sev_string_release",
 ];
 
-const STRING_DEPENDENCIES: &[&str] = &["abort", "free", "malloc", "memcpy", "strcmp", "strlen"];
+const STRING_DEPENDENCIES: &[&str] = &["abort", "__sev_storage_new", "__sev_storage_release", "memcpy", "strcmp", "strlen"];
 
 const STRING_LIBRARY: MlirLibrary = MlirLibrary {
     id: "core.text.string",

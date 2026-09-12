@@ -17,6 +17,25 @@ import * from "timing.sev" as timing
 import * from "../../../backend/src/native_mlir.sev" as native
 
 
+class PreludeSnapshot:
+    root: string
+    owner: int
+    module: universal.Module
+    registry: lexer.SyntaxRegistry
+    files: list[source.SourceFile]
+
+
+PreludeSnapshots: list[PreludeSnapshot] = []
+
+
+def prepare_prelude(sysroot: string) -> unit | Error:
+    files: list[source.SourceFile] = []
+    subject = source.SourceFile(source.SourceId(0), "/__severian_prelude_snapshot__.sev", "")
+    result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
+    if result is Diagnostic:
+        throw Error(diagnostics.render(result, files))
+
+
 def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
     input = parser.Parser(lexer.scan_bootstrap(file))
     result: list[universal.ImportDeclaration] = []
@@ -50,9 +69,9 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], "")) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
-    registry = lexer.SyntaxRegistry([])
+    registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
     if working_directory == "":
         return error(diagnostics.diagnostic("E000120", "could not resolve the current source directory"))
@@ -60,56 +79,91 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     subject_path = normalized_path(input.path if input.path.starts_with("/") else working_directory + "/" + input.path)
     subject_loaded := false
     initializer_namespace := ""
-    parsed = universal.empty_module()
-    prelude = registered_source(read_source(root + "/sev_compiler/universal/prelude.sev"), files)
-    policy = registered_source(read_source(root + "/sev_compiler/universal/prelude.toml"), files)
-    policy_entries = package.parse_document(policy.text)
-    reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
-    excluded: list[string] := []
-    try:
-        excluded = package.prelude_exclusions(resolution, subject_path)
-    catch failure: Error:
-        return error(diagnostics.diagnostic("E000120", failure.message))
-    parsed.excluded_functions = excluded
-    for name in reserved:
-        if name not in excluded:
-            parsed.reserved_functions.append(name)
-    providers = prelude_providers(prelude)
-    for provider_import in providers:
-        provider_locator := ""
-        namespace := ""
-        match provider_import.subject:
-            case Locator:
-                provider_locator = locator
-            case _:
-                return error(diagnostics.diagnostic("E000120", "prelude providers require relative source imports"))
-        supplied ?= provider_import.alias
-        if supplied != None:
-            namespace = supplied + "."
-        provider_path = normalized_path(parent_path(prelude.path) + "/" + provider_locator)
-        is_subject = provider_path == subject_path
-        if is_subject:
-            initializer_namespace = namespace
-        library = load_source_module(input if is_subject else read_source(provider_path), namespace, [], is_subject, files, registry, sysroot=root)
-        for item in library.items:
-            match item:
-                case Function:
-                    provider_function := declaration
-                    if not provider_function.name.contains(".") and provider_function.name not in reserved:
-                        reserved.append(provider_function.name)
-                    provider_function.prelude = true
-                    parsed.items.append(universal.Function(provider_function))
-                    if not provider_function.name.contains(".") and provider_function.name not in excluded and provider_function.name not in parsed.reserved_functions:
-                        parsed.reserved_functions.append(provider_function.name)
+    parsed := universal.empty_module()
+    reused := false
+    if not prepare_only and len(files) == 0:
+        for snapshot in PreludeSnapshots:
+            eligible := snapshot.root == root and snapshot.owner != process.id()
+            for file in snapshot.files:
+                if file.path == subject_path:
+                    eligible = false
+            if eligible:
+                parsed = snapshot.module
+                registry = snapshot.registry
+                try:
+                    excluded = package.prelude_exclusions(resolution, subject_path)
+                    for name in excluded:
+                        if name not in parsed.reserved_functions:
+                            return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
+                    allowed: list[string] = []
+                    for name in parsed.reserved_functions:
+                        if name not in excluded:
+                            allowed.append(name)
+                    parsed.reserved_functions = allowed
+                    parsed.excluded_functions = excluded
+                catch failure: Error:
+                    return error(diagnostics.diagnostic("E000120", failure.message))
+                for file in snapshot.files:
+                    files.append(file)
+                reused = true
+                break
+        # Each child consumes one snapshot; the parent is untouched by fork.
+        PreludeSnapshots.clear()
+    if not reused:
+        prelude = registered_source(read_source(root + "/sev_compiler/universal/prelude.sev"), files)
+        policy = registered_source(read_source(root + "/sev_compiler/universal/prelude.toml"), files)
+        policy_entries = package.parse_document(policy.text)
+        reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
+        excluded: list[string] := []
+        try:
+            excluded = package.prelude_exclusions(resolution, subject_path)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
+        parsed.excluded_functions = excluded
+        for name in reserved:
+            if name not in excluded:
+                parsed.reserved_functions.append(name)
+        providers = prelude_providers(prelude)
+        for provider_import in providers:
+            provider_locator := ""
+            namespace := ""
+            match provider_import.subject:
+                case Locator:
+                    provider_locator = locator
                 case _:
-                    parsed.items.append(item)
-        subject_loaded = subject_loaded or is_subject
-    for name in excluded:
-        if name not in reserved:
-            return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
-    for file in files:
-        parsed.prelude_sources.append(int(file.id.index))
-    timing.finish_stage(timings, "prelude")
+                    return error(diagnostics.diagnostic("E000120", "prelude providers require relative source imports"))
+            supplied ?= provider_import.alias
+            if supplied != None:
+                namespace = supplied + "."
+            provider_path = normalized_path(parent_path(prelude.path) + "/" + provider_locator)
+            is_subject = provider_path == subject_path
+            if is_subject:
+                initializer_namespace = namespace
+            library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, sysroot=root)
+            for item in library.items:
+                match item:
+                    case Function:
+                        provider_function := declaration
+                        if not provider_function.name.contains(".") and provider_function.name not in reserved:
+                            reserved.append(provider_function.name)
+                        provider_function.prelude = true
+                        parsed.items.append(universal.Function(provider_function))
+                        if not provider_function.name.contains(".") and provider_function.name not in excluded and provider_function.name not in parsed.reserved_functions:
+                            parsed.reserved_functions.append(provider_function.name)
+                    case _:
+                        parsed.items.append(item)
+            subject_loaded = subject_loaded or is_subject
+        for name in excluded:
+            if name not in reserved:
+                return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
+        for file in files:
+            parsed.prelude_sources.append(int(file.id.index))
+    if prepare_only:
+        PreludeSnapshots.clear()
+        PreludeSnapshots.append(PreludeSnapshot(root, process.id(), parsed, registry, files))
+        timing.finish_stage(timings, "prelude-snapshot")
+        return ""
+    timing.finish_stage(timings, "prelude-reused" if reused else "prelude")
     library_paths: list[string] = []
     if emit != "agent-ir":
         for file in files:

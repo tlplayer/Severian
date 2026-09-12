@@ -1,4 +1,5 @@
 //! Native CLI profiling. Summary accounting stays in the compiler process.
+mod analysis;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ pub struct Options {
     pub arguments: Vec<String>,
 }
 
-pub const HELP: &str = "\nprofiling:\n  --profile [cpu|memory|time]  CPU/memory/time breakdown; optional stack capture.\n  --profile-output DIR        New directory for the native report and traces.\n  --build-profile NAME        Build settings such as release or dev.\n";
+pub const HELP: &str = "\nprofiling:\n  --profile [calls|memory|time]  Hook calls, allocations, and elapsed time.\n  --profile-output DIR        New directory for the native report and traces.\n  --build-profile NAME        Build settings such as release or dev.\n";
 
 pub fn parse(arguments: Vec<String>) -> Result<Options, String> {
     let mut result = Options::default();
@@ -33,7 +34,7 @@ pub fn parse(arguments: Vec<String>) -> Result<Options, String> {
             let mut mode = inline.unwrap_or("time");
             if inline.is_none() {
                 if let Some(next) = arguments.get(cursor + 1) {
-                    if matches!(next.as_str(), "cpu" | "memory" | "time" | "all" | "summary") {
+                    if matches!(next.as_str(), "calls" | "cpu" | "memory" | "time" | "all" | "summary") {
                         mode = next;
                         cursor += 1;
                     } else if matches!(next.as_str(), "release" | "dev" | "debug") {
@@ -41,13 +42,13 @@ pub fn parse(arguments: Vec<String>) -> Result<Options, String> {
                     }
                 }
             }
-            if !matches!(mode, "cpu" | "memory" | "time" | "all" | "summary") {
-                return Err("--profile expects cpu, memory, or time".into());
+            if !matches!(mode, "calls" | "cpu" | "memory" | "time" | "all" | "summary") {
+                return Err("--profile expects calls, memory, or time".into());
             }
             result.mode = Some(
-                if matches!(mode, "all" | "summary") {
-                    "time"
-                } else {
+                if mode == "summary" { "time" }
+                else if matches!(mode, "all" | "cpu") { "calls" }
+                else {
                     mode
                 }
                 .into(),
@@ -146,6 +147,10 @@ impl Session {
         fs::create_dir(&directory).map_err(|e| format!("cannot create profile directory: {e}"))?;
         let directory = fs::canonicalize(directory).map_err(|e| e.to_string())?;
         env::set_var("SEVERIAN_PROFILE_ACTIVE", "1");
+        if matches!(options.mode.as_deref(), Some("calls" | "memory")) {
+            fs::write(directory.join("hooks.jsonl"), "").map_err(|error| error.to_string())?;
+            env::set_var("SEVERIAN_HOOK_RECORDS", directory.join("hooks.jsonl"));
+        }
         Ok(Self {
             start: Instant::now(),
             own: usage(libc::RUSAGE_SELF)?,
@@ -173,32 +178,17 @@ impl Session {
         )
         .map_err(|e| e.to_string())?;
         eprintln!("Profile: {}", self.directory.join("report.json").display());
+        if matches!(options.mode.as_deref(), Some("calls" | "memory")) {
+            severian_driver::hooks::report(&self.directory.join("hooks.jsonl"), &self.directory.join("functions.tsv"))?;
+            eprintln!("Functions: {}", self.directory.join("functions.tsv").display());
+        }
         Ok(())
     }
 
     pub fn capture(&self, options: &Options) -> Result<i32, String> {
         let binary = env::current_exe().map_err(|e| e.to_string())?;
-        let cpu = options.mode.as_deref() == Some("cpu");
-        let mut command = Command::new(if cpu { "perf" } else { "heaptrack" });
-        if cpu {
-            command
-                .args([
-                    "record",
-                    "-e",
-                    "cpu-clock:u",
-                    "-F",
-                    "99",
-                    "--call-graph",
-                    "dwarf",
-                    "-o",
-                ])
-                .arg(self.directory.join("perf.data"))
-                .arg("--");
-        } else {
-            command
-                .args(["--record-only", "-o"])
-                .arg(self.directory.join("heaptrack"));
-        }
+        let mut command = Command::new("heaptrack");
+        command.args(["--record-only", "-o"]).arg(self.directory.join("heaptrack"));
         let result = command.arg(binary).args(&options.arguments).status();
         let code = match result {
             Ok(status) => {
@@ -218,13 +208,7 @@ impl Session {
         };
         self.finish(options, code)?;
         let mut analyses = Vec::new();
-        if cpu {
-            let mut analysis = Command::new("perf");
-            analysis
-                .args(["report", "--stdio", "--children", "-i"])
-                .arg(self.directory.join("perf.data"));
-            analyses.push(("cpu.txt".to_owned(), analysis));
-        } else {
+        {
             for entry in fs::read_dir(&self.directory).map_err(|e| e.to_string())? {
                 let path = entry.map_err(|e| e.to_string())?.path();
                 if path
@@ -236,11 +220,21 @@ impl Session {
                     )
                 {
                     let mut analysis = Command::new("heaptrack_print");
+                    let name = format!("memory-{}.txt", analyses.len());
                     analysis
                         .arg("-f")
                         .arg(&path)
-                        .args(["--merge-backtraces", "0"]);
-                    analyses.push((format!("memory-{}.txt", analyses.len()), analysis));
+                        .args([
+                            "--merge-backtraces",
+                            "0",
+                            "--print-leaks",
+                            "1",
+                            "--peak-limit",
+                            "25",
+                            "--print-flamegraph",
+                        ])
+                        .arg(self.directory.join(format!("{name}.allocations.folded")));
+                    analyses.push((name, analysis));
                 }
             }
         }
@@ -258,11 +252,27 @@ impl Session {
                     continue;
                 }
             };
-            fs::write(self.directory.join(&name), result.stdout).map_err(|e| e.to_string())?;
+            fs::write(self.directory.join(&name), &result.stdout).map_err(|e| e.to_string())?;
             fs::write(self.directory.join(format!("{name}.stderr")), result.stderr)
                 .map_err(|e| e.to_string())?;
             if !result.status.success() {
                 analysis_code = result.status.code().unwrap_or(1);
+            } else {
+                let trace = PathBuf::from(
+                    analysis
+                        .get_args()
+                        .nth(1)
+                        .ok_or("missing allocation trace")?,
+                );
+                if let Err(error) = analysis::memory(
+                    &self.directory,
+                    &trace,
+                    &name,
+                    &String::from_utf8_lossy(&result.stdout),
+                ) {
+                    eprintln!("Function analysis: {error}");
+                    analysis_code = 1;
+                }
             }
             eprintln!("Stacks: {}", self.directory.join(name).display());
         }
@@ -308,13 +318,13 @@ mod tests {
             ])
         );
         for command in ["build", "test", "run"] {
-            for mode in ["cpu", "memory", "time"] {
+            for mode in ["calls", "cpu", "memory", "time"] {
                 assert_eq!(
                     parse(strings(&[command, "--profile", mode]))
                         .unwrap()
                         .mode
                         .as_deref(),
-                    Some(mode)
+                    Some(if mode == "cpu" { "calls" } else { mode })
                 );
             }
         }

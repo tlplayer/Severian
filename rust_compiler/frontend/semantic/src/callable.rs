@@ -133,6 +133,7 @@ impl Analyzer<'_> {
             .transpose()?;
         let result_type = function.result.ty;
         let (mut body, hooks) = self.lower_function_hooks(ast_function, bindings, result_type)?;
+        let hook_entry_count = body.statements.len();
         if let Some((_, prefix)) = &constructor_storage {
             body.statements.extend(prefix.statements.clone());
         }
@@ -158,7 +159,7 @@ impl Analyzer<'_> {
             }
         }
         if !hooks.is_empty() {
-            insert_hook_exits(&mut body, &hooks);
+            insert_hook_exits(self, bindings, &mut body, &hooks, false)?;
             if block_flow(ast_body) == ControlFlow::FallsThrough {
                 for hook in hooks.iter().rev() {
                     if let Some((field, duration)) = &hook.duration {
@@ -172,6 +173,21 @@ impl Analyzer<'_> {
                         .extend(hook.without_phase.statements.iter().cloned());
                 }
             }
+            // Catch at the function boundary, after inner handlers. This also
+            // covers implicit error propagation in expressions and bindings.
+            let catch_type = self.fallible_types.get(&result_type)
+                .map_or_else(|| self.types.resolve_name("Error").unwrap(), |value| value.error);
+            let catch_binding = self.new_binding_id();
+            let error = Expression { id: self.next_id(), type_id: catch_type,
+                kind: ExpressionKind::Binding(catch_binding), span: ast_function.span };
+            let mut catch_body = Block { statements: vec![Statement::Expression(Expression {
+                id: self.next_id(), type_id: self.types.resolve_name("unit").unwrap(),
+                kind: ExpressionKind::Throw(Box::new(error)), span: ast_function.span,
+            })] };
+            insert_hook_exits(self, bindings, &mut catch_body, &hooks, true)?;
+            let protected = body.statements.split_off(hook_entry_count);
+            body.statements.push(Statement::Try { body: Block { statements: protected },
+                catch_binding, catch_type, catch_body, span: ast_function.span });
         }
         let success_type = self
             .fallible_types
@@ -624,6 +640,7 @@ fn visit_block(block: &mut Block, visit: &mut impl FnMut(&mut Expression)) {
             Statement::FieldSet { value, .. }
             | Statement::FieldUpdate { value, .. }
             | Statement::Expression(value)
+            | Statement::Destroy(value)
             | Statement::Return(Some(value)) => visit_expression(value, visit),
             Statement::Assert {
                 condition, message, ..

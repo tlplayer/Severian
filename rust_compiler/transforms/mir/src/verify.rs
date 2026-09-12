@@ -352,7 +352,7 @@ fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
                 }
             }
             CfgStatement::Drop(place) => {
-                if let Some(local) = place.local_id() {
+                if let Some(local) = place.local_id().filter(|_| place.projection.is_empty()) {
                     state.remove(&local);
                 }
             }
@@ -366,7 +366,7 @@ fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
                     }
                 }
             }
-            CfgStatement::StorageLive(_)
+            CfgStatement::Retain(_) | CfgStatement::StorageLive(_)
             | CfgStatement::Assert { .. }
             | CfgStatement::Coverage(_) => {}
         }
@@ -428,26 +428,27 @@ fn transfer(
                     state.insert(local);
                 }
             }
+            CfgStatement::Retain(place) => {
+                use_operand(block.id.0, body, globals, &Operand::Copy(place.clone()), state)?;
+            }
             CfgStatement::Drop(place) => {
                 verify_place(body, globals, place)?;
                 let Some(local) = place.local_id() else {
                     continue;
                 };
-                if !state.remove(&local) {
+                if !state.contains(&local) {
                     return Err(VerifyError::InvalidOwnershipState {
                         block: block.id.0,
                         local: local.0,
                     });
                 }
+                if place.projection.is_empty() { state.remove(&local); }
             }
             CfgStatement::StorageDead(local) => {
-                let local = *local;
-                if !state.remove(&local) {
-                    return Err(VerifyError::InvalidOwnershipState {
-                        block: block.id.0,
-                        local: local.0,
-                    });
-                }
+                // Storage lifetime also ends after a move or destruction.
+                // Initialization is required by Drop and reads, not by this
+                // marker, which releases no value itself.
+                state.remove(local);
             }
             CfgStatement::StorageLive(local) => {
                 if local.0 as usize >= body.locals.len() {
@@ -666,7 +667,7 @@ fn use_operand(
                 local: local.0,
             });
         }
-        if matches!(operand, Operand::Move(_)) {
+        if matches!(operand, Operand::Move(_)) && place.projection.is_empty() {
             state.remove(&local);
         }
     }

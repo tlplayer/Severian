@@ -3,10 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef struct {
-    size_t length;
-} sev_owned_string;
+#include "owned.h"
 
 typedef struct {
     size_t length;
@@ -15,13 +12,12 @@ typedef struct {
 } sev_string_list;
 
 static void sev_string_list_push(sev_string_list *list, const char *value);
+extern void *__sev_list_create(void);
+extern void __sev_list_push_ptr(void *storage, const char *value);
 
 static char *sev_string_allocation(size_t length) {
-    if (length + 1 > SIZE_MAX - sizeof(sev_owned_string)) abort();
-    sev_owned_string *allocation = malloc(sizeof(sev_owned_string) + length + 1);
-    if (allocation == NULL) abort();
-    allocation->length = length;
-    return (char *)(allocation + 1);
+    if (length == SIZE_MAX) abort();
+    return __sev_storage_new(length + 1, NULL);
 }
 
 // Converted strings can escape into bindings, collections, and MIR literals.
@@ -59,6 +55,7 @@ static size_t sev_utf8_offset(const char *value, size_t character) {
 }
 
 const char *__sev_string_identity(const char *value) {
+    __sev_storage_retain(value);
     return value;
 }
 
@@ -276,8 +273,7 @@ const char *__sev_string_index(const char *value, int64_t index) {
 }
 
 void *__sev_string_characters(const char *value) {
-    sev_string_list *result = calloc(1, sizeof(sev_string_list));
-    if (result == NULL) abort();
+    sev_string_list *result = __sev_list_create();
     for (size_t offset = 0; value[offset] != '\0';) {
         size_t width = sev_utf8_width((unsigned char)value[offset]);
         char *character = sev_string_allocation(width);
@@ -330,19 +326,12 @@ const char *__sev_string_strip(const char *value) {
 }
 
 static void sev_string_list_push(sev_string_list *list, const char *value) {
-    if (list->length == list->capacity) {
-        size_t capacity = list->capacity == 0 ? 4 : list->capacity * 2;
-        uintptr_t *values = realloc(list->values, capacity * sizeof(uintptr_t));
-        if (values == NULL) abort();
-        list->values = values;
-        list->capacity = capacity;
-    }
-    list->values[list->length++] = (uintptr_t)value;
+    __sev_list_push_ptr(list, value);
+    __sev_storage_release(value);
 }
 
 void *__sev_string_split(const char *value, const char *separator) {
-    sev_string_list *result = calloc(1, sizeof(sev_string_list));
-    if (result == NULL) abort();
+    sev_string_list *result = __sev_list_create();
     size_t separator_length = strlen(separator);
     if (separator_length == 0) return result;
     const char *start = value;

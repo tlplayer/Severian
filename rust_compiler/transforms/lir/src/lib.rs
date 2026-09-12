@@ -386,6 +386,8 @@ pub struct CfgBody {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
+    /// Original source snapshots used to resolve native instruction locations.
+    pub sources: Vec<DebugSource>,
     /// Structured fields remain readable while downstream emitters migrate;
     /// CFG lowering populates `storage_globals` and `initializer_cfg`.
     pub values: Vec<Value>,
@@ -402,6 +404,54 @@ pub struct Module {
     pub gpu_architecture: Option<String>,
 }
 
+/// Indexed once per file so native location emission is proportional to the
+/// generated instructions, rather than rescanning every source prefix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugSource {
+    pub id: severian_source::SourceId,
+    pub path: std::path::PathBuf,
+    text: String,
+    line_starts: Vec<usize>,
+}
+
+impl From<&severian_source::SourceFile> for DebugSource {
+    fn from(source: &severian_source::SourceFile) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(
+            source
+                .text
+                .bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        );
+        Self {
+            id: source.id,
+            path: source.path.clone(),
+            text: source.text.clone(),
+            line_starts,
+        }
+    }
+}
+
+impl DebugSource {
+    pub fn text(&self) -> &str { &self.text }
+    pub fn location(&self, byte: u32) -> Option<severian_source::SourceLocation> {
+        let offset = byte as usize;
+        if offset > self.text.len() || !self.text.is_char_boundary(offset) {
+            return None;
+        }
+        let line = self.line_starts.partition_point(|start| *start <= offset);
+        Some(severian_source::SourceLocation {
+            line: line as u32,
+            column: self.text[self.line_starts[line - 1]..offset]
+                .chars()
+                .count() as u32
+                + 1,
+            byte,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassFieldDeclaration {
     pub name: String,
@@ -410,6 +460,8 @@ pub struct ClassFieldDeclaration {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassDeclaration {
+    pub destroy: Option<FunctionId>,
+    pub retain: Option<FunctionId>,
     pub id: u32,
     pub name: String,
     pub fields: Vec<ClassFieldDeclaration>,

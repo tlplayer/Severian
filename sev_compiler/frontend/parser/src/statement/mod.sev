@@ -489,9 +489,10 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     parser_expect_symbol(parser, "(", "expected operator parameters")
     parameters: list[universal.OperatorParameter] = []
     while not parser_at_symbol(parser, ")"):
+        prefix_mode = parser_ownership_mode(parser)
         parameter = parser_identifier(parser, "expected operator parameter")
         annotation := universal.named_type("Self", [], parameter[1])
-        mode := ""
+        mode := prefix_mode
         if parser_take_symbol(parser, ":") != None:
             mode = parser_ownership_mode(parser)
             annotation = parser_type_annotation(parser)
@@ -517,6 +518,16 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
         syntax = universal.OperatorSyntax(symbol, universal.Fixity.Prefix, 10, universal.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
         receiver = false
     return universal.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver, result_mode=result_mode)
+
+
+def parser_destructor(operation: universal.OperatorDeclaration) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    if len(operation.parameters) != 1 or operation.parameters[0].name != "self" or operation.parameters[0].mode != "move":
+        return error(diagnostics.diagnostic_at("E000117", "destructor requires operator drop(move self) -> unit", operation.span))
+    if len(operation.type_parameters) != 0 or len(operation.constraints) != 0 or operation.result_mode != "" or operation.body == None:
+        return error(diagnostics.diagnostic_at("E000117", "destructor requires a non-generic cleanup body", operation.span))
+    parameter = operation.parameters[0]
+    receiver = universal.FunctionParameter("self", parameter.annotation, None, parameter.span, modifiers=[universal.BoundaryModifier("move")])
+    return universal.FunctionDeclaration(name="drop", parameters=[receiver], result=operation.result, body=operation.body, span=operation.span)
 
 
 def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagnostics.Diagnostic:
@@ -1396,7 +1407,11 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
             if parser_at_identifier(parser, "def"):
                 methods.append(parser_function_declaration(parser, []))
             elif parser_at_identifier(parser, "operator"):
-                operators.append(parser_operator_declaration(parser))
+                operation = parser_operator_declaration(parser)
+                if operation.syntax.symbol == "drop":
+                    methods.append(parser_destructor(operation))
+                else:
+                    operators.append(operation)
             elif parser_at_identifier(parser, "trait"):
                 parser_next(parser)
                 traits.append(parser_type_annotation(parser))

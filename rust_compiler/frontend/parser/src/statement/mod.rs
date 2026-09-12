@@ -320,10 +320,25 @@ impl Parser<'_> {
         let compile_time = introducer.kind == TokenKind::Arrow;
         let start = introducer.span;
         let (name, _) = self.identifier("expected a function name")?;
+        let destructor =
+            introducer.kind == TokenKind::Identifier("operator".into()) && name == "drop";
         let (mut type_parameters, mut constraints, _) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
         self.line_breaks();
         let mut parameters = Vec::new();
+        if destructor {
+            if !self.at_identifier("move") {
+                return Err(self.error("destructor requires operator drop(move self) -> unit"));
+            }
+            self.next();
+            if !self.at_identifier("self") {
+                return Err(self.error("destructor requires a consuming self receiver"));
+            }
+            self.next();
+            if !self.at(&TokenKind::RightParen) {
+                return Err(self.error("destructor takes only move self"));
+            }
+        }
         if !self.at(&TokenKind::RightParen) {
             loop {
                 let (parameter_name, parameter_span) =
@@ -446,6 +461,17 @@ impl Parser<'_> {
         } else {
             None
         };
+        if destructor
+            && (result.simple_name() != Some("unit")
+                || !type_parameters.is_empty()
+                || !constraints.is_empty()
+                || hook.is_some()
+                || body.is_none())
+        {
+            return Err(
+                self.error("destructor requires a non-generic body and non-throwing unit result")
+            );
+        }
         Ok(FunctionDeclaration {
             decorators,
             compile_time,
@@ -1994,7 +2020,15 @@ impl Parser<'_> {
                     methods.push(function);
                 }
             } else if self.at_identifier("operator") {
-                operators.push(self.operator_implementation(member_decorators)?);
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Identifier("drop".into()))
+                {
+                    methods.push(self.function_declaration(member_decorators)?);
+                } else {
+                    operators.push(self.operator_implementation(member_decorators)?);
+                }
                 member_has_body = true;
             } else if self.at_identifier("test") {
                 tests.push(self.test_declaration()?);

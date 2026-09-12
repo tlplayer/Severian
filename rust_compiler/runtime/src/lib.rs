@@ -22,6 +22,7 @@ pub fn native_sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("native");
     [
         "coverage.c",
+        "owned.c",
         "string.c",
         "any.c",
         "list.c",

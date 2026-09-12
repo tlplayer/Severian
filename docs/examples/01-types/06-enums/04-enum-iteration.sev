@@ -1,0 +1,21 @@
+enum Color:
+    # Simple key in the enum value defaults to absent meaning it is not supplied
+    Blue
+    # Specify the values that can exist to populate the enum 
+    Green {3}
+    # Multiple values for the same enum need a default value representation
+    Red {1,2} = 2
+    # Mixed type values
+    Purple {"purple"} 
+
+def colors(sample: Color):
+    for color in Color:
+        if color is sample:
+            return color.value
+
+
+test "color iteration is natively supported":
+    assert(colors(Blue) is absent)
+    assert(colors(Green) == 3)
+    assert(colors(Red) == 2)
+    assert(colors(Purple) == "purple")

@@ -9,6 +9,7 @@ pub mod config;
 mod pipeline;
 mod runtime_paths;
 mod timing;
+pub mod hooks;
 
 pub use pipeline::{
     check_file, compile_file, compile_source, CompileError, CompiledTest, Compiler, EmitStage,

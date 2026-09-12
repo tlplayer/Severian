@@ -47,6 +47,57 @@ class NativeProfiling(unittest.TestCase):
         self.assertNotIn('unexpected Python delegation', result.stderr)
         return result, data
 
+    def test_memory_rankings_and_native_source_hint(self):
+        source = self.directory / 'subject.sev'
+        source.write_text('test:\n    assert(true)\n')
+        tools = self.directory / 'bin'
+        recorder = tools / 'heaptrack'
+        recorder.write_text('#!/bin/sh\nprefix=$3\nshift 3\n"$@"\nstatus=$?\ntouch "$prefix.zst"\nexit "$status"\n')
+        recorder.chmod(0o755)
+        analyzer = tools / 'heaptrack_print'
+        analyzer.write_text('#!/bin/sh\nmetric=allocations\noutput=\n'
+                            'while [ "$#" -gt 0 ]; do\n'
+                            'case "$1" in\n'
+                            '--flamegraph-cost-type) metric=$2; shift ;;\n'
+                            '--print-flamegraph) output=$2; shift ;;\n'
+                            'esac\nshift\ndone\n'
+                            'case "$metric" in allocations) cost=7 ;; peak) cost=64 ;; leaked) cost=32 ;; esac\n'
+                            'printf "root;recursive;recursive;allocate; %s\\n" "$cost" > "$output"\n'
+                            'printf "7 calls to allocation functions with 64B peak consumption from\\n  __sev_fn_123_test\\n    at %s:2\\n\\n" "$SEV_HINT_SOURCE"\n')
+        analyzer.chmod(0o755)
+        self.environment['SEV_HINT_SOURCE'] = str(source)
+        for compiler in self.binaries:
+            with self.subTest(compiler=compiler):
+                report = self.directory / compiler
+                result, data = self.invoke(compiler, ['check', source, '--profile', 'memory'], report)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(data['exit_code'], 0)
+                self.assertEqual((report / 'analysis.status').read_text(), '0\n')
+                table_path, = report.glob('*.functions.tsv')
+                table = table_path.read_text()
+                self.assertIn('recursive\t0\t7\t0\t64\t0\t32\n', table)
+                self.assertIn('allocate\t7\t7\t64\t64\t32\t32\n', table)
+                hints_path, = report.glob('*.hints.txt')
+                hints = hints_path.read_text()
+                self.assertIn('Allocation hotspot: test', hints)
+                self.assertIn(str(source) + ':2', hints)
+                self.assertIn('assert(true)', hints)
+
+    def test_directory_workers_reuse_prelude_with_isolated_subjects(self):
+        sources = self.directory / 'sources'
+        sources.mkdir()
+        for index in range(2):
+            (sources / f'{index}.sev').write_text(f'def value() -> int:\n    return {index}\ntest:\n    assert(value() == {index})\n')
+        report = self.directory / 'directory-profile'
+        result, data = self.invoke('source', ['test', sources, '--profile'], report)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('2 passed; 0 failed', result.stdout)
+        self.assertIn('prelude-snapshot', (report / 'stages.tsv').read_text())
+        workers = sorted(report.glob('stages.tsv.unit-*'))
+        self.assertEqual(len(workers), 2)
+        for worker in workers:
+            self.assertIn('prelude-reused', worker.read_text())
+
     def test_direct_file_execution_and_live_native_accounting(self):
         source = ROOT / 'docs/examples/01-types/01-basic/00-constants.sev'
         for compiler in self.binaries:

@@ -1,0 +1,26 @@
+import process
+
+
+class ProfileContext: Context
+    function: string
+    source_id: int
+    span_start: int
+    span_end: int
+    duration: duration
+    error: string | None
+    token: int
+
+
+trait Recording:
+    @record_calls
+    def record_calls(context: ProfileContext) -> None with context
+
+
+class NativeRecording: Recording
+    def record_calls(context: ProfileContext) -> None with context:
+        with context:
+            context.token = process.record_with(context.function, context.source_id, context.span_start, context.span_end)
+            assert(context.token >= 0, "could not emit hook entry")
+
+        without context:
+            assert(process.record_without(context.token, float(context.duration), context.error != None) == 0, "could not emit hook exit")

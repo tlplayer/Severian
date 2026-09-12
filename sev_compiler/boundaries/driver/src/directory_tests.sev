@@ -1,6 +1,24 @@
 import os
 import package
 import process
+import environment
+import source
+import * from "pipeline/source.sev" as compiler
+import * from "../../backend/src/native_mlir.sev" as backend
+
+@c(symbol="exit")
+def worker_exit(status: i32)
+
+
+def run_source(input: string, sysroot: string, output: string) -> int | Error:
+    files: list[source.SourceFile] = []
+    resolution = package.Resolution([], [], "")
+    mlir = compiler.compile_to_mlir(compiler.load_input(input), true, sysroot, "", resolution, files)
+    paths: list[string] = []
+    for file in files:
+        paths.append(file.path)
+    backend.emit_native(mlir, output, native_arguments=package.native_arguments(resolution, paths))
+    return backend.execute_native(output, [])
 
 
 def collect(directory: string, sources: list[string]) -> unit | Error:
@@ -33,6 +51,7 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
     if executable == "":
         throw Error("could not find the native compiler executable")
     failed := 0
+    compiler.prepare_prelude(sysroot)
     for index in range(int(len(selected))):
         source = selected[index]
         print("testing " + source)
@@ -45,9 +64,20 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
             arguments.append(platform)
         status := 1
         try:
-            status = process.run(arguments)
+            child = package.fork_compilation_unit()
+            if child == 0:
+                try:
+                    timing_path = environment.get("SEVERIAN_TIMINGS", "")
+                    if timing_path != "":
+                        if not environment.set("SEVERIAN_TIMINGS", timing_path + ".unit-" + string(index)):
+                            throw Error("could not select worker timing output")
+                    status = run_source(source, sysroot, stage + "/bin/test-" + string(index))
+                catch failure: Error:
+                    process.write_error("error: " + failure.message + "\n")
+                worker_exit(i32(status))
+            status = package.wait_compilation_unit(child)
         catch failure: Error:
-            process.write_error(failure.message + "\n")
+            process.write_error("error: " + failure.message + "\n")
         print(("ok " if status == 0 else "FAILED ") + source)
         if status != 0:
             failed += 1

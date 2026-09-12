@@ -1,0 +1,46 @@
+import package
+import process
+import environment
+import * from "package_compiler.sev"
+
+@c(symbol="exit")
+def session_exit(status: i32)
+
+
+# The package orchestrator runs in the client. This parent only forks pristine
+# compilation workers; unit analysis can never modify the next unit's prelude.
+def serve_package_session(client: int) -> int | Error:
+    ordinal := 0
+    while true:
+        request = process.session_request()
+        if request == "":
+            break
+        status := 1
+        try:
+            entries = package.parse_document(package.read_text(request))
+            arguments = package.string_array(package.setting(entries, "", "arguments"))
+            seconds = int(package.setting(entries, "", "seconds"))
+            bytes = int(package.setting(entries, "", "bytes"))
+            worker = package.fork_compilation_unit()
+            if worker == 0:
+                process.session_detach()
+                try:
+                    if not process.session_limits(seconds, bytes):
+                        throw Error("could not apply compilation worker limits")
+                    timings = environment.get("SEVERIAN_TIMINGS", "")
+                    if timings != "":
+                        if not environment.set("SEVERIAN_TIMINGS", timings + ".unit-" + string(ordinal)):
+                            throw Error("could not select compilation worker timings")
+                    compile_package_unit(arguments)
+                    status = 0
+                catch failure: Error:
+                    process.write_error("error: " + failure.message + "\n")
+                session_exit(i32(status))
+            status = process.session_wait(worker)
+        catch failure: Error:
+            process.write_error("error: " + failure.message + "\n")
+        if not process.session_reply(status):
+            break
+        ordinal += 1
+    process.session_detach()
+    return package.wait_compilation_unit(client)

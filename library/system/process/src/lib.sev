@@ -10,6 +10,27 @@ def kill(process: int) -> bool
 @c(symbol = "__sev_process_wait")
 def wait(process: int) -> int
 
+# Only call before starting threads. The child inherits an isolated snapshot.
+@c(symbol = "__sev_process_fork_snapshot")
+def fork_snapshot() -> int
+
+@c(symbol = "__sev_session_start")
+def session_start() -> int
+@c(symbol = "__sev_session_available")
+def session_available() -> bool
+@c(symbol = "__sev_session_submit")
+def session_submit(request: string) -> int
+@c(symbol = "__sev_session_request")
+def session_request() -> string
+@c(symbol = "__sev_session_reply")
+def session_reply(status: int) -> bool
+@c(symbol = "__sev_session_detach")
+def session_detach()
+@c(symbol = "__sev_session_limits")
+def session_limits(seconds: int, bytes: int) -> bool
+@c(symbol = "__sev_session_wait")
+def session_wait(worker: int) -> int
+
 # Materialized by the runtime from the process entry boundary. The semantic
 # layer lowers this list-valued native surface without exposing its storage.
 def arguments() -> list[string]
@@ -35,6 +56,12 @@ def peak_rss_kib(children: int = 0) -> int
 def write_error(text: string)
 @c(symbol = "__sev_process_executable")
 def executable() -> string
+
+@c(symbol = "__sev_profile_function_table")
+def profile_function_table(allocations: string, peak: string, retained: string, output: string) -> int
+
+@c(symbol = "__sev_hook_function_table")
+def hook_function_table(records: string, output: string) -> int
 
 @c(symbol = "__sev_command_create")
 def native_command() -> int
@@ -80,3 +107,10 @@ def execute(arguments: list[string]) -> Output | Error:
     if status < 0:
         throw Error("could not execute process: " + arguments[0])
     return Output(status, output, errors)
+
+# Structured with/without hook emissions. Zero tokens mean recording is disabled.
+@c(symbol="__sev_hook_record_with")
+def record_with(function: string, source_id: int, start: int, end: int) -> int
+
+@c(symbol="__sev_hook_record_without")
+def record_without(token: int, elapsed: float, failed: bool) -> int

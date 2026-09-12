@@ -82,6 +82,7 @@ impl std::error::Error for PassError {}
 
 pub struct PassContext<'a> {
     pub universal: &'a UniversalContext,
+    pub storage_glue: bool,
 }
 
 #[derive(Default)]
@@ -198,7 +199,11 @@ impl PassManager {
                         })?;
                     for function in &mut module.functions {
                         if let Some(body) = &mut function.body {
-                            pass.run_function(body, context, &mut analyses).map_err(
+                            if std::env::var_os("SEVERIAN_MIR_TRACE").is_some() {
+                                eprintln!("MIR {}: {} ({} blocks, {} locals)", metadata.name, function.name, body.blocks.len(), body.locals.len());
+                            }
+                            pass.run_function(body, &PassContext { universal: context.universal,
+                                storage_glue: function.name.starts_with("__sev_destroy_type") || function.name.starts_with("__sev_retain_type") }, &mut analyses).map_err(
                                 |mut error| {
                                     error.message = format!(
                                         "in function `{}`: {}",
@@ -207,6 +212,14 @@ impl PassManager {
                                     error
                                 },
                             )?;
+                            if metadata.name == "drop-elaboration" && std::env::var("SEVERIAN_MIR_TRACE_FILTER").as_deref() == Ok(function.name.as_str()) {
+                                for local in &body.locals { eprintln!("{local:?}"); }
+                                for block in &body.blocks {
+                                    eprintln!("BLOCK {:?}", block.id);
+                                    for statement in &block.statements { eprintln!("  {statement:?}"); }
+                                    eprintln!("  {:?}", block.terminator);
+                                }
+                            }
                         }
                     }
                 }
@@ -414,6 +427,7 @@ impl Pass for DropElaborationPass {
         context: &PassContext<'_>,
         _analyses: &mut AnalysisManager,
     ) -> Result<(), PassError> {
+        if context.storage_glue { return Ok(()); }
         elaborate_drops(body, &context.universal.types).map_err(|errors| PassError {
             pass: self.metadata.name,
             message: errors
@@ -463,6 +477,7 @@ impl Pass for OwnershipPass {
         context: &PassContext<'_>,
         _analyses: &mut AnalysisManager,
     ) -> Result<(), PassError> {
+        if context.storage_glue { return Ok(()); }
         analyze_ownership(body, &context.universal.types)
             .map(|_| ())
             .map_err(|errors| PassError {
@@ -480,7 +495,7 @@ pub fn run_required_pipeline(
     module: &mut Module,
     universal: &UniversalContext,
 ) -> Result<IrStage, PassError> {
-    let context = PassContext { universal };
+    let context = PassContext { universal, storage_glue: false };
     let mut stage = IrStage::Constructed;
     let mut manager = PassManager::default();
     manager.add(VerifyPass::new(IrStage::Constructed, IrStage::Constructed));

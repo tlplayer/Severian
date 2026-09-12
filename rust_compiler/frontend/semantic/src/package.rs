@@ -2392,7 +2392,7 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
                 binding.0 += offset;
                 remap_expression_bindings(value, offset);
             }
-            Statement::Expression(expression) | Statement::Return(Some(expression)) => {
+            Statement::Expression(expression) | Statement::Destroy(expression) | Statement::Return(Some(expression)) => {
                 remap_expression_bindings(expression, offset)
             }
             Statement::Return(None) | Statement::Break { .. } | Statement::Continue { .. } => {}

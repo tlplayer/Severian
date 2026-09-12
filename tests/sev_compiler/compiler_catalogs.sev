@@ -1,0 +1,28 @@
+import * from "../../sev_compiler/universal/type/scalar.sev" as scalar
+import * from "../../sev_compiler/universal/id/compiler.sev" as ids
+import * from "../../sev_compiler/transforms/mlir/src/emit/strings.sev" as strings
+
+
+def check_byte(value: int):
+    attribute = strings.utf8_byte_attribute(u8(value))
+    assert(attribute.integer == (value - 256 if value >= 128 else value))
+    assert(attribute.type_id.scalar.bits == 8)
+
+
+test:
+    assert(len(scalar.scalar_types()) == 18)
+    for identity in scalar.scalar_identities():
+        value ?= scalar.scalar_type(ids.TypeId(u32(identity)))
+        assert(value != None)
+        if value != None:
+            assert(value.id.index == u32(identity))
+            buffer ?= scalar.scalar_type(ids.TypeId(u32(identity + 200)))
+            assert(buffer != None)
+            if buffer != None:
+                assert(buffer.representation == "buffer")
+                assert(buffer.name == "$buffer$" + value.name)
+    assert(scalar.scalar_type(ids.TypeId(999)) == None)
+    # Repeat to exercise reuse of the already initialized immutable catalog.
+    for repetition in range(2):
+        for value in range(256):
+            check_byte(value)

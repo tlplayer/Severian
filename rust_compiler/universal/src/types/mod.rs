@@ -50,6 +50,12 @@ pub struct ResolvedUnary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeContext {
+    destruction: BTreeMap<TypeId, DefId>,
+    retention: BTreeMap<TypeId, DefId>,
+    borrowed_results: BTreeSet<DefId>,
+    transferred_arguments: BTreeMap<DefId, BTreeSet<usize>>,
+    destruction_fields: BTreeMap<TypeId, Vec<TypeId>>,
+    custom_destruction: BTreeSet<TypeId>,
     interner: TyInterner,
     definitions: BTreeMap<TypeId, TypeDefinition>,
     by_name: HashMap<String, TypeId>,
@@ -66,6 +72,23 @@ pub struct TypeContext {
     capabilities: BTreeMap<TypeId, BTreeSet<TypeId>>,
     trait_binary: BTreeMap<TypeId, BTreeSet<BinaryOperator>>,
     trait_unary: BTreeMap<TypeId, BTreeSet<UnaryOperator>>,
+}
+
+impl TypeContext {
+    pub fn destruction(&self, ty: TypeId) -> Option<DefId> { self.destruction.get(&ty).copied() }
+    pub fn register_transferred_argument(&mut self, function: DefId, index: usize) { self.transferred_arguments.entry(function).or_default().insert(index); }
+    pub fn transfers_argument(&self, function: DefId, index: usize) -> bool { self.transferred_arguments.get(&function).is_some_and(|indices| indices.contains(&index)) }
+    pub fn register_borrowed_result(&mut self, function: DefId) { self.borrowed_results.insert(function); }
+    pub fn borrowed_result(&self, function: DefId) -> bool { self.borrowed_results.contains(&function) }
+    pub fn retention(&self, ty: TypeId) -> Option<DefId> { self.retention.get(&ty).copied() }
+    pub fn register_retention(&mut self, ty: TypeId, function: DefId) { self.retention.insert(ty, function); }
+    pub fn register_destruction(&mut self, ty: TypeId, function: DefId) { self.destruction.insert(ty, function); }
+    pub fn register_destruction_fields(&mut self, ty: TypeId, fields: Vec<TypeId>, custom: bool) {
+        self.destruction_fields.insert(ty, fields);
+        if custom { self.custom_destruction.insert(ty); }
+    }
+    pub fn destruction_fields(&self, ty: TypeId) -> &[TypeId] { self.destruction_fields.get(&ty).map(Vec::as_slice).unwrap_or(&[]) }
+    pub fn custom_destruction(&self, ty: TypeId) -> bool { self.custom_destruction.contains(&ty) }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1370,4 +1393,13 @@ mod tests {
         assert_eq!(unknown_rank.source_shape.rank(), None);
         assert_eq!(unknown_rank.shape, TensorShape::Unranked);
     }
+}
+
+/// Whether a native collection operation acquires its element arguments.
+pub fn native_container_stores_values(symbol: &str) -> bool {
+    if let Some(operation) = symbol.strip_prefix("__sev_list_") {
+        ["push_", "append_", "set_", "insert_", "appendleft_"].iter().any(|prefix| operation.starts_with(prefix))
+    } else if let Some(operation) = symbol.strip_prefix("__sev_set_") {
+        operation.starts_with("append_") || operation.starts_with("add_")
+    } else { symbol.starts_with("__sev_map_set_") }
 }

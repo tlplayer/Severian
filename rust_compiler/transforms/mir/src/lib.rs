@@ -30,6 +30,8 @@ pub use verify::{verify, VerifyError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
+    /// Source snapshots for native debug locations; spans keep their original IDs.
+    pub sources: Vec<severian_source::SourceFile>,
     /// Program-local structural type catalog. Source generic applications are
     /// interned here so planning and lowering never need to reconstruct them
     /// from display names.

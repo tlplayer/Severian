@@ -12,17 +12,16 @@ String lowering:
 - `__sev_string_compare`
 - `__sev_string_release`
 
-These names are compatibility adapters for the current NUL-terminated pointer
-representation. Their allocation prefix intentionally matches the former C
-implementation so ownership remains coherent while the source representation
-migrates to `StringAbiV1`. That legacy prefix is currently a 64-bit contract;
-the legality gate rejects this library on a 32-bit target instead of silently
-using the wrong layout.
+These names adapt the current NUL-terminated pointer representation. Allocation
+and release go through `__sev_storage_new` and `__sev_storage_release`; they no
+longer inspect a fixed prefix before a string pointer. The storage provider
+recognizes managed pointers, counts shared references, and ignores literal or
+foreign pointers. String copies retain managed storage, while moves transfer
+an existing reference.
 
-Calls to `malloc`, `free`, `strlen`, `strcmp`, `memcpy`, and `abort` are external
-platform ABI declarations. They are not Severian library implementations. New
-String behavior belongs in MLIR (or in `.sev` compiled to MLIR), not in a C
-source file.
+`strlen`, `strcmp`, `memcpy`, and `abort` remain external platform declarations.
+String concatenation and release remain MLIR library exports. New String
+behavior belongs in MLIR (or in `.sev` compiled to MLIR).
 
 The active migration order is:
 

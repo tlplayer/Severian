@@ -230,6 +230,7 @@ impl Compiler {
             .check_ast_to_mir(&ast, CompileMode::Build, &module_name(&source.path))
             .map_err(|error| error.with_source(source.clone()))?;
         attach_assertion_locations(&mut mir, source);
+        mir.sources = vec![source.clone()];
         if !self.coverage {
             remove_module_coverage(&mut mir);
         }
@@ -739,6 +740,7 @@ impl Compiler {
         if let Some(source) = sources.last() {
             attach_assertion_locations(&mut merged, source);
         }
+        merged.sources = sources;
         if !self.coverage {
             remove_module_coverage(&mut merged);
         }
@@ -2330,7 +2332,9 @@ fn retain_reachable_functions(
         .iter()
         .filter_map(|function| function.body.as_ref().map(|body| (function.id, body)))
         .collect::<BTreeMap<_, _>>();
-    let mut reachable = roots.into_iter().collect::<BTreeSet<_>>();
+    let mut reachable = roots.into_iter().chain(module.functions.iter()
+        .filter(|function| function.name.starts_with("__sev_destroy_type") || function.name.starts_with("__sev_retain_type"))
+        .map(|function| function.id)).collect::<BTreeSet<_>>();
     let mut queue = std::collections::VecDeque::from_iter(reachable.iter().copied());
 
     let mut initial_instances = BTreeSet::new();
@@ -2413,7 +2417,7 @@ fn collect_function_references(
                         collect_operand_function(operand, definitions);
                     }
                 }
-                severian_mir::CfgStatement::Drop(_)
+                severian_mir::CfgStatement::Retain(_) | severian_mir::CfgStatement::Drop(_)
                 | severian_mir::CfgStatement::StorageLive(_)
                 | severian_mir::CfgStatement::StorageDead(_)
                 | severian_mir::CfgStatement::Coverage(_) => {}

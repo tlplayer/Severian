@@ -92,6 +92,8 @@ mod cfg_lowering_entry {
             .enumerate()
             .map(|(id, declaration)| {
                 Ok(severian_lir::ClassDeclaration {
+                    destroy: types.destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
+                    retain: types.retention(declaration.id).map(|id| FunctionId(id.declaration.0)),
                     variants: declaration.variants.clone(),
                     id: id as u32,
                     name: declaration.name.clone(),
@@ -165,6 +167,11 @@ mod cfg_lowering_entry {
                 .filter_map(|function| function.cfg.as_ref())
                 .any(cfg_uses_gpu);
         Ok(LirModule {
+            sources: mir
+                .sources
+                .iter()
+                .map(severian_lir::DebugSource::from)
+                .collect(),
             values: context.values,
             globals: Vec::new(),
             initializer: LirBlock::default(),
@@ -308,6 +315,18 @@ impl CfgLowering<'_> {
         })
     }
 
+    fn storage_type(&self, body: &severian_mir::CfgBody, place: &severian_mir::Place) -> Option<severian_universal::TypeId> {
+        let mut ty = match place.base {
+            severian_mir::PlaceBase::Local(local) => body.locals.get(local.0 as usize)?.ty,
+            severian_mir::PlaceBase::Global(global) => self.mir.globals.iter().find(|entry| entry.id == global)?.ty,
+        };
+        for projection in &place.projection {
+            let severian_mir::Projection::Field(field) = projection else { return None; };
+            ty = *self.types.destruction_fields(ty).get(*field as usize)?;
+        }
+        Some(ty)
+    }
+
     fn lower_statement(
         &mut self,
         body: &severian_mir::CfgBody,
@@ -317,14 +336,30 @@ impl CfgLowering<'_> {
         match statement {
             severian_mir::CfgStatement::Assign(place, rvalue) => {
                 let value = self.lower_rvalue(body, rvalue, operations)?;
+                if matches!(place.base, severian_mir::PlaceBase::Global(_)) && self.storage_type(body, place).and_then(|ty| self.types.retention(ty)).is_some() {
+                    self.lower_statement(body, &severian_mir::CfgStatement::Drop(place.clone()), operations)?;
+                }
                 operations.push(LirOperation::Store {
                     place: self.lower_place(place),
                     value,
                 });
             }
-            severian_mir::CfgStatement::Drop(place) => {
+            severian_mir::CfgStatement::Drop(place) | severian_mir::CfgStatement::Retain(place) => {
                 let ty = self.place_type(body, place)?;
-                if matches!(ty, LoweredType::Tensor { .. }) && place.projection.is_empty() {
+                let source_type = self.storage_type(body, place);
+                if let Some(destructor) = source_type.and_then(|ty| if matches!(statement, severian_mir::CfgStatement::Retain(_)) { self.types.retention(ty) } else { self.types.destruction(ty) }) {
+                    let address = if self.types.primitive(source_type.unwrap()).is_some() {
+                        self.load_place(body, place, operations)?
+                    } else {
+                        let address = self.new_value(LoweredType::Bytes);
+                        operations.push(LirOperation::AddressOf { place: self.lower_place(place), result: address });
+                        address
+                    };
+                    let result = self.new_value(LoweredType::Unit);
+                    operations.push(LirOperation::Call { function: FunctionId(destructor.declaration.0), arguments: vec![address], result });
+                } else if matches!(statement, severian_mir::CfgStatement::Retain(_)) {
+                    // Primitive scalars and affine values do not acquire a shared reference.
+                } else if matches!(ty, LoweredType::Tensor { .. }) && place.projection.is_empty() {
                     let address = self.new_value(LoweredType::Bytes);
                     operations.push(LirOperation::AddressOf {
                         place: self.lower_place(place),
@@ -1802,6 +1837,8 @@ mod legacy_structured_lowering {
                 .enumerate()
                 .map(|(id, declaration)| {
                     Ok(severian_lir::ClassDeclaration {
+                        destroy: types.destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
+                        retain: types.retention(declaration.id).map(|id| FunctionId(id.declaration.0)),
                         variants: declaration.variants.clone(),
                         id: id as u32,
                         name: declaration.name.clone(),

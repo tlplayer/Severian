@@ -137,7 +137,7 @@ fn validate_slice_block(
                     regions,
                 )?;
             }
-            Statement::Expression(expression) => {
+            Statement::Expression(expression) | Statement::Destroy(expression) => {
                 if let ExpressionKind::Move(operand) = &expression.kind {
                     if let ExpressionKind::Binding(binding) = operand.kind {
                         if let Some(region) = regions.get_mut(&binding) {
@@ -696,7 +696,7 @@ fn validate_statement(
             declared.insert(*id);
             Ok(())
         }
-        Statement::Expression(expression) => validate_expression(expression, declared),
+        Statement::Expression(expression) | Statement::Destroy(expression) => validate_expression(expression, declared),
         Statement::Return(value) => value
             .as_ref()
             .map_or(Ok(()), |value| validate_expression(value, declared)),

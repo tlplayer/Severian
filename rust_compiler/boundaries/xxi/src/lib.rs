@@ -105,6 +105,8 @@ pub fn resolve(
                 .decorators
                 .iter()
                 .any(|decorator| !decorator.is_compile_policy())
+                && (declaration.body.is_none()
+                    || declaration.decorators.iter().any(is_external_attribute))
                 && !semantic_operator_declaration(declaration)
                 && !declaration
                     .decorators
@@ -648,6 +650,18 @@ mod tests {
         let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert!(resolved.foreign.functions.is_empty());
         assert!(resolved.plans.is_empty());
+    }
+
+    #[test]
+    fn imported_hook_on_a_body_is_not_a_foreign_language() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "imported_hook.sev",
+            "import profiling\n@record_calls\ndef twice(value: int) -> int:\n    return value * 2\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.foreign.functions.is_empty());
     }
 
     #[test]

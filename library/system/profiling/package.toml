@@ -1,0 +1,11 @@
+[package]
+name = "profiling"
+version = "0.1.0"
+edition = "2026"
+description = "Structured native records emitted by with/without hook contexts"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+process = { path = "../process", version = "0.1.0" }

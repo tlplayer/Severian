@@ -8,6 +8,7 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
+profiling = { path = "../../../library/system/profiling" }
 diagnostics = { path = "../../diagnostics" }
 source = { path = "../../source" }
 universal = { path = "../../universal" }

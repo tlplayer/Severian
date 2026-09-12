@@ -1,8 +1,53 @@
+import profiling
 import * from "../id/compiler.sev"
 
 
 # Stable identities for the first source-compiled scalar pipeline. The table
 # belongs to universal, and both semantic analysis and MLIR lowering consult it.
+enum ScalarIdentities:
+    Bool {1}
+    Unit {2}
+    String {3}
+    Index {4}
+    NativePtr {5}
+    NoneValue {6}
+    Absent {7}
+    F32 {163}
+    F64 {164}
+    U8 {108}
+    U16 {516}
+    U32 {532}
+    U64 {564}
+    Char {132}
+    I8 {8}
+    I16 {16}
+    I32 {32}
+    I64 {64}
+
+
+def scalar_identities() -> list[int]:
+    return [
+        int(ScalarIdentities.Bool),
+        int(ScalarIdentities.Unit),
+        int(ScalarIdentities.String),
+        int(ScalarIdentities.Index),
+        int(ScalarIdentities.NativePtr),
+        int(ScalarIdentities.NoneValue),
+        int(ScalarIdentities.Absent),
+        int(ScalarIdentities.F32),
+        int(ScalarIdentities.F64),
+        int(ScalarIdentities.U8),
+        int(ScalarIdentities.U16),
+        int(ScalarIdentities.U32),
+        int(ScalarIdentities.U64),
+        int(ScalarIdentities.Char),
+        int(ScalarIdentities.I8),
+        int(ScalarIdentities.I16),
+        int(ScalarIdentities.I32),
+        int(ScalarIdentities.I64),
+    ]
+
+
 class ScalarType:
     id: TypeId
     name: string
@@ -12,9 +57,11 @@ class ScalarType:
     signed: bool = true
 
 
+
+
 def scalar_types() -> list[ScalarType]:
     values: list[ScalarType] = []
-    for identity in [1, 2, 3, 4, 5, 6, 7, 163, 164, 108, 516, 532, 564, 132, 8, 16, 32, 64]:
+    for identity in scalar_identities():
         value ?= scalar_type(TypeId(u32(identity)))
         if value != None:
             values.append(value)
@@ -36,7 +83,8 @@ def scalar_type_name(name: string) -> TypeId | None:
     return None
 
 
-def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
+@record_calls
+def make_scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
     # Lookup constructs only the requested descriptor. Semantic analysis asks
     # this on hot paths; allocating the full catalog here multiplies both
     # allocation traffic and compile time. scalar_types retains catalog order.
@@ -79,15 +127,51 @@ def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
     return None
 
 
+class ScalarSlot:
+    value: ScalarType | None
+
+
+# The scalar catalog is immutable package data. Optional descriptors are stored
+# as values too, avoiding a freshly boxed sum payload on every successful query.
+def initialize_scalar_catalog():
+    values = ScalarCatalog
+    for index in range(1000):
+        values.append(ScalarSlot(None))
+    for identity in scalar_identities():
+        descriptor ?= make_scalar_descriptor(TypeId(u32(identity)))
+        if descriptor != None:
+            values[identity] = ScalarSlot(descriptor)
+            values[identity + 200] = ScalarSlot(ScalarType(TypeId(u32(identity + 200)), "$buffer$" + descriptor.name, descriptor.bits, false, "buffer"))
+
+
+ScalarCatalog: list[ScalarSlot] = []
+
+
+def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
+    if len(ScalarCatalog) == 0:
+        initialize_scalar_catalog()
+    if id.index != 0 and name != "":
+        return make_scalar_descriptor(id, name)
+    if name == "":
+        if id.index < 1000:
+            selected ?= ScalarCatalog[id.index].value
+            if selected != None:
+                if selected.representation != "buffer":
+                    return ScalarCatalog[id.index].value
+        return None
+    for identity in scalar_identities():
+        selected ?= ScalarCatalog[identity].value
+        if selected != None:
+            if selected.name == name:
+                return ScalarCatalog[identity].value
+    return None
+
+
 def scalar_type(id: TypeId) -> ScalarType | None:
-    known ?= scalar_descriptor(id)
-    if known != None:
-        return known
-    if id.index > 200 and id.index < 1000:
-        element ?= scalar_type(TypeId(id.index - 200))
-        if element != None:
-            if element.representation != "buffer":
-                return ScalarType(id, "$buffer$" + element.name, element.bits, false, "buffer")
+    if len(ScalarCatalog) == 0:
+        initialize_scalar_catalog()
+    if id.index < 1000:
+        return ScalarCatalog[id.index].value
     return None
 
 

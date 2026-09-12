@@ -561,7 +561,7 @@ impl Initialization<'_> {
                     }
                     self.expression(value, &initialized)?;
                 }
-                Statement::Expression(value) => {
+                Statement::Expression(value) | Statement::Destroy(value) => {
                     self.expression(value, &initialized)?;
                     if matches!(value.kind, ExpressionKind::Throw(_)) {
                         return Ok(None);

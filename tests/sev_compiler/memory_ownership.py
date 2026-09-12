@@ -98,10 +98,6 @@ test:
 ''', expected='released: 5\n6\nreleased: 6\n')
 
     def test_invalid_resource_uses_have_lifetime_diagnostics(self):
-        self.rejects(RESOURCE + '''
-def optional_resource() -> Resource | None:
-    return Resource(1)
-''', 'nested resource fields require ownership transfer support')
         for body, diagnostic in [
             ('value = Resource(1)\n    drop(value)\n    print(value.id)', 'use after drop'),
             ('value = Resource(1)\n    drop(value)\n    drop(value)', 'use after drop'),

@@ -1,0 +1,45 @@
+import package
+import os
+
+
+def source_hints(report: string) -> string:
+    output: list[string] = []
+    seen: list[string] = []
+    function := ""
+    selected := false
+    cost := ""
+    for line in report.split("\n"):
+        frame = line.strip()
+        if frame == "":
+            selected = false
+            cost = ""
+        elif frame.contains(" calls to allocation functions "):
+            cost = frame
+        if frame.starts_with("at ") and frame.contains(".sev:") and not selected:
+            selected = true
+            location = frame[3:]
+            parts = location.split(":")
+            if len(parts) != 2 or location in seen or not os.is_file(parts[0]):
+                continue
+            seen.append(location)
+            line_number = int(parts[1])
+            lines = package.read_text(parts[0]).split("\n")
+            if line_number < 1 or line_number > len(lines):
+                continue
+            text = lines[line_number - 1]
+            carets: list[string] = []
+            for column in range(int(len(text))):
+                carets.append("^")
+            display := function
+            if function.starts_with("__sev_fn_"):
+                display_parts = function[9:].split("_")
+                display = display_parts[1:].join("_")
+            advice := "Source line from native debug information; inspect allocations and ownership here."
+            if text.contains(".characters()"):
+                advice = "Decodes a string into a character list; reuse decoded input where its lifetime permits."
+            output.append("Allocation hotspot: " + display + "\n  --> " + location + "\n   |\n" + string(line_number) + " | " + text + "\n   | " + carets.join("") + "\n   = " + cost + "\n   = " + advice + "\n")
+            if len(seen) >= 10:
+                break
+        elif frame != "" and not frame.starts_with("in ") and not frame.starts_with("at "):
+            function = frame
+    return output.join("\n")

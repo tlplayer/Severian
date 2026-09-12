@@ -143,6 +143,8 @@ pub enum Rvalue {
 pub enum Statement {
     Assign(Place, Rvalue),
     Drop(Place),
+    /// Acquire ownership of a copied storage-backed value.
+    Retain(Place),
     StorageLive(LocalId),
     StorageDead(LocalId),
     Assert {
@@ -309,8 +311,13 @@ pub(crate) fn lower_program(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let owned_types = program.modules.iter().flat_map(|module| &module.functions)
+        .filter(|function| function.name.starts_with("__sev_destroy_type"))
+        .filter_map(|function| function.parameters.first().map(|parameter| parameter.contract.ty))
+        .collect::<BTreeSet<_>>();
     let mut initializer = BodyBuilder::new(unit, global_bindings.clone(), global_variables.clone());
     initializer.reference_parameters = reference_parameters.clone();
+    initializer.owned_types = owned_types.clone();
     for module in &program.modules {
         initializer.expressions.clear();
         initializer.lower_statements(&module.initializer.statements, module);
@@ -329,6 +336,7 @@ pub(crate) fn lower_program(
                 global_variables.clone(),
             );
             builder.reference_parameters = reference_parameters.clone();
+            builder.owned_types = owned_types.clone();
             for (index, parameter) in function.parameters.iter().enumerate() {
                 let local = builder.local(parameter.contract.ty, true, true);
                 builder.body.locals[local.0 as usize].borrowed = reference_parameters
@@ -399,7 +407,9 @@ struct BodyBuilder {
     entry_parameters: Vec<LocalId>,
     reference_parameters: BTreeMap<FunctionId, Vec<bool>>,
     loops: Vec<LoopTargets>,
-    catch_targets: Vec<CatchTarget>,
+    catch_targets: Vec<(CatchTarget, usize)>,
+    owned_types: BTreeSet<TypeId>,
+    scopes: Vec<Vec<LocalId>>,
     terminated: BTreeSet<BlockId>,
     current_span: Option<Span>,
     execution: Option<ExecutionPlacement>,
@@ -407,6 +417,7 @@ struct BodyBuilder {
 
 #[derive(Debug, Clone, Copy)]
 struct LoopTargets {
+    scope_depth: usize,
     break_target: BlockId,
     continue_target: BlockId,
 }
@@ -446,6 +457,8 @@ impl BodyBuilder {
             reference_parameters: BTreeMap::new(),
             loops: Vec::new(),
             catch_targets: Vec::new(),
+            owned_types: BTreeSet::new(),
+            scopes: Vec::new(),
             terminated: BTreeSet::new(),
             current_span: None,
             execution: None,
@@ -477,6 +490,9 @@ impl BodyBuilder {
 
     fn local(&mut self, ty: TypeId, mutable: bool, argument: bool) -> LocalId {
         let id = LocalId(self.body.locals.len() as u32);
+        if !argument && self.owned_types.contains(&ty) {
+            if let Some(scope) = self.scopes.last_mut() { scope.push(id); }
+        }
         self.body.locals.push(LocalDecl {
             id,
             ty,
@@ -510,12 +526,22 @@ impl BodyBuilder {
         statements: &[severian_hir::Statement],
         module: &severian_hir::Module,
     ) {
+        let depth = self.scopes.len();
+        self.scopes.push(Vec::new());
         for statement in statements {
             if !self.open(self.current) {
                 break;
             }
             self.lower_statement(statement, module);
         }
+        if self.open(self.current) { self.end_scopes(depth, None); }
+        self.scopes.pop();
+    }
+
+    fn end_scopes(&mut self, depth: usize, transferred: Option<LocalId>) {
+        let locals = self.scopes[depth..].iter().rev().flat_map(|scope| scope.iter().rev())
+            .copied().filter(|local| Some(*local) != transferred).collect::<Vec<_>>();
+        for local in locals { self.push(Statement::StorageDead(local)); }
     }
 
     fn lower_statement(
@@ -529,6 +555,7 @@ impl BodyBuilder {
             severian_hir::Statement::FieldUpdate { value, .. }
             | severian_hir::Statement::FieldSet { value, .. }
             | severian_hir::Statement::Expression(value)
+            | severian_hir::Statement::Destroy(value)
             | severian_hir::Statement::Return(Some(value)) => Some(value.span),
             severian_hir::Statement::Binding(id) => module
                 .bindings
@@ -560,7 +587,10 @@ impl BodyBuilder {
         }
         match statement {
             severian_hir::Statement::Sequence(block) => {
-                self.lower_statements(&block.statements, module);
+                for statement in &block.statements {
+                    if !self.open(self.current) { break; }
+                    self.lower_statement(statement, module);
+                }
             }
             severian_hir::Statement::Placement {
                 placement, body, ..
@@ -639,10 +669,18 @@ impl BodyBuilder {
             severian_hir::Statement::Expression(expression) => {
                 self.expression(expression);
             }
+            severian_hir::Statement::Destroy(expression) => {
+                let place = self.expression_place(expression);
+                self.push(Statement::Drop(place));
+            }
             severian_hir::Statement::Return(value) => {
                 let value = value
                     .as_ref()
                     .map(|expression| Operand::Copy(self.expression(expression)));
+                let transferred = value.as_ref().and_then(|operand| match operand {
+                    Operand::Copy(place) | Operand::Move(place) => place.local_id(), _ => None,
+                });
+                self.end_scopes(0, transferred);
                 self.terminate(Terminator::Return(value));
             }
             severian_hir::Statement::Assert {
@@ -674,7 +712,7 @@ impl BodyBuilder {
                 let caught = self.block();
                 let completed = self.block();
                 let join = self.block();
-                self.catch_targets.push(CatchTarget::Discard(caught));
+                self.catch_targets.push((CatchTarget::Discard(caught), self.scopes.len()));
                 self.lower_statements(&body.statements, module);
                 self.catch_targets.pop();
                 if self.open(self.current) {
@@ -723,10 +761,10 @@ impl BodyBuilder {
 
                 let caught = self.block();
                 let join = self.block();
-                self.catch_targets.push(CatchTarget::Bind {
+                self.catch_targets.push((CatchTarget::Bind {
                     block: caught,
                     place: catch_place,
-                });
+                }, self.scopes.len()));
                 self.lower_statements(&body.statements, module);
                 self.catch_targets.pop();
                 let mut reaches_join = false;
@@ -818,6 +856,7 @@ impl BodyBuilder {
                 });
 
                 self.loops.push(LoopTargets {
+                    scope_depth: self.scopes.len(),
                     break_target: exit,
                     continue_target: header,
                 });
@@ -830,6 +869,7 @@ impl BodyBuilder {
                 self.current = exit;
             }
             severian_hir::Statement::Break { .. } => {
+                self.end_scopes(self.loops.last().unwrap().scope_depth, None);
                 let target = self
                     .loops
                     .last()
@@ -838,6 +878,7 @@ impl BodyBuilder {
                 self.terminate(Terminator::Goto(target, Vec::new()));
             }
             severian_hir::Statement::Continue { .. } => {
+                self.end_scopes(self.loops.last().unwrap().scope_depth, None);
                 let target = self
                     .loops
                     .last()
@@ -1093,7 +1134,8 @@ impl BodyBuilder {
             }
             severian_hir::ExpressionKind::Throw(error) => {
                 let error = Operand::Copy(self.expression(error));
-                if let Some(catch) = self.catch_targets.last().cloned() {
+                if let Some((catch, depth)) = self.catch_targets.last().cloned() {
+                    self.end_scopes(depth, match &error { Operand::Copy(place) | Operand::Move(place) => place.local_id(), _ => None });
                     let block = match catch {
                         CatchTarget::Discard(block) => block,
                         CatchTarget::Bind { block, place } => {
@@ -1103,6 +1145,7 @@ impl BodyBuilder {
                     };
                     self.terminate(Terminator::Goto(block, Vec::new()));
                 } else {
+                    self.end_scopes(0, match &error { Operand::Copy(place) | Operand::Move(place) => place.local_id(), _ => None });
                     self.terminate(Terminator::Throw(error));
                 }
                 self.current = self.block();
@@ -1129,12 +1172,7 @@ impl BodyBuilder {
                 self.push(Statement::Assign(result.clone(), Rvalue::AddressOf(source)));
             }
             severian_hir::ExpressionKind::Move(operand) => {
-                let source = match &operand.kind {
-                    severian_hir::ExpressionKind::Binding(binding) => {
-                        self.bindings[binding].clone()
-                    }
-                    _ => self.expression(operand),
-                };
+                let source = self.expression_place(operand);
                 self.push(Statement::Assign(
                     result.clone(),
                     Rvalue::Use(Operand::Move(source)),

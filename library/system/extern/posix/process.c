@@ -65,15 +65,24 @@ int64_t __sev_process_spawn(const char *command) {
     return (int64_t)process;
 }
 
+/* A single-threaded package driver can share an immutable compiler snapshot
+ * with isolated workers. Flush inherited streams to avoid duplicate output. */
+int64_t __sev_process_fork_snapshot(void) {
+    if (fflush(NULL) != 0) return -1;
+    return (int64_t)fork();
+}
+
 _Bool __sev_process_kill(int64_t process) {
     return kill((pid_t)process, SIGTERM) == 0;
 }
 
 int64_t __sev_process_wait(int64_t process) {
     int status = 0;
-    if (waitpid((pid_t)process, &status, 0) < 0) return -1;
+    while (waitpid((pid_t)process, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
     if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128;
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return status;
 }
 

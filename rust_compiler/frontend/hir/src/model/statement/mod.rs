@@ -38,6 +38,7 @@ pub enum Statement {
         value: Expression,
     },
     Expression(Expression),
+    Destroy(Expression),
     Return(Option<Expression>),
     Assert {
         condition: Expression,

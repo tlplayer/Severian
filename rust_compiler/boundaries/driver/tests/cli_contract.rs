@@ -1808,3 +1808,46 @@ fn validation_can_expect_a_nonzero_example_exit() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn native_locations_survive_mlir_composition_and_utf8_columns() {
+    let root = temporary("native-locations");
+    let source = root.join("unicode.sev");
+    fs::write(
+        &source,
+        "def main():\n    value = (\"λ\" + \"x\") + \"y\"\n    print(value)\n",
+    )
+    .unwrap();
+    let output = sev()
+        .arg("build")
+        .arg(&source)
+        .args(["--emit", "mlir"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mlir = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        mlir.contains("unicode.sev\":2:"),
+        "source location lost during composition: {mlir}"
+    );
+    assert!(
+        mlir.contains("call @__sev_string_release"),
+        "intermediate cleanup missing: {mlir}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn unsupported_bootstrap_destructors_cannot_silently_skip_cleanup() {
+    let root = temporary("bootstrap-destructor");
+    let source = root.join("subject.sev");
+    fs::write(&source, "class Resource:\n    operator drop(move self) -> unit:\n        print(1)\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_sev")).arg("check").arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("bootstrap class destruction lowering is not implemented"));
+    fs::remove_dir_all(root).unwrap();
+}

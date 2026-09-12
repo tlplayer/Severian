@@ -821,6 +821,8 @@ fn emit_mlir_binary(
         "--convert-func-to-llvm".to_owned(),
         "--finalize-memref-to-llvm".to_owned(),
         "--reconcile-unrealized-casts".to_owned(),
+        "--ensure-debug-info-scope-on-llvm-func".to_owned(),
+        "--mlir-print-debuginfo".to_owned(),
     ]);
     let lowering_arguments = lowering_arguments
         .iter()
@@ -842,6 +844,8 @@ fn emit_mlir_binary(
     let output_path = output.to_string_lossy().into_owned();
     let mut clang_arguments = vec![
         target,
+        "-g".into(),
+        "-fno-omit-frame-pointer".into(),
         "-pthread".into(),
         "-x".into(),
         "ir".into(),

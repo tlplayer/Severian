@@ -168,6 +168,10 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             ));
         }
     }
+    if runtime_signatures.contains_key("__sev_hook_record_with") || module.functions.iter().any(|function|
+        matches!(&function.linkage, FunctionLinkage::External { symbol } if symbol == "__sev_hook_record_with")) {
+        render_hook_sources(&mut output, module);
+    }
     let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
@@ -179,7 +183,18 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                     .is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
     });
     if uses_aggregate_runtime {
-        output.push_str("  func.func private @__sev_aggregate_box(!llvm.ptr, i64) -> !llvm.ptr\n");
+        output.push_str("  func.func private @__sev_aggregate_box_owned(!llvm.ptr, i64, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n");
+        if !runtime_signatures.contains_key("__sev_storage_release") {
+            output.push_str("  func.func private @__sev_storage_release(!llvm.ptr)\n");
+            declared_external_symbols.insert("__sev_storage_release".to_owned());
+        }
+        for class in &module.classes {
+            for (action, function) in [("retain", class.retain), ("destroy", class.destroy)] {
+                if let Some(function) = function.and_then(|id| module.functions.iter().find(|f| f.id == id)) {
+                    output.push_str(&format!("  llvm.func @__sev_box_{action}_{}(%box: !llvm.ptr) {{\n    func.call @{}(%box) : (!llvm.ptr) -> ()\n    llvm.return\n  }}\n", class.id, function_symbol(function)));
+                }
+            }
+        }
     }
     for (symbol, (inputs, result)) in runtime_signatures {
         let aggregate_abi = symbol.contains("_aggregate");
@@ -454,6 +469,10 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             ));
         }
     }
+    if runtime_signatures.contains_key("__sev_hook_record_with") || module.functions.iter().any(|function|
+        matches!(&function.linkage, FunctionLinkage::External { symbol } if symbol == "__sev_hook_record_with")) {
+        render_hook_sources(&mut output, module);
+    }
     let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
@@ -465,7 +484,18 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
                     .is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
     });
     if uses_aggregate_runtime {
-        output.push_str("  func.func private @__sev_aggregate_box(!llvm.ptr, i64) -> !llvm.ptr\n");
+        output.push_str("  func.func private @__sev_aggregate_box_owned(!llvm.ptr, i64, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n");
+        if !runtime_signatures.contains_key("__sev_storage_release") {
+            output.push_str("  func.func private @__sev_storage_release(!llvm.ptr)\n");
+            declared_external_symbols.insert("__sev_storage_release".to_owned());
+        }
+        for class in &module.classes {
+            for (action, function) in [("retain", class.retain), ("destroy", class.destroy)] {
+                if let Some(function) = function.and_then(|id| module.functions.iter().find(|f| f.id == id)) {
+                    output.push_str(&format!("  llvm.func @__sev_box_{action}_{}(%box: !llvm.ptr) {{\n    func.call @{}(%box) : (!llvm.ptr) -> ()\n    llvm.return\n  }}\n", class.id, function_symbol(function)));
+                }
+            }
+        }
     }
     for (symbol, (inputs, result)) in runtime_signatures {
         let aggregate_abi = symbol.contains("_aggregate");
@@ -720,6 +750,7 @@ fn render_cfg_body_function(
             }
         }
         for (operation_index, operation) in block.operations.iter().enumerate() {
+            let start = output.len();
             render_cfg_operation(
                 output,
                 module,
@@ -730,6 +761,23 @@ fn render_cfg_body_function(
                 4,
                 &mut ssa_locals,
             )?;
+            if let Some(Some(span)) = block.operation_spans.get(operation_index) {
+                if let Some(source) = module
+                    .sources
+                    .iter()
+                    .find(|source| source.id == span.source)
+                {
+                    if let Some(location) = source.location(span.start) {
+                        attach_native_location(
+                            output,
+                            start,
+                            &source.path.to_string_lossy(),
+                            location.line,
+                            location.column,
+                        );
+                    }
+                }
+            }
         }
         if let severian_lir::Terminator::Goto(target) = block.terminator {
             if let Some(region) = gpu_regions.get(&target) {
@@ -741,6 +789,7 @@ fn render_cfg_body_function(
                 continue;
             }
         }
+        let start = output.len();
         render_cfg_terminator(
             output,
             module,
@@ -750,9 +799,67 @@ fn render_cfg_body_function(
             &mut ssa_locals,
             &ssa_live_ins,
         )?;
+        if let Some(span) = block.terminator_span {
+            if let Some(source) = module
+                .sources
+                .iter()
+                .find(|source| source.id == span.source)
+            {
+                if let Some(location) = source.location(span.start) {
+                    attach_native_location(
+                        output,
+                        start,
+                        &source.path.to_string_lossy(),
+                        location.line,
+                        location.column,
+                    );
+                }
+            }
+        }
     }
-    output.push_str("  }\n");
+    output.push_str("  }");
+    if let Some(span) = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.operation_spans.iter().flatten())
+        .next()
+    {
+        if let Some(source) = module
+            .sources
+            .iter()
+            .find(|source| source.id == span.source)
+        {
+            if let Some(location) = source.location(span.start) {
+                output.push_str(&format!(
+                    " loc(\"{}\":{}:{})",
+                    mlir_string(&source.path.to_string_lossy()),
+                    location.line,
+                    location.column
+                ));
+            }
+        }
+    }
+    output.push('\n');
     Ok(())
+}
+
+/// Every textual instruction emitted for one CFG operation inherits its span.
+/// Block labels and region headers are syntax, not standalone instructions.
+fn attach_native_location(output: &mut String, start: usize, file: &str, line: u32, column: u32) {
+    let emitted = output.split_off(start);
+    let location = format!(" loc(\"{}\":{line}:{column})", mlir_string(file));
+    for instruction in emitted.lines() {
+        output.push_str(instruction);
+        let trimmed = instruction.trim();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with('^')
+            && !trimmed.ends_with('{')
+        {
+            output.push_str(&location);
+        }
+        output.push('\n');
+    }
 }
 
 fn is_ssa_local_type(ty: &LoweredType) -> bool {
@@ -1666,6 +1773,9 @@ fn render_cfg_operation(
                 ));
             }
         }
+        Operation::Call { .. } => {
+            render_block(output, module, &Block { operations: vec![operation.clone()] }, indent, None, &mut 0)?;
+        }
         Operation::RuntimeCall {
             symbol,
             arguments,
@@ -2415,6 +2525,14 @@ fn render_runtime_call(
             )));
         }
         if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
+            let LoweredType::Aggregate(class_id) = ty else { unreachable!() };
+            let class = module.classes.iter().find(|class| class.id == class_id);
+            let owns_contents = severian_universal::native_container_stores_values(symbol);
+            for (action, function) in [("retain", class.and_then(|class| class.retain)), ("destroy", class.and_then(|class| class.destroy))] {
+                let instruction = if owns_contents && function.is_some() { format!("llvm.mlir.addressof @__sev_box_{action}_{class_id} : !llvm.ptr") }
+                    else { "llvm.mlir.zero : !llvm.ptr".into() };
+                output.push_str(&format!("{indentation}%runtime_box_{action}_{tag}_{index} = {instruction}\n"));
+            }
             let spelling = mlir_type(&ty)?;
             output.push_str(&format!(
                 "{indentation}%runtime_box_one_{tag}_{index} = arith.constant 1 : i64\n"
@@ -2439,7 +2557,7 @@ fn render_runtime_call(
                 "{indentation}%runtime_box_size_{tag}_{index} = llvm.ptrtoint %runtime_box_end_{tag}_{index} : !llvm.ptr to i64\n"
             ));
             output.push_str(&format!(
-                "{indentation}%runtime_box_{tag}_{index} = func.call @__sev_aggregate_box(%runtime_box_slot_{tag}_{index}, %runtime_box_size_{tag}_{index}) : (!llvm.ptr, i64) -> !llvm.ptr\n"
+                "{indentation}%runtime_box_{tag}_{index} = func.call @__sev_aggregate_box_owned(%runtime_box_slot_{tag}_{index}, %runtime_box_size_{tag}_{index}, %runtime_box_retain_{tag}_{index}, %runtime_box_destroy_{tag}_{index}) : (!llvm.ptr, i64, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n"
             ));
             argument_values.push(format!("%runtime_box_{tag}_{index}"));
             argument_types.push("!llvm.ptr".into());
@@ -2448,6 +2566,8 @@ fn render_runtime_call(
             argument_types.push(mlir_type(&ty)?);
         }
     }
+    let release_boxes = argument_values.iter().filter(|value| value.starts_with("%runtime_box_"))
+        .map(|value| format!("{indentation}func.call @__sev_storage_release({value}) : (!llvm.ptr) -> ()\n")).collect::<String>();
     let arguments_text = argument_values.join(", ");
     let argument_types = argument_types.join(", ");
     if let Some(result) = result {
@@ -2467,6 +2587,7 @@ fn render_runtime_call(
                 "{indentation}%v{} = llvm.load %runtime_box_result_{} : !llvm.ptr -> {spelling}\n",
                 result.0, result.0
             ));
+            output.push_str(&release_boxes);
             return Ok(());
         }
         output.push_str(&format!(
@@ -2479,6 +2600,7 @@ fn render_runtime_call(
             "{indentation}func.call @{symbol}({arguments_text}) : ({argument_types}) -> ()\n"
         ));
     }
+    output.push_str(&release_boxes);
     Ok(())
 }
 
@@ -2886,7 +3008,8 @@ fn render_block(
                     lowered_arguments.push(lowered);
                 }
                 let arguments = lowered_arguments.join(", ");
-                let argument_types = argument_types(module, target)?;
+                let argument_types = target.parameter_types.iter().map(mlir_type)
+                    .collect::<Result<Vec<_>, _>>()?.join(", ");
                 if target.result == LoweredType::Unit {
                     output.push_str(&format!(
                         "{indentation}func.call @{}({arguments}) : ({argument_types}) -> ()\n",
@@ -3274,6 +3397,26 @@ fn function(module: &Module, id: FunctionId) -> Result<&Function, MlirError> {
         .iter()
         .find(|function| function.id == id)
         .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown LIR function {}", id.0)))
+}
+
+/// Hook spans refer to the source snapshot used to build this executable.
+/// Keeping this map in the artifact makes attribution independent of cwd and
+/// subsequent edits to the checkout.
+fn render_hook_sources(output: &mut String, module: &Module) {
+    for (kind, text) in [("path", false), ("text", true)] {
+        for source in &module.sources {
+            let value = if text { source.text().to_owned() } else { source.path.to_string_lossy().into_owned() };
+            output.push_str(&format!("  llvm.mlir.global private constant @__sev_hook_{kind}_{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+                source.id.0, mlir_string(&value), value.len() + 1));
+        }
+        output.push_str(&format!("  func.func @__sev_profile_source_{kind}(%source: i64) -> !llvm.ptr {{\n"));
+        for (index, source) in module.sources.iter().enumerate() {
+            if index != 0 { output.push_str(&format!("  ^source{index}:\n")); }
+            output.push_str(&format!("    %id{index} = arith.constant {} : i64\n    %match{index} = arith.cmpi eq, %source, %id{index} : i64\n    cf.cond_br %match{index}, ^found{index}, ^source{}\n  ^found{index}:\n    %value{index} = llvm.mlir.addressof @__sev_hook_{kind}_{} : !llvm.ptr\n    return %value{index} : !llvm.ptr\n", source.id.0, index + 1, source.id.0));
+        }
+        if !module.sources.is_empty() { output.push_str(&format!("  ^source{}:\n", module.sources.len())); }
+        output.push_str("    %missing = llvm.mlir.zero : !llvm.ptr\n    return %missing : !llvm.ptr\n  }\n");
+    }
 }
 
 fn function_symbol(function: &Function) -> String {
@@ -3872,6 +4015,7 @@ mod tests {
         let module = Module {
             classes: vec![
                 severian_lir::ClassDeclaration {
+                    destroy: None, retain: None,
                     variants: Vec::new(),
                     id: 3,
                     name: "Outer".into(),
@@ -3881,6 +4025,7 @@ mod tests {
                     }],
                 },
                 severian_lir::ClassDeclaration {
+                    destroy: None, retain: None,
                     variants: Vec::new(),
                     id: 22,
                     name: "Inner".into(),
@@ -4310,6 +4455,7 @@ mod tests {
             format: LoweredFloatFormat::Ieee(32),
         };
         let ordinary = render(&Module {
+            sources: Vec::new(),
             values: vec![
                 severian_lir::Value {
                     id: ValueId(0),
@@ -4355,6 +4501,7 @@ mod tests {
     #[test]
     fn nested_artifact_calls_are_declared_and_rendered_inside_control_flow() {
         let ordinary = render(&Module {
+            sources: Vec::new(),
             values: vec![severian_lir::Value {
                 id: ValueId(0),
                 ty: LoweredType::Boolean,

@@ -7,6 +7,22 @@ import os
 import environment
 import process
 
+
+# Package sessions own the lifetime of shared provider state. A worker may
+# mutate its snapshot, while the parent retains the original for the next unit.
+def fork_compilation_unit() -> int | Error:
+    child = process.fork_snapshot()
+    if child < 0:
+        throw Error("could not create an isolated compilation worker")
+    return child
+
+
+def wait_compilation_unit(child: int) -> int | Error:
+    status = process.wait(child)
+    if status < 0:
+        throw Error("could not wait for a compilation worker")
+    return status
+
 # A versioned compilation-unit protocol keeps package orchestration independent
 # of the concrete compiler and does not recursively invoke package commands.
 def encode_resolution(resolution: Resolution) -> string:
@@ -74,12 +90,26 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             reused = recorded == "check" if emit == "check" else os.is_file(unit.output) and digest(unit.output) == recorded
         if not reused:
             arguments := [compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+            memory := 0
+            seconds := 0
             if unit.include_tests or guard_tests:
                 config = resolution.packages[0].manifest.entries
                 memory = process.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
                 seconds = int(setting(config, "test", "timeout-seconds", "60"))
-                arguments = process.guarded_command(arguments, seconds, memory)
-            status = command(arguments)
+                if seconds <= 0:
+                    throw Error("test timeout must be positive")
+            status := 0
+            if process.session_available() and compiler.executable == process.executable():
+                encoded: list[string] = []
+                for argument in arguments:
+                    encoded.append(toml_quote(argument))
+                request = stage + "/request.toml"
+                write_text(request, "arguments = [" + encoded.join(", ") + "]\nseconds = " + string(seconds) + "\nbytes = " + string(memory) + "\n")
+                status = process.session_submit(request)
+            else:
+                if seconds > 0:
+                    arguments = process.guarded_command(arguments, seconds, memory)
+                status = command(arguments)
             if status != 0:
                 throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
             # Only a compiler that reports its actual source inputs can cache.

@@ -46,8 +46,11 @@ class CallableAnalysis:
     transitions: list[TransitionState] = []
     dead: list[int] = []
     resources: list[int] = []
+    drop_cache: list[bool] = []
     deferred: list[universal.Expression] = []
     loop_defer_start: int = 0
+    loop_resource_start: int = 0
+    destructor: bool = false
     test_context: bool = false
     resource_creation: source.Span | None = None
     unsafe_depth: int = 0
@@ -599,6 +602,8 @@ def callable_expression_checked(state: CallableAnalysis, expression: universal.E
         match resolved.kind:
             case BindingReference:
                 return resolved
+            case FieldReference:
+                return resolved
             case Ownership:
                 return resolved
             case _:
@@ -710,6 +715,12 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     return universal.Expression(universal.Ownership(mode, operand), expression.span, type_id=operand.type_id)
                 return error(callable_diagnostic("ownership operation requires a local place", expression.span))
             if mode == "move":
+                if state.destructor and binding_index == 0:
+                    match operand.kind:
+                        case BindingReference:
+                            return error(callable_diagnostic("a destructor cannot move or resurrect self", expression.span))
+                        case _:
+                            pass
                 loans.access(state.loans, binding_index, true, expression.span)
                 if binding_index in state.borrowed_parameters or loans.owner(state.loans, binding_index) != binding_index:
                     return error(callable_diagnostic("cannot move a borrowed value", expression.span))
@@ -724,6 +735,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             return error(callable_diagnostic("element move requires a constant nonnegative index", expression.span))
                         state.moved_elements.append((binding_index, position))
                     case FieldReference:
+                        if callable_has_drop(state, operand.type_id):
+                            callable_field_transfer(state, object, index, expression.span)
                         state.uninitialized.append((binding_index, index))
                     case _:
                         return error(callable_diagnostic("partial moves require field initialization tracking", expression.span))
@@ -1345,7 +1358,21 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     for argument in bound.arguments:
                         for field in record.fields:
                             if argument.name == field.name:
+                                previous_creation = state.resource_creation
+                                enclosing ?= previous_creation
+                                if enclosing != None:
+                                    if enclosing.source.index == expression.span.source.index and enclosing.start == expression.span.start and enclosing.end == expression.span.end:
+                                        state.resource_creation = argument.value.span
                                 typed = callable_expression(state, argument.value, field.type_id)
+                                state.resource_creation = previous_creation
+                                if callable_has_drop(state, field.type_id):
+                                    match typed.kind:
+                                        case BindingReference:
+                                            return error(callable_diagnostic("owned resource fields require move", argument.span))
+                                        case FieldReference:
+                                            return error(callable_diagnostic("owned resource fields require move", argument.span))
+                                        case _:
+                                            pass
                                 resolved.append(universal.CallArgument(field.name, typed, argument.span))
                     if expected.index != 0 and expected.index != record.type_id.index:
                         return error(callable_diagnostic("constructor does not match expected type", expression.span))
@@ -1521,12 +1548,15 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
                 return error(callable_diagnostic("duplicate scalar binding " + binding.name, binding.span))
             if not state.mutables[index]:
                 return error(callable_diagnostic("cannot reassign immutable binding " + name, binding.span))
-            if index in state.dead:
+            if index in state.dead and not callable_has_drop(state, state.types[index]):
                 return error(callable_diagnostic("cannot reassign a dropped or moved binding", binding.span))
             loans.access(state.loans, index, true, binding.span)
             if index in state.readonly:
                 return error(callable_diagnostic("cannot reassign a shared borrow parameter", binding.span))
+            previous_creation = state.resource_creation
+            state.resource_creation = binding.value.span
             value = callable_expression(state, binding.value, state.types[index])
+            state.resource_creation = previous_creation
             callable_transition(state, index, value, binding.span, true)
             return universal.Binding(name, None, value, true, false, binding.span, universal.BindingId(u32(index)), value.type_id, true)
         index += 1
@@ -1634,20 +1664,125 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
     return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
 
 
-def callable_has_drop(state: borrow CallableAnalysis, type_id: universal.TypeId) -> bool:
+def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
     index = int(type_id.index) - 1000
-    if index >= 0 and index < len(state.records):
+    if index < 0 or index >= len(state.records):
+        return false
+    if len(state.drop_cache) != len(state.records):
+        state.drop_cache.clear()
+        for record in state.records:
+            state.drop_cache.append(callable_needs_drop(state, record.type_id, []))
+    return state.drop_cache[index]
+
+
+def callable_needs_drop(state: borrow CallableAnalysis, type_id: universal.TypeId, ancestors: list[int]) -> bool:
+    index = int(type_id.index) - 1000
+    if index >= 0 and index < len(state.records) and index not in ancestors:
         for method in borrow state.records[index].methods:
             if method.name == "drop" or method.name.ends_with(".drop"):
+                return true
+        path = ancestors[:]
+        path.append(index)
+        for field in borrow state.records[index].fields:
+            if callable_needs_drop(state, field.type_id, path):
                 return true
     return false
 
 
+def callable_field_transfer(state: CallableAnalysis, object: universal.Expression, index: int, span: source.Span) -> unit | diagnostics.Diagnostic:
+    root = loans.binding(object)
+    match object.kind:
+        case BindingReference:
+            pass
+        case _:
+            return error(callable_diagnostic("nested partial resource moves require initialized-place tracking", span))
+    for missing in state.uninitialized:
+        if missing[0] == root and missing[1] == index:
+            return error(callable_diagnostic("use after drop or move of field", span))
+    if not (state.destructor and root == 0):
+        for record in state.records:
+            if record.type_id.index == object.type_id.index:
+                for method in record.methods:
+                    if method.name == "drop" or method.name.ends_with(".drop"):
+                        return error(callable_diagnostic("cannot partially move a value with custom cleanup outside its destructor", span))
+
+
+def callable_transfer_result(state: CallableAnalysis, value: universal.Expression, span: source.Span, explicit: bool = false) -> unit | diagnostics.Diagnostic:
+    match value.kind:
+        case BindingReference:
+            root = int(binding.index)
+            if root not in state.dead:
+                state.dead.append(root)
+        case OutcomeValue:
+            callable_transfer_result(state, value, span, explicit)
+        case Ownership:
+            callable_transfer_result(state, value, span, mode == "move")
+        case FieldReference:
+            if not explicit:
+                return error(callable_diagnostic("returning an owned field requires move", span))
+        case _:
+            pass
+
+
+def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression, output: universal.Block, span: source.Span, run_hook: bool = true) -> unit | diagnostics.Diagnostic:
+    index = definitions.record_position(state.records, value.type_id)
+    if index < 0:
+        return
+    record = state.records[index]
+    variants := universal.outcome_variants(record)
+    if len(variants) == 0:
+        variants = universal.union_variants(record)
+    if len(variants) == 0 and record.representation == "TaggedAggregate":
+        for field in record.fields[1:]:
+            variants.append(field.type_id)
+    if len(variants) != 0:
+        ordinal := 0
+        for variant in variants:
+            if callable_has_drop(state, variant):
+                cleanup = universal.empty_block()
+                payload = universal.Expression(universal.FieldReference(value, ordinal + 1), span, type_id=variant)
+                callable_destroy_fields(state, payload, cleanup, span)
+                output.statements.append(callable_control(state, "If", [matches.tag_test(value, ordinal, span)], [cleanup, universal.empty_block()], span))
+            ordinal += 1
+        return
+    # The cleanup hook borrows valid storage internally. Consumption belongs to
+    # the enclosing destruction operation, after the hook and owned fields.
+    for function in state.functions:
+        if run_hook and function.name == record.name + ".drop":
+            call = universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), [universal.CallArgument("self", value, span)]), span, type_id=universal.TypeId(2))
+            output.statements.append(universal.ExpressionStatement(call))
+            return
+    cursor := int(len(record.fields))
+    while cursor > 0:
+        cursor -= 1
+        field = record.fields[cursor]
+        initialized := true
+        match value.kind:
+            case BindingReference:
+                for missing in state.uninitialized:
+                    if missing[0] == int(binding.index) and missing[1] == cursor:
+                        initialized = false
+            case _:
+                pass
+        if initialized and callable_has_drop(state, field.type_id):
+            member = universal.Expression(universal.FieldReference(value, cursor), span, type_id=field.type_id)
+            callable_destroy_fields(state, member, output, span)
+
+
 def callable_drop(state: CallableAnalysis, value: universal.Expression, output: universal.Block, span: source.Span) -> unit | diagnostics.Diagnostic:
-    if state.loop_depth != 0:
-        return error(callable_diagnostic("resource cleanup in loops is not supported", span))
+    projecting = state.projecting
+    state.projecting = true
     resolved = callable_expression(state, value, universal.TypeId(0))
+    state.projecting = projecting
     match resolved.kind:
+        case FieldReference:
+            root = loans.binding(object)
+            if root < 0 or (root not in state.resources and not (state.destructor and root == 0)):
+                return error(callable_diagnostic("cannot drop a borrowed resource field", span))
+            loans.access(state.loans, root, true, span)
+            callable_field_transfer(state, object, index, span)
+            callable_destroy_fields(state, resolved, output, span)
+            state.uninitialized.append((root, index))
         case BindingReference:
             index = int(binding.index)
             remaining: list[loans.Loan] = []
@@ -1667,9 +1802,9 @@ def callable_drop(state: CallableAnalysis, value: universal.Expression, output: 
             if callable_has_drop(state, resolved.type_id):
                 if index not in state.resources:
                     return error(callable_diagnostic("cannot drop a borrowed resource parameter", span))
-                member = universal.Expression(universal.Member(value, "drop"), span)
-                call = universal.Expression(universal.Call(member, []), span)
-                output.statements.append(universal.ExpressionStatement(callable_expression(state, call, universal.TypeId(2))))
+                if state.loop_depth != 0 and index not in state.resources[state.loop_resource_start:]:
+                    return error(callable_diagnostic("cannot consume an outer resource from a repeating loop", span))
+                callable_destroy_fields(state, resolved, output, span)
             state.dead.append(index)
         case _:
             return error(callable_diagnostic("drop requires a local binding", span))
@@ -1746,8 +1881,6 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if not implicit:
                     typed_binding = callable_binding(state, binding)
                     if callable_has_drop(state, typed_binding.type_id):
-                        if typed_binding.update:
-                            return error(callable_diagnostic("resource rebinding requires an explicit drop before replacement", binding.span))
                         match typed_binding.value.kind:
                             case BindingReference:
                                 return error(callable_diagnostic("resource aliases require an explicit ownership transfer", typed_binding.span))
@@ -1755,7 +1888,21 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                                 return error(callable_diagnostic("resource field transfers are not supported", binding.span))
                             case _:
                                 pass
-                        state.resources.append(int(typed_binding.id.index))
+                        if typed_binding.update:
+                            saved = callable_binding(state, universal.Binding("$replacement$" + string(len(state.names)), None, typed_binding.value, false, true, binding.span))
+                            output.statements.append(universal.BindingStatement(saved))
+                            replaced = int(typed_binding.id.index)
+                            if replaced not in state.dead:
+                                old = universal.Expression(universal.BindingReference(typed_binding.id), binding.span, type_id=typed_binding.type_id)
+                                callable_drop(state, old, output, binding.span)
+                            alive: list[int] = []
+                            for dead in state.dead:
+                                if dead != replaced:
+                                    alive.append(dead)
+                            state.dead = alive
+                            typed_binding.value = universal.Expression(universal.BindingReference(saved.id), binding.span, type_id=saved.type_id)
+                        else:
+                            state.resources.append(int(typed_binding.id.index))
                     output.statements.append(universal.BindingStatement(typed_binding))
             case FieldSet:
                 state.initializing = update == None
@@ -1859,8 +2006,8 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
             case Assert:
                 output.statements.append(callable_assertion(state, condition, message, span, condition_span))
             case Throw:
-                if len(state.resources) != 0:
-                    return error(callable_diagnostic("resource cleanup during error propagation is not supported", span))
+                if state.destructor:
+                    return error(callable_diagnostic("a destructor cannot throw", span))
                 error_value = callable_expression(state, value, universal.TypeId(0))
                 if not definitions.error_conformance(state.declarations, state.records, error_value.type_id):
                     return error(callable_diagnostic("throw requires a value conforming to Error", span))
@@ -1868,6 +2015,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 saved = callable_binding(state, universal.Binding("$throw$" + string(state.next_id[0]), None, wrapped, false, true, span))
                 output.statements.append(universal.BindingStatement(saved))
                 callable_deferred_cleanup(state, output, 0)
+                callable_cleanup(state, output, 0, span)
                 output.statements.append(callable_control(state, "Throw", [universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id)], [], span, true))
                 returned = true
             case Return:
@@ -1899,9 +2047,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 operands: list[universal.Expression] = []
                 actual ?= returned_value
                 if actual != None:
-                    if len(state.resources) != 0:
-                        return error(callable_diagnostic("returning a value across a resource lifetime is not supported", span))
-                    if len(state.deferred) != 0:
+                    if callable_has_drop(state, actual.type_id):
+                        callable_transfer_result(state, actual, span)
+                    if len(state.deferred) != 0 or len(state.resources) != 0:
                         saved = callable_binding(state, universal.Binding("$defer$return$" + string(state.next_id[0]), None, actual, false, true, span))
                         output.statements.append(universal.BindingStatement(saved))
                         operands.append(universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id))
@@ -1909,6 +2057,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         operands.append(actual)
                 callable_deferred_cleanup(state, output, 0)
                 callable_cleanup(state, output, 0, span)
+                if state.destructor:
+                    receiver = universal.Expression(universal.BindingReference(universal.BindingId(0)), span, type_id=state.types[0])
+                    callable_destroy_fields(state, receiver, output, span, false)
                 output.statements.append(callable_control(state, "Return", operands, [], span, true))
                 returned = true
             case GrammarApply:
@@ -1954,6 +2105,19 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         if missing[0] < len(state.names):
                             state.uninitialized.append(missing)
                 if not then_exits and not else_exits:
+                    for missing in state.uninitialized:
+                        field_type = state.records[int(state.types[missing[0]].index) - 1000].fields[missing[1]].type_id
+                        if callable_has_drop(state, field_type):
+                            in_then := false
+                            in_else := false
+                            for field in then_state.uninitialized:
+                                if field[0] == missing[0] and field[1] == missing[1]:
+                                    in_then = true
+                            for field in else_state.uninitialized:
+                                if field[0] == missing[0] and field[1] == missing[1]:
+                                    in_else = true
+                            if in_then != in_else:
+                                return error(callable_diagnostic("conditional field destruction requires matching branch lifetimes", span))
                     for binding in state.resources:
                         if (binding in then_state.dead) != (binding in else_state.dead):
                             return error(callable_diagnostic("conditional resource drop requires matching branch lifetimes", span))
@@ -2012,23 +2176,22 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 local = callable_scope(state)
                 local.loop_depth += 1
                 local.loop_defer_start = int(len(local.deferred))
+                local.loop_resource_start = int(len(local.resources))
                 typed = callable_block(local, body.statements, result_type, false)
                 output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
-                if len(state.resources) != 0:
-                    return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("break outside a loop", span))
                 callable_deferred_cleanup(state, output, state.loop_defer_start)
+                callable_cleanup(state, output, state.loop_resource_start, span)
                 output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
                 loop_exit = true
             case Continue:
-                if len(state.resources) != 0:
-                    return error(callable_diagnostic("resource cleanup across loop exits is not supported", span))
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
                 callable_deferred_cleanup(state, output, state.loop_defer_start)
+                callable_cleanup(state, output, state.loop_resource_start, span)
                 output.statements.append(callable_control(state, "Continue", [], [], span, true))
                 returned = true
                 loop_exit = true
@@ -2037,8 +2200,12 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
         index += 1
     if not returned:
         callable_deferred_cleanup(state, output, defer_start)
-        callable_cleanup(state, output, resource_start, source.Span(source.SourceId(0), 0, 0))
+        callable_cleanup(state, output, 0 if complete else resource_start, source.Span(source.SourceId(0), 0, 0))
     if complete and not returned:
+        if state.destructor:
+            span = source.Span(source.SourceId(0), 0, 0)
+            receiver = universal.Expression(universal.BindingReference(universal.BindingId(0)), span, type_id=state.types[0])
+            callable_destroy_fields(state, receiver, output, span, false)
         if result_type.index == 6:
             span = source.Span(source.SourceId(0), 0, 0)
             value = callable_expression(state, universal.Expression(universal.LiteralValue(universal.NoneValue()), span), result_type)
@@ -2261,9 +2428,6 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             state.functions.append(callable_signature(method, int(len(state.functions)), state.records, state.declarations))
     for record in state.records:
         callable_record_layout(state.records, record.type_id, [])
-        for field in record.fields:
-            if callable_has_drop(state, field.type_id):
-                return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
     module.records = state.records
     callable_register_operators(state, module)
     for item in module.items:
@@ -2454,9 +2618,6 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             callable_validate_record_arguments(state, record)
             # Function signatures and specializations can introduce outcome and
             # aggregate layouts after the initial declaration pass.
-            for field in record.fields:
-                if callable_has_drop(state, field.type_id):
-                    return error(callable_diagnostic("nested resource fields require ownership transfer support", field.span))
     module.records = state.records
     return module
 
@@ -2535,7 +2696,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2604,6 +2765,7 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
     local = callable_scope(state)
     local.loop_depth += 1
     local.loop_defer_start = int(len(local.deferred))
+    local.loop_resource_start = int(len(local.resources))
     iteration = universal.Binding(name, None, item, false, false, span)
     statements: list[universal.Statement] = [universal.BindingStatement(iteration)]
     for statement in body.statements:
@@ -2620,8 +2782,6 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
 
 
 def callable_body(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.Block | diagnostics.Diagnostic:
-    if callable_has_drop(state, function.result_type) and not function.constructor:
-        return error(callable_diagnostic("resource returns require ownership transfer support", function.span))
     origin ?= function.template
     if origin != None:
         for template in state.generics:
@@ -2632,6 +2792,9 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
     local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    local.destructor = function.name.ends_with(".drop")
+    if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
+        return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
     local.test_context = function.name.starts_with("__test_") or function.name.starts_with("$case$")
     local.result_mode = function.result_mode
     local.result_origin = function.result_origin
@@ -2645,7 +2808,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                 local.readonly.append(binding)
             if modifier.name in ["borrow", "borrow mut"]:
                 local.borrowed_parameters.append(binding)
-            if modifier.name == "move" and callable_has_drop(state, parameter.type_id):
+            if modifier.name == "move" and callable_has_drop(state, function.parameter_types[binding]) and not local.destructor:
                 local.resources.append(binding)
         local.names.append(parameter.name)
         local.mutables.append(true)

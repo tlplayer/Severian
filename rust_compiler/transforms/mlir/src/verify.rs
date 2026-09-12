@@ -320,8 +320,8 @@ module {
         assert!(composed.contains("func.func @__sev_string_compare("));
         assert!(composed.contains("func.func @__sev_string_release("));
         assert!(!composed.contains("func.func private @__sev_string_concat"));
-        assert!(composed.contains("func.func private @malloc"));
-        assert!(composed.contains("func.func private @free"));
+        assert!(composed.contains("func.func private @__sev_storage_new"));
+        assert!(composed.contains("func.func private @__sev_storage_release"));
     }
 
     #[test]
@@ -641,11 +641,15 @@ impl<'context> Module<'context> {
     fn print(&self) -> String {
         let mut output = String::new();
         unsafe {
-            ffi::mlirOperationPrint(
+            let flags = ffi::mlirOpPrintingFlagsCreate();
+            ffi::mlirOpPrintingFlagsEnableDebugInfo(flags, true, false);
+            ffi::mlirOperationPrintWithFlags(
                 self.operation(),
+                flags,
                 append_printed_text,
                 (&mut output as *mut String).cast(),
             );
+            ffi::mlirOpPrintingFlagsDestroy(flags);
         }
         output
     }

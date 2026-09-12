@@ -8,6 +8,7 @@ import os
 import * from "../boundaries/driver/src/directory_tests.sev" as directory_tests
 import * from "../boundaries/driver/src/package_command.sev"
 import * from "../boundaries/driver/src/package_compiler.sev"
+import * from "../boundaries/driver/src/package_session.sev"
 import * from "../boundaries/driver/src/pipeline/source.sev" as compiler
 import * from "../boundaries/backend/src/native_mlir.sev" as backend
 import * from "../boundaries/driver/src/profiling.sev" as profiling
@@ -44,7 +45,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
             print("sev 0.1.0 (Severian source compiler)")
             return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [cpu|memory|time] --profile-output DIR")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [calls|memory|time] --profile-output DIR")
             return 0
         if argument == "--":
             application = arguments[cursor + 1:]
@@ -90,6 +91,13 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     if command == "test" and os.is_dir(location) and not os.is_file(location + "/package.toml"):
         return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):
+        if command in ["build", "check", "test", "run", "install"] and emit != "plan":
+            compiler.prepare_prelude(sysroot)
+            client = process.session_start()
+            if client < 0:
+                throw Error("could not start package compilation session")
+            if client > 0:
+                return serve_package_session(client)
         status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development)
         if status != 0:
             return status
@@ -133,17 +141,20 @@ def main():
     try:
         invocation = profiling.parse(process.arguments())
         started = profiling.begin(invocation)
-        if invocation.mode == "cpu" or invocation.mode == "memory":
+        if invocation.mode == "memory":
             status = profiling.capture(invocation, started)
         else:
             try:
                 status = execute_native_arguments(invocation.arguments)
             catch failure: Error:
-                process.write_error(failure.message + "\n")
+                process.write_error("error: " + failure.message + "\n")
                 status = 1
+            if process.session_available():
+                # Only the session owner writes the invocation profile.
+                exit_status(i32(status))
             profiling.finish(invocation, started, status)
     catch failure: Error:
-        process.write_error(failure.message + "\n")
+        process.write_error("error: " + failure.message + "\n")
         status = 1
     if status != 0:
         exit_status(i32(status))

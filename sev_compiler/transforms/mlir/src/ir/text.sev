@@ -1,3 +1,4 @@
+import profiling
 import * from "validate.sev"
 import * from "model.sev"
 
@@ -86,16 +87,16 @@ def escaped(value: string) -> string:
     return value.replace("\\", "\\\\").replace("\"", "\\\"")
 
 
+@record_calls
 def attribute_value_text(value: MlirAttributeValue) -> string:
     kind = attribute_kind_name(value.kind)
     if kind == "unit":
         return "unit"
     if kind == "dense_integer" or kind == "dense_integer_array":
-        values := ""
-        separator := ""
+        pieces: list[string] = []
         for element in value.elements:
-            values += separator + string(element.integer)
-            separator = ", "
+            pieces.append(string(element.integer))
+        values = pieces.join(", ")
         if kind == "dense_integer_array":
             if len(value.elements) == 0:
                 return "array<" + type_text(value.type_id) + ">"

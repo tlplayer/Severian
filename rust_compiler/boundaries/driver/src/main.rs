@@ -34,7 +34,7 @@ fn native_invocation() -> Result<i32, String> {
     } else {
         None
     };
-    if matches!(options.mode.as_deref(), Some("cpu" | "memory")) {
+    if matches!(options.mode.as_deref(), Some("memory")) {
         return session.as_ref().expect("profile session").capture(&options);
     }
     let result = run(options.arguments.clone());

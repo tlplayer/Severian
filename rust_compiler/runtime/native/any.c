@@ -1,11 +1,22 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "owned.h"
 
 typedef struct {
     int64_t tag;
     int64_t payload;
 } sev_any;
+
+void __sev_any_retain(sev_any value) {
+    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 8))
+        __sev_storage_retain((void *)(intptr_t)value.payload);
+}
+
+void __sev_any_release(sev_any value) {
+    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 8))
+        __sev_storage_release((void *)(intptr_t)value.payload);
+}
 
 extern const char *__sev_string_from_int(int64_t value);
 extern const char *__sev_string_from_float(double value);
@@ -17,6 +28,7 @@ extern const char *__sev_string_from_u128(unsigned __int128 value);
 extern const char *__sev_string_from_f128(__float128 value);
 
 sev_any __sev_any_from_string(const char *value) {
+    __sev_storage_retain(value);
     sev_any result = {0, (int64_t)(intptr_t)value};
     return result;
 }
@@ -49,24 +61,21 @@ sev_any __sev_any_from_uint(uint64_t value) {
 }
 
 sev_any __sev_any_from_i128(__int128 value) {
-    __int128 *payload = malloc(sizeof(value));
-    if (payload == NULL) abort();
+    __int128 *payload = __sev_storage_new(sizeof(value), NULL);
     *payload = value;
     sev_any result = {6, (int64_t)(intptr_t)payload};
     return result;
 }
 
 sev_any __sev_any_from_u128(unsigned __int128 value) {
-    unsigned __int128 *payload = malloc(sizeof(value));
-    if (payload == NULL) abort();
+    unsigned __int128 *payload = __sev_storage_new(sizeof(value), NULL);
     *payload = value;
     sev_any result = {7, (int64_t)(intptr_t)payload};
     return result;
 }
 
 sev_any __sev_any_from_f128(__float128 value) {
-    __float128 *payload = malloc(sizeof(value));
-    if (payload == NULL) abort();
+    __float128 *payload = __sev_storage_new(sizeof(value), NULL);
     *payload = value;
     sev_any result = {8, (int64_t)(intptr_t)payload};
     return result;
@@ -75,6 +84,7 @@ sev_any __sev_any_from_f128(__float128 value) {
 const char *__sev_any_string(sev_any value) {
     switch (value.tag) {
         case 0:
+            __sev_storage_retain((void *)(intptr_t)value.payload);
             return (const char *)(intptr_t)value.payload;
         case 1:
             return __sev_string_from_int(value.payload);

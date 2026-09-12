@@ -86,9 +86,21 @@ def registered_source(input: source.SourceFile, files: list[source.SourceFile]) 
     for file in files:
         if file.path == path:
             return file
-    registered = source.SourceFile(source.SourceId(u32(len(files))), path, input.text)
+    # SourceFile already owns decoded characters. Register the same snapshot;
+    # changing its identity must not decode the entire file a second time.
+    registered := input
+    registered.id = source.SourceId(u32(len(files)))
+    registered.path = path
     files.append(registered)
     return registered
+
+
+def read_known_source(path: string, files: list[source.SourceFile]) -> source.SourceFile | diagnostics.Diagnostic:
+    normalized = normalized_path(path)
+    for file in files:
+        if file.path == normalized:
+            return file
+    return read_source(normalized)
 
 
 def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> unit | diagnostics.Diagnostic:
@@ -111,7 +123,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
             depth -= 1
         if depth == 0 and lexer.token_word(token) == "from" and index + 2 < len(tokens) and lexer.token_word(tokens[index + 2]) == "import":
             child = dependency_source(resolution, file.path, lexer.token_word(tokens[index + 1]), sysroot)
-            discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
+            discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
         from_import = index >= 2 and lexer.token_word(tokens[index - 2]) == "from"
         if depth == 0 and lexer.token_word(token) == "import" and not from_import and index + 1 < len(tokens):
             subject := index + 1
@@ -131,14 +143,14 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                     child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))
                     if len(resolution.packages) > 0:
                         child = package_module(resolution, file.path, string(tokens[subject]))
-                    discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
+                    discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
                 case _:
                     name := lexer.token_word(tokens[subject])
                     # `import member from package` chooses the source package.
                     if subject + 2 < len(tokens) and lexer.token_word(tokens[subject + 1]) == "from":
                         name = lexer.token_word(tokens[subject + 2])
                     child = dependency_source(resolution, file.path, name, sysroot)
-                    discover_source_syntax(read_source(child), stack, files, registry, resolution, sysroot)
+                    discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
         index += 1
     lexer.discover_operator_descriptors(tokens, registry)
     registry.discovered.append(file.path)
@@ -179,7 +191,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_path := normalized_path(parent_path(path) + "/" + locator)
                         if len(resolution.packages) > 0:
                             child_path = package_module(resolution, path, locator)
-                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution, sysroot)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot)
                         for child_item in child.items:
                             append_imported_item(result, child_item)
                     case Name:
@@ -195,7 +207,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_prefix := prefix + package_name + "."
                         if alias != None and source_name == None:
                             child_prefix = prefix + imported_name + "."
-                        child = load_source_module(read_source(child_path), child_prefix, stack, false, files, registry, resolution, sysroot)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot)
                         selected := source_name == None
                         module_key = child_path + ":" + child_prefix
                         for child_item in child.items:

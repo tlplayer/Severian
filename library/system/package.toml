@@ -9,4 +9,4 @@ path = "src/lib.sev"
 
 
 [xxi.c]
-sources = ["extern/posix/filesystem.c", "extern/posix/process.c"]
+sources = ["extern/posix/filesystem.c", "extern/posix/process.c", "extern/posix/profiling.c", "extern/posix/hooks.c", "extern/posix/hook_analysis.c", "extern/posix/session.c"]

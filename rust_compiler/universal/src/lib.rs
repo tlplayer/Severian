@@ -48,7 +48,7 @@ pub use type_system::{
     Constraint, ImplDefinition, ImplId, ImplSelection, ImplTable, InferenceContext, Signature,
     Substitution, TraitRef, TyInterner, TypeKind, UnifyError,
 };
-pub use types::{
+pub use types::{native_container_stores_values, 
     ResolvedBinary, ResolvedUnary, TypeContext, TypeContextBuilder, TypeDefinition,
     TypeDefinitionKind, TypeError,
 };

@@ -4,6 +4,7 @@ import os
 import package
 import process
 import time
+import * from "profile_analysis.sev" as analysis
 
 class ProfileInvocation:
     mode: string
@@ -33,15 +34,17 @@ def parse(arguments: list[string]) -> ProfileInvocation | Error:
                 result.mode = argument[10:]
             elif cursor + 1 < len(arguments):
                 following = arguments[cursor + 1]
-                if following in ["cpu", "memory", "time", "summary", "all"]:
+                if following in ["calls", "cpu", "memory", "time", "summary", "all"]:
                     result.mode = following
                     cursor += 1
                 elif following in ["release", "dev", "debug"]:
                     throw Error("use --build-profile " + following + " for build settings")
-            if result.mode not in ["cpu", "memory", "time", "summary", "all"]:
-                throw Error("--profile expects cpu, memory, or time")
-            if result.mode in ["summary", "all"]:
+            if result.mode not in ["calls", "cpu", "memory", "time", "summary", "all"]:
+                throw Error("--profile expects calls, memory, or time")
+            if result.mode == "summary":
                 result.mode = "time"
+            if result.mode in ["cpu", "all"]:
+                result.mode = "calls"
         elif argument == "--profile-output" or argument.starts_with("--profile-output="):
             if argument.starts_with("--profile-output="):
                 result.output = argument[17:]
@@ -76,6 +79,10 @@ def begin(invocation: ProfileInvocation) -> ProfileStart | Error:
     directory = package.canonical(directory)
     if not environment.set("SEVERIAN_PROFILE_ACTIVE", "1") or not environment.set("SEVERIAN_TIMINGS", directory + "/stages.tsv"):
         throw Error("could not enable native compiler profiling")
+    if invocation.mode in ["calls", "memory"]:
+        package.write_text(directory + "/hooks.jsonl", "")
+        if not environment.set("SEVERIAN_HOOK_RECORDS", directory + "/hooks.jsonl"):
+            throw Error("could not enable hook profiling")
     return ProfileStart(time.monotonic(), process.user_seconds() + process.user_seconds(1), process.system_seconds() + process.system_seconds(1), directory)
 
 def finish(invocation: ProfileInvocation, started: ProfileStart, status: int) -> unit | Error:
@@ -107,41 +114,55 @@ def finish(invocation: ProfileInvocation, started: ProfileStart, status: int) ->
     report += ",\"peak_rss_kib\":" + string(peak) + "}\n"
     package.write_text(started.directory + "/report.json", report)
     process.write_error("Profile: " + started.directory + "/report.json\n")
+    if invocation.mode in ["calls", "memory"]:
+        table = started.directory + "/functions.tsv"
+        if process.hook_function_table(started.directory + "/hooks.jsonl", table) != 0:
+            throw Error("could not analyze hook profiling records")
+        process.write_error("Functions: " + table + "\n")
 
 def capture(invocation: ProfileInvocation, started: ProfileStart) -> int | Error:
     executable = process.executable()
     if executable == "":
         throw Error("could not find the native compiler executable")
-    command: list[string] := []
-    if invocation.mode == "cpu":
-        command = ["perf", "record", "-e", "cpu-clock:u", "-F", "99", "--call-graph", "dwarf", "-o", started.directory + "/perf.data", "--", executable]
-    else:
-        command = ["heaptrack", "--record-only", "-o", started.directory + "/heaptrack", executable]
+    command = ["heaptrack", "--record-only", "-o", started.directory + "/heaptrack", executable]
     for argument in invocation.arguments[1:]:
         command.append(argument)
     status = process.run(command)
     finish(invocation, started, status)
     analysis_status := 0
-    if invocation.mode == "cpu":
-        result = process.execute(["perf", "report", "--stdio", "--children", "-i", started.directory + "/perf.data"])
-        package.write_text(started.directory + "/cpu.txt", result.stdout)
-        package.write_text(started.directory + "/cpu.txt.stderr", result.stderr)
-        analysis_status = result.status
-        process.write_error("Stacks: " + started.directory + "/cpu.txt\n")
-    else:
-        found := false
-        for name in os.list(started.directory):
-            if name.starts_with("heaptrack") and (name.ends_with(".gz") or name.ends_with(".zst")):
-                found = true
-                result = process.execute(["heaptrack_print", "-f", started.directory + "/" + name, "--merge-backtraces", "0"])
-                package.write_text(started.directory + "/" + name + ".txt", result.stdout)
-                package.write_text(started.directory + "/" + name + ".stderr", result.stderr)
-                if result.status != 0:
-                    analysis_status = result.status
-                process.write_error("Stacks: " + started.directory + "/" + name + ".txt\n")
-        if not found:
-            process.write_error("heaptrack produced no allocation trace\n")
-            analysis_status = 1
+    found := false
+    for name in os.list(started.directory):
+        if name.starts_with("heaptrack") and (name.ends_with(".gz") or name.ends_with(".zst")):
+            found = true
+            result = process.execute(["heaptrack_print", "-f", started.directory + "/" + name, "--merge-backtraces", "0", "--print-leaks", "1", "--peak-limit", "25", "--print-flamegraph", started.directory + "/" + name + ".allocations.folded"])
+            package.write_text(started.directory + "/" + name + ".txt", result.stdout)
+            package.write_text(started.directory + "/" + name + ".stderr", result.stderr)
+            if result.status != 0:
+                analysis_status = result.status
+            process.write_error("Stacks: " + started.directory + "/" + name + ".txt\n")
+            if result.status == 0:
+                hints = analysis.source_hints(result.stdout)
+                package.write_text(started.directory + "/" + name + ".hints.txt", hints)
+                process.write_error(hints)
+                complete := true
+                for kind in ["peak", "leaked"]:
+                    folded = started.directory + "/" + name + "." + kind + ".folded"
+                    costs = process.execute(["heaptrack_print", "-f", started.directory + "/" + name, "--merge-backtraces", "0", "--print-peaks", "0", "--print-allocators", "0", "--print-temporary", "0", "--flamegraph-cost-type", kind, "--print-flamegraph", folded])
+                    if costs.status != 0:
+                        complete = false
+                        analysis_status = costs.status
+                        process.write_error(costs.stderr)
+                if complete:
+                    prefix = started.directory + "/" + name
+                    table_status = process.profile_function_table(prefix + ".allocations.folded", prefix + ".peak.folded", prefix + ".leaked.folded", prefix + ".functions.tsv")
+                    if table_status != 0:
+                        analysis_status = table_status
+                        process.write_error("Could not analyze allocation function costs: " + string(table_status) + "\n")
+                    else:
+                        process.write_error("Functions: " + prefix + ".functions.tsv\n")
+    if not found:
+        process.write_error("heaptrack produced no allocation trace\n")
+        analysis_status = 1
     package.write_text(started.directory + "/analysis.status", string(analysis_status) + "\n")
     if status != 0:
         return status

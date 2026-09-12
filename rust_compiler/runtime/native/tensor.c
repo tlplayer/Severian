@@ -227,22 +227,11 @@ static void sev_tensor_abort_if(_Bool condition) {
     if (condition) abort();
 }
 
-static sev_list *sev_tensor_list(void) {
-    sev_list *list = calloc(1, sizeof(*list));
-    sev_tensor_abort_if(list == NULL);
-    return list;
-}
-
+extern void *__sev_list_create(void);
+extern void __sev_list_push_i64(void *, int64_t);
+static sev_list *sev_tensor_list(void) { return __sev_list_create(); }
 static void sev_tensor_list_push(sev_list *list, uintptr_t value) {
-    if (list->length == list->capacity) {
-        size_t capacity = list->capacity == 0 ? 4 : list->capacity * 2;
-        sev_tensor_abort_if(capacity < list->capacity);
-        uintptr_t *values = realloc(list->values, capacity * sizeof(*values));
-        sev_tensor_abort_if(values == NULL);
-        list->values = values;
-        list->capacity = capacity;
-    }
-    list->values[list->length++] = value;
+    __sev_list_push_i64(list, (int64_t)value);
 }
 
 static uint64_t sev_read_u64(const uint8_t *bytes) {

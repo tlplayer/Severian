@@ -35,6 +35,7 @@ path = "pipeline.sev"
 ### DEPENDENCIES #######################################################
 
 [dependencies]
+profiling = { path = "../library/system/profiling" }
 time = { path = "../library/core/time" }
 package = { path = "../library/package" }
 diagnostics = { path = "diagnostics" }

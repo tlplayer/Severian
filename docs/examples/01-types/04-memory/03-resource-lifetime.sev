@@ -1,7 +1,7 @@
 class Resource:
     name: string
 
-    def Resource(name_param: string):
+    def Resource(name_param: move string):
         name := name_param
         print("open:", name)
 

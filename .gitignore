@@ -30,3 +30,5 @@ docs/examples/setup.bash
 review.diff
 .TODO
 target/debug/*
+# This is source for the imported String runtime, not a generated artifact.
+!library/core/text/mlir/string_v1.mlir
