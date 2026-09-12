@@ -44,6 +44,9 @@ parser = { path = "frontend/parser" }
 source = { path = "source" }
 universal = { path = "universal" }
 
+[xxi.c]
+build-info = "__sev_compiler_build_info"
+
 [dev-dependencies]
 
 ### LANGUAGE ############################################################

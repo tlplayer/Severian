@@ -44,6 +44,15 @@ binary replaces an older `$HOME/.cargo/bin/sev` instead of being hidden behind
 it on `PATH`. Set `SEV_CARGO_INSTALL_ROOT` to select another Cargo installation
 root. Building the compiler and installing a release remain separate workflows.
 
+For a checkout using the `bin/sev` launcher, `sev update` fetches and builds the
+latest upstream compiler. Use `sev update --local` to build uncommitted local
+work without fetching. The update prints the source compiler's version, UTC
+build date, source checkout path, and full Git commit hash. `sev --version`
+reports the same details later; local modifications are marked explicitly.
+These details are embedded at link time, including when building the source
+compiler directly. Source archives without Git metadata report an unknown
+commit. Failed builds or smoke tests preserve the previous compiler.
+
 Local builds write generated files to `package.pkg/`. Cargo places the seed
 binary at `package.pkg/debug/sev`; Severian packages place binaries at
 `package.pkg/<platform>/<profile>/bin/`. `sev clean` removes package artifacts.

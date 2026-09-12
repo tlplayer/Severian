@@ -43,6 +43,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         argument = arguments[cursor]
         if argument == "--version":
             print("sev 0.1.0 (Severian source compiler)")
+            print(package.compiler_build_info())
             return 0
         if argument == "--help" or argument == "-h":
             print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [calls|memory|time] --profile-output DIR")

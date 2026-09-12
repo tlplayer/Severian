@@ -3,6 +3,31 @@ import * from "manifest.sev"
 import * from "host.sev"
 import os
 import path
+import process
+
+@c(symbol="__sev_compiler_build_info")
+def compiler_build_info() -> string
+
+
+# Capture provenance while linking, so moving the executable or changing the
+# checkout never changes its version report. Missing Git data is explicit.
+def native_build_info(root: string, symbol: string) -> string | Error:
+    if symbol == "" or symbol[0] in "0123456789":
+        throw Error("invalid build-info C symbol")
+    for character in symbol.characters():
+        if character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_":
+            throw Error("invalid build-info C symbol")
+    revision = process.execute(["git", "-C", root, "rev-parse", "HEAD"])
+    commit := revision.stdout.strip() if revision.status == 0 else "unknown (source archive)"
+    status = process.execute(["git", "-C", root, "status", "--porcelain", "--untracked-files=normal"])
+    if status.status == 0 and status.stdout.strip() != "":
+        commit += " (local changes)"
+    built = capture(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"])
+    report = "built: " + built + "\nsource: " + root + "\ncommit: " + commit
+    literal = report.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    output = temporary(root + "/package.pkg/cache/build-info", "run-") + "/build_info.c"
+    write_text(output, "const char *" + symbol + "(void) { return \"" + literal + "\"; }\n")
+    return output
 
 # Native providers are package assets. Backends consume these arguments and
 # do not own a second catalog of system-library implementations.
@@ -21,6 +46,9 @@ def native_package(root: string, seen: list[string], arguments: list[string], fo
             if entry.table == "workspace" and entry.key == "members":
                 return
     manifest = parse_manifest(text)
+    symbol = text_setting(manifest.entries, "xxi.c", "build-info", "")
+    if symbol != "":
+        arguments.append(native_build_info(root, symbol))
     for entry in manifest.entries:
         if entry.table == "xxi.c" and entry.key == "sources":
             for value in string_array(entry.value):

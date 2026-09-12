@@ -1865,6 +1865,39 @@ struct NativeProviderSources {
 }
 
 impl NativeProviderSources {
+    fn build_info(root: &Path, symbol: &str) -> Result<PathBuf, CompileError> {
+        if symbol.is_empty() || symbol.as_bytes()[0].is_ascii_digit()
+            || !symbol.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(CompileError::NativeLink("invalid build-info C symbol".into()));
+        }
+        let capture = |program: &str, args: &[&str]| -> Option<String> {
+            let result = Command::new(program).args(args).current_dir(root).output().ok()?;
+            result.status.success().then(|| String::from_utf8_lossy(&result.stdout).trim().to_owned())
+        };
+        let mut commit = capture("git", &["rev-parse", "HEAD"])
+            .unwrap_or_else(|| "unknown (source archive)".into());
+        if capture("git", &["status", "--porcelain", "--untracked-files=normal"])
+            .is_some_and(|status| !status.is_empty())
+        {
+            commit.push_str(" (local changes)");
+        }
+        let built = capture("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+            .ok_or_else(|| CompileError::NativeLink("could not determine UTC build date".into()))?;
+        let root = root.canonicalize().map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        let report = format!("built: {built}\nsource: {}\ncommit: {commit}", root.display());
+        let literal = report.replace('\\', "\\\\").replace('"', "\\\"")
+            .replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| CompileError::NativeLink(error.to_string()))?.as_nanos();
+        let directory = root.join(format!("package.pkg/cache/build-info/run-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&directory).map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        let output = directory.join("build_info.c");
+        std::fs::write(&output, format!("const char *{symbol}(void) {{ return \"{literal}\"; }}\n"))
+            .map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        Ok(output)
+    }
+
     fn discover(
         source: &Path,
         packages: Option<&severian_modules::PackageGraph>,
@@ -1921,6 +1954,11 @@ impl NativeProviderSources {
                 manifest_path.display()
             ))
         })?;
+        if let Some(symbol) = document.get("xxi").and_then(|xxi| xxi.get("c"))
+            .and_then(|provider| provider.get("build-info")).and_then(toml::Value::as_str)
+        {
+            self.c.push(Self::build_info(root, symbol)?);
+        }
         for (language, output) in [
             ("c", &mut self.c),
             ("rust", &mut self.rust),
@@ -3074,6 +3112,46 @@ mod tests {
             .lines()
             .filter(|line| line.contains("func.func @__sev_artifact_"))
             .all(|line| !line.contains("tensor<*x")));
+    }
+
+    #[test]
+    fn build_provenance_captures_source_archives_and_validates_symbols() {
+        let root = temporary_package();
+        let output = NativeProviderSources::build_info(&root, "probe_build_info").unwrap();
+        let contents = std::fs::read_to_string(output).unwrap();
+        assert!(contents.contains("const char *probe_build_info(void)"));
+        assert!(contents.contains(&format!("source: {}", root.canonicalize().unwrap().display())));
+        assert!(contents.contains("unknown (source archive)"));
+        assert!(contents.contains("built: "));
+        assert!(NativeProviderSources::build_info(&root, "bad;symbol").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn build_provenance_records_full_revision_and_local_changes() {
+        let root = temporary_package();
+        let git = |args: &[&str]| {
+            let result = Command::new("git").args(args).current_dir(&root).output().unwrap();
+            assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+            String::from_utf8(result.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init"]);
+        git(&["config", "user.name", "Compiler test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        std::fs::write(root.join(".gitignore"), "package.pkg/\n").unwrap();
+        std::fs::write(root.join("source.sev"), "print(42)\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "initial"]);
+        let revision = git(&["rev-parse", "HEAD"]);
+        let output = NativeProviderSources::build_info(&root, "probe_build_info").unwrap();
+        let clean = std::fs::read_to_string(&output).unwrap();
+        assert!(clean.contains(&format!("commit: {revision}")));
+        assert!(!clean.contains("local changes"));
+        std::fs::write(root.join("source.sev"), "print(43)\n").unwrap();
+        let dirty = NativeProviderSources::build_info(&root, "probe_build_info").unwrap();
+        assert!(std::fs::read_to_string(dirty).unwrap().contains(&format!("commit: {revision} (local changes)")));
+        assert_eq!(std::fs::read_to_string(output).unwrap(), clean);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

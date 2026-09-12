@@ -11,3 +11,14 @@ test "native provider discovery ignores workspace-only ancestors":
     assert(invalid is Error)
     package.remove_tree(root)
 
+test "build provenance captures source archives and validates C symbols":
+    root = package.temporary("/tmp", "sev-build-info-")
+    output = package.native_build_info(root, "probe_build_info")
+    contents = package.read_text(output)
+    assert(contents.contains("const char *probe_build_info(void)"))
+    assert(contents.contains("source: " + root))
+    assert(contents.contains("unknown (source archive)"))
+    assert(contents.contains("built: "))
+    invalid ?= package.native_build_info(root, "bad;symbol")
+    assert(invalid is Error)
+    package.remove_tree(root)
