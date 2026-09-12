@@ -43,7 +43,16 @@ compilation rather than lexer/parser diagnostics. A named diagnostic binding
 such as `reject error:` is reserved for the future diagnostic object model and
 is rejected for now instead of being silently ignored.
 
-Run every test with `sev test`. Add `--profile` for a CPU/memory/time breakdown
+Run every test with `sev test`. In a directory without `package.toml`, this
+discovers `.sev` files in the current directory and its subdirectories. Use
+`sev test path/to/directory` to select another directory, or `sev test file.sev`
+to select one file. The native source compiler tests each discovered file in a
+separate process, continues after failures, and prints a file summary. It skips
+`package.pkg`, `errors`, hidden entries, and symlinks. An empty batch or any
+failed file returns a nonzero exit status. A directory with `package.toml`
+uses its existing package test configuration.
+
+Add `--profile` for a CPU/memory/time breakdown
 of the invocation, including compilation and test execution. Use
 `sev test --profile cpu` for CPU stacks or `sev test --profile memory` for
 allocation stacks. These options measure the invocation and do not filter

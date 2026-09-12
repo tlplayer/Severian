@@ -4,6 +4,8 @@ import path
 import process
 import source
 import package
+import os
+import * from "../boundaries/driver/src/directory_tests.sev" as directory_tests
 import * from "../boundaries/driver/src/package_command.sev"
 import * from "../boundaries/driver/src/package_compiler.sev"
 import * from "../boundaries/driver/src/pipeline/source.sev" as compiler
@@ -84,6 +86,9 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
+    location = input if input != "" else "."
+    if command == "test" and os.is_dir(location) and not os.is_file(location + "/package.toml"):
+        return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):
         status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development)
         if status != 0:

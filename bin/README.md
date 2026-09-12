@@ -18,6 +18,11 @@ validation run.
 seed and remains available when the source compiler needs recovery. Both
 launchers resolve their checkout through symlinks and pass through arguments.
 
+`sev test` batches the `.sev` files in an ordinary directory, including
+subdirectories. `sev test DIRECTORY` selects a directory explicitly. The
+source compiler reports each file and continues after failures; the command
+fails if any file fails. Directories with `package.toml` use package tests.
+
 Both native compilers implement `--profile` directly:
 
 ```sh

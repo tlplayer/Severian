@@ -1,0 +1,55 @@
+import os
+import package
+import process
+
+
+def collect(directory: string, sources: list[string]) -> unit | Error:
+    for name in package.sorted_strings(os.list(directory)):
+        if name in ["package.pkg", "errors"] or name.starts_with("."):
+            continue
+        location = directory + "/" + name
+        # Do not follow links back into an ancestor or another source tree.
+        if os.is_symlink(location):
+            continue
+        if os.is_dir(location):
+            collect(location, sources)
+        elif name.ends_with(".sev") and os.is_file(location):
+            sources.append(location)
+
+
+def run(directory: string, sysroot: string, output: string, profile: string, platform: string, filter: string, emit: string) -> int | Error:
+    if emit != "":
+        throw Error("directory tests do not support --emit; emit a selected source directly")
+    sources: list[string] = []
+    collect(directory, sources)
+    selected: list[string] = []
+    for source in sources:
+        if filter == "" or source.contains(filter):
+            selected.append(source)
+    if len(selected) == 0:
+        throw Error("no Severian test sources found in " + directory)
+    stage = package.temporary(output if output != "" else "package.pkg/tests", "run-")
+    executable = process.executable()
+    if executable == "":
+        throw Error("could not find the native compiler executable")
+    failed := 0
+    for index in range(int(len(selected))):
+        source = selected[index]
+        print("testing " + source)
+        arguments = [executable, "test", source, "--sysroot", sysroot, "-o", stage + "/test-" + string(index)]
+        if profile != "":
+            arguments.append("--build-profile")
+            arguments.append(profile)
+        if platform != "":
+            arguments.append("--target")
+            arguments.append(platform)
+        status := 1
+        try:
+            status = process.run(arguments)
+        catch failure: Error:
+            process.write_error(failure.message + "\n")
+        print(("ok " if status == 0 else "FAILED ") + source)
+        if status != 0:
+            failed += 1
+    print("Test files: " + string(int(len(selected)) - failed) + " passed; " + string(failed) + " failed; " + string(len(selected)) + " total")
+    return 1 if failed > 0 else 0
