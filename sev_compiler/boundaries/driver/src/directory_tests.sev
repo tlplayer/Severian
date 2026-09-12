@@ -28,7 +28,7 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
             selected.append(source)
     if len(selected) == 0:
         throw Error("no Severian test sources found in " + directory)
-    stage = package.temporary(output if output != "" else "package.pkg/tests", "run-")
+    stage = package.temporary(output if output != "" else "package.pkg/debug/tests", "run-")
     executable = process.executable()
     if executable == "":
         throw Error("could not find the native compiler executable")
@@ -36,7 +36,7 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
     for index in range(int(len(selected))):
         source = selected[index]
         print("testing " + source)
-        arguments = [executable, "test", source, "--sysroot", sysroot, "-o", stage + "/test-" + string(index)]
+        arguments = [executable, "test", source, "--sysroot", sysroot, "-o", stage + "/bin/test-" + string(index)]
         if profile != "":
             arguments.append("--build-profile")
             arguments.append(profile)

@@ -68,7 +68,7 @@ def begin(invocation: ProfileInvocation) -> ProfileStart | Error:
         return ProfileStart(0.0, 0.0, 0.0, "")
     directory := invocation.output
     if directory == "":
-        directory = package.temporary("package.pkg/profiles", "source-")
+        directory = package.temporary("package.pkg/debug/profiles", "source-")
     else:
         if os.exists(directory):
             throw Error("profile output directory already exists: " + directory)

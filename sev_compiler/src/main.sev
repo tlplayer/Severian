@@ -107,7 +107,13 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     if command == "check":
         return 0
     if output == "":
-        output = "package.pkg/" + path.basename(input).replace(".sev", "")
+        name = path.basename(input).replace(".sev", "")
+        if command == "build":
+            output = "package.pkg/bin/" + name
+        elif command == "test":
+            output = package.temporary("package.pkg/debug/tests", "run-") + "/bin/" + name
+        else:
+            output = package.temporary("package.pkg/cache/run", "run-") + "/bin/" + name
     sources: list[string] = []
     for file in files:
         sources.append(file.path)

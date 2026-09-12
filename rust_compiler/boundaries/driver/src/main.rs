@@ -1077,16 +1077,12 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("could not identify test invocation: {error}"))?
         .as_nanos();
-    let output_base = if manifest.is_some() {
-        root.join("package.pkg")
-    } else {
-        std::env::temp_dir().join("severian-tests")
-    };
+    let output_base = root.join("package.pkg").join("debug").join("tests");
     let output_root = output_base
         .join(target_directory(&config.target))
         .join(&config.profile)
-        .join("tests")
-        .join(format!("run-{}-{invocation}", process::id()));
+        .join(format!("run-{}-{invocation}", process::id()))
+        .join("bin");
     fs::create_dir_all(&output_root)
         .map_err(|error| format!("could not create {}: {error}", output_root.display()))?;
 

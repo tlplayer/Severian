@@ -1,367 +1,323 @@
-# Building and packaging
+# Severian packages
 
-The source-owned `import package` API and its current compiler boundary are
-documented in [the package library API](API.md).
+This library owns package discovery, resolution, editing, builds, and
+publication in ordinary Severian source. Its design follows
+[SIP-0003: Package Interfaces, Realizations, and Incremental Dependency Builds](../../docs/sip/0003-sip-packages.md).
+The callable API and compilation-unit protocol are documented in [API.md](API.md).
 
-This directory is the executable specification for Severian packages. A change
-to manifest discovery, dependency resolution, build output placement, or the
-`.pkg` format should update this example and its tests in the same change.
+SIP-0003 is a draft. The contracts below describe its intended package model;
+the implementation-status section records the remaining migration work.
 
-The design keeps four things separate:
+## Package model
 
-| Object | Meaning | Authored by |
-| --- | --- | --- |
-| `package.toml` | Desired package, targets, dependencies, and policy | Developer |
-| `sev.lock` | Exact dependency resolution | `sev add/remove/update` |
-| `package.pkg/` | Local build cache and development outputs | `sev build` / `sev test` |
-| `.pkg` | Versioned distributable realization of a library | `sev build` |
+| Object | Role |
+| --- | --- |
+| `package.toml` | User-authored package identity, declared targets, dependencies, exports, and policy |
+| `package.lock` | Generated exact dependency resolution, identities, and content verification data |
+| `package.pkg/` | Generated realization of the package |
+| `package.pkg/package.pkgi` | Generated public semantic interface consumed by imports |
 
-`package.pkg/` is the disposable artifact directory. Files named
-`<name>-<version>.pkg` are versioned bundles inside that directory.
-`sev build` writes version 1 library bundles. `sev publish` writes version 2
-distributions containing metadata, source fallback, and compatible binaries.
-Neither object is a substitute for the manifest or lockfile.
+A package is defined by one manifest. A declared target is a library or binary
+produced by that package; a platform is a compilation destination. An artifact
+is a compiled realization for a platform, backend, and build profile.
 
-## Vocabulary
-
-- A **package** is the unit described by one `package.toml`.
-- A **declared target** is something the package produces: `[lib]` or `[[bin]]`.
-- A **module** is one `.sev` source file in a package.
-- An **interface** is the public identity and type information consumers need.
-- An **implementation** supplies bodies for an interface.
-- A **platform** is a compilation destination such as `x86_64-linux-gnu`.
-- An **artifact** is one realization of a declared target for a platform and
-  profile.
-
-Using “target” for both a binary and a platform makes resolution ambiguous, so
-manifests and metadata retain this distinction.
-
-## Checked-in source layout
+An illustrative source package has this layout:
 
 ```text
-05-building/
-├── README.md
+geometry/
 ├── package.toml
-├── sev.lock
-└── src/
-    ├── lib.sev
-    ├── math.sev
-    └── main.sev
+├── package.lock
+├── src/
+│   ├── lib.sev
+│   └── math.sev
+└── package.pkg/
 ```
 
-The library root imports its private modules. The binary imports the library
-root. A dependency imports another package through the alias declared in
-`[dependencies]`; that alias is also the namespace used by qualified names such
-as `geometry.Point`.
+The manifest's package name must be present and nonempty. Dependency keys are
+local import aliases; published package identity comes from the declared
+package name and resolved version. Path dependencies resolve relative to the
+manifest that declares them. Source paths must stay within their package root.
+Root-package tests may use development dependencies in addition to ordinary
+dependencies.
 
-## Manifest contract
+The manifest in [this directory](package.toml) defines the `package` library
+itself. The `geometry` examples describe a consumer package.
 
-The checked-in [package.toml](package.toml) intentionally uses the complete
-configuration vocabulary currently understood by `sev`. Unknown compiler
-configuration keys are rejected. `sev config defaults` prints the catalog and
-`sev config sync` adds newly introduced settings without replacing explicit
-choices.
+## Canonical generated layout
 
-The structural part is:
-
-```toml
-[package]
-name = "05-building"
-version = "0.1.0"
-edition = "2026"
-default-run = "05-building"
-
-[[bin]]
-name = "05-building"
-path = "src/main.sev"
-
-[lib]
-name = "building"
-path = "src/lib.sev"
-
-[dependencies]
-geometry = "0.3.1"
-# shapes = { package = "geometry", version = "0.3.1" }
-
-[dev-dependencies]
-test-support = "0.1.0"
-```
-
-Rules:
-
-1. Package names identify published packages; dependency keys are local aliases.
-2. Every `[[bin]]` has an explicit unique name and source path.
-3. `[lib]` has one public module root. Its name defaults to the package name.
-4. `package.default-run` is required when more than one binary exists.
-5. A dependency must expose `[lib]`. Binaries are not importable interfaces.
-6. Version dependencies resolve by package identity from the selected registry;
-   a dependency key is only its local import alias. Path dependencies are an
-   explicit development override and resolve relative to their manifest.
-7. Runtime builds use `[dependencies]`; root-package tests may additionally use
-   `[dev-dependencies]`.
-8. Source paths and package archive entries may not escape their package root.
-
-Version dependencies resolve from the default local filesystem
-registry (or one selected by `SEVERIAN_REGISTRY`). `sev publish` writes both the
-versioned `.pkg` artifact and its exploded realization there. `sev add` accepts
-latest, major-prefix, and exact selectors such as `tensor`, `tensor@2`, and
-`tensor@2.1.0`. Remote registry transport and authentication are not yet
-implemented; the resolver never silently selects unrelated source.
-
-The black-box golden path is
-[`registry_publish_consume.sh`](../../test/validation/packages/registry_publish_consume.sh).
-It creates a library with `sev new`, publishes it to an isolated registry,
-creates an unrelated application with `sev new`, consumes the library using
-only registry package declarations, and builds and runs the application. The
-CLI contract suite executes the same script.
-
-Transitive package closure is covered by
-[`registry_transitive_tensor.sh`](../../test/validation/packages/registry_transitive_tensor.sh).
-It publishes `tensor`, a matrix package that performs tensor matmul, and a
-service package that calls the matrix package. A third application declares
-only the service. The resolver discovers the service's published dependency
-edges, while still rejecting a direct import of the undeclared matrix package.
-The test also removes one transitive release temporarily and requires the
-diagnostic to report the complete application-to-service-to-matrix chain.
-
-## Lockfile contract
-
-`sev add`, `sev update`, and `sev remove` atomically update `package.toml` and
-regenerate `sev.lock`. The lock records exact package identities, versions,
-source kinds, content checksums, and dependency edges. It is tool-owned data and
-should be committed for applications. Build-time enforcement of an unchanged
-lock is the next resolver step; current builds resolve the manifest graph.
-
-Resolution must be deterministic:
-
-- entries have one canonical record per package identity;
-- dependency edges refer to locked identities, not loose names;
-- checksums cover fetched package content;
-- path dependencies are canonicalized before cycle detection;
-- normal builds do not rewrite a lockfile whose resolution is unchanged.
-
-This example has no external dependencies, so its lockfile contains only the
-root package. Invented registry entries do not belong in an executable example.
-
-## Commands and local output
-
-From this directory:
-
-```bash
-sev check
-sev test
-sev build
-sev run
-sev run --bin 05-building
-sev add tensor
-sev add tensor@2
-sev update tensor
-sev remove tensor
-sev run tool@1.3
-sev run github.com/example/tool
-sev install tool@1.3
-sev build --build-profile release
-sev check --emit mir --bin 05-building
-```
-
-The current local output layout is:
+The SIP's summary and local-publication contract define these top-level roles:
 
 ```text
 package.pkg/
-└── <platform>/
-    └── <profile>/
-        ├── bin/
-        │   └── 05-building
-        ├── pkg/
-        │   └── building-0.1.0.pkg
-        └── tests/
-            └── run-<invocation>/
-```
-
-The platform is `host` unless overridden by `build.target` or `--target`; the
-profile is `dev` unless overridden by `build.profile` or `--build-profile`.
-
-`add` changes the current project, `install` changes the machine-level command
-set, and `run` resolves only for the current invocation. GitHub shorthands and
-`git+https://...#revision` are cached ephemeral package checkouts.
-
-## Portable Severian release
-
-Release maintainers can assemble a host-specific distribution with:
-
-```bash
-scripts/release/build_portable_release.sh
-```
-
-The resulting `.tar.zst` contains `sev`, the Severian standard libraries,
-Clang, LLD, MLIR tools, LLVM/MLIR shared runtimes, and Clang resource files.
-Its wrapper resolves everything relative to the unpacked directory through
-`SEVERIAN_HOME`; users do not need Rust, Cargo, LLVM, or MLIR installed. The
-archive still targets its declared host ABI and therefore expects the host's
-ordinary system C runtime.
-
-## `.pkg` compatibility boundary
-
-The local build `SEVPKG` version 1 writer emits a deterministic library source
-bundle. Publishing uses version 2: a deterministic indexed container with
-sorted, normalized entries for `metadata/`, optional `source/`, and
-`artifacts/<platform>/<profile>/bin`. Registry execution prefers a compatible
-binary and compiles the included source into the cache when that artifact is
-absent. When only the `.pkg` remains, the reader safely materializes it into the
-distribution cache first. Entry flags preserve executability; bounds checks,
-duplicate detection, and normalized-path validation happen before execution.
-Its magic, version, and byte-level tests define the compatibility contract.
-
-Version 2 is a logical container whose implemented sections can grow toward:
-
-```text
-building.pkg/
+├── package.pkgi
 ├── metadata/
-│   ├── package.toml       # frozen source manifest
-│   ├── sev.lock           # exact dependency graph
-│   ├── build.toml         # compiler, profile, and reproducibility data
-│   ├── artifacts.toml     # artifact index and compatibility requirements
-│   └── checksums.toml     # digest for every indexed object
-├── interface/
-│   └── building.pkgi      # public declarations and stable identities
-├── source/                # optional; controlled by publish.include-source
-│   ├── lib.sev
-│   └── math.sev
 ├── artifacts/
-│   └── <platform>/
-│       └── <profile>/
-│           ├── native/
-│           ├── llvm/
-│           ├── mlir/
-│           └── stablehlo/
-├── evidence/              # optional test, coverage, profile, and debug data
-└── policy/                # optional runtime requirements
-    ├── network.toml
-    └── container.toml
+├── build/
+├── cache/
+├── bin/
+├── debug/
+├── container/
+└── source/
 ```
 
-This is a logical layout; an implementation may use a binary index rather than
-a ZIP filesystem. Archive paths are normalized UTF-8, relative,
-slash-separated, sorted before encoding, and forbidden from containing `..`,
-absolute roots, or escaping symlinks. Checksums cover canonical bytes, not
-extraction metadata.
+| Entry | Contents |
+| --- | --- |
+| `package.pkgi` | Exported declarations, stable symbols, types, callable signatures, constraints, effects, public layouts, ABI information, and implementation references |
+| `metadata/` | Generated realization and publication metadata |
+| `artifacts/` | Completed, reusable compiler and linker outputs, organized by platform, profile, or backend format |
+| `build/` | Mutable incremental state for the working checkout; never published |
+| `cache/` | Disposable intermediate and temporary execution data |
+| `bin/` | Runnable package executables, with platform/profile subdivisions where needed |
+| `debug/` | Test, coverage, profile, symbol, source-map, and compiler-mapping information |
+| `container/` | Optional container realizations or construction metadata |
+| `source/` | Optional source for rebuilding, specialization, debugging, or inspection |
 
-The interface is first-class because consumers should not need implementation
-source merely to type-check imports. Source inclusion and interface inclusion
-are separate publication choices. A package that omits source must include a
-compatible artifact for every platform it claims to support.
-
-## Artifact selection
-
-Running or consuming a `.pkg` follows one deterministic order:
+For example:
 
 ```text
-1. Select the declared target by name and kind.
-2. Select an exact compatible native artifact for the requested platform.
-3. Otherwise select a compatible compiler/backend artifact.
-4. Otherwise rebuild from included source using the included lockfile.
-5. Otherwise use an explicitly permitted container recipe or embedded OCI image.
-6. Otherwise report each rejected candidate and the missing requirement.
+package.pkg/
+├── artifacts/
+│   ├── linux-x86_64/release/object/
+│   └── portable/mlir/
+├── bin/
+│   └── linux-x86_64/release/geometry-tool
+├── debug/
+│   ├── test/<platform>/<build-profile>/<invocation>/
+│   ├── coverage/<invocation>/
+│   └── profile/<invocation>/
+└── cache/
+    ├── native/<invocation>/
+    └── run/<invocation>/bin/
 ```
 
-Selection considers the platform triple, Severian runtime ABI, backend format
-version, CPU/GPU features, required system libraries, and package capabilities.
-It must not silently run an incompatible artifact or weaken package policy.
+Test, coverage, and profile outputs belong beneath `debug/`. Standalone build executables belong
+in `bin/`; temporary run executables and compiler intermediates belong in
+`cache/`. Executables and intermediate files do not belong directly in the
+`package.pkg/` root. Platform and backend classifications belong inside their
+artifact category, rather than introducing additional top-level categories.
 
-## Runtime policy and containers
+The published realization excludes `build/`. Source inclusion is optional;
+an ordinary installed import must be usable without the dependency's source
+or mutable build state. The complete source-free import path remains migration
+work, as recorded below.
 
-The `network` library describes how source performs I/O. Package network policy
-describes what a particular executable needs from its environment. It belongs
-beside container policy because native processes, VMs, remote jobs, and
-containers all share the same requirements.
+### `debug/test/`
 
-Network policy may declare named ingress and egress endpoints, DNS/TLS/proxy
-requirements, timeouts, retry policy, and resource limits. Container policy has
-three explicit modes:
+Contains test invocation results: pass/fail summaries, diagnostics, captured
+output, and failure details. Each invocation owns its directory so repeated or
+concurrent runs do not overwrite one another. Retained test executables belong
+in that invocation's `bin/` subdirectory.
+
+### `debug/coverage/`
+
+Contains coverage measurements and reports, including execution counters and
+their mappings to source lines, branches, or functions. Reports identify the
+source revision, build settings, and test invocation they describe so coverage
+from incompatible builds is not combined.
+
+### `debug/profile/`
+
+Contains CPU, memory, and elapsed-time measurements, compilation-stage timings,
+and detailed profiling traces such as sampled call stacks or allocation
+records. Each invocation owns its reports and records the measured executable,
+arguments, and build identity. This directory describes performance
+measurements; build profiles such as `dev` and `release` remain build settings.
+
+## Interfaces, exports, and imports
+
+`package.pkgi` is generated from the canonical export model. It carries public
+semantic information and stable declaration identities; consumers must not
+need a dependency's private AST to type-check an import.
+
+The SIP defines three export forms that converge on the same export set:
+
+```sev
+package.export(foo)
+
+with package.export:
+    class Point:
+        x: float
+        y: float
+```
 
 ```toml
-[container]
-mode = "none"       # no fallback
-# mode = "recipe"   # construction metadata is present
-# mode = "embedded" # an OCI image is present in the package
+[package]
+name = "geometry"
+version = "1.2.0"
+export = ["Point", "distance"]
 ```
 
-Package installation never gains host access merely because a fallback exists.
-Native tools, network access, filesystem mounts, devices, and credentials remain
-declared capabilities. A force option may acknowledge a compatibility or trust
-warning, but it does not silently bypass the program's safety model.
+These are design examples; convergence of the export forms and general package
+interfaces is not yet complete. Duplicate identical exports collapse, and an
+export referring to a missing declaration is an error.
 
-## Versioning invariants
+The intended import flow is:
 
-- Manifest additions are backward-compatible only when old readers can ignore
-  them safely; otherwise the manifest format needs an explicit version.
-- `.pkg` and `.pkgi` carry independent format versions.
-- Public declaration identities do not depend on source order or build paths.
-- Package archives do not contain absolute host paths or build credentials.
-- Reproducible builds keep timestamps and machine observations out of hashed
-  artifact identity.
-- Readers reject unknown mandatory capabilities and malformed indexes before
-  extracting or executing content.
+```text
+import alias
+  → package.lock
+  → resolved installed package
+  → package.pkg/package.pkgi
+  → semantic namespace
+```
 
-## Implementation status
+An import establishes visibility. It does not fetch an undeclared dependency,
+edit the manifest, or compile every implementation in the imported package.
+Only reachable declarations require implementation lookup. A compatible cached
+implementation is reused; missing or invalid implementations are compiled.
 
-| Capability | Status |
+## Resolution and incremental builds
+
+`package.lock` records exact identities, versions, sources, dependency edges,
+and verification hashes. Explicit dependency operations update the manifest
+and lock together. Normal compilation must not rewrite dependency resolution.
+`sev add` resolves and records a dependency without compiling it.
+
+Interface identity and implementation identity are separate. A private helper
+change in dependency C must not force semantic rebuilds of consumers B and A
+when C's consumed interface remains unchanged. An exported type change causes
+its consumers to be reconsidered; invalidation propagates further only where
+relevant interfaces or implementation dependencies change.
+
+Implementation cache keys include implementation semantics, consumed interface
+hashes, compiler version and ABI, platform, backend, profile, and relevant
+options. Package timestamps alone do not establish cache validity.
+
+The current compilation-unit cache verifies actual source input hashes, the
+resolved graph, compiler identity, native tool versions, build settings, and
+output digests. Its records live in `package.pkg/build/units/`. This implements
+unit reuse; declaration-level interface invalidation remains a separate step.
+
+## Package operations
+
+The package standard library is the semantic authority for package operations.
+The CLI, compiler, publisher, and tooling must use the same resolution and
+export rules. The native source compiler already delegates package operations
+to this library; the Rust seed still has bootstrap implementations to converge.
+
+The current API can be used directly:
+
+```sev
+import package
+
+project = package.open(".")
+graph = package.resolve(project)
+print(package.tree(graph))
+
+compiler = package.Compiler("/path/to/sev_compiler", "/path/to/Severian")
+result = package.build(project, compiler, package.Build(profile="release"))
+report = package.test(project, compiler)
+```
+
+A compilation unit receives a versioned snapshot of resolved identities,
+manifests, roots, and alias edges through `__compile-unit`. That compiler
+boundary performs the requested compilation without resolving the graph again.
+See [API.md](API.md) for request fields and result types.
+
+Common native compiler commands are:
+
+```sh
+sev check
+sev build --build-profile release
+sev test
+sev test --profile
+sev test --profile cpu
+sev test --profile memory
+sev run
+```
+
+`--build-profile` selects build settings; `--profile` measures the invocation.
+Default profiling reports use `package.pkg/debug/profiles/`. Test invocations
+use `package.pkg/debug/tests/`, with their executables beneath `bin/`.
+Standalone source builds use `package.pkg/bin/`; temporary runs and native
+intermediates use `package.pkg/cache/`. Explicit build and profiling output
+options can select another location.
+
+In a directory without `package.toml`, `sev test` batches `.sev` files in that
+directory and its subdirectories. A package directory uses its declared and
+conventional package tests.
+
+## Local registry and publication
+
+SIP-0003 places local package storage under:
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/severian/
+├── registry/
+│   ├── index/
+│   └── packages/<name>/<version>/
+│       ├── package.toml
+│       ├── package.lock
+│       └── package.pkg/
+└── git/
+    ├── checkouts/
+    └── db/
+```
+
+`SEVERIAN_HOME` can select an isolated Severian root. Registry releases are
+immutable published realizations; Git checkouts are independent package
+sources. The designed publication command is `sev publish <package> --local`.
+The exact publication CLI and storage migration are not complete; consult the
+current API for supported operations.
+
+Publication must preserve package identity, validate indexed content, and
+exclude mutable `package.pkg/build/` state. Current publication stages a
+snapshot and commits it without replacing an existing release. An identical
+publication is a no-op; changed content at an existing version produces
+`PackageVersionConflict`. Consumption verifies published content before use.
+
+The current archive compatibility boundary is `SEVPKG`: version 1 contains
+reachable library source; version 2 contains indexed metadata, optional source,
+and compatible native artifacts. Archive entries have normalized relative
+paths, deterministic ordering, content checksums, and executable flags.
+Readers validate bounds, duplicate entries, and paths before extraction or
+execution. Existing archive paths such as `metadata/sev.lock` and
+`artifacts/<platform>/<profile>/bin/` are compatibility details pending
+migration, rather than the canonical working-package layout above.
+
+The current registry runner selects a compatible native binary or builds from
+included source. General interface consumption, additional backend selection,
+and container fallback must satisfy the SIP's compatibility rules before being
+presented as implemented. Optional source, containers, and debug data do not
+replace the semantic interface.
+
+## Implementation status and migration
+
+| Contract | Current status |
 | --- | --- |
-| Manifest discovery and local path dependency graph | Implemented |
-| Binary and library targets | Implemented |
-| Dev dependencies for root tests | Implemented |
-| Catalog-backed configuration and profile overlays | Implemented |
-| Local target layout shown above | Implemented |
-| `SEVPKG` v1 reachable-source library writer | Implemented |
-| Consuming an emitted `.pkg` as a dependency | Not implemented |
-| `sev publish` and version-selected local registry consumption | Implemented |
-| Registry publish/consume golden-path validation | Implemented |
-| Published transitive dependency closure and import isolation | Implemented |
-| General package interfaces (`.pkgi`) | Partial; primitive interface records exist |
-| Atomic `sev add`, `remove`, `update` and lock generation | Implemented |
-| Registry `sev run` and machine-level `sev install` | Implemented |
-| Ephemeral Git/GitHub `sev run` | Implemented |
-| `SEVPKG` v2 writer/reader and native/source selection | Implemented |
+| Package operations in ordinary Severian source | Implemented; native source CLI delegates to this library |
+| One package implementation for every consumer | Partial; Rust bootstrap package semantics remain separate |
+| Manifest discovery, dependency aliases, and transitive resolution | Implemented |
+| Transactional dependency edits and lock generation | Implemented using legacy `sev.lock` |
+| Canonical `package.lock` name | Pending migration of APIs, compilers, archives, examples, and tooling |
+| Lock enforcement | Implemented when requested through `--locked` or `Resolve(locked=true)` |
+| Canonical `package.pkg/` top-level layout | Partial; package builds still write `<platform>/<profile>/bin` and `pkg` beneath `package.pkg/` |
+| Test and profile output placement | Under `package.pkg/debug/`; current writers use plural `tests/` and `profiles/`, pending migration to canonical `test/` and `profile/` |
+| Coverage output placement | Canonical destination is `package.pkg/debug/coverage/`; producer convergence remains migration work |
+| Standalone source build/run and intermediate placement | Implemented beneath `bin/` and `cache/` |
+| General `package.pkgi` and source-free installed imports | Pending; primitive interface records exist |
+| Canonical export model across all SIP export forms | Pending convergence |
+| Compilation-unit cache reuse | Implemented under `package.pkg/build/units/` |
+| Declaration-level interface hashing and incremental invalidation | Pending |
+| Local registry publish/consume and transitive dependency validation | Implemented with existing publication layout |
+| SIP registry index and independent Git storage layout | Pending; current Git cache is under the registry cache |
+| `SEVPKG` v1/v2 archive compatibility | Implemented; archive migration remains separate |
+| Registry execution and machine-level installation | Implemented |
 | Remote registry transport and authentication | Not implemented |
-| Portable Severian release with bundled LLVM/MLIR tools | Implemented by release builder |
-| Network/container policy enforcement | Design contract |
+| General backend/container fallback and policy enforcement | Design contract |
 
-Keeping this table honest is part of the example. Documentation must not claim
-that a future distribution feature is produced by today’s `sev build`.
+The canonical names above define the destination of the migration. Legacy
+paths remain implementation compatibility details until their replacements
+work and all consumers have migrated. SIP-0003 requires replacement interfaces,
+implementation lookup, and shared APIs before removing the corresponding
+legacy paths or duplicate implementations.
 
-## Hosted package operations and publication
+## Validation and native boundaries
 
-The library workspace lists actual manifest paths. Standalone compiler imports
-use that catalog; package builds use their declared resolved graph. Internal
-memory/collection packages may be published as dependencies while retaining
-`metadata.library.public = false` where declared.
-
-Filesystem traversal and temporary directories come from `os`; checked text
-reads come from `file.read_checked`; argument-vector execution and captured
-stdout/stderr come from `process`. Their POSIX implementations are declared by
-`library/system/package.toml`, and both compiler link paths discover native
-providers from package manifests. Resource-budget helpers live in `process`.
-String and UTF-8 manipulation stays in Severian/MLIR; archive decoding does not
-use temporary files or C string conversion helpers.
-
-Publication stages a snapshot, includes native sources and other package
-assets, verifies a content index, and commits the directory without replacement.
-An identical source/configuration/dependency/toolchain identity is a no-op;
-changed content at an existing version produces `PackageVersionConflict`.
-Consumption verifies the snapshot. Opening a release does not create edit
-locks, and build/clean/edit reject published project directories. Interrupted
-publication may leave an unreferenced stage, but never replaces a release.
-
-The source compiler reports the source bytes it actually consumed. Package
-compilation reuses completed outputs only when those input hashes, the resolved
-graph, compiler, native tool versions, target, profile, and output digest match.
-Mutable cache records stay in the consumer's `package.pkg/build/units/`.
-This is compilation-unit reuse; source-free `.pkgi` imports and declaration-level
-invalidation from SIP-0003 remain separate compiler work. The source compiler
-currently accepts scalar native boundaries: lexical path operations and scalar
-native-provider consumers run through it, while the existing file/process APIs
-with C-string signatures still require the Rust seed. This change does not add
-string-to-C ABI lowering.
+Hosted filesystem and process operations come from `os`, `file`, and `process`.
+Their POSIX providers are declared in `library/system/package.toml` and selected
+through package manifests. String processing and archive decoding remain in
+Severian source.
 
 Run the adjacent contracts with:
 
@@ -369,7 +325,12 @@ Run the adjacent contracts with:
 python3 library/system/tests/native.py
 python3 library/package/tests/workspace.py
 SEVERIAN_SOURCE_COMPILER=/path/to/sev python3 library/package/tests/publication.py
-sev_rust test library/system/file
-sev_rust test library/system/process
+python3 tests/sev_compiler/artifact_layout.py
 sev_rust test library/package
 ```
+
+End-to-end publication is covered by
+[registry publish/consume validation](../../test/validation/packages/registry_publish_consume.sh)
+and [transitive dependency validation](../../test/validation/packages/registry_transitive_tensor.sh).
+Changes to package semantics or output placement should update the relevant
+contracts and this implementation-status table together.

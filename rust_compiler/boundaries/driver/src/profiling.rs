@@ -136,7 +136,7 @@ impl Session {
                 .unwrap_or_default()
                 .as_nanos();
             PathBuf::from(format!(
-                "package.pkg/profiles/rust-{}-{nonce}",
+                "package.pkg/debug/profiles/rust-{}-{nonce}",
                 std::process::id()
             ))
         });

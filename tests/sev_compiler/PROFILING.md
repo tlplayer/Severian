@@ -30,7 +30,7 @@ use the existing test resource guard when running bounded automated checks.
 
 `--profile-output DIR` selects a new report directory. Existing directories are
 rejected. By default, each invocation creates a unique directory underneath
-`package.pkg/profiles`. `report.json` records the compiler kind, concrete
+`package.pkg/debug/profiles`. `report.json` records the compiler kind, concrete
 executable, arguments, working directory, mode, exit status, and measurements.
 Use the concrete candidate executable to profile a new build before installing
 it. Source compiler candidates need `--sysroot ROOT` or `SEVERIAN_SYSROOT` when
@@ -136,7 +136,7 @@ and forward calls are processed once. Semantic analysis still checks the full
 prelude; that is now the largest measured stage in this small example.
 
 Local measurement artifacts, commands, binary hashes and individual samples
-are in `sev_compiler/package.pkg/profiles/reachability-final/results.json`.
+are in `sev_compiler/package.pkg/debug/profiles/reachability-final/results.json`.
 
 ## Validation
 

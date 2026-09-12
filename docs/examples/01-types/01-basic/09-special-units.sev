@@ -73,7 +73,8 @@ test "frequency":
 # Unit values work naturally in contracts.
 def process(data: string) with
 {
-    defer data_size(size(data)) < 64MiB -> Error("memory limit exceeded"),
+    # bytes is a keyword that means how much memory does this object consume in B
+    defer bytes(data) < 64MiB -> Error("memory limit exceeded"),
 }:
     print(size(data))
 

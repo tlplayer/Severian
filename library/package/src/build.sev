@@ -11,6 +11,9 @@ import process
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
     return project.root + "/package.pkg/" + safe_name(platform) + "/" + safe_name(profile)
 
+def test_output_root(project: Project, platform: string, profile: string) -> string | Error:
+    return project.root + "/package.pkg/debug/tests/" + safe_name(platform) + "/" + safe_name(profile)
+
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
     mutable_project(project.root)
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
@@ -34,7 +37,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
             continue
         destination := root + "/bin/" + target.name if target.kind == "binary" else root + "/pkg/" + target.name + "-" + project.manifest.version + ".pkg"
         if mode == "test":
-            destination = root + "/tests/" + target.name
+            destination = test_output_root(project, platform, profile) + "/bin/" + target.name
         elif request.emit != "":
             destination += ".json" if request.emit == "agent-ir" else "." + request.emit
         if request.output != "":
@@ -53,7 +56,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
         for location in files(project.root + "/tests"):
             if location.ends_with(".sev"):
                 relative = location[int(len(project.root)) + 1:]
-                units.append(BuildUnit(0, Target(relative, "test", relative), platform, profile, root + "/tests/" + relative.replace("/", "_").replace(".sev", ""), true))
+                units.append(BuildUnit(0, Target(relative, "test", relative), platform, profile, test_output_root(project, platform, profile) + "/bin/" + relative.replace("/", "_").replace(".sev", ""), true))
     return BuildPlan(project, resolution, units, mode, request.emit)
 
 # The compilation-unit protocol is the only compiler execution boundary.
@@ -81,11 +84,11 @@ def check(project: Project, compiler: Compiler, request: Check) -> BuildResult |
 def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Error:
     planned = plan(project, Build("", request.platform, request.profile, request.emit, request.output, request.locked), "test")
     # Each invocation owns its executables, including simultaneous test runs.
-    stage = temporary(output_root(project, planned.units[-1].platform, planned.units[-1].profile) + "/tests", "run-")
+    stage = temporary(test_output_root(project, planned.units[-1].platform, planned.units[-1].profile), "run-")
     for index in range(int(len(planned.units))):
         unit := planned.units[index]
         if unit.package_index == 0:
-            unit.output = stage + "/test-" + string(index)
+            unit.output = stage + "/bin/test-" + string(index)
             planned.units[index] = unit
     result = execute(planned, compiler)
     memory = process.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))

@@ -23,6 +23,13 @@ subdirectories. `sev test DIRECTORY` selects a directory explicitly. The
 source compiler reports each file and continues after failures; the command
 fails if any file fails. Directories with `package.toml` use package tests.
 
+Default profiling reports go under `package.pkg/debug/profiles/`, and test
+invocations under `package.pkg/debug/tests/`, with test executables in their
+invocation's `bin/` directory. Standalone source builds write to
+`package.pkg/bin/`; standalone runs and native compiler intermediates use
+`package.pkg/cache/`. Use `-o` for an explicit build output or `--profile-output`
+for a report directory.
+
 Both native compilers implement `--profile` directly:
 
 ```sh
