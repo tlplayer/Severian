@@ -12,6 +12,7 @@ enum CfgExit:
     Conditional(condition: ValueId, taken: CfgEdge, otherwise: CfgEdge)
     Raise(value: ValueId)
     Finish(value: ValueId | None)
+    FinishFields(values: list[ValueId])
     Dead
 
 

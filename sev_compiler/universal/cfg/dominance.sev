@@ -1,0 +1,138 @@
+# Immediate dominators keep one parent per block, rather than a block-squared
+# matrix. Both CFG and MLIR verification use this graph calculation.
+def tree(count: int, entry: int, sources: list[int], targets: list[int]) -> list[int]:
+    incoming: list[int] = [0]
+    outgoing: list[int] = [0]
+    parents: list[int] = []
+    ranks: list[int] = []
+    seen: list[int] = []
+    nodes: list[int] = []
+    cursors: list[int] = []
+    index := 0
+    while index < count:
+        incoming.append(0)
+        outgoing.append(0)
+        parents.append(-1)
+        ranks.append(-1)
+        seen.append(0)
+        nodes.append(0)
+        cursors.append(0)
+        index += 1
+    if count == 0:
+        return parents
+    index = 0
+    while index < len(sources):
+        incoming[targets[index] + 1] += 1
+        outgoing[sources[index] + 1] += 1
+        index += 1
+    index = 1
+    while index <= count:
+        incoming[index] += incoming[index - 1]
+        outgoing[index] += outgoing[index - 1]
+        index += 1
+    predecessors: list[int] = []
+    successors: list[int] = []
+    index = 0
+    while index < len(sources):
+        predecessors.append(0)
+        successors.append(0)
+        index += 1
+    next_in = clone incoming
+    next_out = clone outgoing
+    index = 0
+    while index < len(sources):
+        predecessor = sources[index]
+        successor = targets[index]
+        predecessors[next_in[successor]] = predecessor
+        successors[next_out[predecessor]] = successor
+        next_in[successor] += 1
+        next_out[predecessor] += 1
+        index += 1
+    postorder: list[int] = []
+    depth := 0
+    nodes[0] = entry
+    cursors[0] = outgoing[entry]
+    seen[entry] = 1
+    while depth >= 0:
+        node = nodes[depth]
+        cursor = cursors[depth]
+        if cursor < outgoing[node + 1]:
+            child = successors[cursor]
+            cursors[depth] += 1
+            if seen[child] == 0:
+                seen[child] = 1
+                depth += 1
+                nodes[depth] = child
+                cursors[depth] = outgoing[child]
+        else:
+            postorder.append(node)
+            depth -= 1
+    index = 0
+    while index < len(postorder):
+        ranks[postorder[int(len(postorder)) - 1 - index]] = index
+        index += 1
+    parents[entry] = entry
+    changed := true
+    while changed:
+        changed = false
+        index = int(len(postorder)) - 2
+        while index >= 0:
+            node = postorder[index]
+            parent := -1
+            cursor := incoming[node]
+            while cursor < incoming[node + 1]:
+                predecessor = predecessors[cursor]
+                if parents[predecessor] >= 0:
+                    if parent < 0:
+                        parent = predecessor
+                    else:
+                        left := parent
+                        right := predecessor
+                        while left != right:
+                            while ranks[left] > ranks[right]:
+                                left = parents[left]
+                            while ranks[right] > ranks[left]:
+                                right = parents[right]
+                        parent = left
+                cursor += 1
+            if parents[node] != parent:
+                parents[node] = parent
+                changed = true
+            index -= 1
+    return parents
+
+
+def contains(parents: list[int], ancestor: int, block: int) -> bool:
+    cursor := block
+    while cursor >= 0:
+        if cursor == ancestor:
+            return true
+        parent = parents[cursor]
+        if parent == cursor:
+            break
+        cursor = parent
+    return false
+
+
+test "a diamond join is dominated by its entry, not either branch":
+    parents = tree(4, 0, [0, 0, 1, 2], [1, 2, 3, 3])
+    assert(contains(parents, 0, 3))
+    assert(not contains(parents, 1, 3))
+    assert(not contains(parents, 2, 3))
+    assert(contains(parents, 3, 3))
+
+
+test "loop backedges and unreachable blocks preserve dominance":
+    parents = tree(5, 0, [0, 1, 2, 2], [1, 2, 1, 3])
+    assert(contains(parents, 1, 3))
+    assert(contains(parents, 2, 3))
+    assert(not contains(parents, 2, 1))
+    assert(parents[4] == -1)
+    assert(not contains(parents, 0, 4))
+
+
+test "multiple loop entries intersect at the common ancestor":
+    parents = tree(4, 0, [0, 0, 1, 2, 1, 2], [1, 2, 2, 1, 3, 3])
+    assert(parents[1] == 0)
+    assert(parents[2] == 0)
+    assert(parents[3] == 0)

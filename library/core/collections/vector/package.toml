@@ -1,0 +1,11 @@
+[package]
+name = "collections.vector"
+version = "0.1.0"
+edition = "2026"
+description = "Growable contiguous vectors with an initial capacity"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+storage = { package = "core.storage", path = "../../storage", version = "0.1.0" }

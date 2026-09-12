@@ -55,6 +55,7 @@ class CallableAnalysis:
     readonly: list[int] = []
     borrowed_parameters: list[int] = []
     result_mode: string = ""
+    result_origin: int = -1
     uninitialized: list[tuple[int, int]] = []
     moved_elements: list[tuple[int, int]] = []
     projecting: bool = false
@@ -72,6 +73,16 @@ def callable_diagnostic(message: string, span: source.Span | None) -> diagnostic
 
 def callable_parameter_value(state: CallableAnalysis, parameter: universal.FunctionParameter, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
     for modifier in parameter.modifiers:
+        if modifier.name == "mirror":
+            return error(callable_diagnostic("mirror requires copy-on-write support", expression.span))
+        if modifier.name == "copy":
+            match expression.kind:
+                case Ownership:
+                    if mode == "clone":
+                        return callable_expression(state, expression, expected)
+                case _:
+                    pass
+            return callable_expression(state, universal.Expression(universal.Ownership("clone", expression), expression.span), expected)
         if modifier.name in ["move", "borrow", "borrow mut"]:
             match expression.kind:
                 case Ownership:
@@ -82,62 +93,37 @@ def callable_parameter_value(state: CallableAnalysis, parameter: universal.Funct
                     pass
             wrapped = universal.Expression(universal.Ownership(modifier.name, expression), expression.span)
             return callable_expression(state, wrapped, expected)
-    value = callable_expression(state, expression, expected)
-    root = loans.binding(value)
-    effect := 0 if value.type_id.index == 3 else 1
+    return callable_expression(state, expression, expected)
+
+
+def callable_parameter_contract(parameter: universal.FunctionParameter, records: list[universal.RecordDeclaration]) -> universal.FunctionParameter:
+    # Ownership is a signature contract, independent of the callee's body.
     for modifier in parameter.modifiers:
-        if modifier.name == "inferred read":
-            effect = 0
-        if modifier.name == "inferred move":
-            effect = 2
-    if root >= 0 and (value.type_id.index == 3 or storage_types.buffer_element(value.type_id, state.records).index != 0 or storage_types.indirect_value(value.type_id, state.records)):
-        loans.access(state.loans, root, effect != 0, expression.span)
-        if effect != 0 and root in state.readonly:
-            return error(callable_diagnostic("shared borrow requires a shared parameter contract", expression.span))
-        if effect == 2:
-            match value.kind:
-                case Ownership:
-                    if mode == "move":
-                        return value
-                case _:
-                    pass
-            return callable_expression(state, universal.Expression(universal.Ownership("move", value), expression.span), expected)
-    return value
+        if modifier.name in ["borrow", "borrow mut", "copy", "move", "mirror"]:
+            return parameter
+    if storage_types.indirect_value(parameter.type_id, records) or not storage_types.copy_storage(parameter.type_id, records):
+        parameter.modifiers = parameter.modifiers[:]
+        parameter.modifiers.append(universal.BoundaryModifier("borrow"))
+    return parameter
 
 
-def callable_inferred_signature(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.FunctionDeclaration:
-    if function.body == None or function.operator_syntax != None:
-        return function
+def callable_contract_signature(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.FunctionDeclaration:
+    # Kept as a normalization entry point for late generic specializations.
     parameters: list[universal.FunctionParameter] = []
-    index := 0
-    # Most signatures need no inference; cached queries must not copy the
-    # complete function/AST inventory either.
-    candidates: list[universal.FunctionDeclaration] := []
     for parameter in function.parameters:
-        explicit := false
-        for modifier in parameter.modifiers:
-            if modifier.name in ["borrow", "borrow mut", "move", "inferred read", "inferred write", "inferred move"]:
-                explicit = true
-        owning = parameter.type_id.index == 3 or storage_types.buffer_element(parameter.type_id, state.records).index != 0 or storage_types.owned_record(parameter.type_id, state.records) or callable_has_drop(state, parameter.type_id)
-        if owning and not explicit:
-            key = string(function.id.value) + ":" + parameter.name
-            effect := -1
-            for cached in borrow state.parameter_effects:
-                if cached.key == key:
-                    effect = cached.effect
-            if effect < 0:
-                if len(candidates) == 0:
-                    candidates = state.functions[:]
-                    for generic in borrow state.generics:
-                        candidates.append(generic)
-                effect = parameter_effects.infer(function, index, candidates, state.parameter_effects)
-                state.parameter_effects.append(parameter_effects.CachedEffect(key, effect))
-            parameter.modifiers = parameter.modifiers[:]
-            parameter.modifiers.append(universal.BoundaryModifier("inferred move" if effect == 2 else ("inferred write" if effect == 1 else "inferred read")))
-        parameters.append(parameter)
-        index += 1
+        parameters.append(callable_parameter_contract(parameter, state.records))
     function.parameters = parameters
     return function
+
+
+def callable_borrowed_result(function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], result: universal.Expression) -> universal.Expression:
+    if function.result_origin >= 0:
+        origin = function.parameters[function.result_origin].name
+        for argument in arguments:
+            if argument.name == origin:
+                result.loan_root = loans.binding(argument.value)
+                result.loan_mode = function.result_mode
+    return result
 
 
 def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, receiver: universal.Expression, arguments: list[universal.CallArgument], span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -501,7 +487,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     instance_name = template.name + "$pack$" + string(count) + suffix
     for function in state.functions:
         if function.name == instance_name:
-            return CallableSelection(callable_inferred_signature(state, function), bound.arguments)
+            return CallableSelection(callable_contract_signature(state, function), bound.arguments)
     if callable_specialization_count(state) >= 512:
         return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup, owner_type=template.owner_type, constructor=template.constructor, prelude=template.prelude)
@@ -550,7 +536,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
             message = bound.message
             continue
         if len(candidates) == 1:
-            return CallableOptionalSelection(CallableSelection(callable_inferred_signature(state, function), bound.arguments))
+            return CallableOptionalSelection(CallableSelection(callable_contract_signature(state, function), bound.arguments))
         compatible := true
         for argument in bound.arguments:
             typed = callable_expression(callable_scope(state), argument.value, universal.TypeId(0))
@@ -561,7 +547,7 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
                         compatible = false
                 index += 1
         if compatible:
-            return CallableOptionalSelection(CallableSelection(callable_inferred_signature(state, function), bound.arguments))
+            return CallableOptionalSelection(CallableSelection(callable_contract_signature(state, function), bound.arguments))
     return error(callable_diagnostic(message, arguments[0].span if len(arguments) != 0 else None))
 
 
@@ -570,6 +556,13 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
     resolved = callable_expression_checked(state, expression, expected)
     match expression.kind:
         case Call:
+            state.loans = loans.retained(state.loans, loan_start)
+        case _:
+            pass
+    # Operators and conversions can also resolve to calls. Their automatic
+    # argument loans end with that expression, just like a spelled-out call.
+    match resolved.kind:
+        case ResolvedCall:
             state.loans = loans.retained(state.loans, loan_start)
         case _:
             pass
@@ -685,6 +678,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case Ownership:
             if expression.type_id.index != 0:
                 return expression
+            if mode == "mirror":
+                return error(callable_diagnostic("mirror requires copy-on-write support", expression.span))
             operand = callable_expression(state, value, expected)
             if mode == "clone":
                 if callable_has_drop(state, operand.type_id):
@@ -694,10 +689,25 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if implementation != None:
                     return callable_resolved_operator(state, implementation, [operand], expression.span, expected)
                 if storage_types.copy_storage(operand.type_id, state.records):
+                    if storage_types.indirect_value(operand.type_id, state.records):
+                        fields: list[universal.CallArgument] = []
+                        receiver = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=operand.type_id)
+                        for record in state.records:
+                            if record.type_id.index == operand.type_id.index:
+                                field_index := 0
+                                for field in record.fields:
+                                    member = universal.Expression(universal.FieldReference(receiver, field_index), expression.span, type_id=field.type_id)
+                                    copied = callable_expression(state, universal.Expression(universal.Ownership("clone", member), expression.span), field.type_id)
+                                    fields.append(universal.CallArgument(field.name, copied, expression.span))
+                                    field_index += 1
+                        copied_record = universal.Expression(universal.RecordValue(fields), expression.span, type_id=operand.type_id)
+                        return universal.Expression(universal.Evaluate(operand, copied_record), expression.span, type_id=operand.type_id)
                     return operand
-                return error(callable_diagnostic("clone requires a copy implementation", expression.span))
+                return error(callable_diagnostic("copy requires a copy implementation", expression.span))
             binding_index = loans.binding(operand)
             if binding_index < 0:
+                if mode in ["borrow", "borrow mut", "move"]:
+                    return universal.Expression(universal.Ownership(mode, operand), expression.span, type_id=operand.type_id)
                 return error(callable_diagnostic("ownership operation requires a local place", expression.span))
             if mode == "move":
                 loans.access(state.loans, binding_index, true, expression.span)
@@ -720,8 +730,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             else:
                 exclusive = mode == "borrow mut"
                 loans.access(state.loans, binding_index, exclusive, expression.span)
-                if exclusive and (binding_index in state.readonly or not state.mutables[binding_index]):
-                    return error(callable_diagnostic("exclusive borrow requires mutable storage", expression.span))
+                if exclusive and binding_index in state.readonly:
+                    return error(callable_diagnostic("cannot mutate through a view", expression.span))
                 state.loans.append(loans.Loan(loans.owner(state.loans, binding_index), -1, exclusive))
             return universal.Expression(universal.Ownership(mode, operand), expression.span, type_id=operand.type_id)
         case MatchExpression:
@@ -912,7 +922,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 case AbsentValue:
                     result_type = universal.TypeId(7)
                 case StringValue:
-                    result_type = universal.TypeId(3)
+                    result_type = expected if storage_types.string_element(expected, state.records).index != 0 else universal.TypeId(3)
                 case CharacterValue:
                     result_type = universal.TypeId(132)
                 case BooleanValue:
@@ -929,6 +939,14 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             result_type = expression.type_id
         case ResolvedCall:
             result_type = expression.type_id
+        case Convert:
+            result_type = expression.type_id
+        case ListValue:
+            result_type = expression.type_id
+        case FunctionReference:
+            result_type = expression.type_id
+        case TypeName:
+            result_type = expression.type_id
         case RecordValue:
             result_type = expression.type_id
             resolved_fields: list[universal.CallArgument] = []
@@ -938,7 +956,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if record.type_id.index == result_type.index:
                         for field in record.fields:
                             if argument.name == field.name:
-                                resolved_fields.append(universal.CallArgument(field.name, callable_expression(state, argument.value, field.type_id), argument.span))
+                                field_value = callable_expression(state, argument.value, field.type_id)
+                                root = loans.owner(state.loans, loans.binding(field_value))
+                                if not storage_types.copy_storage(field.type_id, state.records) and root in state.borrowed_parameters:
+                                    return error(callable_diagnostic("cannot store a borrowed parameter in an owned field; use copy or move", argument.span))
+                                resolved_fields.append(universal.CallArgument(field.name, field_value, argument.span))
                                 matched = true
                 if not matched:
                     return error(callable_diagnostic("unknown initialized record field", argument.span))
@@ -976,8 +998,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         index += 1
             return error(callable_diagnostic("unknown field " + name, expression.span))
         case Stringify:
-            # Interpolation reads an existing string directly. Calling the
-            # identity conversion would infer an ownership transfer instead.
+            # The formatting builder views each interpolation and owns the
+            # appended output; converting text needs no intermediate copy.
             if expected.index != 0 and expected.index != 3:
                 return error(callable_diagnostic("formatted string does not match its expected scalar type", expression.span))
             operand = callable_expression(state, value, universal.TypeId(0))
@@ -1244,10 +1266,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     case _:
                         pass
                 return result
-            if name in ["borrow", "move", "clone"]:
+            if name in ["view", "borrow", "move", "copy", "clone", "mirror"]:
                 if len(arguments) != 1 or arguments[0].name != None:
                     return error(callable_diagnostic(name + " requires one positional value", expression.span))
-                return callable_expression(state, universal.Expression(universal.Ownership(name, arguments[0].value), expression.span), expected)
+                return callable_expression(state, universal.Expression(universal.Ownership("borrow" if name == "view" else ("borrow mut" if name == "borrow" else ("clone" if name == "copy" else name)), arguments[0].value), expression.span), expected)
             if name == "bytes" and len(arguments) == 1:
                 annotation = callable_type_expression(arguments[0].value)
                 subject = callable_annotation(annotation, state.records, state.namespace, state.declarations)
@@ -1255,6 +1277,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return callable_raw_call(state, "data_size", [layout], expression.span, expected)
             if name == "string" and len(arguments) == 1:
                 value = callable_expression(state, arguments[0].value, universal.TypeId(0))
+                if value.type_id.index == 3:
+                    if expected.index != 0 and expected.index != 3:
+                        return error(callable_diagnostic("string conversion does not match the expected type", expression.span))
+                    return value
                 callable_register_record_methods(state, value.type_id)
                 conversion = callable_operator(state, "string", [value.type_id], expression.span)
                 function ?= conversion.function
@@ -1262,6 +1288,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if function.result_type.index != 3:
                         return error(callable_diagnostic("string conversion must return string", expression.span))
                     return callable_resolved_operator(state, function, [value], expression.span, expected)
+                converted_arguments = [universal.CallArgument(None, value, arguments[0].span)]
+                conversion_lookup = callable_select_function(state, "string", converted_arguments, expected)
+                if conversion_lookup.selection != None:
+                    return callable_regular_call(state, expression, "string", converted_arguments, expected)
             if name == "lower" or name.starts_with("cfg."):
                 return error(callable_diagnostic("compiler context requires a resolved grammar capability", expression.span))
             if name == "mlir":
@@ -1311,7 +1341,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                         defaults.append(universal.CallArgument(field.name, typed_default, field.span))
                                 return universal.Expression(universal.RecordValue(defaults), expression.span, type_id=record.type_id)
                         return error(callable_diagnostic(bound.message, expression.span))
-                    resolved: list[universal.CallArgument] = []
+                    resolved: list[universal.CallArgument] := []
                     for argument in bound.arguments:
                         for field in record.fields:
                             if argument.name == field.name:
@@ -1337,7 +1367,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             method_lookup = callable_method(state, callee, len(arguments))
             source_method ?= method_lookup.function
             if source_method != None:
-                method = callable_inferred_signature(state, source_method)
+                method := callable_contract_signature(state, source_method)
                 receiver = callable_receiver(state, callee)
                 if receiver.type_id.index >= 100000:
                     supplied: list[universal.Expression] = [receiver]
@@ -1348,7 +1378,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         supplied.append(callable_parameter_value(state, method.parameters[index], argument.value, method.parameter_types[index]))
                         index += 1
                     return callable_resolved_operator(state, method, supplied, expression.span, expected)
-                if method.name.split(".")[-1].starts_with("_") and state.owner.index != receiver.type_id.index:
+                if method.name.split(".")[-1].starts_with("_") and not callable_same_owner(state, state.owner, receiver.type_id):
                     return error(callable_diagnostic("method is private: " + method.name, expression.span))
                 supplied = [universal.CallArgument(None, receiver, receiver.span)]
                 for argument in arguments:
@@ -1356,26 +1386,42 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if not method.extension:
                     target = universal.Expression(universal.Name(method.name), callee.span)
                     return callable_expression(state, universal.Expression(universal.Call(target, supplied), expression.span), expected)
+                overloads = callable_select_function(state, method.name, supplied, expected)
+                overload ?= overloads.selection
+                if overload != None:
+                    method = callable_contract_signature(state, overload.function)
                 bound = packs.bind_arguments(method, supplied)
                 if bound.message != "":
                     return error(callable_diagnostic(bound.message, expression.span))
-                resolved: list[universal.CallArgument] = []
+                resolved: list[universal.CallArgument] := []
                 for argument in bound.arguments:
                     index := 0
                     for parameter in method.parameters:
                         if argument.name == parameter.name:
-                            operand = callable_parameter_value(state, parameter, argument.value, method.parameter_types[index])
+                            operand = callable_expression(state, argument.value, method.parameter_types[index])
                             resolved.append(universal.CallArgument(parameter.name, operand, argument.span))
                         index += 1
+                contracted: list[universal.CallArgument] = []
+                for argument in resolved:
+                    for parameter in method.parameters:
+                        if argument.name == parameter.name:
+                            operand = callable_parameter_value(state, parameter, argument.value, parameter.type_id)
+                            contracted.append(universal.CallArgument(parameter.name, operand, argument.span))
+                resolved = contracted
                 id = universal.HirId(u32(state.next_id[0]))
                 state.next_id[0] += 1
                 kind = universal.ResolvedCall(universal.Direct(method.definition, universal.Substitution(method.type_arguments)), resolved)
-                result := universal.Expression(kind, expression.span, id, method.result_type)
+                result := callable_borrowed_result(method, resolved, universal.Expression(kind, expression.span, id, method.result_type))
                 if expected.index != 0 and expected.index != result.type_id.index:
                     result = callable_success(state, result)
                     if expected.index != result.type_id.index:
                         return error(callable_diagnostic("call result does not match its expected scalar type", expression.span))
                 return result
+            if alias_type.index != 0 and conversions.scalar_numeric(alias_type):
+                target_name = definitions.type_name(alias_type, state.records)
+                if target_name != name:
+                    target_call = universal.Expression(universal.Name(target_name), callee.span)
+                    return callable_expression(state, universal.Expression(universal.Call(target_call, arguments), expression.span), expected)
             target ?= scalar.scalar_type_name(name)
             if target != None:
                 if conversions.scalar_numeric(target):
@@ -1460,7 +1506,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         return error(callable_diagnostic("expression does not match its expected scalar type", expression.span))
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
-    return universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar)
+    return universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar, loan_root=expression.loan_root, loan_mode=expression.loan_mode)
 
 
 def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> universal.Binding | diagnostics.Diagnostic:
@@ -1494,6 +1540,10 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
     state.resource_creation = binding.value.span
     value := callable_expression(state, binding.value, expected)
     state.resource_creation = previous_creation
+    source_root = loans.binding(value)
+    if source_root >= 0 and source_root in state.readonly and not storage_types.copy_storage(value.type_id, state.records):
+        value.loan_root = source_root
+        value.loan_mode = "borrow"
     if not binding.preserve_error and binding.annotation == None:
         value = callable_success(state, value)
     if value.type_id.index == 2:
@@ -1527,6 +1577,11 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
                     state.readonly.append(int(id.index))
         case _:
             pass
+    if value.loan_mode in ["borrow", "borrow mut"] and value.loan_root >= 0:
+        root = loans.owner(state.loans, value.loan_root)
+        state.loans.append(loans.Loan(root, int(id.index), value.loan_mode == "borrow mut"))
+        if value.loan_mode == "borrow":
+            state.readonly.append(int(id.index))
     callable_transition(state, int(id.index), value, binding.span, false)
     return universal.Binding(binding.name, binding.annotation, value, false, binding.preserve_error, binding.span, id, value.type_id, binding.mutable)
 
@@ -1535,7 +1590,7 @@ def callable_assertion(state: CallableAnalysis, condition: universal.Expression,
     resolved = callable_expression(state, condition, universal.TypeId(1))
     description := "condition is false"
     if int(condition_span.source.index) < len(state.source_files):
-        characters = state.source_files[condition_span.source.index].text.characters()
+        characters = state.source_files[condition_span.source.index].characters
         if condition_span.start < condition_span.end and int(condition_span.end) <= len(characters):
             description = characters[int(condition_span.start):int(condition_span.end)].join("")
     diagnostic := universal.Expression(universal.LiteralValue(universal.StringValue(description)), span)
@@ -1828,8 +1883,14 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     returned_value = typed_return
                     if state.result_mode in ["borrow", "borrow mut"]:
                         root = loans.owner(state.loans, loans.binding(typed_return))
-                        if root not in state.borrowed_parameters:
-                            return error(callable_diagnostic("returned borrow must originate from a borrowed parameter", span))
+                        if root != state.result_origin:
+                            return error(callable_diagnostic("returned borrow must originate from its declared parameter", span))
+                        if state.result_mode == "borrow mut" and root in state.readonly:
+                            return error(callable_diagnostic("cannot return a mutable borrow of a view", span))
+                    elif not storage_types.copy_storage(typed_return.type_id, state.records):
+                        root = loans.owner(state.loans, loans.binding(typed_return))
+                        if root in state.borrowed_parameters:
+                            return error(callable_diagnostic("cannot return an owned value from a borrowed parameter; use copy or a borrowed result", span))
                     state.resource_creation = previous_creation
                 elif result_type.index == 6:
                     returned_value = callable_expression(state, universal.Expression(universal.LiteralValue(universal.NoneValue()), span), result_type)
@@ -2047,6 +2108,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
         if type_id.index == 2:
             return error(callable_diagnostic("unit cannot be a scalar parameter", parameter.span))
         parameter.type_id = type_id
+        parameter = callable_parameter_contract(parameter, records)
         if storage_types.indirect_value(type_id, records) and declaration.body != None:
             parameter.modifiers.append(universal.BoundaryModifier("reference"))
         parameter_names.append(parameter.name)
@@ -2069,6 +2131,19 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
                 return error(callable_diagnostic("C boundaries require scalar ABI types", declaration.span))
     declaration.parameter_types = parameter_types
     declaration.result_type = result_type
+    if declaration.result_mode in ["borrow", "borrow mut"]:
+        origin := -1
+        index := 0
+        for parameter in declaration.parameters:
+            for modifier in parameter.modifiers:
+                if modifier.name == declaration.result_mode and parameter.type_id.index == result_type.index:
+                    if origin >= 0:
+                        return error(callable_diagnostic("borrowed result requires one matching parameter origin", declaration.span))
+                    origin = index
+            index += 1
+        if origin < 0:
+            return error(callable_diagnostic("borrowed result requires a matching borrowed parameter", declaration.span))
+        declaration.result_origin = origin
     declaration.id = universal.FunctionId(u128(ordinal + 1))
     declaration.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal + 1)))
     return declaration
@@ -2127,9 +2202,11 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     for previous in methods:
                         if previous.name == method.name:
                             return error(callable_diagnostic("extension cannot replace existing member " + method.name, method.span))
+                    method.lookup = implementation.lookup
+                    method.extension = true
                     methods.append(method)
                 record.methods = methods
-                state.records[int(record.type_id.index) - 1000] = record
+                state.records[definitions.record_position(state.records, record.type_id)] = record
     grammar_scalar.resolve(state.declarations, state.records)
     for record in state.records:
         if definitions.record_instance(state.declarations, record.type_id) != None:
@@ -2154,7 +2231,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 return error(callable_diagnostic("unit cannot be stored in a record field", field.span))
             resolved_fields.append(resolved_field)
         record.fields = resolved_fields
-        state.records[int(record.type_id.index) - 1000] = record
+        state.records[definitions.record_position(state.records, record.type_id)] = record
         method_names: list[string] = []
         for method in record.methods:
             if method.name == record.name.split(".")[-1]:
@@ -2167,13 +2244,19 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             method = callable_replace_signature(method, ["Self"], [universal.named_type(record.name, [], record.span)])
             method.owner_type = record.type_id
             method.name = record.name + "." + method.name
-            method.lookup = record.lookup
+            if not method.extension:
+                method.lookup = record.lookup
             receiver = universal.FunctionParameter("self", universal.named_type(record.name, [], record.span), None, record.span)
+            for field in record.fields:
+                receiver.modifiers.append(universal.BoundaryModifier("receiver field " + field.name))
             parameters = [receiver]
             for parameter in method.parameters:
                 if parameter.name == "self":
-                    return error(callable_diagnostic("self is implicit in method parameters", parameter.span))
-                parameters.append(parameter)
+                    if len(parameters) != 1:
+                        return error(callable_diagnostic("self must be the first method parameter", parameter.span))
+                    parameters[0] = parameter
+                else:
+                    parameters.append(parameter)
             method.parameters = parameters
             state.functions.append(callable_signature(method, int(len(state.functions)), state.records, state.declarations))
     for record in state.records:
@@ -2357,7 +2440,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             function := state.functions[index]
             index += 1
             if function.body != None:
-                function = callable_inferred_signature(state, function)
+                function = callable_contract_signature(state, function)
                 function.body = callable_body(state, function)
             module.functions.append(function)
             if function.name == "main" and not include_tests:
@@ -2421,12 +2504,12 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
         return required
     if owner.index != 0:
         for function in state.functions:
-            if function.owner_type.index == owner.index and function.name.split(".")[-1] == member and (not implicit or callable_accepts_arity(function, argument_count + 1)):
+            if not function.constructor and function.owner_type.index == owner.index and function.name.split(".")[-1] == member and (not implicit or callable_accepts_arity(function, argument_count + 1)):
                 return CallableOptionalFunction(function)
     for record in state.records:
         if record.type_id.index == owner.index:
             for function in state.functions:
-                if function.name == record.name + "." + member and (not implicit or callable_accepts_arity(function, argument_count + 1)):
+                if not function.constructor and function.name == record.name + "." + member and (not implicit or callable_accepts_arity(function, argument_count + 1)):
                     return CallableOptionalFunction(function)
     selected: universal.FunctionDeclaration | None := None
     for template in state.generics:
@@ -2452,7 +2535,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2551,6 +2634,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
     local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
     local.test_context = function.name.starts_with("__test_") or function.name.starts_with("$case$")
     local.result_mode = function.result_mode
+    local.result_origin = function.result_origin
     namespace ?= function.lookup
     if namespace != None:
         local.namespace = namespace
@@ -2601,7 +2685,7 @@ def callable_replace_signature(function: universal.FunctionDeclaration, names: l
     annotation ?= function.result
     if annotation != None:
         result = definitions.replace_annotation(annotation, names, replacements)
-    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension)
+    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension, result_mode=function.result_mode, result_origin=function.result_origin)
 
 
 def callable_register_aliases(state: CallableAnalysis) -> unit | diagnostics.Diagnostic:
@@ -2628,9 +2712,9 @@ def callable_operator_function(operation: universal.OperatorDeclaration, owner: 
         parameters.append(universal.FunctionParameter("self", receiver_type, None, operation.span))
     for parameter in operation.parameters:
         annotation = definitions.replace_annotation(parameter.annotation, ["Self"], [receiver_type])
-        parameters.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span))
+        parameters.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span, modifiers=[universal.BoundaryModifier(parameter.mode)] if parameter.mode != "" else []))
     result = definitions.replace_annotation(operation.result, ["Self"], [receiver_type])
-    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=operation.definition, type_parameters=operation.type_parameters, constraints=operation.constraints)
+    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=operation.definition, type_parameters=operation.type_parameters, constraints=operation.constraints, result_mode=operation.result_mode)
 
 
 def callable_same_types(left: list[universal.TypeId], right: list[universal.TypeId]) -> bool | diagnostics.Diagnostic:
@@ -2698,7 +2782,10 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             return error(callable_diagnostic("generic extension method parameters require call argument inference", method.span))
                         parameters = [universal.FunctionParameter("self", receiver, None, declaration.span)]
                         for parameter in function.parameters:
-                            parameters.append(parameter)
+                            if parameter.name == "self":
+                                parameters[0] = parameter
+                            else:
+                                parameters.append(parameter)
                         function.parameters = parameters
                         callable_register_generic(state, function)
                     continue
@@ -2770,7 +2857,10 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             function.lookup = declaration.lookup
                             parameters = [universal.FunctionParameter("self", receiver_type, None, declaration.span)]
                             for parameter in function.parameters:
-                                parameters.append(parameter)
+                                if parameter.name == "self":
+                                    parameters[0] = parameter
+                                else:
+                                    parameters.append(parameter)
                             function.parameters = parameters
                             state.functions.append(callable_signature(function, int(len(state.functions)), state.records, state.declarations))
             case _:
@@ -2826,6 +2916,8 @@ def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId
 
 
 def callable_operator(state: CallableAnalysis, symbol: string, operands: list[universal.TypeId], span: source.Span) -> CallableOptionalFunction | diagnostics.Diagnostic:
+    for operand in operands:
+        callable_register_record_methods(state, operand)
     selected: universal.FunctionDeclaration | None := None
     for function in state.functions:
         syntax ?= function.operator_syntax
@@ -2922,7 +3014,7 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
     for operand in operands:
         if operand.type_id.index != function.parameter_types[index].index:
             return error(diagnostics.diagnostic_at("E000212", "operator operand type mismatch", span))
-        arguments.append(universal.CallArgument(function.parameters[index].name, operand, operand.span))
+        arguments.append(universal.CallArgument(function.parameters[index].name, callable_parameter_value(state, function.parameters[index], operand, function.parameter_types[index]), operand.span))
         index += 1
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
@@ -2931,7 +3023,7 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
     if syntax != None:
         if syntax.domain == universal.OperatorDomain.GrammarOperator:
             resolved.grammar = syntax.definition
-    return resolved
+    return callable_borrowed_result(function, arguments, resolved)
 
 
 def callable_required_member(state: CallableAnalysis, owner: universal.TypeId, name: string) -> CallableOptionalFunction | diagnostics.Diagnostic:
@@ -3374,6 +3466,12 @@ def callable_explicit_generic(state: CallableAnalysis, callee: universal.Express
 
 def callable_type_expression(expression: universal.Expression) -> universal.TypeAnnotation | diagnostics.Diagnostic:
     match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    return universal.named_type(spelling, [], expression.span)
+                case _:
+                    return error(callable_diagnostic("expected a type or integer argument", expression.span))
         case Name:
             return universal.named_type(name, [], expression.span)
         case Member:
@@ -3431,6 +3529,10 @@ def callable_constructor_type(state: CallableAnalysis, callee: universal.Express
                 callable_record_layout(state.records, resolved, [])
                 return resolved
         case Name:
+            template ?= definitions.record_template(state.declarations, name, state.namespace)
+            if template != None:
+                if len(template.type_parameters) == len(template.type_defaults):
+                    return callable_annotation(universal.named_type(name, [], callee.span), state.records, state.namespace, state.declarations)
             alias ?= definitions.alias_named(state.declarations, name, state.namespace)
             if alias != None:
                 if len(alias.type_parameters) == 0:
@@ -3445,6 +3547,14 @@ def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId
         if record.type_id.index == owner.index:
             instance ?= definitions.record_instance(state.declarations, record.type_id)
             if instance != None:
+                if len(instance.values) != 0:
+                    state.constants = state.constants[:]
+                for supplied in instance.values:
+                    number = definitions.value_argument(state.declarations, supplied, record.lookup)
+                    value = universal.Expression(universal.LiteralValue(universal.IntegerValue(number)), supplied.span, type_id=universal.TypeId(64))
+                    state.constants.append(universal.Binding(record.lookup + supplied.binding, None, value, false, false, supplied.span, type_id=universal.TypeId(64)))
+                    target = universal.named_type(number, [], supplied.span)
+                    callable_prepend_alias(state.declarations, universal.TypeDeclaration([], record.lookup + supplied.binding, [], [], target, supplied.span, lookup=record.lookup))
                 for template in state.declarations.record_templates:
                     if expansion.same(template.definition, instance.template):
                         index := 0
@@ -3494,17 +3604,31 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
             found := false
             for function in state.functions:
                 if function.name == name:
-                    found = true
+                    previous ?= function.span
+                    declared ?= method.span
+                    if previous != None:
+                        if declared != None:
+                            if previous.source.index == declared.source.index and previous.start == declared.start:
+                                found = true
             if found:
                 continue
             receiver_type = universal.named_type(record.name, [], record.span)
             method = callable_replace_signature(method, ["Self"], [receiver_type])
             method.name = name
-            method.lookup = record.lookup
+            if not method.extension:
+                method.lookup = record.lookup
             method.owner_type = owner
-            parameters = [universal.FunctionParameter("self", receiver_type, None, record.span)]
+            receiver = universal.FunctionParameter("self", receiver_type, None, record.span)
+            for field in record.fields:
+                receiver.modifiers.append(universal.BoundaryModifier("receiver field " + field.name))
+            parameters = [receiver]
             for parameter in method.parameters:
-                parameters.append(parameter)
+                if parameter.name == "self":
+                    if len(parameters) != 1:
+                        return error(callable_diagnostic("self must be the first method parameter", parameter.span))
+                    parameters[0] = parameter
+                else:
+                    parameters.append(parameter)
             method.parameters = parameters
             state.functions.append(callable_signature(method, int(len(state.functions)), state.records, local.declarations))
 
@@ -3517,6 +3641,7 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
                         found = true
             if found:
                 continue
+            operation.definition = definitions.definition_id(record.name + "." + operation.syntax.symbol, 10000 + int(len(state.functions)))
             function = callable_operator_function(operation, owner, record.lookup, state.records)
             function.owner_type = owner
             state.functions.append(callable_signature(function, int(len(state.functions)), state.records, local.declarations))
@@ -3584,6 +3709,26 @@ def callable_validate_record_arguments(state: CallableAnalysis, record: universa
             for constraint in template.constraints:
                 match constraint:
                     case Parameter:
+                        family: list[universal.TypeId] := []
+                        match bound.kind:
+                            case Union:
+                                family = definitions.family_members(local.declarations, bound, local.records, template.lookup)
+                            case _:
+                                pass
+                        if len(family) != 0:
+                            parameter_index := 0
+                            for name in template.type_parameters:
+                                if name == parameter:
+                                    for binding in instance.arguments:
+                                        if binding.parameter.index == u32(parameter_index):
+                                            accepted := false
+                                            for member in family:
+                                                if member.index == binding.type_id.index:
+                                                    accepted = true
+                                            if not accepted:
+                                                return error(callable_diagnostic("type is outside the parameter's type family", span))
+                                parameter_index += 1
+                            continue
                         trait = callable_trait(local, bound, template.lookup)
                         index := 0
                         found := false
@@ -4020,21 +4165,28 @@ def callable_regular_call(state: CallableAnalysis, expression: universal.Express
         if selected != None:
             matches = function.id.value == selected.function.id.value
         if matches:
-            if function.result_mode in ["borrow", "borrow mut"]:
-                return error(callable_diagnostic("borrowed call results require return-origin tracking", expression.span))
             if name in state.names:
                 return error(callable_diagnostic("a scalar binding is not callable: " + name, expression.span))
             if len(arguments) != len(function.parameters) and selected == None:
                 return error(callable_diagnostic("wrong argument count for " + name, expression.span))
-            resolved: list[universal.CallArgument] = []
+            resolved: list[universal.CallArgument] := []
             if selected != None:
                 for argument in selected.arguments:
                     index := 0
                     for parameter in function.parameters:
                         if argument.name == parameter.name:
-                            value = callable_parameter_value(state, parameter, argument.value, function.parameter_types[index])
+                            value = callable_expression(state, argument.value, function.parameter_types[index])
                             resolved.append(universal.CallArgument(parameter.name, value, argument.span))
                         index += 1
+            # Evaluate all arguments before activating automatic call loans.
+            # A receiver may read its fields while computing another argument.
+            contracted: list[universal.CallArgument] = []
+            for argument in resolved:
+                for parameter in function.parameters:
+                    if argument.name == parameter.name:
+                        value = callable_parameter_value(state, parameter, argument.value, parameter.type_id)
+                        contracted.append(universal.CallArgument(parameter.name, value, argument.span))
+            resolved = contracted
             result_type = function.result_type
             kind: universal.ExpressionKind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution(function.type_arguments)), resolved)
             id = universal.HirId(u32(state.next_id[0]))
@@ -4044,7 +4196,7 @@ def callable_regular_call(state: CallableAnalysis, expression: universal.Express
                 if unwrapped.type_id.index != expected.index:
                     return error(callable_diagnostic("call result does not match its expected scalar type", expression.span))
                 return unwrapped
-            return universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar)
+            return callable_borrowed_result(function, resolved, universal.Expression(kind, expression.span, id, result_type, grammar=expression.grammar))
     for function in state.functions:
         if function.name == state.namespace + name:
             return error(callable_diagnostic("no overload accepts these arguments for " + name, expression.span))
@@ -4075,3 +4227,15 @@ def callable_accepts_arity(function: universal.FunctionDeclaration, count: int) 
         if parameter.default == None:
             required += 1
     return count >= required and count <= len(function.parameters)
+
+
+
+def callable_same_owner(state: CallableAnalysis, left: universal.TypeId, right: universal.TypeId) -> bool:
+    if left.index == right.index:
+        return true
+    for owner in state.records:
+        if owner.type_id.index == left.index:
+            for target in state.records:
+                if target.type_id.index == right.index and expansion.same(owner.definition, target.definition):
+                    return true
+    return false

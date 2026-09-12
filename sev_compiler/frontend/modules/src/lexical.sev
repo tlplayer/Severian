@@ -18,7 +18,7 @@ def lexical_source(file: source.SourceFile, registry: lexer.SyntaxRegistry, defi
             ranges.append(descriptor)
     if len(ranges) == 0 and not definitions:
         return file
-    characters = file.text.characters()
+    characters = file.characters
     index := 0
     for character in characters:
         included := false

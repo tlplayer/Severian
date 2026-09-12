@@ -68,6 +68,8 @@ def operation_kind(operation: universal.Operation) -> string:
             return "Store"
         case Alias:
             return "Alias"
+        case CallFields:
+            return "Call"
         case Call:
             return "Call"
         case Unary:
@@ -101,6 +103,9 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
                 case Raise:
                     kind = "Throw"
                     payload = ",\"value\":" + quoted(string(value.index))
+                case FinishFields:
+                    kind = "Return"
+                    payload = ",\"values\":" + values_json(values)
                 case Finish:
                     kind = "Return"
                     returned ?= value
@@ -187,6 +192,11 @@ def operation_json(operation: universal.Operation) -> string:
             operands.append(object)
             results.append(result)
             fields = ",\"owner\":" + string(owner.index) + ",\"field\":" + string(index)
+        case CallFields:
+            operands = arguments
+            for output in outputs:
+                results.append(output)
+            fields = ",\"function\":" + identity(universal.DefId(0, 0, universal.DeclarationId(function.value)))
         case Call:
             operands = arguments
             results.append(result)

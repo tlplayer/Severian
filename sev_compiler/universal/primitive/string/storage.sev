@@ -1,0 +1,99 @@
+import * from "../../../../library/core/collections/vector/src/vector.sev" as vectors
+import * from "../char/utf8.sev" as encoding
+
+
+# Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
+# N is the initial vector capacity and does not limit the string's length.
+class string[T: u8 | u32 = u8, N = 256]:
+    storage: vectors.vector[T, N]
+
+    def string():
+        storage = vectors.vector[T, N]()
+
+    def string(storage: move vectors.vector[T, N]):
+        pass
+
+    def capacity() -> int:
+        return storage.capacity()
+
+    def length() -> int:
+        position := 0
+        count := 0
+        while position < storage.used:
+            position += __width(position)
+            count += 1
+        return count
+
+    operator copy(self) -> Self:
+        return string[T, N](storage.copy())
+
+    operator string(self) -> string:
+        result = string[u8, 256]()
+        position := 0
+        while position < storage.used:
+            codepoint = __decode(position)
+            position += __width(position)
+            result.append(encoding.from_codepoint(codepoint))
+        return result
+
+    def __unit(position: int) -> int:
+        return int(storage.get(position))
+
+    def __width(position: int) -> int:
+        if bytes(T).amount == 32.0:
+            return 1
+        first = __unit(position)
+        if first < 128:
+            return 1
+        if first < 224:
+            return 2
+        if first < 240:
+            return 3
+        return 4
+
+    def __decode(position: int) -> int:
+        first = __unit(position)
+        width = __width(position)
+        if width == 1:
+            return first
+        second = __unit(position + 1)
+        if width == 2:
+            return encoding.decode_two(first, second)
+        third = __unit(position + 2)
+        if width == 3:
+            return encoding.decode_three(first, second, third)
+        return encoding.decode_four(first, second, third, __unit(position + 3))
+
+    def append(self: borrow Self, value: char) -> borrow Self:
+        codepoint = encoding.codepoint(value)
+        if bytes(T).amount == 32.0:
+            storage.append(T(codepoint))
+        else:
+            width = encoding.width(codepoint)
+            assert(storage.used <= 9223372036854775807 - width)
+            storage.reserve(storage.used + width)
+            if width == 1:
+                storage.append(T(codepoint))
+            elif width == 2:
+                storage.append(T(192 + codepoint / 64))
+                storage.append(T(128 + codepoint % 64))
+            elif width == 3:
+                storage.append(T(224 + codepoint / 4096))
+                storage.append(T(128 + (codepoint / 64) % 64))
+                storage.append(T(128 + codepoint % 64))
+            else:
+                storage.append(T(240 + codepoint / 262144))
+                storage.append(T(128 + (codepoint / 4096) % 64))
+                storage.append(T(128 + (codepoint / 64) % 64))
+                storage.append(T(128 + codepoint % 64))
+        return self
+
+    def append(self: borrow Self, value: string) -> borrow Self:
+        count = value.storage.used
+        position := 0
+        while position < count:
+            codepoint = value.__decode(position)
+            width = value.__width(position)
+            append(encoding.from_codepoint(codepoint))
+            position += width
+        return self

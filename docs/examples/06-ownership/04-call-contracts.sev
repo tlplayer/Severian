@@ -1,0 +1,83 @@
+# Parameter modes are declarations, not deductions from function bodies.
+def length(values: list[int]) -> usize:
+    return values.length()
+
+
+def clear(values: borrow list[int]):
+    values.clear()
+
+
+def independent(values: copy list[int]) -> list[int]:
+    values[0] = 99
+    return values
+
+
+def consume(values: move list[int]) -> list[int]:
+    return values
+
+
+def increment(value: int) -> int:
+    value += 1
+    return value
+
+
+test "default calls view owned values and copy primitive values":
+    values = [1, 2, 3]
+    assert(length(values) == 3)
+    assert(length(values) == 3)
+    value = 41
+    assert(increment(value) == 42)
+    assert(value == 41)
+
+
+test "copy parameters own independent storage":
+    values = [1, 2, 3]
+    changed = independent(values)
+    assert(changed[0] == 99)
+    assert(values[0] == 1)
+
+
+test "borrow parameters can mutate the caller":
+    values = [1, 2, 3]
+    clear(values)
+    assert(length(values) == 0)
+
+
+test with compiler "move parameters consume their argument":
+    values = [1, 2, 3]
+    owned = consume(values)
+    reject:
+        print(values)
+    accept:
+        assert(length(owned) == 3)
+
+
+test with compiler "a default view cannot mutate or transfer ownership":
+    reject:
+        def bad(values: list[int]):
+            values.clear()
+    reject:
+        def bad(values: list[int]) -> list[int]:
+            return values
+    reject:
+        def bad(values: list[int]):
+            alias = values
+            alias[0] = 99
+    reject:
+        def bad(values: list[int]):
+            drop(values)
+
+
+class Counter:
+    amount: int
+
+
+def change_copy(value: copy Counter) -> int:
+    value.amount = 99
+    return value.amount
+
+
+test "copy parameters also isolate records of primitive fields":
+    original = Counter(1)
+    assert(change_copy(original) == 99)
+    assert(original.amount == 1)

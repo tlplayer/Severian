@@ -6,6 +6,7 @@ description = "Collection facade over independently published providers"
 [lib]
 path = "src/lib.sev"
 [dependencies]
+vector = { package = "collections.vector", path = "vector", version = "0.1.0" }
 set = { path = "set", version = "0.2.0" }
 map = { path = "map", version = "0.2.0" }
 btree = { path = "btree", version = "0.1.0" }

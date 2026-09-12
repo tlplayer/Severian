@@ -268,7 +268,7 @@ test "tokens preserve matched spelling separately from classified payload":
         assert(token.lexeme.span.source.index == token.span.source.index)
         assert(token.lexeme.span.start == token.span.start)
         assert(token.lexeme.span.end == token.span.end)
-        assert(token.lexeme.text == input.text.characters()[int(token.span.start):int(token.span.end)].join(""))
+        assert(token.lexeme.text == input.characters[int(token.span.start):int(token.span.end)].join(""))
     assert(tokens[5].kind == TokenKind.Eof)
     assert(tokens[5].lexeme.text == "")
     assert(string(tokens[5]) == "")

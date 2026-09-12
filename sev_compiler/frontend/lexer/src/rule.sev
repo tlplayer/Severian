@@ -9,7 +9,7 @@ class LexemeInput:
 
 
 def lexeme_input(file: source.SourceFile) -> LexemeInput:
-    return LexemeInput(file, file.text.characters())
+    return LexemeInput(file, file.characters)
 
 
 def lexeme_span(input: LexemeInput, start: int, end: int) -> source.Span:

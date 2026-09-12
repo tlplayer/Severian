@@ -1,3 +1,4 @@
+import * from "../../../library/core/memory/src/buffer_intrinsics.sev" as memory
 # Source list construction, access, mutation, truth and iteration protocols.
 # buffer[T] is the typed rank-one MLIR storage boundary.
 import * from "slicing.sev" as slicing
@@ -25,14 +26,14 @@ def __list_index(value: int) -> index
 def __list_size(value: index) -> int
 
 -> scalar_lists[T: ListElement]():
-    @mlir("memref.alloc", operand_segments="1,0")
-    def allocate(size: index) -> list[T]
+    def allocate(size: index) -> list[T]:
+        return memory.allocate_buffer(size)
 
     @mlir("memref.load")
     def load(values: list[T], position: index) -> T
 
     @mlir("memref.store")
-    def store(value: T, values: list[T], position: index)
+    def store(value: T, values: borrow list[T], position: index)
 
     @mlir("memref.dim")
     def dimension(values: list[T], axis: index) -> index
@@ -106,7 +107,7 @@ def __list_size(value: index) -> int
         assert(position < count(values))
         return load(values, __list_index(position))
 
-    operator element_set(values: list[T], position: int, value: T):
+    operator element_set(values: borrow list[T], position: int, value: T):
         assert(position >= 0)
         assert(position < count(values))
         store(value, values, __list_index(position))
@@ -127,14 +128,14 @@ scalar_lists[ListElement]()
 
 # These operations depend only on typed storage, so their element parameter
 # does not require numeric or comparison capabilities.
-@mlir("memref.alloc", operand_segments="1,0")
-def __buffer_allocate[T](size: index) -> list[T]
+def __buffer_allocate[T](size: index) -> list[T]:
+    return memory.allocate_buffer(size)
 
 @mlir("memref.load")
 def __buffer_load[T](values: list[T], position: index) -> T
 
 @mlir("memref.store")
-def __buffer_store[T](value: T, values: list[T], position: index)
+def __buffer_store[T](value: T, values: borrow list[T], position: index)
 
 @mlir("memref.dim")
 def __buffer_dimension[T](values: list[T], axis: index) -> index
@@ -143,10 +144,10 @@ extend list[T]:
     def length() -> usize:
         return usize(__list_size(__buffer_dimension(self, 0)))
 
-    def clear():
+    def clear(self: borrow Self):
         self = __buffer_allocate(__list_index(0))
 
-    def append(value: T):
+    def append(self: borrow Self, value: T):
         count = __list_size(__buffer_dimension(self, 0))
         assert(count < 9223372036854775807)
         result: list[T] = __buffer_allocate(__list_index(count + 1))
@@ -170,7 +171,7 @@ operator element_at[T](values: list[T], position: int) -> T:
     assert(position < __list_size(__buffer_dimension(values, 0)))
     return __buffer_load(values, __list_index(position))
 
-operator element_set[T](values: list[T], position: int, value: T):
+operator element_set[T](values: borrow list[T], position: int, value: T):
     assert(position >= 0)
     assert(position < __list_size(__buffer_dimension(values, 0)))
     __buffer_store(value, values, __list_index(position))
@@ -220,8 +221,9 @@ operator slice_at[T](values: list[T], start: int, stop: int, step: int, has_star
     return result
 
 
-@mlir("memref.dim")
-def __string_dimension(value: string, axis: index) -> index
+def __string_dimension(value: string, axis: index) -> index:
+    assert(__list_size(axis) == 0)
+    return __list_index(value.storage.used)
 
 def len(value: string) -> int:
     return value.length()

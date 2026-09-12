@@ -1,17 +1,18 @@
 import universal
+import * from "../../../../universal/type/storage.sev" as storage_types
 import * from "../../../../universal/type/scalar.sev" as scalar
 import * from "../ir/lib.sev"
 import * from "strings.sev"
 import * from "../../../../universal/declaration/scalar.sev" as boundary
 
 
-def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> MlirType:
-    for record in records:
+def callable_mlir_type(id: universal.TypeId, records: borrow list[universal.RecordDeclaration] = []) -> MlirType:
+    for record in borrow records:
         if record.type_id.index == id.index:
             if record.storage_element.index != 0 and record.representation != "OwnedBuffer":
                 return memref_type(integer_type(8).scalar, [-1])
             fields: list[MlirType] = []
-            for field in record.fields:
+            for field in borrow record.fields:
                 fields.append(callable_storage_type(callable_mlir_type(field.type_id, records)))
             return struct_type(fields)
     if id.index == 2:
@@ -33,13 +34,16 @@ def callable_mlir_type(id: universal.TypeId, records: list[universal.RecordDecla
     throw Error("scalar MIR has an unknown value type")
 
 
-def callable_mlir_results(id: universal.TypeId, records: list[universal.RecordDeclaration] = []) -> list[MlirType]:
+def callable_mlir_results(id: universal.TypeId, records: borrow list[universal.RecordDeclaration] = []) -> list[MlirType]:
     if id.index == 2:
         return []
-    return [callable_mlir_type(id, records)]
+    results: list[MlirType] = []
+    for field in storage_types.value_fields(id, records):
+        results.append(callable_mlir_type(field, records))
+    return results
 
 
-def callable_mlir_value(module: universal.Module, id: universal.ValueId) -> MlirValue:
+def callable_mlir_value(module: borrow universal.Module, id: universal.ValueId) -> MlirValue:
     return MlirValue(int(id.index), callable_mlir_type(module.values[id.index].type_id, module.records))
 
 
@@ -47,9 +51,9 @@ def callable_function_symbol(id: universal.FunctionId) -> string:
     return "__sev_scalar_" + string(id.value)
 
 
-def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block: universal.BasicBlock):
+def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module, block: borrow universal.BasicBlock):
     cursor := 0
-    for operation in block.operations:
+    for operation in borrow block.operations:
         cursor += 1
         match operation:
             case TypeLayout:
@@ -144,6 +148,14 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                     builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
                 else:
                     throw Error("scalar MIR has an unregistered binary operation")
+            case CallFields:
+                inputs: list[MlirValue] = []
+                returned: list[MlirValue] = []
+                for argument in arguments:
+                    inputs.append(callable_mlir_value(module, argument))
+                for result in outputs:
+                    returned.append(callable_mlir_value(module, result))
+                builder_call(builder, callable_function_symbol(function), inputs, returned)
             case Call:
                 inputs: list[MlirValue] = []
                 for argument in arguments:
@@ -152,7 +164,7 @@ def callable_mlir_block(builder: MlirOpBuilder, module: universal.Module, block:
                 if module.values[result.index].type_id.index != 2:
                     outputs.append(callable_mlir_value(module, result))
                 found := false
-                for callable_source in module.functions:
+                for callable_source in borrow module.functions:
                     if callable_source.id.value == function.value:
                         native_operation = boundary.scalar_boundary(callable_source, "mlir")
                         symbol = boundary.scalar_boundary(callable_source, "c")
@@ -213,16 +225,16 @@ def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[M
     return handle
 
 
-def lower_callables(module: universal.Module) -> MlirProgram:
+def lower_callables(module: borrow universal.Module) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
-    for function in module.functions:
+    for function in borrow module.functions:
         operation = boundary.scalar_boundary(function, "mlir")
         if operation != "":
             handles.append(MlirFunctionHandle(-1, MlirFunctionName("intrinsic"), MlirBlockHandle(-1, -1), [], true))
             continue
         parameters: list[MlirValue] = []
-        for value in function.values:
+        for value in borrow function.values:
             parameters.append(callable_mlir_value(module, value))
         symbol := boundary.scalar_boundary(function, "c")
         if symbol != "":
@@ -230,7 +242,7 @@ def lower_callables(module: universal.Module) -> MlirProgram:
         else:
             handles.append(builder_create_function(builder, callable_function_symbol(function.id), private_visibility(), parameters, callable_mlir_results(function.result_type, module.records)))
     index := 0
-    for function in module.functions:
+    for function in borrow module.functions:
         if function.cfg_index >= 0:
             callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry)
         index += 1
@@ -242,14 +254,14 @@ def lower_callables(module: universal.Module) -> MlirProgram:
         callable_cfg(builder, module, module.cfg_bodies[0], init.entry)
         builder_set_insertion_point(builder, entry.entry)
         builder_call(builder, "__sev_initializer", [], [])
-    for test in module.tests:
+    for test in borrow module.tests:
         function ?= test.function
         if function != None:
             builder_call(builder, callable_function_symbol(function), [], [])
     outputs: list[MlirValue] = []
     main ?= module.entry
     if main != None:
-        for function in module.functions:
+        for function in borrow module.functions:
             if function.id.value == main.value:
                 if function.result_type.index == 2:
                     builder_call(builder, callable_function_symbol(main), [], [])
@@ -300,14 +312,14 @@ def callable_load(builder: MlirOpBuilder, address: MlirValue, output: MlirValue)
 
 
 
-def callable_cfg(builder: MlirOpBuilder, module: universal.Module, body: universal.CfgBody, entry: MlirBlockHandle):
+def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody, entry: MlirBlockHandle):
     handles = [entry]
     for block in body.blocks[1:]:
         parameters: list[MlirValue] = []
         for parameter in block.parameters:
             parameters.append(callable_mlir_value(module, parameter))
         handles.append(builder_create_block(builder, entry.region, parameters))
-    for block in body.blocks:
+    for block in borrow body.blocks:
         builder_set_insertion_point(builder, handles[block.id])
         callable_mlir_block(builder, module, block)
         terminal ?= block.terminator
@@ -337,6 +349,11 @@ def callable_cfg(builder: MlirOpBuilder, module: universal.Module, body: univers
                         builder_constant(builder, failed, boolean_attribute(false))
                         builder_assert(builder, failed, "unhandled typed error")
                         builder_create_operation(builder, operation_name("llvm", "unreachable"), terminator=true)
+                case FinishFields:
+                    outputs: list[MlirValue] = []
+                    for value in values:
+                        outputs.append(callable_mlir_value(module, value))
+                    builder_return(builder, outputs)
                 case Finish:
                     outputs: list[MlirValue] = []
                     returned ?= value
@@ -380,7 +397,7 @@ def callable_buffer_address(builder: MlirOpBuilder, buffer: MlirValue, position:
     return pointer
 
 
-def callable_buffer_operation(builder: MlirOpBuilder, module: universal.Module, function: universal.FunctionDeclaration, operation: string, inputs: list[MlirValue], outputs: list[MlirValue]) -> bool:
+def callable_buffer_operation(builder: MlirOpBuilder, module: borrow universal.Module, function: borrow universal.FunctionDeclaration, operation: string, inputs: list[MlirValue], outputs: list[MlirValue]) -> bool:
     if operation not in ["memref.alloc", "memref.load", "memref.store", "memref.dim"]:
         return false
     buffer_type := function.result_type
@@ -388,7 +405,7 @@ def callable_buffer_operation(builder: MlirOpBuilder, module: universal.Module, 
         buffer_type = function.parameter_types[0]
     elif operation == "memref.store":
         buffer_type = function.parameter_types[1]
-    for record in module.records:
+    for record in borrow module.records:
         if record.type_id.index != buffer_type.index or record.storage_element.index == 0:
             continue
         element = callable_mlir_type(record.storage_element, module.records)

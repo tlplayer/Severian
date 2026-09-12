@@ -102,11 +102,11 @@ def string(value: bool) -> string:
     return "true" if value else "false"
 
 
-def string(value: string) -> string:
+def string(value: string) -> view string:
     return value
 
 
-def __store_byte(destination: string, position: int, value: int):
+def __store_byte(destination: borrow string, position: int, value: int):
     text.__store(__byte(value), destination, text.__index(position))
 
 
@@ -141,7 +141,11 @@ test "character conversion writes all four UTF-8 widths":
 # search for the first significant-digit precision that round-trips are .sev.
 # The current hosted target is glibc in its default C numeric locale.
 @mlir("memref.extract_aligned_pointer_as_index")
-def __base(value: string) -> index
+def __buffer_base(value: buffer[u8]) -> index
+
+
+def __base(value: string) -> index:
+    return __buffer_base(value.storage.data)
 
 @mlir("llvm.inttoptr")
 def __pointer(value: int) -> native_ptr
@@ -160,7 +164,7 @@ def __address(value: string) -> native_ptr:
 
 # Keep the memref borrow across the entire C call. Returning a raw address to
 # the allocating caller would hide its last use from buffer deallocation.
-def __decimal_into(destination: string, format: string, value: f64) -> i32:
+def __decimal_into(destination: borrow string, format: string, value: f64) -> i32:
     return __decimal(__address(destination), 128, __address(format), value)
 
 
@@ -176,7 +180,7 @@ def __terminated(value: string) -> string:
     return result
 
 
-def __prefix(source: string, count: int, destination: string, position: int):
+def __prefix(source: string, count: int, destination: borrow string, position: int):
     cursor := position
     while cursor < count:
         __store_byte(destination, cursor, text.byte_at(source, cursor))

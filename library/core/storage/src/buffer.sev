@@ -1,0 +1,12 @@
+import * from "../../memory/src/lib.sev" as memory
+
+# Safe owning allocations. Collection capacity and growth are deliberately
+# absent: vector owns those policies and uses these same memory primitives.
+def allocate[T](count: int) -> buffer[T]:
+    width = int(bytes(T).amount / 8.0)
+    assert(count >= 0 and width > 0)
+    assert(count <= 9223372036854775807 / width)
+    return memory.allocate_buffer(memory.buffer_index(count))
+
+def free[T](value: move buffer[T]):
+    drop value

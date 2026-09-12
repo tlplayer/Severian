@@ -62,9 +62,12 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
         parts.append(universal.Expression(universal.LiteralValue(universal.StringValue(literal)), span))
     if len(parts) == 0:
         return universal.Expression(universal.LiteralValue(universal.StringValue("")), span)
-    result := parts[0]
-    for part in parts[1:]:
-        result = universal.Expression(universal.Binary(universal.operator_syntax(universal.Add()), result, part), span)
+    # Formatting owns its output while viewing interpolated inputs. Append
+    # into one growing string, including the single-interpolation case.
+    result := universal.Expression(universal.LiteralValue(universal.StringValue("")), span)
+    for part in parts:
+        append = universal.Expression(universal.Member(result, "append"), span)
+        result = universal.Expression(universal.Call(append, [universal.CallArgument(None, part, span)]), span)
     return result
 
 class Parser:
@@ -370,13 +373,18 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
     return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults)
 
 def parser_ownership_mode(parser: Parser) -> string:
-    if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move"):
-        mode = string(parser_next(parser))
-        if mode == "borrow" and parser_at_identifier(parser, "mut"):
+    if parser_at_identifier(parser, "view"):
+        parser_next(parser)
+        return "borrow"
+    if parser_at_identifier(parser, "borrow"):
+        parser_next(parser)
+        if parser_at_identifier(parser, "mut"):
             parser_next(parser)
-            return "borrow mut"
-        return mode
+        return "borrow mut"
+    if parser_at_identifier(parser, "move") or parser_at_identifier(parser, "copy") or parser_at_identifier(parser, "mirror"):
+        return string(parser_next(parser))
     return ""
+
 
 def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
@@ -483,16 +491,20 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     while not parser_at_symbol(parser, ")"):
         parameter = parser_identifier(parser, "expected operator parameter")
         annotation := universal.named_type("Self", [], parameter[1])
+        mode := ""
         if parser_take_symbol(parser, ":") != None:
+            mode = parser_ownership_mode(parser)
             annotation = parser_type_annotation(parser)
         elif parameter[0] != "self":
             return error(parser_fail(parser, "expected operator parameter type"))
-        parameters.append(universal.OperatorParameter(parameter[0], annotation, parameter[1]))
+        parameters.append(universal.OperatorParameter(parameter[0], annotation, parameter[1], mode=mode))
         if parser_take_symbol(parser, ",") == None:
             break
     close = parser_expect_symbol(parser, ")", "expected closing operator parenthesis")
     result := universal.named_type("unit", [], close.span)
+    result_mode := ""
     if parser_take_symbol(parser, "->") != None:
+        result_mode = parser_ownership_mode(parser)
         result = parser_type_annotation(parser)
     constraints = operator_constraints
     for constraint in parser_declaration_constraints(parser):
@@ -504,7 +516,7 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     if len(parameters) == 1 and parameters[0].name == "self":
         syntax = universal.OperatorSyntax(symbol, universal.Fixity.Prefix, 10, universal.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
         receiver = false
-    return universal.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver)
+    return universal.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver, result_mode=result_mode)
 
 
 def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagnostics.Diagnostic:
@@ -1003,12 +1015,17 @@ def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic
         return universal.Expression(universal.Lambda(parameters, body), source.Span(token.span.source, token.span.start, body.span.end))
     # Parenthesized calls keep ordinary callable lookup; prefix ownership forms
     # carry their operation explicitly through parsing and semantic analysis.
-    if parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move") or parser_at_identifier(parser, "clone"):
+    if parser_at_identifier(parser, "view") or parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move") or parser_at_identifier(parser, "copy") or parser_at_identifier(parser, "clone") or parser_at_identifier(parser, "mirror"):
         if parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
             mode := string(parser_next(parser))
-            if mode == "borrow" and parser_at_identifier(parser, "mut"):
-                parser_next(parser)
+            if mode == "view":
+                mode = "borrow"
+            elif mode == "borrow":
+                if parser_at_identifier(parser, "mut"):
+                    parser_next(parser)
                 mode = "borrow mut"
+            elif mode == "copy":
+                mode = "clone"
             value = parse_unary(parser)
             return universal.Expression(universal.Ownership(mode, value), source.Span(token.span.source, token.span.start, value.span.end))
     if parser_take_symbol(parser, "&") != None:
@@ -1241,6 +1258,9 @@ def parser_type_arguments(parser: Parser) -> list[universal.TypeAnnotation] | di
 
 
 def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+    if parser_at_simple(parser, Integer):
+        token = parser_next(parser)
+        return universal.named_type(lexer.token_number(token), [], token.span)
     if parser_at_symbol(parser, "{"):
         start = parser_next(parser).span
         key = parse_type_annotation(parser)

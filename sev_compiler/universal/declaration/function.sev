@@ -89,6 +89,7 @@ class FunctionDeclaration:
     # Executable bodies are indexed in Module.cfg_bodies.
     cfg: CfgBody | None = None
     result_mode: string = ""
+    result_origin: int = -1
     prelude: bool = false
     type_defaults: list[TypeAnnotation] = []
 

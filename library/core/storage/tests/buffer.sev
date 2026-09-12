@@ -1,0 +1,20 @@
+import * from "../src/lib.sev" as storage
+
+test "typed allocations can be written and released":
+    values: buffer[u32] = storage.allocate(2)
+    values[0] = u32(955)
+    values[1] = u32(128512)
+    assert(values[0] == u32(955))
+    assert(values[1] == u32(128512))
+    storage.free(values)
+
+test "empty allocations can be dropped":
+    values: buffer[u8] = storage.allocate(0)
+    assert(len(values) == 0)
+    drop values
+
+test with compiler "free consumes the allocation":
+    values: buffer[u8] = storage.allocate(1)
+    storage.free(values)
+    reject:
+        print(values[0])

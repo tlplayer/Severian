@@ -1,0 +1,10 @@
+# Raw pointer access remains separate from core.storage's owning buffers.
+# These calls use the same hosted allocation and pointer primitives as the
+# language's explicit unsafe allocation interface.
+def raw_allocate[T](count: int) -> pointer[T]:
+    unsafe:
+        return allocate[T](count)
+
+def raw_free[T](value: pointer[T]):
+    unsafe:
+        free(value)

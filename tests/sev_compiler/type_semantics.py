@@ -21,72 +21,9 @@ class TypeSemantics(MigrationCase):
                                '--sysroot', ROOT, '-o', executable])
                 self.assertEqual(self.succeeds([executable]), expected)
 
-    def test_interpolation_views_input_without_consuming_it(self):
-        self.native('''
-            def formatted(value: string) -> string:
-                return f"Hello, {value}!"
-            test:
-                name = "Sev" + "erian"
-                print(f"{name}:{type(name)}")
-                greeting = formatted(name)
-                assert(name[:5] == "Sever")
-                drop(name)
-                assert(greeting == "Hello, Severian!")
-                print(greeting)
-                empty = ""
-                assert(f"{empty}" == "")
-                assert(empty == "")
-        ''', expected="Severian:string\nHello, Severian!\n")
+    def test_string_methods(self):
+        self.native(ROOT / 'sev_compiler/universal/primitive/string/methods.sev')
         owned_records.OwnedRecords.check_allocations(self)
-
-    def test_interpolation_evaluates_expressions_once_and_keeps_results_alive(self):
-        self.native('''
-            def text() -> string:
-                print("text")
-                return "λ" + "😀"
-            def number() -> int:
-                print("number")
-                return 42
-            def identity(value: string) -> string:
-                return f"{value}"
-            test:
-                original = "Sev" + "erian"
-                result = identity(original)
-                print(original)
-                drop(original)
-                assert(result == "Severian")
-                assert(f"{text()}:{number()}" == "λ😀:42")
-                print(result)
-        ''', expected="Severian\ntext\nnumber\nSeverian\n")
-        owned_records.OwnedRecords.check_allocations(self)
-
-    def test_character_conversion_for_concatenation(self):
-        self.native('''
-            test:
-                count = 10
-                ratio = 0.5
-                character = '!'
-                combined = string(count + ratio) + character
-                assert(combined == "10.5!")
-                assert("hello" + 'λ' == "helloλ")
-                result: string = "hello" + '😀'
-                assert(result == "hello😀")
-                appended := "hello"
-                appended += '!'
-                assert(appended == "hello!")
-        ''')
-
-    def test_interpolation_preserves_nested_move_effects(self):
-        self.rejects('''
-            def consume(value: move string) -> int:
-                return value.length()
-            def formatted(value: string) -> string:
-                return f"{consume(move value)}"
-            def main():
-                name = "Severian"
-                print(formatted(name))
-                print(name)
-        ''', "use after drop or move")
 
     def test_for_initializer_runs_once_and_has_loop_scope(self):
         self.native('''

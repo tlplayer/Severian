@@ -14,7 +14,7 @@ def buffer_element(id: TypeId, records: borrow list[RecordDeclaration]) -> TypeI
 
 def indirect_value(id: TypeId, records: borrow list[RecordDeclaration]) -> bool:
     for record in borrow records:
-        if record.type_id.index == id.index and record.representation == "OwnedBuffer":
+        if record.type_id.index == id.index and record.representation in ["OwnedBuffer", "String"]:
             return true
     return id.index >= 1000 and buffer_element(id, records).index == 0
 
@@ -56,3 +56,29 @@ def copy_storage(id: TypeId, records: borrow list[RecordDeclaration], active: li
                     return false
             return true
     return false
+
+
+# Flatten owned records at function boundaries so their buffers remain visible
+# to the target's ownership pass without duplicating each caller's control flow.
+def value_fields(id: TypeId, records: borrow list[RecordDeclaration]) -> list[TypeId]:
+    if id.index == 2:
+        return []
+    if not owned_record(id, records):
+        return [id]
+    result: list[TypeId] = []
+    for record in borrow records:
+        if record.type_id.index == id.index:
+            for field in borrow record.fields:
+                for leaf in value_fields(field.type_id, records):
+                    result.append(leaf)
+    return result
+
+
+# String literals use the same typed buffer leaves as their source vector.
+def string_element(id: TypeId, records: borrow list[RecordDeclaration]) -> TypeId:
+    for record in borrow records:
+        if record.type_id.index == id.index and record.representation == "String":
+            leaves = value_fields(id, records)
+            if len(leaves) > 0:
+                return buffer_element(leaves[0], records)
+    return TypeId(0)

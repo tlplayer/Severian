@@ -1,11 +1,10 @@
 import * from "../char/utf8.sev" as character
 
-# The first compiled representation is an immutable UTF-8 byte view. Literals
-# own static MLIR storage; concatenation returns a newly allocated byte buffer.
-# The MLIR ownership/deallocation pipeline manages allocated result lifetimes.
-# These declarations are typed operation bindings, not C string helpers.
-@mlir("memref.dim")
-def __dimension(value: string, dimension: index) -> index
+# Text algorithms view the initialized part of the shared vector backend.
+# Allocation and capacity belong to vector; ownership follows its typed buffer.
+def __dimension(value: string, dimension: index) -> index:
+    assert(__size(dimension) == 0)
+    return __index(value.storage.used)
 
 @mlir("arith.index_cast")
 def __size(value: index) -> int
@@ -13,8 +12,8 @@ def __size(value: index) -> int
 @mlir("arith.index_cast")
 def __index(value: int) -> index
 
-@mlir("memref.load")
-def __load(value: string, position: index) -> u8
+def __load(value: string, position: index) -> u8:
+    return __buffer_load(value.storage.data, position)
 
 @mlir("arith.extui")
 def __byte_value(value: u8) -> int
@@ -22,11 +21,15 @@ def __byte_value(value: u8) -> int
 @mlir("arith.trunci")
 def __character(value: int) -> char
 
-@mlir("memref.alloc", operand_segments="1,0")
-def __allocate(size: index) -> string
+def __allocate(size: index) -> string:
+    result = string()
+    result.storage.reserve(__size(size))
+    result.storage.used = __size(size)
+    return result
 
-@mlir("memref.store")
-def __store(value: u8, destination: string, position: index)
+
+def __store(value: u8, destination: borrow string, position: index):
+    __buffer_store(value, destination.storage.data, position)
 
 
 def byte_count(value: string) -> int:
@@ -96,10 +99,13 @@ def decode(value: string, offset: int) -> int:
 
 
 def __count(value: string, offset: int) -> int:
-    if offset == byte_count(value):
-        return 0
-    codepoint = decode(value, offset)
-    return 1 + __count(value, offset + character.width(codepoint))
+    count := 0
+    position := offset
+    while position < byte_count(value):
+        codepoint = decode(value, position)
+        position += character.width(codepoint)
+        count += 1
+    return count
 
 
 def length(value: string) -> int:
@@ -107,10 +113,14 @@ def length(value: string) -> int:
 
 
 def __offset(value: string, position: int, offset: int) -> int:
-    if position == 0:
-        return offset
-    codepoint = decode(value, offset)
-    return __offset(value, position - 1, offset + character.width(codepoint))
+    assert(position >= 0)
+    cursor := offset
+    remaining := position
+    while remaining > 0:
+        codepoint = decode(value, cursor)
+        cursor += character.width(codepoint)
+        remaining -= 1
+    return cursor
 
 
 def character_at(value: string, position: int) -> char:
@@ -129,11 +139,13 @@ test "character indexing decodes each UTF-8 width":
 
 
 def __equal(left: string, right: string, offset: int) -> bool:
-    if offset == byte_count(left):
-        return true
-    if byte_at(left, offset) != byte_at(right, offset):
-        return false
-    return __equal(left, right, offset + 1)
+    assert(offset >= 0 and offset <= byte_count(left))
+    position := offset
+    while position < byte_count(left):
+        if byte_at(left, position) != byte_at(right, position):
+            return false
+        position += 1
+    return true
 
 
 def equal(left: string, right: string) -> bool:
@@ -153,7 +165,7 @@ test "equality compares bytes and lengths":
     assert(equal("", ""))
 
 
-def __copy(source: string, destination: string, offset: int, position: int):
+def __copy(source: string, destination: borrow string, offset: int, position: int):
     cursor := position
     while cursor < byte_count(source):
         __store(__load(source, __index(cursor)), destination, __index(offset + cursor))

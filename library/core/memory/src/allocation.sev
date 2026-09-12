@@ -1,14 +1,17 @@
 # Allocation is the sole raw-memory boundary used by source-owned core
 # collections. The allocate/free intrinsics are provided by the selected
 # allocator runtime and are never exposed by list, array, or deque.
+def __allocate_raw[T](requested: usize) -> pointer[T]:
+    unsafe:
+        return allocate[T](int(requested))
+
 class Allocation[T]:
-    data: *[T]
+    data: pointer[T]
     capacity: usize
 
     def Allocation(requested: usize):
-        unsafe:
-            this.data := allocate[T](requested)
-        this.capacity := requested
+        data = __allocate_raw[T](requested)
+        capacity = requested
 
     def read(index: usize) -> borrow T:
         assert(index < capacity, "allocation read is out of bounds")

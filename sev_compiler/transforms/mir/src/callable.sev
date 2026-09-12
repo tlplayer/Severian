@@ -104,6 +104,12 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             evaluated = execute_grammar(module, context, scope, syntax, [value], [], expression.span, expression.type_id)
             return semantic_runtime(evaluated, expression.span)
         case LiteralValue:
+            match value:
+                case StringValue:
+                    if storage_types.string_element(expression.type_id, module.records).index != 0:
+                        return callable_string_literal(module, context, scope, value, expression.type_id)
+                case _:
+                    pass
             result = mir_value(module, expression.type_id)
             cfg.append(context, universal.Operation.Constant(value, result))
             return result
@@ -157,6 +163,8 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
         case TypeName:
             mir_expression(module, context, scope, value)
             result = mir_value(module, expression.type_id)
+            if storage_types.string_element(expression.type_id, module.records).index != 0:
+                return callable_string_literal(module, context, scope, name, expression.type_id)
             cfg.append(context, universal.Operation.Constant(universal.StringValue(name), result))
             return result
         case Unary:
@@ -187,8 +195,10 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
                     for declaration in module.functions:
                         if declaration.id.value == function.declaration.value:
                             native = boundary.scalar_boundary(declaration, "mlir") != ""
-                            if aggregate.signature(declaration, module.records) or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0):
+                            if not native and (declaration.result_origin >= 0 or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0)):
                                 return callable_inline_receiver(module, context, scope, declaration, arguments, expression.span)
+                            if aggregate.signature(declaration, module.records):
+                                return callable_aggregate_call(module, context, scope, declaration, arguments, expression.span)
                     evaluated: list[universal.ValueId] = []
                     for argument in arguments:
                         if storage_types.indirect_value(argument.value.type_id, module.records) and not native:
@@ -289,6 +299,13 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
         else:
             cfg.terminate(context, universal.CfgExit.Dead, origin)
     cfg.at(context, continuation)
+    if function.result_origin >= 0:
+        origin_parameter = function.parameters[function.result_origin].name
+        argument_index := 0
+        for argument in arguments:
+            if argument.name == origin_parameter:
+                return evaluated[argument_index]
+            argument_index += 1
     return result
 
 
@@ -298,6 +315,9 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
             return true
         match statement:
             case BindingStatement:
+                if binding.value.loan_mode == "borrow mut" and not binding.update:
+                    scope.bindings.append(mir_expression(module, context, scope, binding.value))
+                    continue
                 match binding.value.kind:
                     case Ownership:
                         if mode == "borrow mut" and not binding.update:
@@ -342,14 +362,21 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
 
     return true
 
-def required_calls(body: universal.CfgBody, required: list[string]):
-    for block in body.blocks:
-        for operation in block.operations:
+def require_function(required: list[universal.FunctionId], function: universal.FunctionId):
+    for previous in required:
+        if previous.value == function.value:
+            return
+    required.append(function)
+
+
+def required_calls(body: borrow universal.CfgBody, required: list[universal.FunctionId]):
+    for block in borrow body.blocks:
+        for operation in borrow block.operations:
             match operation:
+                case CallFields:
+                    require_function(required, function)
                 case Call:
-                    identity = string(function.value)
-                    if identity not in required:
-                        required.append(identity)
+                    require_function(required, function)
                 case _:
                     pass
 
@@ -363,46 +390,47 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
     module.cfg_bodies.append(context.body)
     module.globals = scope.bindings
     functions: list[universal.FunctionDeclaration] = []
-    required: list[string] = []
+    required: list[universal.FunctionId] = []
     required_calls(context.body, required)
     # All application declarations remain roots, including library exports and
     # unused functions that still need lowering diagnostics. Only prelude bodies
     # are demand driven. Scan lowered calls so inlined ownership operations,
     # recursive calls and source grammar-generated calls use the same graph.
-    for function in module.functions:
-        identity = string(function.id.value)
-        # External declarations are ABI contracts even when no call is live.
-        # Keep them so conflicting native signatures cannot disappear in DCE.
-        if boundary.scalar_boundary(function, "c") != "" and identity not in required:
-            required.append(identity)
+    for function in borrow module.functions:
+        # Keep external ABI contracts even when no call is live.
+        if boundary.scalar_boundary(function, "c") != "":
+            require_function(required, function.id)
         origin ?= function.span
         if origin != None:
-            if int(origin.source.index) not in library_sources and identity not in required:
-                required.append(identity)
+            if int(origin.source.index) not in library_sources:
+                require_function(required, function.id)
         else:
-            if identity not in required:
-                required.append(identity)
+            require_function(required, function.id)
     cursor := 0
     while cursor < len(required):
         identity = required[cursor]
         cursor += 1
         selected := -1
         index := 0
-        for candidate in module.functions:
-            if string(candidate.id.value) == identity:
+        for candidate in borrow module.functions:
+            if candidate.id.value == identity.value:
                 selected = index
                 break
             index += 1
         if selected == -1:
             return error(diagnostics.Diagnostic("E000230", "call graph refers to an unknown function", None))
         function = module.functions[selected]
-        if aggregate.signature(function, module.records) or callable_exclusive_signature(function):
-            if function.body == None or boundary.scalar_boundary(function, "mlir") != "":
+        if callable_exclusive_signature(function) and boundary.scalar_boundary(function, "mlir") == "":
+            if function.body == None:
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
             continue
         local = CallableMirScope()
         context = cfg.ExecutionContext(universal.empty_cfg(function.result_type))
         for type_id in function.parameter_types:
+            if storage_types.owned_record(type_id, module.records):
+                cell = aggregate.parameter(module, context, local.aggregates, type_id, context.body.entry)
+                local.bindings.append(cell)
+                continue
             stored_type = universal.TypeId(5) if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
@@ -410,6 +438,24 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
             cfg.append(context, universal.Operation.Allocate(stored_type, cell))
             cfg.append(context, universal.Operation.Store(cell, parameter_value))
             local.bindings.append(cell)
+        # Aggregate parameters were added as entry block values; interleave
+        # leaves with scalar parameters in source parameter order.
+        if aggregate.signature(function, module.records):
+            function.values = []
+            parameter_cursor := 0
+            for type_id in function.parameter_types:
+                if storage_types.owned_record(type_id, module.records):
+                    for value in callable_parameter_fields(context.body, local.aggregates, local.bindings[parameter_cursor]):
+                        function.values.append(value)
+                else:
+                    for operation in context.body.blocks[context.body.entry].operations:
+                        match operation:
+                            case Store:
+                                if address.index == local.bindings[parameter_cursor].index:
+                                    function.values.append(value)
+                            case _:
+                                pass
+                parameter_cursor += 1
         body ?= function.body
         if body != None:
             mir_block(module, context, body, local)
@@ -679,6 +725,8 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                             return error(diagnostics.Diagnostic("E000231", "CFG return requires a lowered value", expression.span))
                 if scope.return_target >= 0:
                     cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(scope.return_target, inline_arguments)), frame.origin)
+                elif storage_types.owned_record(frame.context.body.return_type, module.records):
+                    cfg.terminate(frame.context, universal.CfgExit.FinishFields(inline_arguments), frame.origin)
                 else:
                     cfg.terminate(frame.context, universal.CfgExit.Finish(returned), frame.origin)
                 return Nothing
@@ -775,3 +823,66 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                         return Nothing
             return error(diagnostics.Diagnostic("E000231", "grammar requires a semantic body", span))
     return error(diagnostics.Diagnostic("E000231", "unresolved grammar capability", span))
+
+
+# A function receives each owned record leaf as an ordinary SSA argument.
+def callable_parameter_fields(body: universal.CfgBody, state: aggregate.AggregateStorage, slot: universal.ValueId) -> list[universal.ValueId]:
+    values: list[universal.ValueId] = []
+    for place in state.places:
+        if place.value.index == slot.index:
+            for field in place.fields:
+                for value in callable_parameter_fields(body, state, field):
+                    values.append(value)
+            return values
+    for operation in body.blocks[body.entry].operations:
+        match operation:
+            case Store:
+                if address.index == slot.index:
+                    values.append(value)
+            case _:
+                pass
+    return values
+
+
+def callable_aggregate_call(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], span: source.Span) -> universal.ValueId | diagnostics.Diagnostic:
+    if boundary.scalar_boundary(function, "mlir") != "" or boundary.scalar_boundary(function, "c") != "":
+        return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", span))
+    inputs: list[universal.ValueId] = []
+    evaluated: list[universal.ValueId] = []
+    for argument in arguments:
+        if storage_types.indirect_value(argument.value.type_id, module.records):
+            evaluated.append(callable_mir_place(module, context, scope, argument.value))
+        else:
+            evaluated.append(mir_expression(module, context, scope, argument.value))
+    for parameter in function.parameters:
+        index := 0
+        for argument in arguments:
+            if argument.name == parameter.name:
+                for value in aggregate.values(module, context, scope.aggregates, evaluated[index]):
+                    inputs.append(value)
+            index += 1
+    outputs: list[universal.ValueId] = []
+    for type_id in storage_types.value_fields(function.result_type, module.records):
+        outputs.append(mir_value(module, type_id))
+    cfg.append(context, universal.Operation.CallFields(function.id, inputs, outputs))
+    if storage_types.owned_record(function.result_type, module.records):
+        result = aggregate.allocate(module, context, scope.aggregates, function.result_type)
+        aggregate.write_values(module, context, scope.aggregates, result, outputs, [0])
+        return result
+    if len(outputs) != 0:
+        return outputs[0]
+    return mir_value(module, function.result_type)
+
+
+# A literal initializes the vector's buffer and logical length. Literal buffers
+# are read-only globals; the first growth copies them through vector.reserve.
+def callable_string_literal(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, text: string, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
+    leaves = storage_types.value_fields(type_id, module.records)
+    buffer = mir_value(module, leaves[0])
+    cfg.append(context, universal.Operation.Constant(universal.StringValue(text), buffer))
+    count = mir_value(module, universal.TypeId(64))
+    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == 532 else len(text.bytes())
+    cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(size)), count))
+    result = aggregate.allocate(module, context, scope.aggregates, type_id)
+    aggregate.write_values(module, context, scope.aggregates, result, [buffer, count], [0])
+    return result

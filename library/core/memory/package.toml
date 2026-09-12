@@ -6,7 +6,7 @@ description = "Owned raw allocations beneath core data structures"
 
 [package.unsafe]
 capabilities = ["allocation", "pointers", "unsafe-blocks"]
-sources = ["src/allocation.sev"]
+sources = ["src/allocation.sev", "src/raw.sev", "src/raw_intrinsics.sev"]
 
 [lib]
 path = "src/lib.sev"

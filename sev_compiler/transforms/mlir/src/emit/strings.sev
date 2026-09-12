@@ -1,4 +1,5 @@
 import * from "../ir/lib.sev"
+import * from "../../../../universal/primitive/char/encoding.sev" as encoding
 
 
 def utf8_view_type() -> MlirType:
@@ -12,14 +13,25 @@ def utf8_byte_attribute(byte: u8) -> MlirAttributeValue:
 
 
 def string_literal(builder: MlirOpBuilder, value: string, output: MlirValue):
-    bytes = value.bytes()
-    count = int(len(bytes))
-    element_type = MlirScalarType(IntegerScalar, 8, false, 0)
+    element_type = output.type_id.scalar
+    elements: list[MlirAttributeValue] = []
+    if element_type.bits == 32:
+        for character in value.characters():
+            bytes = character.bytes()
+            codepoint := int(bytes[0])
+            if len(bytes) == 2:
+                codepoint = encoding.decode_two(int(bytes[0]), int(bytes[1]))
+            elif len(bytes) == 3:
+                codepoint = encoding.decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2]))
+            elif len(bytes) == 4:
+                codepoint = encoding.decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3]))
+            elements.append(integer_attribute(codepoint, integer_type(32)))
+    else:
+        for byte in value.bytes():
+            elements.append(utf8_byte_attribute(byte))
+    count = int(len(elements))
     storage_type = memref_type(element_type, [count])
     tensor = tensor_type(element_type, [count])
-    elements: list[MlirAttributeValue] = []
-    for byte in bytes:
-        elements.append(utf8_byte_attribute(byte))
     dense = MlirAttributeValue(DenseIntegerAttributeKind, "", 0, false, tensor, [], elements)
     constant = MlirAttributeValue(UnitAttributeKind, "", 0, false, index_type(), [])
     symbol = "__sev_string_" + string(output.id)

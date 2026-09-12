@@ -1,0 +1,70 @@
+import * from "dominance.sev" as dominance
+
+# A compact index of SSA definitions. Values are looked up directly instead
+# of rebuilding every ancestor's full value list for each block.
+class Definitions:
+    ids: list[int]
+    blocks: list[int]
+    positions: list[int]
+
+
+def create(count: int) -> Definitions:
+    ids: list[int] = []
+    blocks: list[int] = []
+    positions: list[int] = []
+    index := 0
+    while index < count * 2 + 1:
+        ids.append(-1)
+        blocks.append(-1)
+        positions.append(-1)
+        index += 1
+    return Definitions(ids, blocks, positions)
+
+
+def slot(definitions: Definitions, value: int) -> int:
+    index := value % int(len(definitions.ids))
+    while definitions.ids[index] >= 0 and definitions.ids[index] != value:
+        index = (index + 1) % int(len(definitions.ids))
+    return index
+
+
+def add(definitions: borrow mut Definitions, value: int, block: int, position: int) -> bool:
+    if value < 0:
+        return false
+    index = slot(definitions, value)
+    if definitions.ids[index] >= 0:
+        return false
+    definitions.ids[index] = value
+    definitions.blocks[index] = block
+    definitions.positions[index] = position
+    return true
+
+
+def usable(definitions: Definitions, parents: list[int], value: int, block: int, position: int) -> bool:
+    if value < 0:
+        return false
+    index = slot(definitions, value)
+    if definitions.ids[index] != value:
+        return false
+    origin = definitions.blocks[index]
+    if origin == -2:
+        return true
+    if origin == block:
+        return definitions.positions[index] < position
+    return dominance.contains(parents, origin, block)
+
+
+test "SSA values require a dominating definition before their use":
+    definitions = create(4)
+    assert(add(definitions, 1000000, 0, 0))
+    assert(add(definitions, 4, 1, 0))
+    assert(add(definitions, 5, 3, -1))
+    assert(add(definitions, 99, -2, -1))
+    parents = [0, 0, 0, 0]
+    assert(usable(definitions, parents, 1000000, 3, 0))
+    assert(not usable(definitions, parents, 4, 3, 0))
+    assert(not usable(definitions, parents, 1000000, 0, 0))
+    assert(usable(definitions, parents, 5, 3, 0))
+    assert(usable(definitions, parents, 99, 2, 0))
+    assert(not usable(definitions, parents, 6, 3, 1))
+    assert(not add(definitions, 4, 2, 0))

@@ -68,6 +68,7 @@ class OperatorParameter:
     name: string
     annotation: TypeAnnotation
     span: source.Span
+    mode: string = ""
 
 
 class OperatorDeclaration:
@@ -81,6 +82,7 @@ class OperatorDeclaration:
     receiver: bool = true
     definition: DefId = DefId(0, 0, DeclarationId(0))
     grammar_parameter: string | absent = absent
+    result_mode: string = ""
 
 
 class TraitDeclaration:

@@ -21,7 +21,7 @@ operator element_at(values: list[string], position: int) -> string:
     start = values.ends[position - 1] if position > 0 else 0
     return values.data[start:values.ends[position]]
 
-operator element_set(values: list[string], position: int, value: string):
+operator element_set(values: borrow list[string], position: int, value: string):
     assert(position >= 0)
     assert(position < len(values.ends))
     start = values.ends[position - 1] if position > 0 else 0
@@ -62,11 +62,11 @@ extend StringList:
     def length() -> usize:
         return usize(len(self.ends))
 
-    def clear():
+    def clear(self: borrow Self):
         self.data = ""
         self.ends = []
 
-    def append(value: string):
+    def append(self: borrow Self, value: string):
         self.data = self.data + value
         offsets = clone self.ends
         offsets.append(self.data.length())

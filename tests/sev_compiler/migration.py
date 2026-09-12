@@ -85,7 +85,7 @@ class MigrationCase(unittest.TestCase):
         return result.stdout
 
     def compile(self, text, *, emit="mlir", name="subject.sev", sysroot=ROOT):
-        path = self.write(text, name)
+        path = text if isinstance(text, Path) else self.write(text, name)
         return self.succeeds([COMPILER, "test", path, "--emit", emit,
                               "--sysroot", sysroot])
 

@@ -1,0 +1,11 @@
+[package]
+name = "core.storage"
+version = "0.1.0"
+edition = "2026"
+description = "Checked owning buffers over core.memory"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+memory = { package = "core.memory", path = "../memory", version = "0.1.0" }

@@ -6,3 +6,20 @@ def make() -> Label:
     return Label("hello" + " world")
 
 assert(make().text == "hello world")
+
+
+def carry(prefix: int, value: move Label, suffix: int) -> Label:
+    assert(prefix == 10)
+    assert(suffix == 20)
+    return value
+
+
+def descend(value: move Label, count: int) -> Label:
+    if count == 0:
+        return value
+    return descend(value, count - 1)
+
+
+test "owned record calls retain buffers across return boundaries":
+    returned = descend(carry(10, make(), 20), 12)
+    assert(returned.text == "hello world")

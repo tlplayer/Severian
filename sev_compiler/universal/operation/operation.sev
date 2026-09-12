@@ -14,6 +14,7 @@ enum Operation:
     Unary(operator: OperatorSyntax, operand: ValueId, result: ValueId)
     Binary(operator: OperatorSyntax, left: ValueId, right: ValueId, result: ValueId)
     Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    CallFields(function: FunctionId, arguments: list[ValueId], outputs: list[ValueId])
     Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
     Allocate(type_id: TypeId, result: ValueId)
     Alias(value: ValueId, result: ValueId)

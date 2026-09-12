@@ -13,6 +13,7 @@ class RecordInstance:
     template: universal.DefId
     arguments: list[universal.TypeBinding]
     constructors: list[universal.TypeConstructorBinding] = []
+    values: list[universal.TypeAnnotation] = []
 
 
 class SemanticDefinitions:
@@ -570,9 +571,21 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
     actuals: list[universal.TypeBinding] = []
     constructors: list[universal.TypeConstructorBinding] = []
     replacements: list[universal.TypeAnnotation] = []
+    values: list[universal.TypeAnnotation] = []
     index := 0
     name := template.name + "["
     for argument in arguments:
+        number = value_argument(definitions, argument, namespace)
+        if number != "":
+            supplied = universal.named_type(number, [], argument.span)
+            supplied.binding = template.type_parameters[index]
+            values.append(supplied)
+            replacements.append(universal.named_type(number, [], argument.span))
+            if index > 0:
+                name += ", "
+            name += number
+            index += 1
+            continue
         constructor_name ?= universal.simple_type_name(argument)
         if constructor_name != None:
             constructor ?= record_template(definitions, constructor_name, namespace)
@@ -595,7 +608,7 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
     for instance in definitions.record_instances:
         origin = instance.template
         if origin.package == template.definition.package and origin.module == template.definition.module and origin.declaration.value == template.definition.declaration.value:
-            equal := len(instance.arguments) == len(actuals) and len(instance.constructors) == len(constructors)
+            equal := len(instance.arguments) == len(actuals) and len(instance.constructors) == len(constructors) and len(instance.values) == len(values)
             index = 0
             for binding in instance.arguments:
                 if equal:
@@ -607,15 +620,26 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
                     other = constructors[index]
                     equal = binding.parameter.index == other.parameter.index and binding.definition.package == other.definition.package and binding.definition.module == other.definition.module and binding.definition.declaration.value == other.definition.declaration.value
                 index += 1
+            index = 0
+            for supplied in instance.values:
+                if equal:
+                    equal = supplied.binding == values[index].binding and universal.simple_type_name(supplied) == universal.simple_type_name(values[index])
+                index += 1
             if equal:
                 return instance.type_id
     if len(records) >= 4096:
         return error(diagnostics.diagnostic_at("E000205", "record specialization limit exceeded", span))
-    id = universal.TypeId(u32(1000 + len(records)))
+    id := universal.TypeId(u32(1000 + len(records)))
+    representation := ""
+    if template.name == "string" and len(actuals) == 1 and len(values) == 1:
+        if int(actuals[0].type_id.index) in [108, 532]:
+            representation = "String"
+            if actuals[0].type_id.index == 108 and universal.simple_type_name(values[0]) == "256":
+                id = universal.TypeId(3)
     position = len(records)
-    record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition)
+    record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation)
     records.append(record)
-    definitions.record_instances.append(RecordInstance(id, template.definition, actuals, constructors))
+    definitions.record_instances.append(RecordInstance(id, template.definition, actuals, constructors, values))
     fields: list[universal.FunctionParameter] = []
     names: list[string] = []
     for field in template.fields:
@@ -684,3 +708,37 @@ def scoped_defaults(definitions: SemanticDefinitions, defaults: list[universal.T
     for default in defaults:
         result.append(scoped_default(definitions, default, namespace))
     return result
+
+
+# Value parameters retain literal spellings separately from type identities.
+# Resolving an alias here lets one generic forward its capacity to another.
+def value_argument(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string, active: list[string] = []) -> string:
+    name := ""
+    supplied ?= universal.simple_type_name(annotation)
+    if supplied != None:
+        name = supplied
+    numeric := name != ""
+    for character in name.characters():
+        if character < "0" or character > "9":
+            numeric = false
+    if numeric:
+        return name
+    if name in active:
+        return ""
+    alias ?= alias_named(definitions, name, namespace)
+    if alias != None:
+        target ?= alias.definition
+        if target != None:
+            path = active[:]
+            path.append(name)
+            return value_argument(definitions, target, alias.lookup, path)
+    return ""
+
+
+def record_position(records: list[universal.RecordDeclaration], type_id: universal.TypeId) -> int:
+    position := 0
+    for record in records:
+        if record.type_id.index == type_id.index:
+            return position
+        position += 1
+    throw Error("unknown record identity")

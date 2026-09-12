@@ -154,10 +154,16 @@ class OwnedRecords(MigrationCase):
             #include <stdlib.h>
             #include <stdio.h>
             void *__real_malloc(size_t);
+            void *__real_calloc(size_t, size_t);
             void __real_free(void *);
             static long live;
             void *__wrap_malloc(size_t n) {
                 void *p = __real_malloc(n);
+                if (p) ++live;
+                return p;
+            }
+            void *__wrap_calloc(size_t n, size_t width) {
+                void *p = __real_calloc(n, width);
                 if (p) ++live;
                 return p;
             }
@@ -174,7 +180,7 @@ class OwnedRecords(MigrationCase):
         ''')
         tracked = self.directory / 'tracked'
         self.succeeds([tool('SEVERIAN_CLANG', 'clang-21'), self.directory / 'subject.ll',
-                       tracker, '-Wl,--wrap=malloc', '-Wl,--wrap=free', '-o', tracked, '-lm'])
+                       tracker, '-Wl,--wrap=malloc', '-Wl,--wrap=calloc', '-Wl,--wrap=free', '-o', tracked, '-lm'])
         self.succeeds([tracked])
 
     def test_generic_record_inference_preserves_types_and_copies(self):

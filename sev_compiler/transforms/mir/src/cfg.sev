@@ -1,3 +1,5 @@
+import * from "../../../universal/cfg/availability.sev" as availability
+import * from "../../../universal/cfg/dominance.sev" as graph
 import * from "../../../universal/cfg/cfg.sev"
 import universal
 import * from "../../../universal/type/storage.sev" as storage_types
@@ -27,8 +29,8 @@ def finish(module: universal.Module, context: ExecutionContext, span: source.Spa
     if open(context):
         terminate(context, universal.CfgExit.Finish(None) if context.body.return_type.index == 2 else universal.CfgExit.Dead, origin)
     verify(module, context.body)
-    verify_availability(context.body, parameters)
     prune_unreachable(context.body)
+    verify_availability(context.body, parameters)
     promote_storage(module, context.body)
     return verify(module, context.body)
 
@@ -65,6 +67,15 @@ def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnost
                         return error(diagnostics.Diagnostic("E000230", "CFG raise requires a typed outcome", terminator.span))
                     if body.return_type.index != 2 and body.return_type.index != type_id.index:
                         return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", terminator.span))
+                case FinishFields:
+                    expected = storage_types.value_fields(body.return_type, module.records)
+                    if len(values) != len(expected):
+                        return error(diagnostics.Diagnostic("E000230", "CFG return field count mismatch", terminator.span))
+                    position := 0
+                    for returned in values:
+                        if module.values[returned.index].type_id.index != expected[position].index:
+                            return error(diagnostics.Diagnostic("E000230", "CFG return field type mismatch", terminator.span))
+                        position += 1
                 case Finish:
                     returned ?= value
                     if returned != None:
@@ -95,7 +106,104 @@ def value(module: universal.Module, type_id: universal.TypeId) -> universal.Valu
     return id
 
 
+def simplify_storage(module: universal.Module, body: universal.CfgBody):
+    slots: list[universal.ValueId] = []
+    counts: list[int] = []
+    initialized: list[universal.ValueId] = []
+    definitions: list[int] = []
+    positions: list[int] = []
+    direct: list[bool] = []
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Allocate:
+                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.records).index != 0:
+                        slots.append(result)
+                        counts.append(0)
+                        initialized.append(result)
+                        definitions.append(-1)
+                        positions.append(-1)
+                        direct.append(true)
+                case _:
+                    pass
+    for block in body.blocks:
+        position := 0
+        for operation in block.operations:
+            match operation:
+                case Store:
+                    index := 0
+                    for slot in slots:
+                        if slot.index == address.index:
+                            counts[index] += 1
+                            initialized[index] = value
+                            definitions[index] = block.id
+                            positions[index] = position
+                        index += 1
+                case _:
+                    pass
+            position += 1
+    parents = dominators(body)
+    for block in body.blocks:
+        position := 0
+        for operation in block.operations:
+            match operation:
+                case Load:
+                    index := 0
+                    for slot in slots:
+                        if slot.index == address.index:
+                            if counts[index] != 1 or not graph.contains(parents, definitions[index], block.id):
+                                direct[index] = false
+                            elif definitions[index] == block.id and positions[index] >= position:
+                                direct[index] = false
+                        index += 1
+                case Store:
+                    pass
+                case _:
+                    for input in operation_inputs(operation):
+                        index := 0
+                        for slot in slots:
+                            if slot.index == input.index:
+                                direct[index] = false
+                            index += 1
+            position += 1
+    for block in body.blocks:
+        body.blocks[block.id] = simplify_storage_block(block, slots, initialized, direct)
+
+
+def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.ValueId], initialized: list[universal.ValueId], direct: list[bool]) -> universal.BasicBlock:
+    operations: list[universal.Operation] = []
+    for operation in block.operations:
+        retained := true
+        match operation:
+            case Allocate:
+                index := 0
+                for slot in slots:
+                    if slot.index == result.index and direct[index]:
+                        retained = false
+                    index += 1
+            case Store:
+                index := 0
+                for slot in slots:
+                    if slot.index == address.index and direct[index]:
+                        retained = false
+                    index += 1
+            case Load:
+                index := 0
+                for slot in slots:
+                    if slot.index == address.index and direct[index]:
+                        operations.append(universal.Operation.Alias(initialized[index], result))
+                        retained = false
+                    index += 1
+            case _:
+                pass
+        if retained:
+            operations.append(operation)
+    block.operations = operations
+    return block
+
+
 def promote_storage(module: universal.Module, body: universal.CfgBody):
+    simplify_storage(module, body)
     slots: list[universal.ValueId] = []
     initial: list[universal.ValueId] = []
     prefix: list[universal.Operation] = []
@@ -113,46 +221,50 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
                 case _:
                     pass
     for selected in body.blocks:
-        current := initial[:]
-        if selected.id != body.entry:
-            current = []
-            for slot in slots:
-                parameter = value(module, module.values[initial[len(current)].index].type_id)
-                selected.parameters.append(parameter)
-                current.append(parameter)
-        operations: list[universal.Operation] := []
-        if selected.id == body.entry:
-            operations = prefix[:]
-        for operation in selected.operations:
-            retained := true
-            match operation:
-                case Allocate:
-                    retained = false
-                case Load:
-                    index := 0
-                    for slot in slots:
-                        if slot.index == address.index:
-                            operations.append(universal.Operation.Alias(current[index], result))
-                            retained = false
-                        index += 1
-                case Store:
-                    index := 0
-                    for slot in slots:
-                        if slot.index == address.index:
-                            current[index] = value
-                            retained = false
-                        index += 1
-                case _:
-                    pass
-            if retained:
-                operations.append(operation)
-        selected.operations = operations
-        body.blocks[selected.id] = selected
-        terminal ?= selected.terminator
-        if terminal != None:
-            for edge in successors(terminal.exit):
-                for item in current:
-                    edge.arguments.append(item)
+        body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix)
+
+
+def promote_storage_block(module: universal.Module, selected: universal.BasicBlock, entry: int, slots: list[universal.ValueId], initial: list[universal.ValueId], prefix: list[universal.Operation]) -> universal.BasicBlock:
+    current := initial[:]
+    if selected.id != entry:
+        current = []
+        for slot in slots:
+            parameter = value(module, module.values[initial[len(current)].index].type_id)
+            selected.parameters.append(parameter)
+            current.append(parameter)
+    operations: list[universal.Operation] := []
+    if selected.id == entry:
+        operations = prefix[:]
+    for operation in selected.operations:
+        retained := true
+        match operation:
+            case Allocate:
+                retained = false
+            case Load:
+                index := 0
+                for slot in slots:
+                    if slot.index == address.index:
+                        operations.append(universal.Operation.Alias(current[index], result))
+                        retained = false
+                    index += 1
+            case Store:
+                index := 0
+                for slot in slots:
+                    if slot.index == address.index:
+                        current[index] = value
+                        retained = false
+                    index += 1
+            case _:
+                pass
+        if retained:
+            operations.append(operation)
+    selected.operations = operations
+    terminal ?= selected.terminator
+    if terminal != None:
+        for edge in successors(terminal.exit):
+            for item in current:
+                edge.arguments.append(item)
+    return selected
 
 
 def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
@@ -167,6 +279,8 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
             return [value]
         case FieldAddress:
             return [object]
+        case CallFields:
+            return arguments
         case Call:
             return arguments
         case Unary:
@@ -195,6 +309,8 @@ def operation_results(operation: universal.Operation) -> list[universal.ValueId]
             return [result]
         case FieldAddress:
             return [result]
+        case CallFields:
+            return outputs
         case Call:
             return [result]
         case Unary:
@@ -219,39 +335,15 @@ def reachable_blocks(body: universal.CfgBody) -> list[int]:
 
 
 def dominators(body: universal.CfgBody) -> list[int]:
-    count = int(len(body.blocks))
-    reachable = reachable_blocks(body)
-    result: list[int] = []
-    for row in range(count):
-        for column in range(count):
-            result.append(1 if row != body.entry or column == body.entry else 0)
-    changed := true
-    while changed:
-        changed = false
-        for index in range(count):
-            if index == body.entry or index not in reachable:
-                continue
-            for member in range(count):
-                common := 1
-                found := false
-                for predecessor in range(count):
-                    if predecessor not in reachable:
-                        continue
-                    terminal ?= body.blocks[predecessor].terminator
-                    if terminal != None:
-                        for edge in successors(terminal.exit):
-                            if edge.target == index:
-                                found = true
-                                if result[predecessor * count + member] == 0:
-                                    common = 0
-                if not found:
-                    common = 0
-                if member == index:
-                    common = 1
-                if common != result[index * count + member]:
-                    result[index * count + member] = common
-                    changed = true
-    return result
+    sources: list[int] = []
+    targets: list[int] = []
+    for block in body.blocks:
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                sources.append(block.id)
+                targets.append(edge.target)
+    return graph.tree(int(len(body.blocks)), body.entry, sources, targets)
 
 
 def verify_inputs(values: list[universal.ValueId], available: list[int], span: source.Span) -> bool | diagnostics.Diagnostic:
@@ -261,38 +353,60 @@ def verify_inputs(values: list[universal.ValueId], available: list[int], span: s
     return true
 
 
+def verify_ssa_inputs(values: list[universal.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span) -> bool | diagnostics.Diagnostic:
+    for value in values:
+        if not availability.usable(definitions, parents, int(value.index), block, position):
+            return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
+    return true
+
+
 def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
-    dominance = dominators(body)
-    reachable = reachable_blocks(body)
-    count = int(len(body.blocks))
+    parents = dominators(body)
+    count := int(len(parameters))
     for block in body.blocks:
-        if block.id not in reachable:
-            continue
-        available: list[int] = []
-        for parameter in parameters:
-            available.append(int(parameter.index))
-        for predecessor in range(count):
-            if dominance[block.id * count + predecessor] == 1:
-                for parameter in body.blocks[predecessor].parameters:
-                    available.append(int(parameter.index))
-                if predecessor != block.id:
-                    for operation in body.blocks[predecessor].operations:
-                        for result in operation_results(operation):
-                            available.append(int(result.index))
+        count += int(len(block.parameters))
+        for operation in block.operations:
+            count += int(len(operation_results(operation)))
+    definitions = availability.create(count)
+    for parameter in parameters:
+        availability.add(definitions, int(parameter.index), body.entry, -1)
+    for block in body.blocks:
+        span := source.Span(source.SourceId(0), 0, 0)
         terminal ?= block.terminator
         if terminal != None:
+            span = terminal.span
+        for parameter in block.parameters:
+            formal := false
+            if block.id == body.entry:
+                for input in parameters:
+                    if input.index == parameter.index:
+                        formal = true
+            if not formal and not availability.add(definitions, int(parameter.index), block.id, -1):
+                return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
+        position := 0
+        for operation in block.operations:
+            for result in operation_results(operation):
+                if not availability.add(definitions, int(result.index), block.id, position):
+                    return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
+            position += 1
+    for block in body.blocks:
+        if parents[block.id] < 0:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            position := 0
             for operation in block.operations:
-                verify_inputs(operation_inputs(operation), available, terminal.span)
-                for result in operation_results(operation):
-                    if int(result.index) in available:
-                        return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", terminal.span))
-                    available.append(int(result.index))
+                verify_ssa_inputs(operation_inputs(operation), definitions, parents, block.id, position, terminal.span)
+                position += 1
             inputs: list[universal.ValueId] = []
             match terminal.exit:
                 case Raise:
                     inputs.append(value)
                 case Conditional:
                     inputs.append(condition)
+                case FinishFields:
+                    for value in values:
+                        inputs.append(value)
                 case Finish:
                     returned ?= value
                     if returned != None:
@@ -302,9 +416,8 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
             for edge in successors(terminal.exit):
                 for argument in edge.arguments:
                     inputs.append(argument)
-            verify_inputs(inputs, available, terminal.span)
+            verify_ssa_inputs(inputs, definitions, parents, block.id, position, terminal.span)
     return true
-
 
 
 def prune_unreachable(body: universal.CfgBody):

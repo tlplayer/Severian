@@ -1,0 +1,7 @@
+# The typed-buffer allocation boundary uses the existing MLIR memory lowering.
+# core.storage supplies validation and ownership-facing operations above it.
+@mlir("memref.alloc", operand_segments="1,0")
+def allocate_buffer[T](count: index) -> buffer[T]
+
+@mlir("arith.index_cast")
+def buffer_index(count: int) -> index

@@ -1,0 +1,14 @@
+import * from "../src/raw.sev" as memory
+
+test "raw allocation remains available alongside owning storage":
+    values = memory.raw_allocate[u32](2)
+    unsafe:
+        values[0] = u32(955)
+        values[1] = u32(128512)
+        assert(values[0] == u32(955))
+        assert(values[1] == u32(128512))
+    memory.raw_free(values)
+
+test "an empty raw allocation can be freed":
+    values = memory.raw_allocate[u8](0)
+    memory.raw_free(values)

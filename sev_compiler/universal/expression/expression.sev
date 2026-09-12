@@ -11,6 +11,8 @@ class Expression:
     id: HirId = HirId(0)
     type_id: TypeId = TypeId(0)
     grammar: DefId | None = None
+    loan_root: int = -1
+    loan_mode: string = ""
 
 
 class CallArgument:

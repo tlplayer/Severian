@@ -1,3 +1,5 @@
+import * from "../../../../universal/cfg/availability.sev" as availability
+import * from "../../../../universal/cfg/dominance.sev" as graph
 import * from "builder.sev"
 import * from "model.sev"
 
@@ -127,16 +129,16 @@ def copy_values(values: list[int]) -> list[int]:
     return copied
 
 
-def region_index(program: MlirProgram, id: int) -> int:
+def region_index(program: borrow MlirProgram, id: int) -> int:
     index := 0
-    for region in program.regions:
+    for region in borrow program.regions:
         if region.id == id:
             return index
         index += 1
     return -1
 
 
-def validate_operation_signature(program: MlirProgram, operation: MlirOperation) -> bool | MlirVerificationError:
+def validate_operation_signature(program: borrow MlirProgram, operation: borrow MlirOperation) -> bool | MlirVerificationError:
     name = operation_name_text(operation.name)
     dialect = operation.name.dialect
     mnemonic = operation.name.mnemonic
@@ -145,9 +147,9 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
     location ?= operation.location
     if location != None:
         validate_location(location)
-    for operand in operation.operands:
+    for operand in borrow operation.operands:
         validate_type(operand.type_id)
-    for result in operation.results:
+    for result in borrow operation.results:
         validate_type(result.type_id)
     attribute_names: list[string] = []
     for attribute in operation.attributes:
@@ -167,8 +169,8 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
         return error(InvalidRegionContract(name))
     for successor in operation.successors:
         found := false
-        for region in program.regions:
-            for block in region.blocks:
+        for region in borrow program.regions:
+            for block in borrow region.blocks:
                 if block.id == successor:
                     found = true
         if not found:
@@ -176,8 +178,8 @@ def validate_operation_signature(program: MlirProgram, operation: MlirOperation)
     return true
 
 
-def validate_operation(program: MlirProgram, operation: MlirOperation, defined: list[int], owned_regions: list[int]) -> bool | MlirVerificationError:
-    for operand in operation.operands:
+def validate_operation(program: borrow MlirProgram, operation: borrow MlirOperation, defined: list[int], owned_regions: list[int]) -> bool | MlirVerificationError:
+    for operand in borrow operation.operands:
         if operand.id not in defined:
             return error(UndefinedValue(operand.id))
     validate_operation_signature(program, operation)
@@ -191,39 +193,91 @@ def validate_operation(program: MlirProgram, operation: MlirOperation, defined: 
     return true
 
 
-def validate_region(program: MlirProgram, region_id: int, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
+def validate_flat_region(program: borrow MlirProgram, region: borrow MlirRegion, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
+    parents = region_dominators(region)
+    count := int(len(inherited))
+    for block in borrow region.blocks:
+        count += int(len(block.arguments))
+        for operation in borrow block.operations:
+            count += int(len(operation.results))
+    definitions = availability.create(count)
+    for value in inherited:
+        availability.add(definitions, value, -2, -1)
+    block_index := 0
+    for block in borrow region.blocks:
+        for argument in block.arguments:
+            if not availability.add(definitions, argument.id, block_index, -1):
+                return error(DuplicateValue(argument.id))
+        position := 0
+        for operation in borrow block.operations:
+            for result in borrow operation.results:
+                if not availability.add(definitions, result.id, block_index, position):
+                    return error(DuplicateValue(result.id))
+            position += 1
+        block_index += 1
+    block_index = 0
+    for block in borrow region.blocks:
+        terminated := false
+        position := 0
+        for operation in borrow block.operations:
+            if terminated:
+                return error(OperationAfterTerminator(block.id))
+            known: list[int] = []
+            for operand in borrow operation.operands:
+                if not availability.usable(definitions, parents, operand.id, block_index, position):
+                    return error(UndefinedValue(operand.id))
+                known.append(operand.id)
+            validate_operation(program, operation, known, owned_regions)
+            terminated = operation.terminator
+            position += 1
+        if requires_terminator and not terminated:
+            return error(MissingTerminator(region.id))
+        block_index += 1
+    return true
+
+
+def validate_region(program: borrow MlirProgram, region_id: int, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
     index = region_index(program, region_id)
     if index < 0:
         return error(MissingRegion(region_id))
     region = program.regions[index]
     if len(region.blocks) == 0:
         return error(MissingBlock(region_id))
+    flat := true
+    for block in borrow region.blocks:
+        for operation in borrow block.operations:
+            if len(operation.regions) != 0:
+                flat = false
+    if flat:
+        return validate_flat_region(program, region, inherited, requires_terminator, owned_regions)
     dominators = region_dominators(region)
     block_index := 0
-    for block in region.blocks:
+    for block in borrow region.blocks:
         defined = copy_values(inherited)
-        predecessor := 0
-        for dominator in region.blocks:
-            if predecessor != block_index and dominators[block_index * int(len(region.blocks)) + predecessor] == 1:
-                for argument in region.blocks[predecessor].arguments:
-                    defined.append(argument.id)
-                for operation in region.blocks[predecessor].operations:
-                    for result in operation.results:
-                        defined.append(result.id)
-            predecessor += 1
+        predecessor := dominators[block_index]
+        while predecessor >= 0 and predecessor != block_index:
+            for argument in region.blocks[predecessor].arguments:
+                defined.append(argument.id)
+            for operation in region.blocks[predecessor].operations:
+                for result in borrow operation.results:
+                    defined.append(result.id)
+            parent = dominators[predecessor]
+            if parent == predecessor:
+                break
+            predecessor = parent
         block_index += 1
         for argument in block.arguments:
             if argument.id in defined:
                 return error(DuplicateValue(argument.id))
             defined.append(argument.id)
         terminated := false
-        for operation in block.operations:
+        for operation in borrow block.operations:
             if terminated:
                 return error(OperationAfterTerminator(block.id))
             validate_operation(program, operation, defined, owned_regions)
             if operation.terminator:
                 terminated = true
-            for result in operation.results:
+            for result in borrow operation.results:
                 if result.id in defined:
                     return error(DuplicateValue(result.id))
                 defined.append(result.id)
@@ -232,22 +286,22 @@ def validate_region(program: MlirProgram, region_id: int, inherited: list[int], 
     return true
 
 
-def validate(program: MlirProgram) -> bool | MlirVerificationError:
+def validate(program: borrow MlirProgram) -> bool | MlirVerificationError:
     names: list[string] = []
     blocks: list[int] = []
-    for region in program.regions:
-        for block in region.blocks:
+    for region in borrow program.regions:
+        for block in borrow region.blocks:
             if block.id in blocks:
                 return error(DuplicateBlock(block.id))
             blocks.append(block.id)
-    for function in program.functions:
+    for function in borrow program.functions:
         if function.name in names:
             return error(DuplicateFunction(function.name))
         names.append(function.name)
     owned_regions: list[int] = []
-    for operation in program.operations:
+    for operation in borrow program.operations:
         validate_operation(program, operation, [], owned_regions)
-    for function in program.functions:
+    for function in borrow program.functions:
         location ?= function.location
         if location != None:
             validate_location(location)
@@ -264,7 +318,7 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
             entry = region.blocks[0]
             if len(entry.arguments) != len(function.arguments):
                 return error(ReturnSignatureMismatch(function.name))
-            for block in region.blocks:
+            for block in borrow region.blocks:
                 final_operation = block.operations[int(len(block.operations)) - 1]
                 if operation_name_text(final_operation.name) != "func.return":
                     continue
@@ -275,43 +329,31 @@ def validate(program: MlirProgram) -> bool | MlirVerificationError:
                     if not same_type(final_operation.operands[index].type_id, function.result_types[index]):
                         return error(ReturnSignatureMismatch(function.name))
                     index += 1
-    for region in program.regions:
+    for region in borrow program.regions:
         if region.id not in owned_regions:
             return error(UnownedRegion(region.id))
     return true
 
 
-def program_is_valid(program: MlirProgram) -> bool:
+def program_is_valid(program: borrow MlirProgram) -> bool:
     outcome ?= validate(program)
     return outcome is bool
 
 
 
-def region_dominators(region: MlirRegion) -> list[int]:
-    count = int(len(region.blocks))
-    result: list[int] = []
-    for row in range(count):
-        for column in range(count):
-            result.append(1 if row != 0 or column == 0 else 0)
-    changed := true
-    while changed:
-        changed = false
-        for index in range(1, count):
-            for member in range(count):
-                common := 1
-                found := false
-                for predecessor in range(count):
-                    candidate = region.blocks[predecessor]
-                    if len(candidate.operations) != 0:
-                        if region.blocks[index].id in candidate.operations[-1].successors:
-                            found = true
-                            if result[predecessor * count + member] == 0:
-                                common = 0
-                if not found:
-                    common = 0
-                if member == index:
-                    common = 1
-                if common != result[index * count + member]:
-                    result[index * count + member] = common
-                    changed = true
-    return result
+def region_dominators(region: borrow MlirRegion) -> list[int]:
+    sources: list[int] = []
+    targets: list[int] = []
+    predecessor := 0
+    for block in borrow region.blocks:
+        if len(block.operations) != 0:
+            for successor in block.operations[-1].successors:
+                index := 0
+                for candidate in borrow region.blocks:
+                    if candidate.id == successor:
+                        sources.append(predecessor)
+                        targets.append(index)
+                        break
+                    index += 1
+        predecessor += 1
+    return graph.tree(int(len(region.blocks)), 0, sources, targets)

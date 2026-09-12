@@ -1,0 +1,134 @@
+import * from "../../../storage/src/lib.sev" as storage
+
+# The vector owns its buffer directly. N is the initial capacity; reserve
+# chooses growth and core.storage checks allocations through core.memory. Replacing or
+# dropping the buffer releases its allocation through ordinary ownership.
+class vector[T, N = 256]:
+    data: buffer[T]
+    used: int
+
+    def vector():
+        width = int(bytes(T).amount / 8.0)
+        assert(N >= 0 and width > 0)
+        assert(N <= 9223372036854775807 / width)
+        data: buffer[T] = storage.allocate(N)
+        used = 0
+
+    def len() -> int:
+        return used
+
+    def capacity() -> int:
+        return len(data)
+
+    def reserve(self: borrow Self, required: int):
+        assert(required >= 0)
+        if required <= len(data):
+            return
+        data = __vector_grow(data, used, required, N)
+
+    def append(self: borrow Self, value: T):
+        assert(used < 9223372036854775807)
+        reserve(used + 1)
+        data[used] = value
+        used += 1
+
+    def get(position: int) -> T:
+        assert(position >= 0 and position < used)
+        return data[position]
+
+    def clear(self: borrow Self):
+        used = 0
+
+    operator copy(self) -> Self:
+        return self.copy()
+
+    def copy() -> Self:
+        result = vector[T, N]()
+        result.reserve(used)
+        position := 0
+        while position < used:
+            result.append(data[position])
+            position += 1
+        return result
+
+
+
+# Keep the vector's growth loop in one function across append call sites.
+def __vector_grow[T](data: view buffer[T], used: int, required: int, initial: int) -> buffer[T]:
+    assert(required >= 0)
+    current = len(data)
+    capacity := current if current > initial else initial
+    if capacity == 0:
+        capacity = 1
+    while capacity < required:
+        if capacity > 4611686018427387903:
+            capacity = required
+        else:
+            capacity *= 2
+    width = int(bytes(T).amount / 8.0)
+    assert(width > 0)
+    assert(capacity <= 9223372036854775807 / width)
+    replacement: buffer[T] = storage.allocate(capacity)
+    position := 0
+    while position < used:
+        replacement[position] = data[position]
+        position += 1
+    return replacement
+
+
+test "vector reserves capacity independently of initialized length":
+    value = vector[u8]()
+    assert(value.len() == 0)
+    assert(value.capacity() == 256)
+    value.append(u8(65))
+    assert(value.len() == 1)
+    assert(value.get(0) == u8(65))
+    assert(value.capacity() == 256)
+
+
+test "vector grows and reuses its capacity after clearing":
+    value = vector[u32, 2]()
+    value.append(u32(955))
+    value.append(u32(128512))
+    assert(value.capacity() == 2)
+    value.append(u32(20013))
+    assert(value.capacity() == 4)
+    assert(value.get(0) == u32(955))
+    assert(value.get(1) == u32(128512))
+    assert(value.get(2) == u32(20013))
+    value.clear()
+    value.append(u32(97))
+    assert(value.len() == 1)
+    assert(value.capacity() == 4)
+
+
+test "vector copies have independent storage":
+    original = vector[u8, 1]()
+    original.append(u8(65))
+    duplicate = original.copy()
+    duplicate.clear()
+    duplicate.append(u8(66))
+    assert(original.get(0) == u8(65))
+    assert(duplicate.get(0) == u8(66))
+
+
+test "append reuses the allocation until capacity is exhausted":
+    value = vector[u8, 2]()
+    initial = __raw_index(__raw_buffer_address(value.data))
+    value.append(u8(1))
+    value.append(u8(2))
+    assert(__raw_index(__raw_buffer_address(value.data)) == initial)
+    value.append(u8(3))
+    assert(value.capacity() == 4)
+    assert(value.get(0) == u8(1))
+    assert(value.get(1) == u8(2))
+    assert(value.get(2) == u8(3))
+
+
+test "zero initial capacity grows on the first append":
+    value = vector[u8, 0]()
+    assert(value.len() == 0)
+    assert(value.capacity() == 0)
+    value.append(u8(42))
+    assert(value.capacity() == 1)
+    assert(value.get(0) == u8(42))

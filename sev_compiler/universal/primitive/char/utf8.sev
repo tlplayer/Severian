@@ -4,6 +4,15 @@ import * from "encoding.sev"
 def codepoint(value: char) -> int
 
 
+@mlir("arith.trunci")
+def __scalar(value: int) -> char
+
+
+def from_codepoint(value: int) -> char:
+    assert(valid(value))
+    return __scalar(value)
+
+
 test "character literals preserve Unicode scalars and escapes":
     assert(codepoint('a') == 97)
     assert(codepoint('λ') == 955)

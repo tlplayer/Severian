@@ -1,5 +1,6 @@
 # Ordered source providers. Add library behavior here without rebuilding the compiler.
 import * from "grammar/contracts.sev"
+import * from "primitive/string/storage.sev"
 import * from "primitive/tuple.sev"
 import * from "primitive/enum.sev"
 import * from "../../library/system/io/src/text.sev"
@@ -9,7 +10,8 @@ import * from "primitive/numeric/power.sev"
 import * from "primitive/units.sev"
 import * from "primitive/collections.sev"
 import * from "primitive/string_lists.sev"
-import * from "primitive/hosted_memory.sev"
+import * from "primitive/pointer.sev"
+import * from "../../library/core/memory/src/raw_intrinsics.sev"
 import * from "primitive/assertion.sev"
 import * from "primitive/string/methods.sev" as string_methods
 import * from "../../library/testing/src/lib.sev"

@@ -28,7 +28,7 @@ def render(value: Diagnostic, files: list[source.SourceFile]) -> string:
 def render_location(location: source.Span, files: list[source.SourceFile]) -> string:
     if int(location.source.index) < len(files):
         input = files[location.source.index]
-        characters = input.text.characters()
+        characters = input.characters
         offset = int(location.start)
         if offset <= len(characters):
             line := 1

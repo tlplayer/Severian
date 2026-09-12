@@ -23,6 +23,8 @@ def constant_index(expression: universal.Expression) -> int:
 
 
 def binding(expression: universal.Expression) -> int:
+    if expression.loan_root >= 0:
+        return expression.loan_root
     match expression.kind:
         case BindingReference:
             return int(binding.index)

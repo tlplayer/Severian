@@ -3,17 +3,13 @@ import * from "format.sev" as format
 import * from "../slicing.sev" as slicing
 
 
-operator copy(value: string) -> string:
-    return text.concat(value, "")
-
-
 @mlir("memref.extract_aligned_pointer_as_index")
 def __float_end_address(value: buffer[int]) -> index
 
 @mlir("llvm.ptrtoint")
 def __float_pointer_value(value: native_ptr) -> int
 
-def __parse_float_buffer(value: string, end: buffer[int]) -> float:
+def __parse_float_buffer(value: string, end: borrow buffer[int]) -> float:
     return format.__parse(format.__address(value), format.__pointer(text.__size(__float_end_address(end))))
 
 operator float(value: string) -> float:
@@ -71,22 +67,12 @@ operator slice_at(value: string, start: int, stop: int, step: int, has_start: bo
     end = slicing.bound(stop, size, reverse) if has_stop else (-1 if reverse else size)
     result := ""
     while (position > end if reverse else position < end):
-        first = text.__offset(value, position, 0)
-        last = text.__offset(value, position + 1, 0)
-        part = text.__allocate(text.__index(last - first))
-        index := first
-        while index < last:
-            text.__store(text.__load(value, text.__index(index)), part, text.__index(index - first))
-            index += 1
-        result = text.concat(result, part)
+        result.append(text.character_at(value, position))
         position = slicing.next_position(position, end, step)
     return result
 
 
 extend string:
-    def length() -> int:
-        return text.length(self)
-
     def contains(needle: string) -> bool:
         return __contains_bytes(self, needle)
 
@@ -178,3 +164,240 @@ operator int(value: string) -> int:
         result -= digit
         position += 1
     return result if negative else -result
+
+
+def __test_formatted(value: string) -> string:
+    return f"Hello, {value}!"
+
+
+def __test_interpolation_identity(value: string) -> string:
+    return f"{value}"
+
+
+def __test_text(calls: borrow int) -> string:
+    calls += 1
+    return "λ" + "😀"
+
+
+def __test_number(calls: borrow int) -> int:
+    calls += 10
+    return 42
+
+
+test "interpolation reads strings without consuming them":
+    name = "Sev" + "erian"
+    assert(f"{name}:{type(name)}" == "Severian:string")
+    greeting = __test_formatted(name)
+    assert(name[:5] == "Sever")
+    drop(name)
+    assert(greeting == "Hello, Severian!")
+    empty = ""
+    assert(f"{empty}" == "")
+    assert(empty == "")
+
+
+test "interpolation evaluates once and preserves returned values":
+    original = "Sev" + "erian"
+    result = __test_interpolation_identity(original)
+    assert(original == "Severian")
+    drop(original)
+    assert(result == "Severian")
+    calls := 0
+    assert(f"{__test_text(borrow calls)}:{__test_number(borrow calls)}" == "λ😀:42")
+    assert(calls == 11)
+
+
+test "string and character concatenation":
+    count = 10
+    ratio = 0.5
+    character = '!'
+    assert(string(count + ratio) + character == "10.5!")
+    assert("hello" + 'λ' == "helloλ")
+    result: string = "hello" + '😀'
+    assert(result == "hello😀")
+    appended := "hello"
+    appended += '!'
+    assert(appended == "hello!")
+
+
+def __test_recursive_length(value: string, remaining: int) -> int:
+    if remaining == 0:
+        return value.length()
+    return __test_recursive_reader(value, remaining - 1)
+
+
+def __test_recursive_reader(value: string, remaining: int) -> int:
+    return __test_recursive_length(value, remaining)
+
+
+test "recursive readers preserve a shared view":
+    value = "Severian"
+    saved = view value
+    assert(__test_recursive_length(saved, 8) == 8)
+    assert(saved == "Severian")
+    drop(saved)
+    value.append('!')
+    assert(value == "Severian!")
+
+
+def __test_consume(value: move string) -> int:
+    return value.length()
+
+
+def __test_format_consumed(value: move string) -> string:
+    return f"{__test_consume(move value)}"
+
+
+test with compiler "interpolation preserves explicit moves":
+    name = "Severian"
+    __test_format_consumed(name)
+    reject:
+        print(name)
+
+
+test "append chains string and character suffixes":
+    assert("Apple".append("s").append('!') == "Apples!")
+    value := ""
+    value.append('a')
+    value.append('λ')
+    value.append('中')
+    value.append('😀')
+    assert(value == "aλ中😀")
+    assert(value.length() == 4)
+    value.append("")
+    value.append(" tail")
+    assert(value == "aλ中😀 tail")
+    assert("".append("") == "")
+
+
+test "append handles self append and independent copies":
+    value := "a"
+    value.append('b')
+    before = clone value
+    suffix = copy value
+    value.append(suffix)
+    assert(value == "abab")
+    assert(before == "ab")
+    before.append('!')
+    assert(before == "ab!")
+    assert(value == "abab")
+    saved = clone value
+    for index in range(100):
+        value.append('x')
+    assert(saved == "abab")
+    assert(value.length() == 104)
+    drop(value)
+    assert(saved == "abab")
+    assert(before == "ab!")
+
+
+test "4096 character appends reuse vector capacity":
+    value := ""
+    previous := 0
+    allocations := 0
+    allocated_units := 0
+    for index in range(4096):
+        value.append('x')
+        current = __raw_index(__raw_buffer_address(value.storage.data))
+        if current != previous:
+            allocations += 1
+            allocated_units += value.capacity()
+            previous = current
+    assert(value.length() == 4096)
+    assert(value.capacity() == 4096)
+    assert(allocations <= 5)
+    assert(allocated_units <= 7936)
+
+
+test "string encoding and initial capacity are parameters":
+    empty = string()
+    assert(empty.length() == 0)
+    assert(empty.capacity() == 256)
+    small: string[u8, 2] = ""
+    small.append('a')
+    small.append('b')
+    small.append('c')
+    assert(small.capacity() == 4)
+    assert(string(small) == "abc")
+    wide: string[u32, 2] = ""
+    wide.append('λ')
+    wide.append('😀')
+    wide.append('!')
+    assert(wide.length() == 3)
+    assert(wide.capacity() == 4)
+    assert(wide.storage.used == 3)
+    assert(string(wide) == "λ😀!")
+    literal: string[u32, 1] = "λ😀"
+    literal.append('!')
+    assert(string(literal) == "λ😀!")
+
+
+test with compiler "append respects a shared view":
+    value := "hello"
+    saved = view value
+    reject:
+        value.append('!')
+        print(saved)
+
+
+test with compiler "string encoding must be u8 or u32":
+    reject:
+        value: string[u16] = "invalid"
+
+
+def __test_mutate(value: borrow string):
+    value.append('!')
+
+
+def __test_independent(value: copy string) -> string:
+    value.append('!')
+    return value
+
+
+test "parameter contracts preserve owners and make copies independent":
+    value = "hello"
+    duplicate = __test_independent(value)
+    assert(value == "hello")
+    assert(duplicate == "hello!")
+    __test_mutate(value)
+    assert(value == "hello!")
+
+
+test "chained append keeps the original receiver":
+    value = "a"
+    value.append("b").append('c')
+    assert(value == "abc")
+    alias = value.append('d')
+    alias.append('e')
+    drop(alias)
+    assert(value == "abcde")
+
+
+test with compiler "default views cannot mutate consume or escape":
+    reject:
+        def mutate(value: string):
+            value.append('!')
+    reject:
+        def consume(value: string):
+            drop(value)
+    reject:
+        def consume(value: string):
+            other = move value
+    reject:
+        def escape(value: string) -> string:
+            return value
+    reject:
+        def mutate_alias(value: string):
+            alias = value
+            alias.append('!')
+
+
+test with compiler "a saved append result keeps its exclusive loan":
+    value = "a"
+    alias = value.append('b')
+    reject:
+        value.append('c')
+    accept:
+        alias.append('c')
+        drop(alias)
+        value.append('d')

@@ -33,6 +33,14 @@ class SourceFile:
     id: SourceId
     path: string
     text: string
+    characters: list[string]
+
+    def SourceFile(source_id: SourceId, source_path: string, source_text: string):
+        id = source_id
+        path = source_path
+        text = source_text
+        # Spans use character offsets. Decode once for lexing and diagnostics.
+        characters = source_text.characters()
 
 
 class SourceMap:

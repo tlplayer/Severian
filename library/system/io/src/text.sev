@@ -17,7 +17,7 @@ def __write(value: string, offset: int):
         __write(value, offset + 1)
 
 
-def __separator(value: string) -> string:
+def __separator(value: string) -> view string:
     return value
 
 
@@ -25,7 +25,7 @@ def __separator(value: None) -> string:
     return " "
 
 
-def __ending(value: string) -> string:
+def __ending(value: string) -> view string:
     return value
 
 
