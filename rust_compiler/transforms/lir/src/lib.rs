@@ -468,3 +468,53 @@ pub struct Function {
     pub parameter_types: Vec<LoweredType>,
     pub cfg: Option<CfgBody>,
 }
+
+impl Function {
+    /// Keep internal identities unique while making native profiler stacks
+    /// readable. External ABI names must remain exactly as declared.
+    pub fn native_symbol(&self) -> String {
+        match &self.linkage {
+            FunctionLinkage::Internal => {
+                let name: String = self
+                    .name
+                    .chars()
+                    .map(|character| {
+                        if character.is_ascii_alphanumeric() || character == '_' {
+                            character
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect();
+                format!("__sev_fn_{}_{}", self.id.0, name)
+            }
+            FunctionLinkage::External { symbol } => symbol.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_symbols_preserve_identity_and_external_abi() {
+        let mut function = Function {
+            id: FunctionId(42),
+            name: "module.inspect[T]".into(),
+            parameters: Vec::new(),
+            result: LoweredType::Unit,
+            body: None,
+            linkage: FunctionLinkage::Internal,
+            parameter_types: Vec::new(),
+            cfg: None,
+        };
+        assert_eq!(function.native_symbol(), "__sev_fn_42_module_inspect_T_");
+        function.id = FunctionId(43);
+        assert_eq!(function.native_symbol(), "__sev_fn_43_module_inspect_T_");
+        function.linkage = FunctionLinkage::External {
+            symbol: "malloc".into(),
+        };
+        assert_eq!(function.native_symbol(), "malloc");
+    }
+}

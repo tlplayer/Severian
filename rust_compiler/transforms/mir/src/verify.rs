@@ -169,6 +169,109 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BlockId, LocalDecl};
+    use severian_universal::LiteralValue;
+
+    fn block(id: u32, statements: Vec<CfgStatement>, terminator: Terminator) -> BasicBlock {
+        BasicBlock {
+            id: BlockId(id),
+            execution: None,
+            parameters: Vec::new(),
+            statement_spans: vec![None; statements.len()],
+            statements,
+            terminator,
+            terminator_span: None,
+        }
+    }
+
+    fn initialize() -> CfgStatement {
+        CfgStatement::Assign(
+            Place::local(LocalId(0)),
+            Rvalue::Use(Operand::Constant {
+                value: LiteralValue::Integer("1".into()),
+                ty: TypeId(0),
+            }),
+        )
+    }
+
+    fn body(blocks: Vec<BasicBlock>) -> CfgBody {
+        CfgBody {
+            blocks,
+            locals: vec![LocalDecl {
+                id: LocalId(0),
+                ty: TypeId(0),
+                mutable: true,
+                argument: false,
+                borrowed: false,
+                span: None,
+            }],
+            ..CfgBody::default()
+        }
+    }
+
+    fn branch(then_block: u32, else_block: u32) -> Terminator {
+        Terminator::Branch {
+            condition: Operand::Constant {
+                value: LiteralValue::Boolean(true),
+                ty: TypeId(0),
+            },
+            then_block: BlockId(then_block),
+            else_block: BlockId(else_block),
+        }
+    }
+
+    fn read() -> Terminator {
+        Terminator::Return(Some(Operand::Copy(Place::local(LocalId(0)))))
+    }
+
+    #[test]
+    fn initialization_must_reach_both_sides_of_a_join() {
+        let mut graph = body(vec![
+            block(0, vec![], branch(1, 2)),
+            block(1, vec![initialize()], Terminator::Goto(BlockId(3), vec![])),
+            block(2, vec![], Terminator::Goto(BlockId(3), vec![])),
+            block(3, vec![], read()),
+        ]);
+        assert_eq!(
+            verify_body(&graph, &[], None, None),
+            Err(VerifyError::UseBeforeDefinition { block: 3, local: 0 })
+        );
+        graph.blocks[2] = block(2, vec![initialize()], Terminator::Goto(BlockId(3), vec![]));
+        assert_eq!(verify_body(&graph, &[], None, None), Ok(()));
+    }
+
+    #[test]
+    fn backedge_propagates_initialization_loss_across_passes() {
+        let mut graph = body(vec![
+            block(0, vec![initialize()], Terminator::Goto(BlockId(1), vec![])),
+            block(1, vec![], branch(2, 3)),
+            block(2, vec![], Terminator::Goto(BlockId(1), vec![])),
+            block(3, vec![], read()),
+        ]);
+        assert_eq!(verify_body(&graph, &[], None, None), Ok(()));
+        // Dropping and then reading on a subsequent iteration must fail even
+        // though the preheader initialized the value on the first iteration.
+        graph.blocks[2] = block(
+            2,
+            vec![CfgStatement::StorageDead(LocalId(0))],
+            Terminator::Goto(BlockId(1), vec![]),
+        );
+        assert!(verify_body(&graph, &[], None, None).is_err());
+    }
+
+    #[test]
+    fn invalid_successor_is_rejected_before_caching_edges() {
+        let graph = body(vec![block(0, vec![], Terminator::Goto(BlockId(7), vec![]))]);
+        assert_eq!(
+            verify_body(&graph, &[], None, None),
+            Err(VerifyError::InvalidBlock(7))
+        );
+    }
+}
+
 fn verify_body(
     body: &CfgBody,
     globals: &[GlobalDecl],
@@ -212,19 +315,24 @@ fn verify_body(
         .filter(|local| local.argument)
         .map(|local| local.id)
         .collect();
+    // CFG edges are fixed throughout the analysis. Keep them across passes,
+    // and intersect the monotonically shrinking input sets in place.
+    let successors_by_block = body
+        .blocks
+        .iter()
+        .map(|block| successors(&block.terminator))
+        .collect::<Vec<_>>();
     let mut changed = true;
     while changed {
         changed = false;
         for block in &body.blocks {
             let mut state = incoming[block.id.0 as usize].clone();
             transfer_definitions(block, &mut state);
-            for successor in successors(&block.terminator) {
+            for successor in &successors_by_block[block.id.0 as usize] {
                 let target = &mut incoming[successor.0 as usize];
-                let next = target.intersection(&state).copied().collect();
-                if *target != next {
-                    *target = next;
-                    changed = true;
-                }
+                let previous_len = target.len();
+                target.retain(|local| state.contains(local));
+                changed |= target.len() != previous_len;
             }
         }
     }
@@ -520,7 +628,9 @@ fn verify_rvalue(
         | Rvalue::Convert { operand, .. }
         | Rvalue::Await { task: operand } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
-        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => fields.iter().collect(),
+        Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => {
+            fields.iter().collect()
+        }
         Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) | Rvalue::AddressOf(place) => {
             verify_place(body, globals, place)?;
             if let Some(local) = place.local_id().filter(|local| !state.contains(local)) {

@@ -1,4 +1,82 @@
-# Source compiler profiling checkpoint
+# Native compiler profiling
+
+Both compiler executables parse and implement profiling themselves. The shell
+launchers only select a native executable. Python is not used to implement
+profiling or run the profiled command.
+
+```sh
+sev 00-constants.sev --profile
+sev build input.sev --profile cpu
+sev test input.sev --profile memory
+sev run input.sev --profile time
+sev_rust build input.sev --build-profile release --profile
+```
+
+Bare `--profile` and `--profile time` measure the current compiler in process
+using the monotonic clock and OS resource accounting. They print wall time,
+user/system CPU time, and maximum process RSS to stderr. CPU accounting includes
+completed children, including native tools and executed programs. Maximum RSS
+is the largest process high-water mark; it is not summed process-tree RSS or
+live heap size. Compilation stages print their wall times as they finish. The
+source compiler also records stage timings in `stages.tsv` and reports its
+process RSS high-water mark at each stage. Stage times need not sum to the
+invocation total, which includes additional driver work and execution.
+
+Program stdout and stderr remain live and unredirected. On normal compiler
+errors, the native driver preserves diagnostics and writes a failing profile
+report. A process killed by a signal can leave only completed stage output or
+partial traces. Profiling itself does not impose a new time or memory limit;
+use the existing test resource guard when running bounded automated checks.
+
+`--profile-output DIR` selects a new report directory. Existing directories are
+rejected. By default, each invocation creates a unique directory underneath
+`package.pkg/profiles`. `report.json` records the compiler kind, concrete
+executable, arguments, working directory, mode, exit status, and measurements.
+Use the concrete candidate executable to profile a new build before installing
+it. Source compiler candidates need `--sysroot ROOT` or `SEVERIAN_SYSROOT` when
+executed outside their normal launcher environment.
+
+`--build-profile release` selects optimization/build settings. Everything after
+`--` is passed unchanged to the executed program, including a program's own
+`--profile` argument. Both separated and equals forms of the profiling mode are
+supported. The profiling options work on the native executables directly.
+
+Detailed stack capture uses external native profilers, invoked by the compiler
+with literal argument arrays:
+
+- `--profile cpu` runs another instance of the same native compiler under perf,
+  using 99 Hz user CPU sampling and DWARF call chains. It retains `perf.data`
+  and writes `cpu.txt`, including self and inclusive costs.
+- `--profile memory` runs that native compiler under heaptrack and analyzes each
+  allocation trace with heaptrack_print. Reports include allocation counts,
+  temporary allocations, peak heap consumers, and allocation stacks. Individual
+  stacks remain separate to avoid inaccurate merged peak attribution.
+
+Detailed modes require perf permissions or heaptrack/heaptrack_print on PATH.
+They fail explicitly if the profiler is unavailable; they do not silently
+substitute a summary. Capture totals include profiler overhead. Analysis runs
+after capture accounting and records its separate exit code in `analysis.status`.
+A failed compiler invocation remains failed even if analysis succeeds. Run and
+test invocations also include generated program execution. CPU samples measure
+on-CPU activity rather than blocked I/O; allocation tracing does not identify
+logical allocations hidden inside custom arenas.
+
+The Rust bootstrap includes readable function names after the unique ID in
+internal native symbols, shared by its MLIR and C emitters. External ABI names
+remain unchanged. Keep symbols in optimized binaries when profiling; source
+line attribution additionally requires debug information. Existing binaries
+may still contain numeric-only names.
+
+The native regression harness is `tests/sev_compiler/native_profiling.py`. It
+calls concrete compiler binaries directly and places failing Python stubs on
+PATH to detect accidental Python delegation. Select candidates using
+`SEVERIAN_NATIVE_RUST_COMPILER` and `SEVERIAN_NATIVE_SOURCE_COMPILER`.
+
+For comparison, keep input and build settings fixed, save a baseline, identify
+a hot stack, change that implementation, and repeat serially. Cross-compiler
+timings alone do not establish equivalent work or identify a cause.
+
+## Earlier source compiler checkpoint
 
 Rebuild the source compiler from the repository root:
 

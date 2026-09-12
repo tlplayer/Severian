@@ -996,7 +996,7 @@ fn native_optimization_uses_the_selected_profile() {
             let output = sev()
                 .arg("build")
                 .arg(&root)
-                .args(["--profile", profile])
+                .args(["--build-profile", profile])
                 .env(
                     "PATH",
                     format!(

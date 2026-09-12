@@ -1,5 +1,6 @@
 import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
+from source import SourceFile
 import process
 import package
 import lexer
@@ -28,7 +29,17 @@ def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclarati
     return result
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = []) -> string:
+def load_input(path: string) -> source.SourceFile | Error:
+    # Normalize the source diagnostic before crossing the driver's Error boundary.
+    result ?= read_source(path)
+    if result is SourceFile:
+        return result
+    if result is Diagnostic:
+        throw Error(result.message)
+    throw Error("could not read source file: " + path)
+
+
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = []) -> string | Error:
     result ?= compile_source(input, include_tests, sysroot, files, emit, resolution)
     if result is string:
         return result

@@ -62,12 +62,16 @@ for an executable profile example.
 
 ```sh
 sev test --profile
-sev test --memory
-sev test --profile --memory
-sev test --profile --memory --leaks
+sev test --profile cpu
+sev test --profile memory
+sev test --profile time
 ```
 
-Profile tests report:
+Bare `--profile` reports CPU totals, peak resident memory, and elapsed time for
+the compiler and executed tests. CPU and memory modes add function stacks using
+perf and heaptrack respectively. These options do not enable sanitizers.
+
+The separate per-test profile contracts report:
 
 - `time_ns`: elapsed monotonic time for the test body.
 - `allocated_bytes`: bytes allocated during the test body.

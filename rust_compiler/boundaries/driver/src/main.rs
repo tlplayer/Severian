@@ -1,6 +1,7 @@
 mod api;
 mod example_validation;
 mod mutation;
+mod profiling;
 mod test_runner;
 
 use severian_driver::config::{
@@ -17,10 +18,30 @@ use std::process::{self, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
-    if let Err(message) = run(env::args().skip(1).collect()) {
-        eprintln!("error: {message}");
-        std::process::exit(1);
+    match native_invocation() {
+        Ok(code) => std::process::exit(code),
+        Err(message) => {
+            eprintln!("error: {message}");
+            std::process::exit(1);
+        }
     }
+}
+
+fn native_invocation() -> Result<i32, String> {
+    let options = profiling::parse(env::args().skip(1).collect())?;
+    let session = if options.mode.is_some() {
+        Some(profiling::Session::begin(&options)?)
+    } else {
+        None
+    };
+    if matches!(options.mode.as_deref(), Some("cpu" | "memory")) {
+        return session.as_ref().expect("profile session").capture(&options);
+    }
+    let result = run(options.arguments.clone());
+    if let Some(session) = session {
+        session.finish(&options, if result.is_ok() { 0 } else { 1 })?;
+    }
+    result.map(|()| 0)
 }
 
 fn run(mut arguments: Vec<String>) -> Result<(), String> {
@@ -206,7 +227,7 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
             continue;
         }
         let destination = match argument.as_str() {
-            "--profile" => Some(&mut options.profile),
+            "--build-profile" => Some(&mut options.profile),
             "--target" => Some(&mut options.target),
             "--bin" => Some(&mut options.bin),
             _ => None,
@@ -1940,7 +1961,11 @@ build options:\n",
         let option = catalog.get(path).expect("help option is cataloged");
         output.push_str(&format!(
             "  --{:<10} {} (default: {})\n",
-            path.trim_start_matches("build."),
+            if path == "build.profile" {
+                "build-profile"
+            } else {
+                "target"
+            },
             option.description,
             option.default
         ));
@@ -1948,6 +1973,7 @@ build options:\n",
     output.push_str(
         "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir, or write agent-ir; do not execute.\n  -o PATH     Write the selected artifact, emitted IR, or Agent IR directory to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
     );
+    output.push_str(profiling::HELP);
     output
 }
 
@@ -2002,7 +2028,7 @@ mod tests {
         let (options, mutate) = parse_test(vec![
             "--mutate".into(),
             "fixture.sev".into(),
-            "--profile".into(),
+            "--build-profile".into(),
             "debug".into(),
         ])
         .unwrap();

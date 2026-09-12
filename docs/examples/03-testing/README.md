@@ -43,11 +43,11 @@ compilation rather than lexer/parser diagnostics. A named diagnostic binding
 such as `reject error:` is reserved for the future diagnostic object model and
 is rejected for now instead of being silently ignored.
 
-Run every test with `sev test`. Run only profile tests and enforce their runtime
-contracts with `sev test --profile`. During development, use
-`sev test --profile --memory` to combine the profile report with native address
-and undefined-behavior sanitizers. Add `--leaks` to enable the stricter,
-opt-in leak pass.
+Run every test with `sev test`. Add `--profile` for a CPU/memory/time breakdown
+of the invocation, including compilation and test execution. Use
+`sev test --profile cpu` for CPU stacks or `sev test --profile memory` for
+allocation stacks. These options measure the invocation and do not filter
+which tests run or enable sanitizers.
 
 `when function return/throw value` is test-only syntax. It is valid in both an
 ordinary `test:` and a `test with chaos` block, and is a compile-time error

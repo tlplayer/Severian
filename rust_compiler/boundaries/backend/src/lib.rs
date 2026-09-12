@@ -485,10 +485,7 @@ fn collect_operations<'a>(block: &'a Block, operations: &mut Vec<&'a Operation>)
 }
 
 fn function_name(function: &Function) -> String {
-    match &function.linkage {
-        FunctionLinkage::Internal => format!("__sev_fn_{}", function.id.0),
-        FunctionLinkage::External { symbol } => symbol.clone(),
-    }
+    function.native_symbol()
 }
 
 fn c_return_type(ty: LoweredType) -> Result<&'static str, BackendError> {

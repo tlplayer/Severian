@@ -26,11 +26,21 @@ extern int64_t __sev_command_execute(int64_t, _Bool);
 extern const char *__sev_command_stdout(int64_t);
 extern const char *__sev_command_stderr(int64_t);
 extern void __sev_command_drop(int64_t);
+extern double __sev_process_user_seconds(int64_t);
+extern double __sev_process_system_seconds(int64_t);
+extern int64_t __sev_process_peak_rss_kib(int64_t);
+extern const char *__sev_process_executable(void);
 
 static void joined(char *out, size_t size, const char *root, const char *name) {
     assert(snprintf(out, size, "%s/%s", root, name) < (int)size);
 }
 int main(void) {
+    assert(__sev_process_user_seconds(0) >= 0.0);
+    assert(__sev_process_system_seconds(0) >= 0.0);
+    assert(__sev_process_peak_rss_kib(0) > 0);
+    const char *self = __sev_process_executable();
+    assert(*self == '/' && access(self, X_OK) == 0);
+    free((void *)self);
     char root[] = "/tmp/sev-host-contract-XXXXXX";
     assert(mkdtemp(root));
     char path[4096], release[4096], left[4096], right[4096];

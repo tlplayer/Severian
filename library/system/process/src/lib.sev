@@ -23,6 +23,19 @@ import * from "resources.sev"
 @c(symbol = "__sev_process_id")
 def id() -> int
 
+# Hosted OS accounting: CPU totals include completed children when requested.
+# Peak RSS is the largest process peak, not a sum of simultaneous process RSS.
+@c(symbol = "__sev_process_user_seconds")
+def user_seconds(children: int = 0) -> float
+@c(symbol = "__sev_process_system_seconds")
+def system_seconds(children: int = 0) -> float
+@c(symbol = "__sev_process_peak_rss_kib")
+def peak_rss_kib(children: int = 0) -> int
+@c(symbol = "__sev_process_write_error")
+def write_error(text: string)
+@c(symbol = "__sev_process_executable")
+def executable() -> string
+
 @c(symbol = "__sev_command_create")
 def native_command() -> int
 @c(symbol = "__sev_command_argument")

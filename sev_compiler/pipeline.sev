@@ -51,7 +51,7 @@ def plan(root: string, rebuild: bool = true) -> list[package.Step] | Error:
     steps: list[package.Step] = []
     dependencies: list[string] = []
     if rebuild:
-        steps.append(package.Step("compiler", [seed, "build", root + "/sev_compiler", "--bin", "sev_compiler", "--profile", compiler_profile, "-o", compiler], root, stage="compiler", timeout=compiler_seconds, memory_bytes=compiler_memory))
+        steps.append(package.Step("compiler", [seed, "build", root + "/sev_compiler", "--bin", "sev_compiler", "--build-profile", compiler_profile, "-o", compiler], root, stage="compiler", timeout=compiler_seconds, memory_bytes=compiler_memory))
         dependencies.append("compiler")
     for section in section_names.split(","):
         for location in package.files(root + "/docs/examples/" + section.strip()):

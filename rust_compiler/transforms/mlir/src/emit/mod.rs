@@ -3277,10 +3277,7 @@ fn function(module: &Module, id: FunctionId) -> Result<&Function, MlirError> {
 }
 
 fn function_symbol(function: &Function) -> String {
-    match &function.linkage {
-        FunctionLinkage::Internal => format!("__sev_fn_{}", function.id.0),
-        FunctionLinkage::External { symbol } => symbol.clone(),
-    }
+    function.native_symbol()
 }
 
 fn all_operations(module: &Module) -> Vec<&Operation> {

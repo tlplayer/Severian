@@ -2048,19 +2048,19 @@ impl Analyzer<'_> {
             }
             self.class_instances = resolved_visible_instances.clone();
             for definition_class in classes {
+                // Most package classes are invisible in this defining module.
+                // Check visibility before touching their potentially large AST
+                // records, then clone only for an actual installed lookup.
+                let Some(lookups) = definition_class.lookups.get(&package_class.module) else {
+                    continue;
+                };
                 let Some(instance) = self
                     .class_instances_by_type
                     .get(&definition_class.ty)
-                    .cloned()
                 else {
                     continue;
                 };
-                for lookup in definition_class
-                    .lookups
-                    .get(&package_class.module)
-                    .into_iter()
-                    .flatten()
-                {
+                for lookup in lookups {
                     self.class_instances
                         .insert((lookup.clone(), Vec::new()), instance.clone());
                 }

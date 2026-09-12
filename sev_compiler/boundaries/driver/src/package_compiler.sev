@@ -13,7 +13,7 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
     resolution = package.decode_resolution(package.read_text(arguments[6]))
     emit = arguments[4]
     files: list[source.SourceFile] = []
-    text = pipeline.compile_to_mlir(source.load(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files)
+    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files)
     input_records: list[string] = []
     for file in files:
         package.write_text(arguments[6] + ".source", file.text)

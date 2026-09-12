@@ -160,7 +160,7 @@ sev remove tensor
 sev run tool@1.3
 sev run github.com/example/tool
 sev install tool@1.3
-sev build --profile release
+sev build --build-profile release
 sev check --emit mir --bin 05-building
 ```
 
@@ -179,7 +179,7 @@ package.pkg/
 ```
 
 The platform is `host` unless overridden by `build.target` or `--target`; the
-profile is `dev` unless overridden by `build.profile` or `--profile`.
+profile is `dev` unless overridden by `build.profile` or `--build-profile`.
 
 `add` changes the current project, `install` changes the machine-level command
 set, and `run` resolves only for the current invocation. GitHub shorthands and

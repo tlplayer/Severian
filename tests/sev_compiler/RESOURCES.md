@@ -30,7 +30,7 @@ python3 tests/sev_compiler/test_resource_guard.py -v
 
 python3 tests/sev_compiler/resource_guard.py --timeout 180 \
   --memory-bytes 6000000000 --report /tmp/compiler-build.json -- \
-  sev_rust build sev_compiler --bin sev_compiler --profile release \
+  sev_rust build sev_compiler --bin sev_compiler --build-profile release \
   -o sev_compiler/package.pkg/host/dev/bin/sev_compiler
 ```
 

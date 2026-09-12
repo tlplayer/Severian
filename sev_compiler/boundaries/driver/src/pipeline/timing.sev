@@ -2,6 +2,7 @@ import environment
 import package
 
 import time
+import process
 
 # One file per invocation keeps compiler output (including emitted IR) intact.
 # Flush after each completed stage so failures retain their partial profile.
@@ -15,13 +16,18 @@ def begin() -> Timings:
     path = environment.get("SEVERIAN_TIMINGS", "")
     if path != "":
         package.write_text(path, "stage\tseconds\n")
-    return Timings(path, time.monotonic() if path != "" else 0.0, ["stage\tseconds"])
+    enabled = path != "" or environment.get("SEVERIAN_PROFILE_ACTIVE", "") == "1"
+    return Timings(path, time.monotonic() if enabled else 0.0, ["stage\tseconds"])
 
 
 def finish_stage(timings: Timings, stage: string):
-    if timings.path == "":
+    active = environment.get("SEVERIAN_PROFILE_ACTIVE", "") == "1"
+    if timings.path == "" and not active:
         return
     now = time.monotonic()
     timings.rows.append(stage + "\t" + string(now - timings.previous))
-    package.write_text(timings.path, timings.rows.join("\n") + "\n")
+    if timings.path != "":
+        package.write_text(timings.path, timings.rows.join("\n") + "\n")
+    if active:
+        process.write_error("  Stage " + stage + ": " + string(now - timings.previous) + "s wall; " + string(float(process.peak_rss_kib()) / 1024.0) + " MiB process peak RSS\n")
     timings.previous = time.monotonic()

@@ -642,6 +642,7 @@ impl Compiler {
         ),
         CompileError,
     > {
+        let _timing = crate::timing::Stage::begin("semantic");
         let root_package = graph
             .modules
             .last()
@@ -725,6 +726,7 @@ impl Compiler {
         sources: Vec<SourceFile>,
         types: severian_universal::TypeContext,
     ) -> Result<MirModule, CompileError> {
+        let _timing = crate::timing::Stage::begin("mir");
         let mut merged = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
         merged.types = Some(types);
         let mut context = self.context.clone();
@@ -749,6 +751,7 @@ impl Compiler {
         output: &Path,
         source: Option<&Path>,
     ) -> Result<Artifact, CompileError> {
+        let _timing = crate::timing::Stage::begin("native-codegen-and-link");
         let linker_arguments = source
             .map(|source| self.native_linker_arguments(source, output))
             .transpose()?
@@ -920,6 +923,7 @@ impl Compiler {
         &self,
         source: &Path,
     ) -> Result<severian_modules::ModuleGraph, CompileError> {
+        let _timing = crate::timing::Stage::begin("module-resolution");
         let packages = self.standard_package_graph(source)?;
         let initial = severian_modules::resolve_with_packages_and_max_errors(
             source,

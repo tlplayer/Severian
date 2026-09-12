@@ -18,6 +18,19 @@ validation run.
 seed and remains available when the source compiler needs recovery. Both
 launchers resolve their checkout through symlinks and pass through arguments.
 
+Both native compilers implement `--profile` directly:
+
+```sh
+sev input.sev --profile
+sev_rust build input.sev --profile cpu --build-profile release
+sev test input.sev --profile memory
+sev run input.sev --profile time
+```
+
+Bare `--profile` prints CPU, memory, and time totals. Use `--build-profile release`
+to select build settings. See [compiler profiling](../tests/sev_compiler/PROFILING.md)
+for stack capture, native accounting, candidate binaries, and report contents.
+
 Install or rebuild the current checkout with:
 
 ```sh

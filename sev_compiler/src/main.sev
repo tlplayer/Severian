@@ -8,16 +8,16 @@ import * from "../boundaries/driver/src/package_command.sev"
 import * from "../boundaries/driver/src/package_compiler.sev"
 import * from "../boundaries/driver/src/pipeline/source.sev" as compiler
 import * from "../boundaries/backend/src/native_mlir.sev" as backend
+import * from "../boundaries/driver/src/profiling.sev" as profiling
 
 @c(symbol="exit")
 def exit_status(status: i32)
 
 
-def main():
-    arguments = process.arguments()
+def execute_native_arguments(arguments: list[string]) -> int | Error:
     if len(arguments) > 1 and arguments[1] == "__compile-unit":
         compile_package_unit(arguments)
-        return
+        return 0
     command := "run"
     input := ""
     output := ""
@@ -40,10 +40,10 @@ def main():
         argument = arguments[cursor]
         if argument == "--version":
             print("sev 0.1.0 (Severian source compiler)")
-            return
+            return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean")
-            return
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [cpu|memory|time] --profile-output DIR")
+            return 0
         if argument == "--":
             application = arguments[cursor + 1:]
             break
@@ -55,7 +55,7 @@ def main():
             development = true
         elif argument == "--dry-run":
             emit = "plan"
-        elif argument in ["--emit", "--sysroot", "-o", "--output", "--bin", "--filter", "--target", "--profile", "--alias"]:
+        elif argument in ["--emit", "--sysroot", "-o", "--output", "--bin", "--filter", "--target", "--build-profile", "--alias"]:
             cursor += 1
             if cursor >= len(arguments):
                 throw Error(argument + " requires a value")
@@ -67,7 +67,7 @@ def main():
                 binary = arguments[cursor]
             elif argument == "--target":
                 platform = arguments[cursor]
-            elif argument == "--profile":
+            elif argument == "--build-profile":
                 profile = arguments[cursor]
             elif argument == "--alias":
                 alias = arguments[cursor]
@@ -87,20 +87,20 @@ def main():
     if not input.ends_with(".sev"):
         status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development)
         if status != 0:
-            exit_status(i32(status))
-        return
+            return status
+        return 0
     files: list[source.SourceFile] = []
     resolution = package.Resolution([], [], "")
-    mlir = compiler.compile_to_mlir(source.load(input), command == "test" or command == "check", sysroot, emit, resolution, files)
+    mlir = compiler.compile_to_mlir(compiler.load_input(input), command == "test" or command == "check", sysroot, emit, resolution, files)
     if emit != "":
         if output == "":
             print(mlir)
         else:
             if file.write(output, mlir) != 0:
                 throw Error("could not write MLIR output")
-        return
+        return 0
     if command == "check":
-        return
+        return 0
     if output == "":
         output = "package.pkg/" + path.basename(input).replace(".sev", "")
     sources: list[string] = []
@@ -112,4 +112,27 @@ def main():
     else:
         status = backend.execute_native(output, application)
         if status != 0:
-            exit_status(i32(status))
+            return status
+
+    return 0
+
+
+def main():
+    status := 0
+    try:
+        invocation = profiling.parse(process.arguments())
+        started = profiling.begin(invocation)
+        if invocation.mode == "cpu" or invocation.mode == "memory":
+            status = profiling.capture(invocation, started)
+        else:
+            try:
+                status = execute_native_arguments(invocation.arguments)
+            catch failure: Error:
+                process.write_error(failure.message + "\n")
+                status = 1
+            profiling.finish(invocation, started, status)
+    catch failure: Error:
+        process.write_error(failure.message + "\n")
+        status = 1
+    if status != 0:
+        exit_status(i32(status))

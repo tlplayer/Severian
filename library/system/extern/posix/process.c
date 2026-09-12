@@ -13,6 +13,39 @@
 
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
+
+double __sev_process_user_seconds(int64_t children) {
+    struct rusage usage;
+    if (getrusage(children ? RUSAGE_CHILDREN : RUSAGE_SELF, &usage) != 0) return -1.0;
+    return (double)usage.ru_utime.tv_sec + (double)usage.ru_utime.tv_usec / 1000000.0;
+}
+double __sev_process_system_seconds(int64_t children) {
+    struct rusage usage;
+    if (getrusage(children ? RUSAGE_CHILDREN : RUSAGE_SELF, &usage) != 0) return -1.0;
+    return (double)usage.ru_stime.tv_sec + (double)usage.ru_stime.tv_usec / 1000000.0;
+}
+int64_t __sev_process_peak_rss_kib(int64_t children) {
+    struct rusage usage;
+    if (getrusage(children ? RUSAGE_CHILDREN : RUSAGE_SELF, &usage) != 0) return -1;
+#ifdef __APPLE__
+    return (int64_t)usage.ru_maxrss / 1024;
+#else
+    return (int64_t)usage.ru_maxrss;
+#endif
+}
+void __sev_process_write_error(const char *text) {
+    fputs(text, stderr);
+    fflush(stderr);
+}
+const char *__sev_process_executable(void) {
+    char *path = malloc(4096);
+    if (!path) abort();
+    ssize_t length = readlink("/proc/self/exe", path, 4095);
+    if (length < 0 || length == 4095) { free(path); return ""; }
+    path[length] = 0;
+    return path;
+}
 
 int64_t __sev_process_run(const char *command) {
     int status = system(command);

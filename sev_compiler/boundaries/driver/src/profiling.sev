@@ -1,0 +1,148 @@
+import environment
+import file
+import os
+import package
+import process
+import time
+
+class ProfileInvocation:
+    mode: string
+    output: string
+    arguments: list[string]
+
+class ProfileStart:
+    wall: float
+    user: float
+    system: float
+    directory: string
+
+def parse(arguments: list[string]) -> ProfileInvocation | Error:
+    result = ProfileInvocation("", "", [arguments[0]])
+    cursor := 1
+    while cursor < len(arguments):
+        argument = arguments[cursor]
+        if argument == "--":
+            for value in arguments[cursor:]:
+                result.arguments.append(value)
+            break
+        if argument == "--profile" or argument.starts_with("--profile="):
+            if result.mode != "":
+                throw Error("--profile may only be supplied once")
+            result.mode = "time"
+            if argument.starts_with("--profile="):
+                result.mode = argument[10:]
+            elif cursor + 1 < len(arguments):
+                following = arguments[cursor + 1]
+                if following in ["cpu", "memory", "time", "summary", "all"]:
+                    result.mode = following
+                    cursor += 1
+                elif following in ["release", "dev", "debug"]:
+                    throw Error("use --build-profile " + following + " for build settings")
+            if result.mode not in ["cpu", "memory", "time", "summary", "all"]:
+                throw Error("--profile expects cpu, memory, or time")
+            if result.mode in ["summary", "all"]:
+                result.mode = "time"
+        elif argument == "--profile-output" or argument.starts_with("--profile-output="):
+            if argument.starts_with("--profile-output="):
+                result.output = argument[17:]
+            else:
+                cursor += 1
+                if cursor >= len(arguments) or arguments[cursor] == "--":
+                    throw Error("--profile-output requires a directory")
+                result.output = arguments[cursor]
+            if result.output == "":
+                throw Error("--profile-output requires a directory")
+        else:
+            result.arguments.append(argument)
+            if argument in ["--build-profile", "--target", "--bin", "--filter", "--emit", "--sysroot", "--alias", "-o", "--output"]:
+                cursor += 1
+                if cursor < len(arguments):
+                    result.arguments.append(arguments[cursor])
+        cursor += 1
+    if result.output != "" and result.mode == "":
+        throw Error("--profile-output requires --profile")
+    return result
+
+def begin(invocation: ProfileInvocation) -> ProfileStart | Error:
+    if invocation.mode == "":
+        return ProfileStart(0.0, 0.0, 0.0, "")
+    directory := invocation.output
+    if directory == "":
+        directory = package.temporary("package.pkg/profiles", "source-")
+    else:
+        if os.exists(directory):
+            throw Error("profile output directory already exists: " + directory)
+        package.mkdir(directory)
+    directory = package.canonical(directory)
+    if not environment.set("SEVERIAN_PROFILE_ACTIVE", "1") or not environment.set("SEVERIAN_TIMINGS", directory + "/stages.tsv"):
+        throw Error("could not enable native compiler profiling")
+    return ProfileStart(time.monotonic(), process.user_seconds() + process.user_seconds(1), process.system_seconds() + process.system_seconds(1), directory)
+
+def finish(invocation: ProfileInvocation, started: ProfileStart, status: int) -> unit | Error:
+    if invocation.mode == "":
+        return
+    wall = time.monotonic() - started.wall
+    user = process.user_seconds() + process.user_seconds(1) - started.user
+    system = process.system_seconds() + process.system_seconds(1) - started.system
+    peak = max(process.peak_rss_kib(), process.peak_rss_kib(1))
+    summary := "Profile breakdown:\n"
+    summary += "  Time: " + string(wall) + "s wall\n"
+    summary += "  CPU: " + string(user + system) + "s total ("
+    summary += string(user) + "s user, " + string(system) + "s system)\n"
+    summary += "  Memory: " + string(float(peak) / 1024.0) + " MiB maximum process RSS\n"
+    summary += "  Exit: " + string(status) + "\n"
+    process.write_error(summary)
+    arguments: list[string] = []
+    for argument in invocation.arguments[1:]:
+        arguments.append(package.json_string(argument))
+    report := "{\"format\":1,\"compiler\":\"source\""
+    report += ",\"mode\":" + package.json_string(invocation.mode)
+    report += ",\"binary\":" + package.json_string(process.executable())
+    report += ",\"arguments\":[" + arguments.join(",") + "]"
+    report += ",\"cwd\":" + package.json_string(process.current_directory())
+    report += ",\"exit_code\":" + string(status)
+    report += ",\"wall_seconds\":" + string(wall)
+    report += ",\"user_seconds\":" + string(user)
+    report += ",\"system_seconds\":" + string(system)
+    report += ",\"peak_rss_kib\":" + string(peak) + "}\n"
+    package.write_text(started.directory + "/report.json", report)
+    process.write_error("Profile: " + started.directory + "/report.json\n")
+
+def capture(invocation: ProfileInvocation, started: ProfileStart) -> int | Error:
+    executable = process.executable()
+    if executable == "":
+        throw Error("could not find the native compiler executable")
+    command: list[string] := []
+    if invocation.mode == "cpu":
+        command = ["perf", "record", "-e", "cpu-clock:u", "-F", "99", "--call-graph", "dwarf", "-o", started.directory + "/perf.data", "--", executable]
+    else:
+        command = ["heaptrack", "--record-only", "-o", started.directory + "/heaptrack", executable]
+    for argument in invocation.arguments[1:]:
+        command.append(argument)
+    status = process.run(command)
+    finish(invocation, started, status)
+    analysis_status := 0
+    if invocation.mode == "cpu":
+        result = process.execute(["perf", "report", "--stdio", "--children", "-i", started.directory + "/perf.data"])
+        package.write_text(started.directory + "/cpu.txt", result.stdout)
+        package.write_text(started.directory + "/cpu.txt.stderr", result.stderr)
+        analysis_status = result.status
+        process.write_error("Stacks: " + started.directory + "/cpu.txt\n")
+    else:
+        found := false
+        for name in os.list(started.directory):
+            if name.starts_with("heaptrack") and (name.ends_with(".gz") or name.ends_with(".zst")):
+                found = true
+                result = process.execute(["heaptrack_print", "-f", started.directory + "/" + name, "--merge-backtraces", "0"])
+                package.write_text(started.directory + "/" + name + ".txt", result.stdout)
+                package.write_text(started.directory + "/" + name + ".stderr", result.stderr)
+                if result.status != 0:
+                    analysis_status = result.status
+                process.write_error("Stacks: " + started.directory + "/" + name + ".txt\n")
+        if not found:
+            process.write_error("heaptrack produced no allocation trace\n")
+            analysis_status = 1
+    package.write_text(started.directory + "/analysis.status", string(analysis_status) + "\n")
+    if status != 0:
+        return status
+    return analysis_status
