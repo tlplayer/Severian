@@ -27,20 +27,16 @@ def foo(value: int) -> int:
 
 
 class User:
-    name: string {
-        len(name) == 0
-            -> Error("name cannot be empty"),
+    name: string 
+    {
+        len(name) == 0 -> Error("name cannot be empty"),
     }
 
-    age: int {
-        age < 0
-            -> Error("age cannot be negative"),
-
-        age > 130
-            -> invalid_age(age),
-
-        age < 18 and restricted_account()
-            -> Error("restricted accounts require an adult"),
+    age: int 
+    {
+        age < 0 -> Error("age cannot be negative"),
+        age > 130 -> invalid_age(age),
+        age < 18 and restricted_account() -> Error("restricted accounts require an adult"),
     }
 
 

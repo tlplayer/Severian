@@ -264,6 +264,39 @@ def callable_path(expression: universal.Expression) -> string:
             return ""
 
 
+def callable_type_operand(state: CallableAnalysis, expression: universal.Expression) -> bool | diagnostics.Diagnostic:
+    match expression.kind:
+        case Binary:
+            return operator.symbol == "|" and callable_type_operand(state, left) and callable_type_operand(state, right)
+        case SourceSymbol:
+            return callable_constructor_type(state, expression).index != 0
+        case _:
+            pass
+    application = callable_application_target(expression)
+    name = callable_path(expression) if application == "" else application
+    if name == "":
+        return false
+    # Value bindings, including an object's fields, shadow type spellings.
+    root = name.split(".")[0]
+    if root in state.names:
+        return false
+    for constant in state.constants:
+        if constant.name == root or constant.name == state.namespace + root:
+            return false
+    if callable_implicit_field(state, root, expression.span) != None:
+        return false
+    if scalar.scalar_type_name(name) != None or name == "buffer":
+        return true
+    if definitions.alias_named(state.declarations, name, state.namespace) != None:
+        return true
+    if definitions.record_template(state.declarations, name, state.namespace) != None:
+        return true
+    for record in state.records:
+        if record.name == name or record.name == state.namespace + name:
+            return true
+    return false
+
+
 def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> universal.TypeId | diagnostics.Diagnostic:
     named_tagged_variant = callable_tagged_selection(state, expression)
     if named_tagged_variant.record != -1:
@@ -1283,11 +1316,16 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if len(arguments) != 1 or arguments[0].name != None:
                     return error(callable_diagnostic(name + " requires one positional value", expression.span))
                 return callable_expression(state, universal.Expression(universal.Ownership("borrow" if name == "view" else ("borrow mut" if name == "borrow" else ("clone" if name == "copy" else name)), arguments[0].value), expression.span), expected)
-            if name == "bytes" and len(arguments) == 1:
-                annotation = callable_type_expression(arguments[0].value)
-                subject = callable_annotation(annotation, state.records, state.namespace, state.declarations)
-                layout = universal.Expression(universal.TypeLayout(subject, false), expression.span, type_id=universal.TypeId(64))
-                return callable_raw_call(state, "data_size", [layout], expression.span, expected)
+            if name == "bytes":
+                if len(arguments) != 1 or arguments[0].name != None or arguments[0].spread:
+                    return error(callable_diagnostic("bytes requires one positional type or value", expression.span))
+                if callable_type_operand(state, arguments[0].value):
+                    annotation = callable_type_expression(arguments[0].value)
+                    subject = callable_annotation(annotation, state.records, state.namespace, state.declarations)
+                    layout = universal.Expression(universal.TypeLayout(subject, false), expression.span, type_id=universal.TypeId(64))
+                    return callable_raw_call(state, "data_size", [layout], expression.span, expected)
+                # Value operands use the ordinary source operator/function
+                # dispatch below, preserving evaluation and ownership effects.
             if name == "string" and len(arguments) == 1:
                 value = callable_expression(state, arguments[0].value, universal.TypeId(0))
                 if value.type_id.index == 3:
