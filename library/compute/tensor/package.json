@@ -1,0 +1,43 @@
+{
+  "package": {
+    "name": "tensor",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Shape-aware tensor kernels and parallel execution policies",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "numerics",
+        "implementation": "source-and-compiler-contracts",
+        "status": "experimental"
+      },
+      "compiler": {
+        "symbols": {
+          "X": "ranked_matmul"
+        },
+        "fusion": {
+          "runtime-symbol": "__sev_fused_activations",
+          "packing-bits": 4,
+          "max-chain": 16,
+          "operations": {
+            "relu": 1,
+            "fast_sigmoid": 2,
+            "fast_tanh": 3,
+            "gelu": 4,
+            "swish": 5
+          }
+        }
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

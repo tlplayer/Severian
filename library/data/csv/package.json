@@ -1,0 +1,28 @@
+{
+  "package": {
+    "name": "csv",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "CSV documents, rows, mutation, and encoding",
+    "metadata": {
+      "library": {
+        "category": "data-formats",
+        "implementation": "source",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "data": {
+      "path": "..",
+      "version": "0.1.0"
+    },
+    "file": {
+      "path": "../../system/file",
+      "version": "0.1.0"
+    }
+  }
+}

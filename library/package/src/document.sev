@@ -1,0 +1,265 @@
+import * from "model.sev"
+
+# Package documents use a flat node arena: parent indexes avoid recursive values.
+class DocumentNode:
+    parent: int
+    key: string
+    kind: string
+    value: string = ""
+
+class DocumentReader:
+    characters: list[string]
+    cursor: int = 0
+    nodes: list[DocumentNode] = []
+
+    def peek() -> string:
+        return characters[cursor] if cursor < int(len(characters)) else ""
+
+    def fail(message: string) -> unit | Error:
+        throw Error("invalid JSON5 at character " + string(cursor + 1) + ": " + message)
+
+    def space() -> unit | Error:
+        while cursor < int(len(characters)):
+            item = peek()
+            if item in [" ", "\t", "\r", "\n", "", "", " ", "﻿", " ", " "]:
+                cursor += 1
+            elif item == "/" and cursor + 1 < int(len(characters)) and characters[cursor + 1] == "/":
+                cursor += 2
+                while cursor < int(len(characters)) and peek() not in ["\r", "\n", " ", " "]:
+                    cursor += 1
+            elif item == "/" and cursor + 1 < int(len(characters)) and characters[cursor + 1] == "*":
+                cursor += 2
+                while cursor + 1 < int(len(characters)) and not (peek() == "*" and characters[cursor + 1] == "/"):
+                    cursor += 1
+                if cursor + 1 >= int(len(characters)):
+                    fail("unterminated comment")
+                cursor += 2
+            else:
+                break
+
+    def hexadecimal(count: int) -> int | Error:
+        value := 0
+        for index in range(count):
+            digit := -1
+            for candidate in range(16):
+                if peek().upper() == "0123456789ABCDEF"[candidate:candidate + 1]:
+                    digit = candidate
+            if digit < 0:
+                fail("expected hexadecimal digit")
+            value = value * 16 + digit
+            cursor += 1
+        return value
+
+    def quoted() -> string | Error:
+        delimiter = peek()
+        cursor += 1
+        result := ""
+        while cursor < int(len(characters)):
+            item := peek()
+            cursor += 1
+            if item == delimiter:
+                return result
+            if item in ["\n", "\r", " ", " "]:
+                fail("unescaped newline in string")
+            if item == "\\":
+                item = peek()
+                if item == "":
+                    fail("unterminated escape")
+                cursor += 1
+                if item == "u" or item == "x":
+                    scalar := hexadecimal(4 if item == "u" else 2)
+                    if scalar >= 55296 and scalar <= 56319:
+                        if peek() != "\\" or cursor + 1 >= int(len(characters)) or characters[cursor + 1] != "u":
+                            fail("missing low surrogate")
+                        cursor += 2
+                        low = hexadecimal(4)
+                        if low < 56320 or low > 57343:
+                            fail("invalid low surrogate")
+                        scalar = 65536 + (scalar - 55296) * 1024 + low - 56320
+                    elif scalar >= 56320 and scalar <= 57343:
+                        fail("unexpected low surrogate")
+                    result += string(char(scalar))
+                elif item in ["\n", "\r", " ", " "]:
+                    if item == "\r" and peek() == "\n":
+                        cursor += 1
+                elif item == "n":
+                    result += "\n"
+                elif item == "r":
+                    result += "\r"
+                elif item == "t":
+                    result += "\t"
+                elif item == "b":
+                    result += string(char(8))
+                elif item == "f":
+                    result += string(char(12))
+                elif item == "v":
+                    result += string(char(11))
+                elif item == "0":
+                    if peek() != "" and "0123456789".contains(peek()):
+                        fail("octal escape is not JSON5")
+                    result += string(char(0))
+                elif "123456789".contains(item):
+                    fail("numeric escape is not JSON5")
+                else:
+                    result += item
+            else:
+                result += item
+        fail("unterminated string")
+        return ""
+
+    def identifier() -> string | Error:
+        result := ""
+        while cursor < int(len(characters)):
+            item = peek()
+            if not "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$0123456789".contains(item):
+                break
+            if result == "" and "0123456789".contains(item):
+                fail("invalid object key")
+            result += item
+            cursor += 1
+        if result == "":
+            fail("expected object key")
+        return result
+
+    def value(parent: int, key: string, depth: int = 0) -> int | Error:
+        if depth > 128:
+            fail("document nesting exceeds 128")
+        space()
+        index = int(len(nodes))
+        item = peek()
+        if item == "{" or item == "[":
+            object = item == "{"
+            nodes.append(DocumentNode(parent, key, "object" if object else "array"))
+            cursor += 1
+            space()
+            closing = "}" if object else "]"
+            keys: list[string] = []
+            while peek() != closing:
+                child_key := string(int(len(keys)))
+                if object:
+                    child_key = quoted() if peek() in ["\"", "'"] else identifier()
+                    if child_key in keys:
+                        fail("duplicate key " + child_key)
+                    space()
+                    if peek() != ":":
+                        fail("expected colon")
+                    cursor += 1
+                keys.append(child_key)
+                value(index, child_key, depth + 1)
+                space()
+                if peek() == closing:
+                    break
+                if peek() != ",":
+                    fail("expected comma or " + closing)
+                cursor += 1
+                space()
+            cursor += 1
+        elif item in ["\"", "'"]:
+            nodes.append(DocumentNode(parent, key, "string", quoted()))
+        else:
+            start = cursor
+            while cursor < int(len(characters)) and peek() not in [",", "]", "}", " ", "\t", "\n", "\r", "/"]:
+                cursor += 1
+            raw = characters[start:cursor].join("")
+            if raw == "":
+                fail("expected value")
+            normalized := raw
+            if raw not in ["true", "false", "null", "Infinity", "+Infinity", "-Infinity", "NaN", "+NaN", "-NaN"]:
+                numeric = DocumentReader(raw.characters())
+                sign := ""
+                if numeric.peek() in ["+", "-"]:
+                    sign = "-" if numeric.peek() == "-" else ""
+                    numeric.cursor += 1
+                if numeric.peek() == "0" and numeric.cursor + 1 < int(len(numeric.characters)) and numeric.characters[numeric.cursor + 1] in ["x", "X"]:
+                    numeric.cursor += 2
+                    digits = int(len(numeric.characters)) - numeric.cursor
+                    if digits == 0 or digits > 15:
+                        fail("hex integer requires 1 to 15 digits")
+                    normalized = sign + string(numeric.hexadecimal(digits))
+                else:
+                    digits := 0
+                    while numeric.peek() != "" and "0123456789".contains(numeric.peek()):
+                        numeric.cursor += 1
+                        digits += 1
+                    if digits > 1 and raw[(1 if raw.starts_with("+") or raw.starts_with("-") else 0):].starts_with("0"):
+                        fail("leading zero in number")
+                    if numeric.peek() == ".":
+                        numeric.cursor += 1
+                        while numeric.peek() != "" and "0123456789".contains(numeric.peek()):
+                            numeric.cursor += 1
+                            digits += 1
+                    if digits == 0:
+                        fail("invalid value " + raw)
+                    if numeric.peek() in ["e", "E"]:
+                        numeric.cursor += 1
+                        if numeric.peek() in ["+", "-"]:
+                            numeric.cursor += 1
+                        exponent_start = numeric.cursor
+                        while numeric.peek() != "" and "0123456789".contains(numeric.peek()):
+                            numeric.cursor += 1
+                        if exponent_start == numeric.cursor:
+                            fail("missing exponent digits")
+                    if numeric.cursor != int(len(numeric.characters)):
+                        fail("invalid number " + raw)
+                    normalized = raw[1:] if raw.starts_with("+") else raw
+            nodes.append(DocumentNode(parent, key, "scalar", normalized))
+        return index
+
+def document_quote(value: string) -> string:
+    result := "\""
+    for character in value.characters():
+        item = string(character)
+        if item == "\\" or item == "\"":
+            result += "\\" + item
+        elif int(character.bytes()[0]) < 32:
+            code = int(character.bytes()[0])
+            result += "\\u00" + "0123456789abcdef"[code / 16:code / 16 + 1] + "0123456789abcdef"[code % 16:code % 16 + 1]
+        else:
+            result += item
+    return result + "\""
+
+def document_nodes(text: string) -> list[DocumentNode] | Error:
+    reader = DocumentReader(text.characters())
+    reader.value(-1, "")
+    reader.space()
+    if reader.cursor != int(len(reader.characters)):
+        reader.fail("trailing input")
+    return reader.nodes
+
+def document_render(nodes: list[DocumentNode], index: int, json: bool = true) -> string:
+    node = nodes[index]
+    if node.kind == "string":
+        return document_quote(node.value)
+    if node.kind == "scalar":
+        return node.value
+    parts: list[string] = []
+    for child in range(index + 1, int(len(nodes))):
+        if nodes[child].parent != index:
+            continue
+        rendered = document_render(nodes, child, json)
+        parts.append(document_quote(nodes[child].key) + (": " if json else " = ") + rendered if node.kind == "object" else rendered)
+    return ("{" if node.kind == "object" else "[") + parts.join(", ") + ("}" if node.kind == "object" else "]")
+
+# The Entry contract remains format independent at the package boundary.
+def document_entries(nodes: list[DocumentNode], index: int, table: string, array: bool, entries: list[Entry]):
+    for child in range(index + 1, int(len(nodes))):
+        node = nodes[child]
+        if node.parent != index:
+            continue
+        section = table + "." + node.key if table != "" else node.key
+        if node.kind == "object" and table not in ["dependencies", "dev-dependencies"]:
+            document_entries(nodes, child, section, array, entries)
+        elif node.kind == "array" and child + 1 < int(len(nodes)) and nodes[child + 1].parent == child and nodes[child + 1].kind == "object":
+            for element in range(child + 1, int(len(nodes))):
+                if nodes[element].parent == child:
+                    document_entries(nodes, element, section + "." + nodes[element].key, true, entries)
+        else:
+            entries.append(Entry(table, node.key, document_render(nodes, child, false), array))
+
+def parse_json5_document(text: string) -> list[Entry] | Error:
+    nodes = document_nodes(text)
+    if nodes[0].kind != "object":
+        throw Error("package document requires an object")
+    entries: list[Entry] = []
+    document_entries(nodes, 0, "", false, entries)
+    return entries

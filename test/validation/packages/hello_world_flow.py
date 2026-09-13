@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native acceptance: init, build, test, publish, add, import, relocate, reuse."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import statistics
@@ -33,14 +34,15 @@ class HelloWorldFlow(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn('empty directory', rejected.stderr)
             self.assertEqual(marker.read_text(), 'authored content')
-            self.assertFalse((occupied / 'package.toml').exists())
+            self.assertFalse((occupied / 'package.json').exists())
 
             producer = root / 'source_required'
             created = invoke('init', producer)
             self.assertEqual(created.returncode, 0, created.stderr)
-            manifest = producer / 'package.toml'
-            with manifest.open('a') as stream:
-                stream.write('\n[publish]\ninclude-source = false\n')
+            manifest = producer / 'package.json'
+            document = json.loads('\n'.join(line for line in manifest.read_text().splitlines() if not line.lstrip().startswith('//')))
+            document['publish']['include-source'] = False
+            manifest.write_text(json.dumps(document))
             original = manifest.read_bytes()
             rejected = invoke('publish', '--local', cwd=producer)
             self.assertNotEqual(rejected.returncode, 0)

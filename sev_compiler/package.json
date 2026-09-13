@@ -1,0 +1,116 @@
+// Severian package manifest.
+// Generated from the compiler-owned configuration catalog.
+//## PACKAGE ############################################################
+//## TARGETS ############################################################
+// [lib]
+// name = "sev_compiler"
+// path = "src/lib.sev"
+//## DEPENDENCIES #######################################################
+//## LANGUAGE ############################################################
+//## BUILD ###############################################################
+//## DIAGNOSTICS #########################################################
+//## DEVELOPMENT PROFILE #################################################
+//## RELEASE PROFILE #####################################################
+//## TESTING #############################################################
+// The example-suite executable runs many individually guarded pipeline steps.
+//## PUBLISHING ##########################################################
+{
+  "package": {
+    "name": "sev_compiler",
+    "version": "0.1.0",
+    "edition": "2026",
+    "license": "Severian License",
+    "default-run": "sev_compiler",
+    "metadata": {
+      "pipeline": {
+        "sections": "00-getting-started,01-types,02-functions,03-testing",
+        "timeout-seconds": "30",
+        "memory-bytes": "3000000000",
+        "compiler-timeout-seconds": "180",
+        "compiler-memory-bytes": "3000000000",
+        "compiler-profile": "release"
+      }
+    }
+  },
+  "bin": [
+    {
+      "name": "sev_compiler",
+      "path": "src/main.sev"
+    },
+    {
+      "name": "compiler-pipeline",
+      "path": "pipeline.sev"
+    }
+  ],
+  "dependencies": {
+    "profiling": {
+      "path": "../library/system/profiling"
+    },
+    "time": {
+      "path": "../library/core/time"
+    },
+    "package": {
+      "path": "../library/package"
+    },
+    "diagnostics": {
+      "path": "diagnostics"
+    },
+    "lexer": {
+      "path": "frontend/lexer"
+    },
+    "parser": {
+      "path": "frontend/parser"
+    },
+    "source": {
+      "path": "source"
+    },
+    "universal": {
+      "path": "universal"
+    }
+  },
+  "xxi": {
+    "c": {
+      "build-info": "__sev_compiler_build_info"
+    }
+  },
+  "dev-dependencies": {},
+  "language": {
+    "type-safe": true
+  },
+  "build": {
+    "profile": "dev",
+    "target": "host",
+    "incremental": true
+  },
+  "diagnostics": {
+    "mode": "user",
+    "message-format": "text",
+    "max-errors": 5,
+    "verify-each": false
+  },
+  "profile": {
+    "dev": {
+      "opt-level": 0,
+      "debug-symbols": true,
+      "strip": false,
+      "lto": false
+    },
+    "release": {
+      "opt-level": 3,
+      "debug-symbols": false,
+      "strip": true,
+      "lto": true
+    }
+  },
+  "test": {
+    "coverage-min": 0,
+    "memory-max": "4GB",
+    "timeout-seconds": 1800,
+    "leaks": "deny"
+  },
+  "publish": {
+    "registry": "default",
+    "include-source": true,
+    "include-interface": true
+  }
+}

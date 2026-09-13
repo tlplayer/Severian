@@ -591,7 +591,7 @@ function overloads of existing prelude functions must have the same arity and
 result type, with a distinct parameter type signature; duplicate signatures
 are rejected. Generic free functions cannot silently shadow a prelude template.
 
-A package can select out source callables in `package.toml`:
+A package can select out source callables in `package.json`:
 
 ```toml
 [prelude]

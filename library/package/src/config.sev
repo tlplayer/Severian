@@ -1,3 +1,4 @@
+import * from "lint_policy.sev"
 import * from "model.sev"
 
 class Option:
@@ -35,6 +36,7 @@ def default_catalog() -> list[Option]:
     ]
 
 def validate_configuration(entries: list[Entry]) -> unit | Error:
+    validate_lint(entries)
     catalog = default_catalog()
     for entry in entries:
         if entry.table == "prelude":

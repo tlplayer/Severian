@@ -1044,7 +1044,7 @@ impl Compiler {
         let catalog = crate::config::Catalog::load().map_err(CompileError::Component)?;
         let mut standard_ids = BTreeMap::new();
         for (name, root) in standard {
-            let manifest_path = root.join("package.toml");
+            let manifest_path = crate::config::document::path(&root);
             let manifest =
                 crate::config::Manifest::load(&manifest_path, &catalog).map_err(|error| {
                     CompileError::Diagnostic(Diagnostic::new(
@@ -1922,7 +1922,7 @@ impl NativeProviderSources {
     ) -> Result<Option<Self>, CompileError> {
         let mut roots = BTreeSet::new();
         if let Some(root) = source.parent().and_then(|directory| {
-            directory.ancestors().find(|ancestor| ancestor.join("package.toml").is_file())
+            directory.ancestors().find(|ancestor| crate::config::document::path(&ancestor).is_file())
         }) {
             roots.insert(root.to_owned());
         }
@@ -1956,7 +1956,7 @@ impl NativeProviderSources {
     }
 
     fn discover_manifest(&mut self, root: &Path) -> Result<(), CompileError> {
-        let manifest_path = root.join("package.toml");
+        let manifest_path = crate::config::document::path(&root);
         if !manifest_path.is_file() {
             return Ok(());
         }
@@ -1966,7 +1966,7 @@ impl NativeProviderSources {
                 manifest_path.display()
             ))
         })?;
-        let document = manifest.parse::<toml::Value>().map_err(|error| {
+        let document = crate::config::document::parse(&manifest).map_err(|error| {
             CompileError::NativeLink(format!(
                 "invalid FFI manifest {}: {error}",
                 manifest_path.display()
@@ -2269,7 +2269,7 @@ fn module_name(path: &Path) -> String {
     let package_root = path
         .ancestors()
         .skip(1)
-        .find(|directory| directory.join("package.toml").is_file())
+        .find(|directory| crate::config::document::path(&directory).is_file())
         .or_else(|| path.parent())
         .unwrap_or_else(|| Path::new(""));
     let package = package_root

@@ -1,0 +1,18 @@
+{
+  "package": {
+    "name": "collections.traits",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Small capability contracts shared by core collections",
+    "metadata": {
+      "library": {
+        "category": "core-collections",
+        "implementation": "source-contracts",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

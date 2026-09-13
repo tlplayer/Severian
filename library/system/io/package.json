@@ -1,0 +1,46 @@
+{
+  "package": {
+    "name": "io",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Portable streams, standard handles, and printing",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev",
+        "src/buffer.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "system",
+        "implementation": "native-abi",
+        "status": "experimental",
+        "version": 1
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "xxi": {
+    "c": {
+      "sources": [
+        "extern/posix/descriptor.c"
+      ]
+    }
+  },
+  "dependencies": {
+    "xxi": {
+      "path": "../../interop/xxi",
+      "version": "0.1.0"
+    },
+    "memory": {
+      "package": "core.memory",
+      "path": "../../core/memory",
+      "version": "0.1.0"
+    }
+  }
+}

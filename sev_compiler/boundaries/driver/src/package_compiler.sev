@@ -27,12 +27,12 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
             continue
         directory := path.dirname(package.canonical(file.path))
         while directory != "/":
-            for name in ["package.toml", "package.lock", "sev.lock"]:
+            for name in ["package.json", "package.toml", "package.lock", "sev.lock"]:
                 location = directory + "/" + name
                 if location not in recorded:
                     records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if os.is_file(location) else "missing"))
                     recorded.append(location)
-            if os.is_file(directory + "/package.toml"):
+            if os.is_file(package.manifest_file(directory)):
                 if directory not in roots:
                     roots.append(directory)
                 break
@@ -44,7 +44,7 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
             if resolved.archive_path != "":
                 records.append(package.toml_quote(resolved.archive_path) + " = " + package.toml_quote(package.digest(resolved.archive_path)))
         for directory in roots:
-            entries = package.parse_document(package.read_text(directory + "/package.toml"))
+            entries = package.parse_document(package.read_text(package.manifest_file(directory)))
             for entry in entries:
                 if entry.table == "xxi.c" and entry.key == "sources":
                     for source in package.string_array(entry.value):

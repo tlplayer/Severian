@@ -15,7 +15,7 @@ def repository() -> string | Error:
         return package.canonical(configured)
     location := process.current_directory()
     while location != "/" and location != "":
-        if package.exists(location + "/sev_compiler/package.toml") and package.exists(location + "/docs/examples"):
+        if package.exists(package.manifest_file(location + "/sev_compiler")) and package.exists(location + "/docs/examples"):
             return package.canonical(location)
         location = path.dirname(location)
     throw Error("set SEVERIAN_SYSROOT to the Severian repository")

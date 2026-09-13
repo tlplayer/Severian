@@ -1,0 +1,67 @@
+{
+  "package": {
+    "name": "network",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Ownership-safe networking",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/ffi.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "networking",
+        "implementation": "native-abi",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "ffi": {
+      "path": "../interop/ffi",
+      "version": "0.1.0"
+    },
+    "io": {
+      "path": "../system/io",
+      "version": "0.1.0"
+    }
+  },
+  "xxi": {
+    "c": {
+      "sources": [
+        "native/posix/network.c"
+      ]
+    }
+  },
+  "ffi": {
+    "c": [
+      {
+        "name": "network-posix",
+        "abi": "c-v1",
+        "targets": [
+          "linux",
+          "macos"
+        ],
+        "sources": [
+          "native/posix/network.c"
+        ],
+        "include": [
+          "native/include"
+        ],
+        "libraries": []
+      }
+    ]
+  },
+  "coverage": {
+    "exclude": [
+      "src/lib.sev"
+    ]
+  }
+}

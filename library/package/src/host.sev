@@ -83,7 +83,7 @@ def collect_files(root: string, directory: string, result: list[string], nested_
             throw Error("package content may not contain symlinks: " + location)
         if os.is_dir(location):
             # Nested manifests introduce separate packages, not source folders.
-            if nested_packages or not os.is_file(location + "/package.toml"):
+            if nested_packages or not os.is_file(manifest_file(location)):
                 collect_files(root, location, result, nested_packages)
         elif os.is_file(location):
             result.append(location)
@@ -119,7 +119,7 @@ def recover_edit(root: string) -> unit | Error:
     stage = root + "/.sev-transaction"
     if not os.is_file(stage + "/ready"):
         return
-    copy_file(stage + "/manifest.old", root + "/package.toml")
+    copy_file(stage + "/manifest.old", manifest_file(root))
     previous = read_text(stage + "/lock.old")
     lock_name = read_text(stage + "/lock.name") if os.is_file(stage + "/lock.name") else "sev.lock"
     if lock_name not in ["package.lock", "sev.lock"]:
@@ -136,7 +136,7 @@ def recover_edit(root: string) -> unit | Error:
 def published_project(root: string) -> bool:
     directory := canonical(root)
     while directory != "/":
-        if os.is_file(directory + "/metadata/publication.toml"):
+        if os.is_file(directory + "/metadata/publication.json"):
             return true
         directory = path.dirname(directory)
     return false
@@ -144,3 +144,8 @@ def published_project(root: string) -> bool:
 def mutable_project(root: string) -> unit | Error:
     if published_project(root):
         throw Error("published packages are immutable: " + root)
+
+def manifest_file(root: string) -> string:
+    if os.is_file(root + "/package.json") or not os.is_file(root + "/package.toml"):
+        return root + "/package.json"
+    return root + "/package.toml"

@@ -1,7 +1,7 @@
 import package
 import process
 
-def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool) -> int:
+def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool, force_lint: bool = false) -> int:
     compiler = package.Compiler(process.executable(), sysroot)
     location = input if input != "" else "."
     if command == "init":
@@ -28,9 +28,9 @@ def package_command(command: string, input: string, sysroot: string, binary: str
         return 0
     project = package.open("." if command == "publish" and input != "" and not package.exists(input) else location)
     if command == "publish" and input != "" and not package.exists(input) and input != project.manifest.name:
-        throw Error("publish name does not match package.toml: " + input)
+        throw Error("publish name does not match package.json: " + input)
     if command == "build":
-        request = package.Build(binary, platform, profile, "" if emit == "plan" else emit, output, locked)
+        request = package.Build(binary, platform, profile, "" if emit == "plan" else emit, output, locked, force_lint)
         if emit == "plan":
             planned = package.plan(project, request)
             for unit in planned.units:
@@ -50,6 +50,8 @@ def package_command(command: string, input: string, sysroot: string, binary: str
         return package.run(project, compiler, package.Run(binary, platform, profile, arguments, locked))
     elif command == "publish":
         print(package.publish(project, compiler, package.Publish("", true, profile if profile != "" else "release", platform if platform != "" else "host")))
+    elif command == "options":
+        print(package.options(project.manifest.entries))
     elif command == "tree":
         print(package.tree(package.resolve(project)))
     elif command == "metadata" or command == "resolve":

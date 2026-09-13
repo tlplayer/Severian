@@ -33,23 +33,23 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         retain_file(cache + "/artifact.interface.sev", root + "/" + interface)
         for relative in [object, ir, interface]:
             inventory.append(toml_quote(relative) + " = " + toml_quote(digest(root + "/" + relative)))
-        index = root + "/package.pkgi/index.toml"
-        previous = read_text(index) if os.is_file(index) else "format = 1\n"
+        index = root + "/package.pkgi/index.json"
+        previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
         if not previous.contains(toml_quote(build_id)):
-            write_text(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\npath = " + toml_quote(interface) + "\nabi = \"severian-scalar-c-1\"\nsource-fallback = true\n")
+            write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\npath = " + toml_quote(interface) + "\nabi = \"severian-scalar-c-1\"\nsource-fallback = true\n")
     retain_file(cache + "/artifact", root + "/" + output)
     if emit == "":
         require_command(["chmod", "755", "--", root + "/" + output])
     inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))
     text = "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
-    write_text(root + "/metadata/realizations/" + build_id + ".toml", text)
-    index = root + "/metadata/artifacts.toml"
-    previous = read_text(index) if os.is_file(index) else "format = 1\n"
+    write_document(root + "/metadata/realizations/" + build_id + ".json", text)
+    index = root + "/metadata/artifacts.json"
+    previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
     if not previous.contains(toml_quote(build_id)):
-        write_text(index, previous + "\n[[realization]]\nbuild-id = " + toml_quote(build_id) + "\nmanifest = " + toml_quote("realizations/" + build_id + ".toml") + "\n")
+        write_document(index, previous + "\n[[realization]]\nbuild-id = " + toml_quote(build_id) + "\nmanifest = " + toml_quote("realizations/" + build_id + ".json") + "\n")
     if os.is_file(cache + "/inputs"):
-        retain_file(cache + "/inputs", root + "/metadata/realizations/" + build_id + ".inputs.toml")
-    write_text(root + "/metadata/package.toml", render_manifest(owner.manifest.entries))
+        write_document(root + "/metadata/realizations/" + build_id + ".inputs.json", read_text(cache + "/inputs"))
+    write_text(manifest_file(root + "/metadata"), render_manifest(owner.manifest.entries))
     lock = project_lock_file(owner.root)
     write_text(root + "/metadata/package.lock", read_text(lock) if os.is_file(lock) else resolution.lock)
     source_index: list[string] = []
@@ -59,7 +59,7 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         retain_file(location, root + "/source/" + relative)
         source_paths.append(relative)
         source_index.append(toml_quote(relative) + " = " + toml_quote(digest(location)))
-    write_text(root + "/metadata/source-index.toml", "format = 1\n\n[files]\n" + source_index.join("\n") + "\n")
+    write_document(root + "/metadata/source-index.json", "format = 1\n\n[files]\n" + source_index.join("\n") + "\n")
     for location in files(root + "/source", true):
         if location[int(len(root + "/source/")):] not in source_paths:
             os.remove(location)
@@ -67,16 +67,16 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
     return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "native", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
 
 def sidecars_match(cache: string) -> bool:
-    if not os.is_file(cache + "/sidecars.toml"):
+    if not os.is_file(cache + "/sidecars.json"):
         return false
-    for entry in parse_document(read_text(cache + "/sidecars.toml")):
+    for entry in parse_document(read_text(cache + "/sidecars.json")):
         location = cache + "/" + relative_path(entry.key)
         if not os.is_file(location) or digest(location) != unquote(entry.value):
             return false
     return true
 
 def restore_realization(root: string, cache: string, build_id: string, emit: string) -> bool:
-    manifest = root + "/metadata/realizations/" + build_id + ".toml"
+    manifest = root + "/metadata/realizations/" + build_id + ".json"
     if not os.is_file(manifest) or emit != "library":
         return false
     entries = parse_document(read_text(manifest))
@@ -101,7 +101,7 @@ def restore_realization(root: string, cache: string, build_id: string, emit: str
     sidecars: list[string] = []
     for suffix in [".o", ".mlir", ".interface.sev"]:
         sidecars.append(toml_quote("artifact" + suffix) + " = " + toml_quote(digest(cache + "/artifact" + suffix)))
-    write_text(cache + "/sidecars.toml", sidecars.join("\n"))
-    copy_file(root + "/metadata/realizations/" + build_id + ".inputs.toml", cache + "/inputs")
+    write_document(cache + "/sidecars.json", sidecars.join("\n"))
+    copy_file(root + "/metadata/realizations/" + build_id + ".inputs.json", cache + "/inputs")
     write_text(cache + "/output", digest(cache + "/artifact"))
     return true

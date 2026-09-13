@@ -12,7 +12,7 @@ the implementation-status section records the remaining migration work.
 
 | Object | Role |
 | --- | --- |
-| `package.toml` | User-authored package identity, declared targets, dependencies, exports, and policy |
+| `package.json` | User-authored package identity, declared targets, dependencies, exports, and policy |
 | `package.lock` | Generated exact dependency resolution, identities, and content verification data |
 | `package.pkg/` | Generated realization of the package |
 | `package.pkg/package.pkgi` | Generated public semantic interface consumed by imports |
@@ -25,7 +25,7 @@ An illustrative source package has this layout:
 
 ```text
 geometry/
-├── package.toml
+├── package.json
 ├── package.lock
 ├── src/
 │   ├── lib.sev
@@ -40,7 +40,7 @@ manifest that declares them. Source paths must stay within their package root.
 Root-package tests may use development dependencies in addition to ordinary
 dependencies.
 
-The manifest in [this directory](package.toml) defines the `package` library
+The manifest in [this directory](package.json) defines the `package` library
 itself. The `geometry` examples describe a consumer package.
 
 ## Canonical generated layout
@@ -140,11 +140,14 @@ with package.export:
         y: float
 ```
 
-```toml
-[package]
-name = "geometry"
-version = "1.2.0"
-export = ["Point", "distance"]
+```json5
+{
+  package: {
+    name: "geometry",
+    version: "1.2.0",
+    export: ["Point", "distance"],
+  },
+}
 ```
 
 These are design examples; convergence of the export forms and general package
@@ -245,7 +248,7 @@ Standalone source builds use `package.pkg/bin/`; temporary runs and native
 intermediates use `package.pkg/cache/`. Explicit build and profiling output
 options can select another location.
 
-In a directory without `package.toml`, `sev test` batches `.sev` files in that
+In a directory without `package.json`, `sev test` batches `.sev` files in that
 directory and its subdirectories. A package directory uses its declared and
 conventional package tests.
 
@@ -258,7 +261,7 @@ ${XDG_DATA_HOME:-$HOME/.local/share}/severian/
 ├── registry/
 │   ├── index/
 │   └── packages/<name>/<version>/
-│       ├── package.toml
+│       ├── package.json
 │       ├── package.lock
 │       └── package.pkg/
 └── git/
@@ -328,7 +331,7 @@ legacy paths or duplicate implementations.
 ## Validation and native boundaries
 
 Hosted filesystem and process operations come from `os`, `file`, and `process`.
-Their POSIX providers are declared in `library/system/package.toml` and selected
+Their POSIX providers are declared in `library/system/package.json` and selected
 through package manifests. String processing and archive decoding remain in
 Severian source.
 
@@ -347,3 +350,12 @@ End-to-end publication is covered by
 and [transitive dependency validation](../../test/validation/packages/registry_transitive_tensor.sh).
 Changes to package semantics or output placement should update the relevant
 contracts and this implementation-status table together.
+
+## Package quality
+
+Builds run policy-driven lint before compilation and artifact reuse. See
+[SIP-0006](../../docs/sip/0006-code-quality.md#milestone-1-implementation) for
+rule IDs, thresholds, suppression syntax, JSON diagnostics, and Sev examples.
+`sev options` prints the catalog-generated commented configuration; `sev init`
+and `sev new` include it automatically. Manifests are JSON5; locks are generated
+JSON. Legacy TOML manifests remain readable during migration.

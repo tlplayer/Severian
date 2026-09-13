@@ -444,7 +444,7 @@ fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
     }
     let mut directory = path.as_path();
     loop {
-        let manifest = directory.join("package.toml");
+        let manifest = severian_driver::config::document::path(&directory);
         if manifest.is_file() {
             return Manifest::load(&manifest, catalog)
                 .map(Box::new)
@@ -452,7 +452,7 @@ fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
         }
         directory = directory.parent().ok_or_else(|| {
             format!(
-                "no package.toml found from `{}` to the filesystem root",
+                "no package.json found from `{}` to the filesystem root",
                 path.display()
             )
         })?;
@@ -536,7 +536,7 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     }
     let input = discover(options.path.as_deref(), catalog)?;
     let Input::Package(manifest) = input else {
-        return Err("`sev publish` requires a package.toml".into());
+        return Err("`sev publish` requires a package.json".into());
     };
     if !manifest.publish {
         return Err(format!(
@@ -626,23 +626,23 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         })?;
     }
     let published_manifest = manifest.published_source_manifest()?;
-    fs::write(source_output.join("package.toml"), &published_manifest)
+    fs::write(severian_driver::config::document::path(&source_output), &published_manifest)
         .map_err(|error| format!("could not write published source manifest: {error}"))?;
     let metadata = staging.join("metadata");
     fs::create_dir_all(&metadata)
         .map_err(|error| format!("could not create {}: {error}", metadata.display()))?;
-    fs::write(metadata.join("package.toml"), &published_manifest)
+    fs::write(severian_driver::config::document::path(&metadata), &published_manifest)
         .map_err(|error| format!("could not write published package metadata: {error}"))?;
-    fs::write(metadata.join("sev.lock"), manifest.render_lockfile()?)
+    fs::write(metadata.join("package.lock"), manifest.render_lockfile()?)
         .map_err(|error| format!("could not write published dependency lock: {error}"))?;
     fs::write(
-        metadata.join("build.toml"),
-        format!(
+        metadata.join("build.json"),
+        severian_driver::config::document::render(&severian_driver::config::document::parse(&format!(
             "format = 1\ncompiler = {:?}\ntarget = {:?}\nprofile = {:?}\n",
             env!("CARGO_PKG_VERSION"),
             target_directory(&config.target),
             config.profile
-        ),
+        ))?)?,
     )
     .map_err(|error| format!("could not write published build metadata: {error}"))?;
 
@@ -676,7 +676,7 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
             )
         ));
     }
-    fs::write(metadata.join("artifacts.toml"), artifact_index)
+    fs::write(metadata.join("artifacts.json"), severian_driver::config::document::render(&severian_driver::config::document::parse(&artifact_index)?)?)
         .map_err(|error| format!("could not write artifact index: {error}"))?;
     let artifact = staging.join(format!("{}-{}.pkg", manifest.name, manifest.version));
     emit_distribution_package(&staging, &artifact)?;
@@ -771,7 +771,7 @@ fn materialize_git_package(specification: &str) -> Result<PathBuf, String> {
     let checkout = registry
         .join("cache/git")
         .join(format!("{:016x}", fnv1a64(identity.as_bytes())));
-    if checkout.join("package.toml").is_file() {
+    if severian_driver::config::document::path(&checkout).is_file() {
         return Ok(checkout);
     }
     let parent = checkout
@@ -815,10 +815,10 @@ fn materialize_git_package(specification: &str) -> Result<PathBuf, String> {
             ));
         }
     }
-    if !temporary.join("package.toml").is_file() {
+    if !severian_driver::config::document::path(&temporary).is_file() {
         let _ = fs::remove_dir_all(&temporary);
         return Err(format!(
-            "Git package `{specification}` has no root package.toml"
+            "Git package `{specification}` has no root package.json"
         ));
     }
     fs::rename(&temporary, &checkout)
@@ -854,8 +854,8 @@ fn materialize_registry_binary(
     let registry = registry_root(None)?;
     let release = registry_release_path(&registry, &package, &version.spelling)?;
     let distribution = ensure_distribution_root(&registry, &release, &package, &version.spelling)?;
-    let metadata_path = distribution.join("metadata/package.toml");
-    let source_path = distribution.join("source/package.toml");
+    let metadata_path = severian_driver::config::document::path(&distribution.join("metadata"));
+    let source_path = severian_driver::config::document::path(&distribution.join("source"));
     let manifest_text = fs::read_to_string(&metadata_path)
         .or_else(|_| fs::read_to_string(&source_path))
         .map_err(|error| {
@@ -864,8 +864,7 @@ fn materialize_registry_binary(
                 version.spelling
             )
         })?;
-    let metadata = manifest_text
-        .parse::<toml::Value>()
+    let metadata = severian_driver::config::document::parse(&manifest_text)
         .map_err(|error| format!("invalid {}: {error}", metadata_path.display()))?;
     let binary_name = distribution_binary_name(&metadata, options.bin.as_deref())?;
     let target = options
@@ -927,7 +926,7 @@ fn ensure_distribution_root(
     package: &str,
     version: &str,
 ) -> Result<PathBuf, String> {
-    if release.join("metadata/package.toml").is_file() {
+    if severian_driver::config::document::path(&release.join("metadata")).is_file() {
         return Ok(release.to_owned());
     }
     let archive = release.join(format!("{package}-{version}.pkg"));
@@ -938,7 +937,7 @@ fn ensure_distribution_root(
         .join("cache/distributions")
         .join(package)
         .join(version);
-    if cache.join("metadata/package.toml").is_file() {
+    if severian_driver::config::document::path(&cache.join("metadata")).is_file() {
         return Ok(cache);
     }
     let parent = cache
@@ -957,16 +956,16 @@ fn ensure_distribution_root(
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
-    if !staging.join("metadata/package.toml").is_file() {
+    if !severian_driver::config::document::path(&staging.join("metadata")).is_file() {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
-            "distribution `{}` has no metadata/package.toml",
+            "distribution `{}` has no metadata/package.json",
             archive.display()
         ));
     }
     match fs::rename(&staging, &cache) {
         Ok(()) => Ok(cache),
-        Err(_) if cache.join("metadata/package.toml").is_file() => {
+        Err(_) if severian_driver::config::document::path(&cache.join("metadata")).is_file() => {
             let _ = fs::remove_dir_all(&staging);
             Ok(cache)
         }
@@ -1028,7 +1027,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
     }
     let requested = options.path.clone().unwrap_or_else(|| PathBuf::from("."));
     let (mut sources, fixture_packages, root, manifest, validation) =
-        if requested.is_dir() && !requested.join("package.toml").is_file() {
+        if requested.is_dir() && !severian_driver::config::document::path(&requested).is_file() {
             let mut sources = Vec::new();
             test_runner::collect_sources(&requested, &mut sources)?;
             (sources, Vec::new(), requested.clone(), None, None)
@@ -1526,9 +1525,9 @@ fn config(arguments: Vec<String>, catalog: &Catalog) -> Result<(), String> {
                 .unwrap_or_else(|| PathBuf::from("."));
             let input = discover(Some(&path), catalog)?;
             let Input::Package(manifest) = input else {
-                return Err("config sync requires a package.toml".into());
+                return Err("config sync requires a package.json".into());
             };
-            let count = catalog.sync(&manifest.root.join("package.toml"))?;
+            let count = catalog.sync(&severian_driver::config::document::path(&manifest.root))?;
             println!("synchronized {count} configuration option(s)");
             Ok(())
         }
@@ -1573,8 +1572,7 @@ fn edit_dependency(
     let manifest_path = project_manifest_path(Path::new("."))?;
     let original = fs::read_to_string(&manifest_path)
         .map_err(|error| format!("could not read {}: {error}", manifest_path.display()))?;
-    let parsed = original
-        .parse::<toml::Value>()
+    let parsed = severian_driver::config::document::parse(&original)
         .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
     let (alias, package, registry) = match action {
         DependencyEdit::Add => (argument_name.clone(), argument_name, None),
@@ -1598,7 +1596,8 @@ fn edit_dependency(
         )?)
     };
 
-    let mut document = original
+    let normalized = toml::to_string_pretty(&parsed).map_err(|error| error.to_string())?;
+    let mut document = normalized
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
     if document.get("dependencies").is_none() {
@@ -1625,9 +1624,10 @@ fn edit_dependency(
     let lock_path = manifest_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("sev.lock");
+        .join("package.lock");
     let previous_lock = fs::read(&lock_path).ok();
-    write_atomic(&manifest_path, document.to_string().as_bytes())?;
+    let output = severian_driver::config::document::render(&severian_driver::config::document::parse(&document.to_string())?)?;
+    write_atomic(&manifest_path, output.as_bytes())?;
     let result = (|| {
         let manifest = Manifest::load(&manifest_path, catalog)?;
         if action != DependencyEdit::Remove {
@@ -1769,8 +1769,8 @@ fn select_registry_version(
         .filter(|entry| {
             let release = entry.path();
             let version = entry.file_name().to_string_lossy().into_owned();
-            release.join("metadata/package.toml").is_file()
-                || release.join("source/package.toml").is_file()
+            severian_driver::config::document::path(&release.join("metadata")).is_file()
+                || severian_driver::config::document::path(&release.join("source")).is_file()
                 || release.join(format!("{package}-{version}.pkg")).is_file()
         })
         .filter_map(|entry| {
@@ -1851,13 +1851,13 @@ fn project_manifest_path(start: &Path) -> Result<PathBuf, String> {
     let mut directory = fs::canonicalize(start)
         .map_err(|error| format!("could not resolve {}: {error}", start.display()))?;
     loop {
-        let manifest = directory.join("package.toml");
+        let manifest = severian_driver::config::document::path(&directory);
         if manifest.is_file() {
             return Ok(manifest);
         }
         directory = directory.parent().map(Path::to_owned).ok_or_else(|| {
             format!(
-                "no package.toml found from `{}` to the filesystem root",
+                "no package.json found from `{}` to the filesystem root",
                 start.display()
             )
         })?;
@@ -1924,7 +1924,7 @@ fn create_project(arguments: Vec<String>, catalog: &Catalog, new: bool) -> Resul
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty() && name != ".")
         .unwrap_or_else(|| "app".into());
-    let manifest = root.join("package.toml");
+    let manifest = severian_driver::config::document::path(&root);
     if manifest.exists() {
         return Err(format!("{} already exists", manifest.display()));
     }
@@ -1935,13 +1935,11 @@ fn create_project(arguments: Vec<String>, catalog: &Catalog, new: bool) -> Resul
         fs::write(&source, "print(\"hello\")\n")
             .map_err(|error| format!("could not write {}: {error}", source.display()))?;
     }
-    let lock = root.join("sev.lock");
+    let lock = root.join("package.lock");
     if !lock.exists() {
         fs::write(
             &lock,
-            format!(
-                "# Generated by sev.\nversion = 1\n\n[[package]]\nname = {name:?}\nversion = \"0.1.0\"\n"
-            ),
+            serde_json::to_string_pretty(&serde_json::json!({"version": 1, "package": [{"name": name, "version": "0.1.0"}]})).map_err(|error| error.to_string())?,
         )
         .map_err(|error| format!("could not write {}: {error}", lock.display()))?;
     }
@@ -1954,7 +1952,7 @@ fn help(catalog: &Catalog) -> String {
         "usage: sev [command] [path] [options] [-- application-args]\n\n\
 default:\n  sev [path] [-- args...]       Check, build, and run the default binary.\n\n\
 commands:\n  check   build   compile   run   test   doctor   api <list|show|check|diff>   publish   add   remove   update   install   new   init   config <show|sync|defaults>\n\n\
-package lifecycle:\n  sev add NAME[@VERSION]       Add a project dependency and refresh sev.lock.\n  sev remove NAME              Remove a project dependency and refresh sev.lock.\n  sev update NAME              Resolve the newest package and refresh sev.lock.\n  sev run NAME[@VERSION]       Resolve temporarily and run now.\n  sev install NAME[@VERSION]   Install a package executable for the machine.\n\n\
+package lifecycle:\n  sev add NAME[@VERSION]       Add a project dependency and refresh package.lock.\n  sev remove NAME              Remove a project dependency and refresh package.lock.\n  sev update NAME              Resolve the newest package and refresh package.lock.\n  sev run NAME[@VERSION]       Resolve temporarily and run now.\n  sev install NAME[@VERSION]   Install a package executable for the machine.\n\n\
 build options:\n",
     );
     for path in ["build.profile", "build.target"] {

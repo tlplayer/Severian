@@ -1,3 +1,4 @@
+import * from "lint.sev"
 import * from "compiler.sev"
 import * from "host.sev"
 import * from "model.sev"
@@ -33,7 +34,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
         try:
             destination = project_lock_file(project.root)
             current = read_text(destination) if os.is_file(destination) else ""
-            if current != project.lock_text or read_text(project.root + "/package.toml") != project.manifest_text:
+            if current != project.lock_text or read_text(manifest_file(project.root)) != project.manifest_text:
                 throw Error("package changed while resolving; retry the build")
             staged = project.root + "/.sev-build.lock.new"
             write_text(staged, resolution.lock)
@@ -86,10 +87,11 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
             if location.ends_with(".sev"):
                 relative = location[int(len(project.root)) + 1:]
                 units.append(BuildUnit(0, Target(relative, "test", relative), platform, profile, test_output_root(project, platform, profile) + "/bin/" + relative.replace("/", "_").replace(".sev", ""), true))
-    return BuildPlan(project, resolution, units, mode, request.emit)
+    return BuildPlan(project, resolution, units, mode, request.emit, request.lint)
 
 # The compilation-unit protocol is the only compiler execution boundary.
 def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
+    enforce_lint(plan.project, plan.lint)
     artifacts: list[Artifact] = []
     for unit in plan.units:
         if unit.package_index != 0:

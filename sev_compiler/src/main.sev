@@ -29,6 +29,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     platform := ""
     profile := ""
     alias := ""
+    lint := false
     locked := false
     library := false
     development := false
@@ -36,7 +37,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     application: list[string] := []
     cursor := 1
     if len(arguments) > 1:
-        if arguments[1] in ["build", "run", "test", "check", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean"]:
+        if arguments[1] in ["build", "run", "test", "check", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean", "options"]:
             command = arguments[1]
             cursor += 1
     while cursor < len(arguments):
@@ -46,7 +47,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
             print(package.compiler_build_info())
             return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [calls|memory|time] --profile-output DIR")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
             return 0
         if argument == "--":
             application = arguments[cursor + 1:]
@@ -54,6 +55,8 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         if argument == "--local":
             if command != "publish":
                 throw Error("--local requires publish")
+        elif argument == "--lint":
+            lint = true
         elif argument == "--locked":
             locked = true
         elif argument == "--lib":
@@ -92,7 +95,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
     location = input if input != "" else "."
-    if command == "test" and os.is_dir(location) and not os.is_file(location + "/package.toml"):
+    if command == "test" and os.is_dir(location) and not os.is_file(package.manifest_file(location)):
         return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):
         if command in ["build", "check", "test", "run", "install"] and emit != "plan":
@@ -101,7 +104,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
                 throw Error("could not start package compilation session")
             if client > 0:
                 return serve_package_session(client)
-        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development)
+        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development, lint)
         if status != 0:
             return status
         return 0

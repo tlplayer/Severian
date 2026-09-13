@@ -1,0 +1,29 @@
+{
+  "package": {
+    "name": "time",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Wall and monotonic clocks",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "system": {
+      "path": "../../system",
+      "version": "0.1.0"
+    },
+    "io": {
+      "path": "../../system/io",
+      "version": "0.1.0"
+    }
+  }
+}

@@ -98,3 +98,7 @@ For CI publication, configure the repository secret `VSCE_PAT`, run the
 `vscode-extension` workflow manually, and select its `publish` input. Pushes
 and pull requests only build the public VSIX artifact; they never publish it.
 Increment `version` before publishing a new release.
+
+The Severian conformance package is in `tests/package.json`; run
+`sev test editors/vscode/tests` from the repository root. The extension itself
+uses the npm manifest in this directory.

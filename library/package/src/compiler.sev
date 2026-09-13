@@ -35,7 +35,7 @@ def encode_resolution(resolution: Resolution) -> string:
         text += "interface = " + toml_quote(resolved.interface_path) + "\narchive = " + toml_quote(resolved.archive_path) + "\nbuild-id = " + toml_quote(resolved.build_id) + "\n"
     for edge in resolution.edges:
         text += "\n[[edge]]\nparent = " + string(edge.parent) + "\nchild = " + string(edge.child) + "\nalias = " + toml_quote(edge.alias) + "\ndevelopment = " + ("true" if edge.development else "false") + "\n"
-    return text
+    return entries_json(parse_document(text))
 
 def decode_resolution(text: string) -> Resolution | Error:
     entries = parse_document(text)
@@ -116,7 +116,7 @@ def cached_inputs_match(location: string) -> bool:
 def source_cache_root(input: string) -> string:
     directory := path.dirname(input)
     while directory != "/":
-        if os.is_file(directory + "/package.toml"):
+        if os.is_file(manifest_file(directory)):
             return directory
         directory = path.dirname(directory)
     return path.dirname(input)
@@ -139,7 +139,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
     try:
         scoped = unit_resolution(resolution, unit.package_index) if len(resolution.packages) > 0 else resolution
         graph = encode_resolution(scoped)
-        write_text(stage + "/resolution.toml", graph)
+        write_document(stage + "/resolution.json", graph)
         input = canonical(source_path) if source_path != "" else inside(scoped.packages[0].root, unit.target.path)
         root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
         sysroot = canonical(compiler.sysroot)
@@ -171,7 +171,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             # Never let a failed compilation validate a previous artifact.
             if os.is_file(cache + "/output"):
                 os.remove(cache + "/output")
-            arguments := [compiler.executable, "__compile-unit", input, stage + "/artifact", emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+            arguments := [compiler.executable, "__compile-unit", input, stage + "/artifact", emit, compiler.sysroot, stage + "/resolution.json", "test" if unit.include_tests else "build", unit.platform, unit.profile]
             memory := 0
             seconds := 0
             if (unit.include_tests or guard_tests) and len(resolution.packages) > 0:
@@ -185,8 +185,8 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                 encoded: list[string] = []
                 for argument in arguments:
                     encoded.append(toml_quote(argument))
-                request = stage + "/request.toml"
-                write_text(request, "arguments = [" + encoded.join(", ") + "]\nseconds = " + string(seconds) + "\nbytes = " + string(memory) + "\n")
+                request = stage + "/request.json"
+                write_document(request, "arguments = [" + encoded.join(", ") + "]\nseconds = " + string(seconds) + "\nbytes = " + string(memory) + "\n")
                 status = process.session_submit(request)
             else:
                 if seconds > 0:
@@ -208,9 +208,9 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                     for suffix in [".o", ".mlir", ".interface.sev"]:
                         copy_file(stage + "/artifact" + suffix, cache + "/artifact" + suffix)
                         sidecars.append(toml_quote("artifact" + suffix) + " = " + toml_quote(digest(cache + "/artifact" + suffix)))
-                    write_text(cache + "/sidecars.toml", sidecars.join("\n"))
-            if cached_inputs_match(stage + "/resolution.toml.inputs"):
-                portable_inputs(stage + "/resolution.toml.inputs", cache + "/inputs", scoped, root, sysroot)
+                    write_document(cache + "/sidecars.json", sidecars.join("\n"))
+            if cached_inputs_match(stage + "/resolution.json.inputs"):
+                portable_inputs(stage + "/resolution.json.inputs", cache + "/inputs", scoped, root, sysroot)
                 write_text(cache + "/output", "check" if emit == "check" else digest(cache + "/artifact"))
         if len(scoped.packages) > 0 and emit in ["", "library"]:
             result = retain_realization(scoped, unit, compiler, cache, build_id, emit)

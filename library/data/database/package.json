@@ -1,0 +1,32 @@
+{
+  "package": {
+    "name": "database",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Executable SQL databases, transactions, result rows, and a loopback database server",
+    "metadata": {
+      "library": {
+        "category": "data",
+        "implementation": "source-and-native",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "platform": {
+      "path": "../../system/platform",
+      "version": "0.1.0"
+    },
+    "pql": {
+      "path": "../pql",
+      "version": "0.1.0"
+    },
+    "storage": {
+      "path": "../storage",
+      "version": "0.1.0"
+    }
+  }
+}

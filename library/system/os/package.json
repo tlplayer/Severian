@@ -1,0 +1,25 @@
+{
+  "package": {
+    "name": "os",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Hosted filesystem operations and metadata",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "system": {
+      "path": "..",
+      "version": "0.1.0"
+    }
+  }
+}

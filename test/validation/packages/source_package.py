@@ -36,9 +36,9 @@ def main():
         (app / "target").mkdir()
         (app / "target/keep.sev").write_text("def preserved() -> int:\n    return 7\n")
         assert "shapes = geometry@0.1.0" in sev("tree", cwd=app).stdout
-        before = (app / "package.toml").read_bytes(), (app / "sev.lock").read_bytes()
+        before = (app / "package.json").read_bytes(), (app / "package.lock").read_bytes()
         sev("add", "missing@9", cwd=app, succeeds=False)
-        assert before == ((app / "package.toml").read_bytes(), (app / "sev.lock").read_bytes())
+        assert before == ((app / "package.json").read_bytes(), (app / "package.lock").read_bytes())
         (app / "src/main.sev").write_text("test \"answer\":\n    assert(42 == 42)\ndef main():\n    print(42)\n")
         sev("test", cwd=app)
         sev("publish", cwd=app)

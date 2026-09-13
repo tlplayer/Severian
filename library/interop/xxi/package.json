@@ -1,0 +1,35 @@
+{
+  "package": {
+    "name": "xxi",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Checked foreign calls over ABI, storage and memory contracts"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "abi": {
+      "path": "../abi",
+      "version": "0.1.0"
+    },
+    "ffi": {
+      "path": "../ffi",
+      "version": "0.1.0"
+    },
+    "storage": {
+      "package": "core.storage",
+      "path": "../../core/storage",
+      "version": "0.1.0"
+    },
+    "memory": {
+      "package": "core.memory",
+      "path": "../../core/memory",
+      "version": "0.1.0"
+    },
+    "process": {
+      "path": "../../system/process",
+      "version": "0.1.0"
+    }
+  }
+}

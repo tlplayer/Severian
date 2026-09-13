@@ -1,0 +1,49 @@
+{
+  "package": {
+    "name": "math",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Portable mathematics with a package-owned native provider",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/ffi.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "numerics",
+        "implementation": "native-abi",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "ffi": {
+      "path": "../../interop/ffi",
+      "version": "0.1.0"
+    }
+  },
+  "ffi": {
+    "c": [
+      {
+        "name": "math-c",
+        "abi": "c-v1",
+        "targets": [
+          "linux",
+          "macos"
+        ],
+        "sources": [],
+        "include": [],
+        "libraries": [
+          "m"
+        ]
+      }
+    ]
+  }
+}

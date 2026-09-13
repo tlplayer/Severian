@@ -21,7 +21,7 @@ launchers resolve their checkout through symlinks and pass through arguments.
 `sev test` batches the `.sev` files in an ordinary directory, including
 subdirectories. `sev test DIRECTORY` selects a directory explicitly. The
 source compiler reports each file and continues after failures; the command
-fails if any file fails. Directories with `package.toml` use package tests.
+fails if any file fails. Directories with `package.json` use package tests.
 
 Default profiling reports go under `package.pkg/debug/profiles/`, and test
 invocations under `package.pkg/debug/tests/`, with test executables in their

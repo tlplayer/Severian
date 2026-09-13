@@ -412,7 +412,7 @@ function nearestPackageRoot(source, workspaceRoot) {
   const boundary = path.resolve(workspaceRoot);
   let current = path.dirname(path.resolve(source));
   while (current === boundary || current.startsWith(`${boundary}${path.sep}`)) {
-    if (fs.existsSync(path.join(current, 'package.toml'))) {
+    if (fs.existsSync(path.join(current, 'package.json')) || fs.existsSync(path.join(current, 'package.toml'))) {
       return current;
     }
     if (current === boundary) {

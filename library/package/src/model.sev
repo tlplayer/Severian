@@ -72,6 +72,8 @@ class Build:
     emit: string = ""
     output: string = ""
     locked: bool = false
+    lint: bool = false
+
 
 class Check:
     target: string = ""
@@ -110,6 +112,7 @@ class BuildPlan:
     units: list[BuildUnit]
     mode: string
     emit: string
+    lint: bool = false
 
 class Artifact:
     target: Target

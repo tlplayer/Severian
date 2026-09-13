@@ -1,9 +1,9 @@
-SIP-0000: Title
+SIP-0006: Package Quality Pipeline
 
-Status: *Draft* | Accepted | Implementing | Implemented | Rejected | Superseded
-Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
+Status: Implementing (milestone 1)
+Type: Compiler | Tooling | Package
 Authors:
-Created: YYYY-MM-DD
+Created: 2026-09-13
 Target:
 Supersedes:
 Superseded by:
@@ -15,14 +15,157 @@ have go to definition, usages, and debugging functionality to inspect/review and
 faster
 
 
-## Appendix
+## Milestone 1 implementation
 
--- all terms, file formats, variables, classes, functions, traits in a table
+Package builds run `package.lint(project)` before compiling or reusing an
+artifact. `sev build --lint` explicitly enables that pass for this invocation.
+`sev check`, package tests, and package runs use the same execution boundary.
+`sev options` prints the catalog-generated configuration without editing files.
+`sev new` and `sev init` generate that configuration with lint enabled.
+
+```mermaid
+flowchart LR
+    J[package.json + package.lock] --> P[Validate package policy]
+    P --> L[Classified source tokens]
+    L --> F[Callable scopes and shared metrics]
+    F --> R[Lint rules and explicit suppressions]
+    R --> D[Sort by file, line, column, rule ID]
+    D --> E{Any policy errors?}
+    E -->|yes| Stop[Fail before compilation]
+    E -->|no| C[Compile or reuse artifact]
+```
+
+Manifests use **package.json** with JSON5 parsing rules. Comments, trailing commas, quoted or unquoted
+keys, and single-quoted strings are accepted. The generated representation uses
+quoted keys and strict JSON values, with explanatory `//` comments. Numeric
+package options are bounded nonnegative integers. `package.lock` retains its
+filename and contains generated JSON. Package metadata and compiler-session
+records use `.json`. Cargo manifests, compiler configuration catalogs, and
+historical protocol specifications are not Severian package manifests.
+Legacy package TOML remains readable during migration; `package.json` takes precedence
+when both names exist. Generated files use the new format.
+
+```json5
+{
+  package: { name: 'quality-demo', version: '0.1.0' },
+  bin: [{ name: 'quality-demo', path: 'src/main.sev' }],
+  lint: {
+    enabled: true,
+    'file-lines': 999,
+    'function-lines': 399,
+    parameters: 6,
+    'class-methods': 20,
+    'match-arms': 9,
+    'conditional-branches': 9,
+    exclude: ['generated/'], // Exact package-relative file or directory prefix.
+    rules: {
+      L0003: 'error', // off | info | hint | warning | error
+      L0006: 'hint',
+    },
+  },
+  diagnostics: { 'message-format': 'text' }, // text | json
+}
+```
+
+A limit is an **inclusive maximum**: 999 file lines and 399 callable lines pass;
+1000 and 400 fail respectively. File lines include comments and blank lines.
+Callable size counts source lines from `def` through its last body token.
+Parameters exclude `self`; commas inside generic types or default expressions
+do not create additional parameters. Class size measures declared direct
+methods. Match and conditional metrics count direct cases and `if`/`elif`
+branches, respectively.
+
+| Rule | Metric | Default limit | Default severity |
+| --- | --- | ---: | --- |
+| L0001 | File source lines | 999 | warning |
+| L0002 | Function/method source lines | 399 | warning |
+| L0003 | Parameters excluding receiver | 6 | warning |
+| L0004 | Unused locals, parameters, explicit imports, binary globals | 0 | warning |
+| L0005 | Unreachable callables and statements after terminators | 0 | warning |
+| L0006 | Direct class methods | 20 | hint |
+| L0007 | Direct match cases | 9 | hint |
+| L0008 | Conditional dispatch branches | 9 | hint |
+
+Rules consume the compiler's classified lexer tokens. Strings and comments do
+not count as symbol uses. Callable scopes isolate local-use checks. Package
+reachability starts at `main`, top-level code/tests, exported/library APIs,
+methods and decorated callables; function values count as references, including
+callbacks. Statements after unconditional `return`, `throw`, `break`, or
+`continue` in the same block are also reported. Same-name overloads and qualified uses conservatively keep candidates
+live. This is conservative source analysis, not a proof that externally invoked
+code can be deleted. Structural findings are suggestions; this milestone does
+not implement responsibility inference, duplicate-code detection, churn,
+profiling, coverage, or automatic refactoring.
 
 ```sev
-package.lint
-package.coverage
+# L0004: the parameter is never read; text in a string is not a use.
+def greeting(unused_name: string):
+    print("unused_name")
+
+# Prefix an intentionally unused parameter with _.
+def notification(_context: string):
+    print("ready")
+
+# Function values passed as callbacks remain reachable.
+def notify():
+    print("ready")
+
+def invoke(callback: () -> unit):
+    callback()
+
+def main():
+    invoke(notify)
 ```
+
+Suppressions are explicit and non-destructive. Unknown rule IDs fail validation.
+A whole-file directive can appear anywhere outside string literals. A next-line
+directive only suppresses findings anchored on the immediately following line.
+
+```sev
+# sev-lint-next-line: allow L0003
+def legacy_bridge(a: int, b: int, c: int, d: int, e: int, f: int, g: int):
+    print(a, b, c, d, e, f, g)
+```
+
+```sev
+import package
+
+project = package.open(".")
+for finding in package.lint(project):
+    print(finding.rule, finding.file, finding.line, finding.measured)
+
+# Generate complete options, preserving explicitly configured values.
+print(package.options(project.manifest.entries))
+```
+
+Diagnostics include rule ID, package-relative path, start/end positions,
+severity, measured value, threshold, explanation, and remediation. Positions
+are one-based Unicode character locations; end positions are exclusive.
+Text diagnostics go to stderr. JSON mode emits one diagnostic object per line
+to stderr. Diagnostics sort by path, numeric line, numeric column, then rule ID.
+Lint runs on every package execution, including artifact cache hits, so a cached
+binary cannot bypass a newly tightened policy. Release builds run the same
+static checks without adding instrumentation to generated code.
+
+The focused regression suite is `test/validation/packages/quality`; CLI checks
+are in `library/package/tests/quality.py`. Run the source compiler against the
+suite after rebuilding it with the Rust seed. The Rust seed also reads JSON5
+manifests so it can bootstrap the source compiler after migration.
+
+## Appendix
+
+| Term | Contract |
+| --- | --- |
+| `package.json` | User-authored identity, targets, dependencies, quality policy |
+| `package.lock` | Generated JSON dependency resolution |
+| `package.pkg/` | Generated artifacts and package metadata |
+| `package.lint(Project)` | Returns ordered `list[LintDiagnostic]` without editing source |
+| `package.options(list[Entry])` | Produces a complete commented package configuration |
+| `LintRule` | Stable rule ID, metric option, default maximum, level and remediation |
+| `LintDiagnostic` | Rule, source range, severity, measurement, maximum and remediation |
+| `LintSource` | Classified tokens, source positions, callable scopes and suppressions |
+| `Entry` | Format-independent package table/key/value record |
+| `DocumentNode` | JSON5 node in an arena indexed by parent; `C` retains Container meaning |
 
 ## Context (list of items)
 
@@ -111,40 +254,41 @@ Coverage is defaulted on
 
 * Function documentation:
 
-  ```sev WIP feel free to edit it 
-   Parses one source file into a syntax tree.
+  ```sev
+   # Parses one source file into a syntax tree.
   
-   Parameters:
-   - source: Source text to parse.
+   # Parameters:
+   # - source: Source text to parse.
   
-   Returns:
-   - Parsed syntax tree.
+   # Returns:
+   # - Parsed syntax tree.
   
-   Errors:
-   - ParseError when source cannot satisfy the grammar.
+   # Errors:
+   # - ParseError when source cannot satisfy the grammar.
   
-   Complexity:
-   - O(n)
-  def parse(source: string) -> Result[Tree, ParseError]:
+   # Complexity:
+   # - O(n)
+  def parse(source: string) -> Tree | ParseError:
       ...
   ```
 
 * Class documentation:
 
   ```sev
-   Owns package dependency resolution.
+   # Owns package dependency resolution.
   
-   Responsibilities:
-   - Resolve package versions.
-   - Validate dependency constraints.
-   - Produce the dependency graph.
+   # Responsibilities:
+   # - Resolve package versions.
+   # - Validate dependency constraints.
+   # - Produce the dependency graph.
   
-   Invariants:
-   - Graph contains no unresolved dependency.
-   - Package identity is unique.
+   # Invariants:
+   # - Graph contains no unresolved dependency.
+   # - Package identity is unique.
   class Resolver:
       ...
   ```
+
 
 * Editor:
 
@@ -407,8 +551,8 @@ Coverage is defaulted on
 * Removed rules remain recognized as deprecated configuration keys for at least one migration period.
 
 ## Migration
-1. All package.toml files become json files for readability and easier handling a json version that allows comments
-2. All package.pkg should use the golden path initial options with comments of possible values automatically update by package.options to include all potential values to avoid doc/user desync. 
+1. Severian manifests use `package.json` with comment support; Cargo files retain their native TOML format.
+2. Generated `package.json` files use the default options with comments listing supported values. `package.options` keeps generated configuration aligned with the option catalog. 
 3. All builds should have limits for LOC <1000, code/branch coverage > 90% and no dead code/unused variables as warnings as well as a O(...) notation for functions etc. which allows for cleaner profiling testing and better optimizations
 4. Methods should be smaller than 400 LOCs. 
 5. Matches should have less than 10 cases otherwise they should be a dict/map lookup
@@ -435,7 +579,7 @@ N/A should not result in deprecations
    * Dead code and unused symbols.
    * Structural smells.
    * Stable rule IDs and deterministic diagnostic ordering.
-   * Swap from toml to json for packages/locks etc. It's easier to manage and change allow comments in the json per json5 rules
+   * Use JSON5 package manifests and generated JSON locks/metadata, with legacy readers during migration.
 
 2. `sev test` produces enforceable quality metrics.
 

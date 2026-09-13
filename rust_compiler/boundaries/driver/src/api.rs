@@ -512,7 +512,7 @@ fn validate_compiler_coverage(
             documented_sources.insert(PathBuf::from(source));
         }
         let mut actual = Vec::new();
-        collect_named_files(&repository.join("library"), "package.toml", &mut actual)?;
+        collect_named_files(&repository.join("library"), "package.json", &mut actual)?;
         let actual = actual
             .into_iter()
             .filter_map(|path| path.strip_prefix(repository).ok().map(Path::to_path_buf))
@@ -979,7 +979,7 @@ fn collect_toml(path: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
 fn parse_toml(path: &Path) -> Result<toml::Value, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    toml::from_str(&source).map_err(|error| format!("{}: {error}", path.display()))
+    severian_driver::config::document::parse(&source).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 fn array<'a>(

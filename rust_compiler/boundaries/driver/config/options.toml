@@ -165,3 +165,139 @@ group = "Publishing"
 type = "bool"
 default = "true"
 description = "Include stable interfaces in published package artifacts."
+
+[[option]]
+path = "lint.enabled"
+group = "lint"
+type = "bool"
+default = "true"
+values = []
+description = "Run package lint before compilation"
+
+[[option]]
+path = "lint.file-lines"
+group = "lint"
+type = "integer"
+default = "999"
+values = []
+description = "Maximum file-lines for L0001"
+
+[[option]]
+path = "lint.function-lines"
+group = "lint"
+type = "integer"
+default = "399"
+values = []
+description = "Maximum function-lines for L0002"
+
+[[option]]
+path = "lint.parameters"
+group = "lint"
+type = "integer"
+default = "6"
+values = []
+description = "Maximum parameters for L0003"
+
+[[option]]
+path = "lint.unused-symbol"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum unused-symbol for L0004"
+
+[[option]]
+path = "lint.dead-code"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum dead-code for L0005"
+
+[[option]]
+path = "lint.class-methods"
+group = "lint"
+type = "integer"
+default = "20"
+values = []
+description = "Maximum class-methods for L0006"
+
+[[option]]
+path = "lint.match-arms"
+group = "lint"
+type = "integer"
+default = "9"
+values = []
+description = "Maximum match-arms for L0007"
+
+[[option]]
+path = "lint.conditional-branches"
+group = "lint"
+type = "integer"
+default = "9"
+values = []
+description = "Maximum conditional-branches for L0008"
+
+[[option]]
+path = "lint.rules.L0001"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0001: file-lines"
+
+[[option]]
+path = "lint.rules.L0002"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0002: function-lines"
+
+[[option]]
+path = "lint.rules.L0003"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0003: parameters"
+
+[[option]]
+path = "lint.rules.L0004"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0004: unused-symbol"
+
+[[option]]
+path = "lint.rules.L0005"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0005: dead-code"
+
+[[option]]
+path = "lint.rules.L0006"
+group = "lint rules"
+type = "enum"
+default = "hint"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0006: class-methods"
+
+[[option]]
+path = "lint.rules.L0007"
+group = "lint rules"
+type = "enum"
+default = "hint"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0007: match-arms"
+
+[[option]]
+path = "lint.rules.L0008"
+group = "lint rules"
+type = "enum"
+default = "hint"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0008: conditional-branches"

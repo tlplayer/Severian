@@ -1,0 +1,27 @@
+{
+  "package": {
+    "name": "platform",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Selected target facts, capabilities, and data layout",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "system",
+        "implementation": "native-abi",
+        "status": "experimental",
+        "version": 1
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

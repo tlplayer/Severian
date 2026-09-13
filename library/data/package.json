@@ -1,0 +1,24 @@
+{
+  "package": {
+    "name": "data",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Format-independent tabular data and relational operations",
+    "metadata": {
+      "library": {
+        "category": "data",
+        "implementation": "source",
+        "status": "experimental"
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "tensor": {
+      "path": "../compute/tensor",
+      "version": "0.1.0"
+    }
+  }
+}

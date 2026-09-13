@@ -1,3 +1,4 @@
+import * from "document.sev"
 import * from "model.sev"
 import * from "config.sev"
 import * from "host.sev"
@@ -41,29 +42,11 @@ def unquote(raw: string) -> string | Error:
         return value[1:int(int(len(value))) - 1]
     if not value.starts_with("\"") or not value.ends_with("\""):
         throw Error("expected a TOML string: " + raw)
-    result := ""
-    escaped := false
-    for character in value[1:int(int(len(value))) - 1].characters():
-        item = string(character)
-        if escaped:
-            if item == "n":
-                result += "\n"
-            elif item == "r":
-                result += "\r"
-            elif item == "t":
-                result += "\t"
-            elif item == "\\" or item == "\"":
-                result += item
-            else:
-                throw Error("unsupported TOML escape: " + item)
-            escaped = false
-        elif item == "\\":
-            escaped = true
-        else:
-            result += item
-    if escaped:
-        throw Error("unterminated TOML escape")
-    return result
+    reader = DocumentReader(value.characters())
+    decoded = reader.quoted()
+    if reader.cursor != int(len(reader.characters)):
+        throw Error("trailing input after string")
+    return decoded
 
 # Delimiters inside strings and nested arrays/inline tables are data.
 def split_fields(text: string, separator: string) -> list[string] | Error:
@@ -111,6 +94,8 @@ def split_fields(text: string, separator: string) -> list[string] | Error:
     return result
 
 def parse_document(text: string) -> list[Entry] | Error:
+    if text.strip().starts_with("{") or text.strip().starts_with("//") or text.strip().starts_with("/*"):
+        return parse_json5_document(text)
     entries: list[Entry] = []
     section := ""
     array := false
@@ -232,16 +217,16 @@ def parse_manifest(text: string) -> Manifest | Error:
 def open(location: string = ".") -> Project | Error:
     root := canonical(location)
     if os.is_file(root):
-        if path.basename(root) != "package.toml":
-            throw Error("package.open expects a directory or package.toml")
+        if path.basename(root) not in ["package.json", "package.toml"]:
+            throw Error("package.open expects a directory or package.json")
         root = path.dirname(root)
-    while not os.is_file(root + "/package.toml"):
+    while not os.is_file(manifest_file(root)):
         parent = path.dirname(root)
         if parent == root:
-            throw Error("no package.toml found from " + location)
+            throw Error("no package.json found from " + location)
         root = parent
     if published_project(root):
-        original = read_text(root + "/package.toml")
+        original = read_text(manifest_file(root))
         lock_path = project_lock_file(root)
         lock = read_text(lock_path) if os.is_file(lock_path) else ""
         manifest = parse_manifest(original)
@@ -255,7 +240,7 @@ def open(location: string = ".") -> Project | Error:
     lock := ""
     try:
         recover_edit(root)
-        original = read_text(root + "/package.toml")
+        original = read_text(manifest_file(root))
         lock_path = project_lock_file(root)
         if os.is_file(lock_path):
             lock = read_text(lock_path)
@@ -280,11 +265,11 @@ def string_array(value: string) -> list[string] | Error:
 # Workspace members are explicit manifest locations, independent of import
 # aliases and organizational directory depth. Reading the catalog is read-only.
 def workspace_library(root: string, name: string) -> string | Error:
-    document = parse_document(read_text(root + "/package.toml"))
+    document = parse_document(read_text(manifest_file(root)))
     members = string_array(setting(document, "workspace", "members", "[]"))
     selected := ""
     for member in members:
-        manifest_path = inside(root, member + "/package.toml")
+        manifest_path = inside(root, member + "/" + path.basename(manifest_file(root + "/" + member)))
         manifest_text = read_text(manifest_path)
         entries = parse_document(manifest_text)
         if text_setting(entries, "package", "name") == name:
@@ -311,8 +296,8 @@ def prelude_exclusions(resolution: Resolution, importer: string) -> list[string]
     if owner == "":
         directory := path.dirname(importer)
         while true:
-            if os.is_file(directory + "/package.toml"):
-                entries = parse_document(read_text(directory + "/package.toml"))
+            if os.is_file(manifest_file(directory)):
+                entries = parse_document(read_text(manifest_file(directory)))
                 break
             parent = path.dirname(directory)
             if parent == directory:
@@ -331,15 +316,15 @@ def prelude_exclusions(resolution: Resolution, importer: string) -> list[string]
 def standalone_dependency(root: string, importer: string, alias: string) -> string | Error:
     directory := path.dirname(importer)
     while true:
-        if os.is_file(directory + "/package.toml"):
-            entries = parse_document(read_text(directory + "/package.toml"))
+        if os.is_file(manifest_file(directory)):
+            entries = parse_document(read_text(manifest_file(directory)))
             for entry in entries:
                 if entry.table == "dependencies" and entry.key == alias:
                     dependency = parse_dependency(alias, entry.value, false)
                     reference = dependency.reference
                     if reference.source == "path":
                         target_root = canonical(directory + "/" + reference.location)
-                        manifest = parse_manifest(read_text(target_root + "/package.toml"))
+                        manifest = parse_manifest(read_text(manifest_file(target_root)))
                         if manifest.name != reference.name:
                             throw Error("dependency package name mismatch: " + alias)
                         for target in manifest.targets:
@@ -353,3 +338,48 @@ def standalone_dependency(root: string, importer: string, alias: string) -> stri
             break
         directory = parent
     return workspace_library(root, alias)
+
+# Render normalized Entry values without exposing TOML as the package format.
+def value_json(raw: string) -> string | Error:
+    value = raw.strip()
+    if value.starts_with("\"") or value.starts_with("'"):
+        return document_quote(unquote(value))
+    if value.starts_with("["):
+        values: list[string] = []
+        for part in split_fields(value[1:int(len(value)) - 1], ","):
+            values.append(value_json(part))
+        return "[" + values.join(", ") + "]"
+    if value.starts_with("{"):
+        values: list[string] = []
+        for entry in parse_document(split_fields(value[1:int(len(value)) - 1], ",").join("\n")):
+            values.append(document_quote(entry.key) + ": " + value_json(entry.value))
+        return "{" + values.join(", ") + "}"
+    return value
+
+def entries_json(entries: list[Entry]) -> string | Error:
+    nodes: list[DocumentNode] = [DocumentNode(-1, "", "object")]
+    for entry in entries:
+        parent := 0
+        components = entry.table.split(".") if entry.table != "" else []
+        for index in range(int(len(components))):
+            key = components[index]
+            found := -1
+            for child in range(1, int(len(nodes))):
+                if nodes[child].parent == parent and nodes[child].key == key:
+                    found = child
+                    break
+            if found < 0:
+                kind = "array" if entry.array and index == int(len(components)) - 2 else "object"
+                found = int(len(nodes))
+                nodes.append(DocumentNode(parent, key, kind))
+            parent = found
+        nodes.append(DocumentNode(parent, entry.key, "scalar", value_json(entry.value)))
+    # Top-level sections get their own lines; leaf values stay compact.
+    sections: list[string] = []
+    for index in range(1, int(len(nodes))):
+        if nodes[index].parent == 0:
+            sections.append("  " + document_quote(nodes[index].key) + ": " + document_render(nodes, index))
+    return "{\n" + sections.join(",\n") + "\n}\n"
+
+def write_document(destination: string, text: string) -> unit | Error:
+    write_text(destination, entries_json(parse_document(text)))

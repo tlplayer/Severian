@@ -36,7 +36,7 @@ def native_package(root: string, seen: list[string], arguments: list[string], fo
     if root in seen:
         return
     seen.append(root)
-    text = read_text(root + "/package.toml")
+    text = read_text(manifest_file(root))
     entries = parse_document(text)
     # Standalone sources can live beneath a workspace rather than a package.
     # A workspace supplies no native provider of its own; its build pipeline
@@ -69,8 +69,8 @@ def native_arguments(resolution: Resolution, sources: list[string]) -> list[stri
         native_package(package.root, seen, arguments, false)
     for source in sources:
         directory := path.dirname(canonical(source))
-        while directory != "/" and not os.is_file(directory + "/package.toml"):
+        while directory != "/" and not os.is_file(manifest_file(directory)):
             directory = path.dirname(directory)
-        if os.is_file(directory + "/package.toml"):
+        if os.is_file(manifest_file(directory)):
             native_package(directory, seen, arguments, len(resolution.packages) == 0)
     return arguments

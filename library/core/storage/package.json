@@ -1,0 +1,33 @@
+{
+  "package": {
+    "name": "core.storage",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Checked owning buffers over core.memory",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/statistics.sev"
+      ]
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "xxi": {
+    "c": {
+      "sources": [
+        "native/statistics.c"
+      ]
+    }
+  },
+  "dependencies": {
+    "memory": {
+      "package": "core.memory",
+      "path": "../memory",
+      "version": "0.1.0"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "package": {
+    "name": "package-quality-tests",
+    "version": "0.1.0"
+  },
+  "lib": {
+    "path": "main.sev"
+  },
+  "dependencies": {
+    "package": {
+      "path": "../../../../library/package"
+    }
+  }
+}

@@ -194,7 +194,7 @@
         "severian.coverage.target": {
           "type": "string",
           "default": "",
-          "description": "Source or project directory passed to `sev coverage`, relative to the workspace. When empty, the nearest `package.toml` or workspace root is used."
+          "description": "Source or project directory passed to `sev coverage`, relative to the workspace. When empty, the nearest `package.json` or workspace root is used."
         },
         "severian.coverage.autoLoad": {
           "type": "boolean",

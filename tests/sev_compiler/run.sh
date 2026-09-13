@@ -41,12 +41,12 @@ for root in "${roots[@]}"; do
         selected_targets["$root"]=1
         continue
     fi
-    if [[ -f "$root/package.toml" ]]; then
+    if [[ -f "$root/package.json" ]]; then
         selected_targets["$root"]=1
     else
         while IFS= read -r -d '' manifest; do
-            selected_targets["${manifest%/package.toml}"]=1
-        done < <(find "$root" -type f -name package.toml -print0)
+            selected_targets["${manifest%/package.json}"]=1
+        done < <(find "$root" -type f -name package.json -print0)
     fi
     while IFS= read -r test_source; do
         selected_targets["$test_source"]=1

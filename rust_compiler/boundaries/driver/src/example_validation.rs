@@ -203,7 +203,7 @@ fn run_package_fixtures(
     let mut coverage_points = BTreeSet::new();
     for (index, package) in packages.iter().enumerate() {
         let result = (|| {
-            let manifest = Manifest::load(&package.join("package.toml"), catalog)?;
+            let manifest = Manifest::load(&severian_driver::config::document::path(&package), catalog)?;
             let config = super::resolve_config(catalog, Some(&manifest), options)?;
             let compiler = super::compiler(&config, Some(&manifest), true)?.with_coverage();
             let mut sources = manifest
@@ -358,7 +358,7 @@ fn enforce_coverage(
 }
 
 fn collect_targets(directory: &Path, root: bool, output: &mut Discovery) -> Result<(), String> {
-    if !root && directory.join("package.toml").is_file() {
+    if !root && severian_driver::config::document::path(&directory).is_file() {
         output.packages.push(directory.to_owned());
         return Ok(());
     }

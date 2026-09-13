@@ -1,0 +1,9 @@
+{
+  "package": {
+    "name": "core.compile",
+    "version": "0.1.0"
+  },
+  "lib": {
+    "path": "src/mod.sev"
+  }
+}

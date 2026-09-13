@@ -48,8 +48,8 @@ class Edit:
             throw Error("could not lock package edit")
         try:
             recover_edit(original.root)
-            if read_text(original.root + "/package.toml") != original.manifest_text:
-                throw Error("package.toml changed while editing; reopen the project")
+            if read_text(manifest_file(original.root)) != original.manifest_text:
+                throw Error("package manifest changed while editing; reopen the project")
             lock_path = project_lock_file(original.root)
             current_lock = read_text(lock_path) if os.is_file(lock_path) else ""
             if current_lock != original.lock_text:
@@ -64,7 +64,7 @@ class Edit:
             require_command(["sync", "-f", stage])
             write_text(stage + "/ready", "rollback")
             require_command(["sync", "-f", stage])
-            replace_file(stage + "/manifest.new", original.root + "/package.toml")
+            replace_file(stage + "/manifest.new", manifest_file(original.root))
             replace_file(stage + "/lock.new", lock_path)
             require_command(["sync", "-f", original.root])
             remove_tree(stage)
@@ -76,6 +76,9 @@ class Edit:
         return open(original.root)
 
 def render_manifest(entries: list[Entry]) -> string:
+    return entries_json(entries)
+
+def render_legacy_manifest(entries: list[Entry]) -> string:
     tables: list[string] = []
     for entry in entries:
         if entry.table not in tables:
@@ -124,7 +127,7 @@ def new(location: string, name: string = "", library: bool = false) -> Project |
     target = "lib" if library else "main"
     header += "\n[lib]\n" if library else "\n[[bin]]\n"
     header += "name = " + toml_quote(selected) + "\npath = \"src/" + target + ".sev\"\n"
-    write_text(stage + "/package.toml", header)
+    write_text(stage + "/package.json", options(parse_document(header)))
     write_text(stage + "/src/" + target + ".sev", "def answer() -> int:\n    return 42\n" if library else "def main():\n    print(\"hello, severian\")\n")
     write_text(stage + "/package.lock", resolve(open(stage)).lock)
     replace_file(stage, location)
@@ -147,3 +150,26 @@ def init(location: string = ".", name: string = "", library: bool = false) -> Pr
         throw Error(failure.message)
     remove_tree(stage)
     return open(root)
+
+# package.options is the generator used by new/init and explicit policy sync.
+# Existing values win; catalog comments enumerate defaults and legal severities.
+def options(entries: list[Entry]) -> string | Error:
+    result = entries[:]
+    comments := "// Severian package. Generated options; existing values are preserved.\n"
+    for option in default_catalog():
+        components = option.path.split(".")
+        table = components[:int(len(components)) - 1].join(".")
+        key = components[-1]
+        if setting(result, table, key) == "":
+            raw = document_quote(option.default) if option.kind in ["string", "enum"] else option.default
+            result.append(Entry(table, key, raw))
+        comments += "// " + option.path + ": " + option.kind + "; default " + option.default + ("; values " + option.values.join(", ") if int(len(option.values)) > 0 else "") + "\n"
+    if setting(result, "lint", "enabled") == "":
+        result.append(Entry("lint", "enabled", "true"))
+    for rule in lint_rules():
+        if setting(result, "lint", rule.option) == "":
+            result.append(Entry("lint", rule.option, string(rule.limit)))
+        if setting(result, "lint.rules", rule.id) == "":
+            result.append(Entry("lint.rules", rule.id, document_quote(rule.level)))
+        comments += "// " + rule.id + ": " + rule.message + "; levels off, info, hint, warning, error; default " + rule.level + "; limit " + string(rule.limit) + "\n"
+    return comments + entries_json(result)

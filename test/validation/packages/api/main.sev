@@ -103,14 +103,14 @@ test "dependency edits resolve aliases and preserve files on failure":
     assert(len(graph.packages) == 2)
     assert(graph.edges[0].alias == "shapes")
     assert(package.dependency_source(graph, changed.root + "/src/main.sev", "shapes").ends_with("/src/lib.sev"))
-    before = package.read_text(changed.root + "/package.toml")
+    before = package.read_text(changed.root + "/package.json")
     failed := false
     try:
         package.add(changed, "missing@1")
     catch error: Error:
         failed = true
     assert(failed)
-    assert(package.read_text(changed.root + "/package.toml") == before)
+    assert(package.read_text(changed.root + "/package.json") == before)
     environment.set("SEVERIAN_REGISTRY", previous)
     package.remove_tree(stage)
 
@@ -130,7 +130,7 @@ test "locked resolution pins content and rejects stale source":
 test "root tests alone may use development dependencies":
     stage = package.temporary("/tmp")
     project = package.new(stage + "/demo")
-    package.write_text(project.root + "/package.toml", project.manifest_text + "\n[dev-dependencies]\nunavailable = \"1.0.0\"\n")
+    package.write_text(project.root + "/package.json", package.render_manifest(project.manifest.entries + [package.Entry("dev-dependencies", "unavailable", "\"1.0.0\"")]))
     refreshed = package.open(project.root)
     assert(len(package.resolve(refreshed).packages) == 1)
     failed := false
@@ -148,7 +148,7 @@ test "open recovers an interrupted manifest lock transaction":
     package.write_text(journal + "/manifest.old", project.manifest_text)
     package.write_text(journal + "/lock.old", project.lock_text)
     package.write_text(journal + "/ready", "rollback")
-    package.write_text(project.root + "/package.toml", "incomplete")
+    package.write_text(project.root + "/package.json", "incomplete")
     recovered = package.open(project.root)
     assert(recovered.manifest_text == project.manifest_text)
     assert(recovered.lock_text == project.lock_text)
@@ -176,7 +176,7 @@ test "archive rejects duplicate and traversing entries":
 test "manifest edits preserve array tables and reject unknown configuration":
     entries = package.parse_document("[package]\nname = \"demo\"\n[[package.metadata.rule]]\nname = \"first\"\n[[package.metadata.rule]]\nname = \"second\"\n")
     rendered = package.render_manifest(entries)
-    assert(rendered.contains("[[package.metadata.rule]]"))
+    assert(rendered.starts_with("{"))
     reparsed = package.parse_document(rendered)
     assert(len(reparsed) == len(entries))
     failed := false

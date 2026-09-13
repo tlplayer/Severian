@@ -78,7 +78,7 @@ fn snapshot(configuration: &str, roots: &BTreeSet<PathBuf>, output: &Path) -> Re
 
 fn package_root(source: &Path) -> PathBuf {
     for directory in source.ancestors().skip(1) {
-        if directory.join("package.toml").is_file() { return directory.into(); }
+        if severian_driver::config::document::path(&directory).is_file() { return directory.into(); }
     }
     source.parent().expect("source parent").into()
 }

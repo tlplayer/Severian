@@ -1,0 +1,31 @@
+{
+  "package": {
+    "name": "core.memory",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Owned raw allocations beneath core data structures",
+    "unsafe": {
+      "capabilities": [
+        "allocation",
+        "pointers",
+        "unsafe-blocks"
+      ],
+      "sources": [
+        "src/allocation.sev",
+        "src/raw.sev",
+        "src/raw_intrinsics.sev"
+      ]
+    },
+    "metadata": {
+      "library": {
+        "category": "memory",
+        "implementation": "source-and-runtime-intrinsics",
+        "status": "experimental",
+        "public": false
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

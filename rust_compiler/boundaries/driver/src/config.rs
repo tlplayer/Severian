@@ -1,3 +1,5 @@
+#[path = "package_document.rs"]
+pub mod document;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -89,6 +91,12 @@ impl Catalog {
     }
 
     pub fn template(&self, package_name: &str) -> String {
+        let value = document::parse(&self.legacy_template(package_name)).expect("catalog template");
+        let comments = self.options.iter().map(|option| format!("// {}: {} (default: {}; values: {})\n", option.path, option.description, option.default, if option.values.is_empty() { option.kind.clone() } else { option.values.join(", ") })).collect::<String>();
+        comments + &document::render(&value).expect("JSON package template")
+    }
+
+    fn legacy_template(&self, package_name: &str) -> String {
         let mut output = format!(
             "# Severian package manifest.\n# Generated from the compiler-owned configuration catalog.\n\n### PACKAGE ############################################################\n\n[package]\nname = {name}\nversion = \"0.1.0\"\nedition = \"2026\"\nlicense = \"Severian License\"\ndefault-run = {name}\n\n### TARGETS ############################################################\n\n[[bin]]\nname = {name}\npath = \"src/main.sev\"\n\n# [lib]\n# name = {name}\n# path = \"src/lib.sev\"\n\n### DEPENDENCIES #######################################################\n\n[dependencies]\n\n[dev-dependencies]\n",
             name = quote(package_name),
@@ -115,8 +123,7 @@ impl Catalog {
     pub fn sync(&self, path: &Path) -> Result<usize, String> {
         let original = fs::read_to_string(path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-        let document = original
-            .parse::<toml::Value>()
+        let document = document::parse(&original)
             .map_err(|error| format!("invalid {}: {error}", path.display()))?;
         let present = configuration_values(&document)
             .into_keys()
@@ -134,7 +141,8 @@ impl Catalog {
             let table = option.path.rsplit_once('.').expect("catalog path").0;
             additions.entry(table).or_default().push(option);
         }
-        let mut output = original;
+        let json = original.trim_start().starts_with(['{', '/']);
+        let mut output = if json { toml::to_string_pretty(&document).map_err(|error| error.to_string())? } else { original };
         for (table, options) in additions {
             let header = format!("[{table}]");
             let block = options
@@ -162,6 +170,7 @@ impl Catalog {
                 output.push_str(&format!("\n{header}\n{block}"));
             }
         }
+        if json { output = document::render(&document::parse(&output)?)?; }
         fs::write(path, output)
             .map_err(|error| format!("could not update {}: {error}", path.display()))?;
         Ok(missing.len())
@@ -490,7 +499,7 @@ impl Manifest {
             .ok_or_else(|| "`[dependencies]` must be a table".to_owned())?;
         dependencies.clear();
         dependencies.extend(replacements);
-        toml::to_string_pretty(&document)
+        document::render(&document)
             .map_err(|error| format!("could not serialize published package manifest: {error}"))
     }
 
@@ -546,7 +555,7 @@ impl Manifest {
                 output.push_str("]\n");
             }
         }
-        Ok(output)
+        document::render(&document::parse(&output)?)
     }
 }
 
@@ -628,7 +637,8 @@ impl<'a> PackageGraphBuilder<'a> {
         manifest_path: &Path,
         require_library: bool,
     ) -> Result<severian_modules::PackageId, String> {
-        let manifest_path = fs::canonicalize(manifest_path)
+        let selected = document::path(manifest_path.parent().unwrap_or_else(|| Path::new(".")));
+        let manifest_path = fs::canonicalize(&selected)
             .map_err(|error| format!("could not resolve {}: {error}", manifest_path.display()))?;
         if let Some(id) = self.resolved.get(&manifest_path) {
             return Ok(*id);
@@ -641,8 +651,7 @@ impl<'a> PackageGraphBuilder<'a> {
         }
         let source = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("could not read {}: {error}", manifest_path.display()))?;
-        let value = source
-            .parse::<toml::Value>()
+        let value = document::parse(&source)
             .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
         let document: PackageDocument = value
             .clone()
@@ -715,7 +724,7 @@ impl<'a> PackageGraphBuilder<'a> {
                 let path = dependency_path(alias, declaration).map_err(|error| {
                     format!("package `{owner}` dependency `{alias}` could not resolve: {error}")
                 })?;
-                let manifest = root.join(path).join("package.toml");
+                let manifest = document::path(&root.join(path));
                 let id = self.resolve(&manifest, true).map_err(|error| {
                     format!("while resolving package `{owner}` dependency `{alias}`: {error}")
                 })?;
@@ -792,7 +801,7 @@ fn dependency_path(alias: &str, declaration: &DependencyDeclaration) -> Result<P
 fn registry_package(name: &str, version: &str, registry: Option<&str>) -> Result<PathBuf, String> {
     let root = registry_root(registry)?;
     let source = registry_release_path(&root, name, version)?.join("source");
-    if source.join("package.toml").is_file() {
+    if document::path(&source).is_file() {
         Ok(source)
     } else {
         Err(format!(
@@ -837,11 +846,46 @@ pub fn registry_root(registry: Option<&str>) -> Result<PathBuf, String> {
 }
 
 fn validate_configuration(catalog: &Catalog, document: &toml::Value) -> Result<(), String> {
+    validate_lint_policy(catalog, document)?;
     for (key, value) in configuration_values(document) {
         if catalog.get(&key).is_some() {
             catalog.validate(&key, &value)?;
         } else if is_configuration_table(&key) {
             return Err(format!("unknown configuration option `{key}`"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_lint_policy(catalog: &Catalog, document: &toml::Value) -> Result<(), String> {
+    let Some(value) = document.get("lint") else { return Ok(()); };
+    let table = value.as_table().ok_or("lint policy requires an object")?;
+    for (key, value) in table {
+        match key.as_str() {
+            "enabled" => { value.as_bool().ok_or("lint.enabled requires a boolean")?; }
+            "exclude" => {
+                let paths = value.as_array().ok_or("lint.exclude requires an array of relative paths")?;
+                for path in paths {
+                    let path = path.as_str().ok_or("lint.exclude requires string paths")?;
+                    let relative = path.strip_suffix('/').unwrap_or(path);
+                    if relative.is_empty() || relative.starts_with('/') || relative.contains(['\\', ':'])
+                        || relative.chars().any(char::is_control)
+                        || relative.split('/').any(|part| matches!(part, "" | "." | "..")) {
+                        return Err(format!("unsafe lint exclusion: {path}"));
+                    }
+                }
+            }
+            "rules" => {
+                for (rule, level) in value.as_table().ok_or("lint.rules requires an object")? {
+                    catalog.validate(&format!("lint.rules.{rule}"), level.as_str().ok_or("lint severity requires a string")?)?;
+                }
+            }
+            _ => {
+                let path = format!("lint.{key}");
+                let limit = value.as_integer().filter(|number| (0..=999_999_999).contains(number))
+                    .ok_or_else(|| format!("{path} requires an integer between 0 and 999999999"))?;
+                catalog.validate(&path, &limit.to_string())?;
+            }
         }
     }
     Ok(())
@@ -1019,6 +1063,7 @@ fn render(option: &OptionSpec, value: &str) -> String {
 
 fn is_configuration_table(path: &str) -> bool {
     [
+        "lint.",
         "language.",
         "build.",
         "diagnostics.",
@@ -1050,9 +1095,9 @@ mod tests {
     fn catalog_drives_defaults_validation_and_template() {
         let catalog = Catalog::load().unwrap();
         let template = catalog.template("hello");
-        assert!(template.contains("profile = \"dev\""));
-        assert!(template.contains("target = \"host\""));
-        assert!(template.contains("timeout-seconds = 60"));
+        assert_eq!(document::parse(&template).unwrap()["build"]["profile"].as_str(), Some("dev"));
+        assert_eq!(document::parse(&template).unwrap()["build"]["target"].as_str(), Some("host"));
+        assert_eq!(document::parse(&template).unwrap()["test"]["timeout-seconds"].as_integer(), Some(60));
         assert_eq!(catalog.default("test.timeout-seconds").unwrap(), "60");
         assert!(catalog.validate("test.timeout-seconds", "-1").is_err());
         assert!(!template.contains("backend ="));
@@ -1097,7 +1142,7 @@ mod tests {
         let manifest =
             Manifest::load(&package.join("package.toml"), &Catalog::load().unwrap()).unwrap();
         let published = manifest.published_source_manifest().unwrap();
-        let value = published.parse::<toml::Value>().unwrap();
+        let value = document::parse(&published).unwrap();
         let dependency = &value["dependencies"]["helper"];
         assert_eq!(dependency["package"].as_str(), Some("actual-dependency"));
         assert_eq!(dependency["version"].as_str(), Some("2.3.4"));
