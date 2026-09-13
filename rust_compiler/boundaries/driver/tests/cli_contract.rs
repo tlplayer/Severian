@@ -1868,3 +1868,20 @@ fn releasing_a_view_reports_the_offending_source_span() {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+#[cfg(unix)]
+fn scalar_native_builds_cannot_bypass_mlir() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary("required-mlir");
+    let source = root.join("main.sev");
+    let probe = root.join("mlir-opt");
+    fs::write(&source, "def main():\n    pass\n").unwrap();
+    fs::write(&probe, "#!/bin/sh\nprintf '%s\\n' 'required MLIR route reached' >&2\nexit 37\n").unwrap();
+    fs::set_permissions(&probe, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = sev().arg("build").arg(&source).arg("-o").arg(root.join("main"))
+        .env("SEVERIAN_MLIR_OPT", &probe).output().unwrap();
+    assert!(!output.status.success(), "scalar compilation bypassed MLIR");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("required MLIR route reached"), "{}", String::from_utf8_lossy(&output.stderr));
+    fs::remove_dir_all(root).unwrap();
+}

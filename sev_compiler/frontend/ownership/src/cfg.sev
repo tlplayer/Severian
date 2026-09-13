@@ -1,0 +1,169 @@
+import universal
+import source
+import diagnostics
+import * from "../../../universal/cfg/availability.sev" as availability
+import * from "../../../universal/cfg/dominance.sev" as graph
+
+def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
+    match exit:
+        case Jump:
+            return [edge]
+        case Conditional:
+            return [taken, otherwise]
+        case _:
+            return []
+
+
+def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
+    match operation:
+        case IsVariant:
+            return [value]
+        case Load:
+            return [address]
+        case Store:
+            return [address, value]
+        case Alias:
+            return [value]
+        case FieldAddress:
+            return [object]
+        case CallFields:
+            return arguments
+        case Call:
+            return arguments
+        case Unary:
+            return [operand]
+        case Binary:
+            return [left, right]
+        case Assert:
+            return [condition]
+        case _:
+            return []
+
+
+def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
+    match operation:
+        case TypeLayout:
+            return [result]
+        case IsVariant:
+            return [result]
+        case Allocate:
+            return [result]
+        case Constant:
+            return [result]
+        case Load:
+            return [result]
+        case Alias:
+            return [result]
+        case FieldAddress:
+            return [result]
+        case CallFields:
+            return outputs
+        case Call:
+            return [result]
+        case Unary:
+            return [result]
+        case Binary:
+            return [result]
+        case _:
+            return []
+
+
+def reachable_blocks(body: universal.CfgBody) -> list[int]:
+    reachable = [body.entry]
+    cursor := 0
+    while cursor < len(reachable):
+        terminal ?= body.blocks[reachable[cursor]].terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                if edge.target not in reachable:
+                    reachable.append(edge.target)
+        cursor += 1
+    return reachable
+
+
+def dominators(body: universal.CfgBody) -> list[int]:
+    sources: list[int] = []
+    targets: list[int] = []
+    for block in body.blocks:
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in successors(terminal.exit):
+                sources.append(block.id)
+                targets.append(edge.target)
+    return graph.tree(int(len(body.blocks)), body.entry, sources, targets)
+
+
+def verify_inputs(values: list[universal.ValueId], available: list[int], span: source.Span) -> bool | diagnostics.Diagnostic:
+    for value in values:
+        if int(value.index) not in available:
+            return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
+    return true
+
+
+def verify_ssa_inputs(values: list[universal.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span) -> bool | diagnostics.Diagnostic:
+    for value in values:
+        if not availability.usable(definitions, parents, int(value.index), block, position):
+            return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
+    return true
+
+
+def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
+    parents = dominators(body)
+    count := int(len(parameters))
+    for block in body.blocks:
+        count += int(len(block.parameters))
+        for operation in block.operations:
+            count += int(len(operation_results(operation)))
+    definitions = availability.create(count)
+    for parameter in parameters:
+        availability.add(definitions, int(parameter.index), body.entry, -1)
+    for block in body.blocks:
+        span := source.Span(source.SourceId(0), 0, 0)
+        terminal ?= block.terminator
+        if terminal != None:
+            span = terminal.span
+        for parameter in block.parameters:
+            formal := false
+            if block.id == body.entry:
+                for input in parameters:
+                    if input.index == parameter.index:
+                        formal = true
+            if not formal and not availability.add(definitions, int(parameter.index), block.id, -1):
+                return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
+        position := 0
+        for operation in block.operations:
+            for result in operation_results(operation):
+                if not availability.add(definitions, int(result.index), block.id, position):
+                    return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
+            position += 1
+    for block in body.blocks:
+        if parents[block.id] < 0:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            position := 0
+            for operation in block.operations:
+                verify_ssa_inputs(operation_inputs(operation), definitions, parents, block.id, position, terminal.span)
+                position += 1
+            inputs: list[universal.ValueId] = []
+            match terminal.exit:
+                case Raise:
+                    inputs.append(value)
+                case Conditional:
+                    inputs.append(condition)
+                case FinishFields:
+                    for value in values:
+                        inputs.append(value)
+                case Finish:
+                    returned ?= value
+                    if returned != None:
+                        inputs.append(returned)
+                case _:
+                    pass
+            for edge in successors(terminal.exit):
+                for argument in edge.arguments:
+                    inputs.append(argument)
+            verify_ssa_inputs(inputs, definitions, parents, block.id, position, terminal.span)
+    return true
+
+

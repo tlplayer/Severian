@@ -1,3 +1,4 @@
+#include "../../../memory/native/memory.h"
 #include "regex_abi.h"
 
 #include <regex.h>
@@ -23,7 +24,7 @@ typedef struct {
 
 static char *sev_regex_copy_view(sev_string_view_v1 view) {
     if (!view.data && view.length) return NULL;
-    char *copy = malloc(view.length + 1);
+    char *copy = sev_memory_allocate(view.length + 1);
     if (!copy) return NULL;
     if (view.length) memcpy(copy, view.data, view.length);
     copy[view.length] = '\0';
@@ -39,18 +40,18 @@ static sev_string_view_v1 sev_regex_view(const char *data, size_t length) {
 }
 
 static sev_regex_strings *sev_regex_strings_new(void) {
-    return calloc(1, sizeof(sev_regex_strings));
+    return sev_memory_zeroed(1, sizeof(sev_regex_strings));
 }
 
 static int sev_regex_strings_push(sev_regex_strings *values, const char *data, size_t length) {
     if (values->length == values->capacity) {
         size_t capacity = values->capacity ? values->capacity * 2 : 8;
-        char **items = realloc(values->items, capacity * sizeof(*items));
+        char **items = sev_memory_resize(values->items, capacity * sizeof(*items));
         if (!items) return -1;
         values->items = items;
         values->capacity = capacity;
     }
-    char *item = malloc(length + 1);
+    char *item = sev_memory_allocate(length + 1);
     if (!item) return -1;
     if (length) memcpy(item, data, length);
     item[length] = '\0';
@@ -60,9 +61,9 @@ static int sev_regex_strings_push(sev_regex_strings *values, const char *data, s
 
 static void sev_regex_strings_destroy(sev_regex_strings *values) {
     if (!values) return;
-    for (size_t index = 0; index < values->length; ++index) free(values->items[index]);
-    free(values->items);
-    free(values);
+    for (size_t index = 0; index < values->length; ++index) sev_memory_release(values->items[index]);
+    sev_memory_release(values->items);
+    sev_memory_release(values);
 }
 
 static int sev_regex_buffer_reserve(sev_regex_buffer *buffer, size_t extra) {
@@ -77,7 +78,7 @@ static int sev_regex_buffer_reserve(sev_regex_buffer *buffer, size_t extra) {
         }
         capacity *= 2;
     }
-    char *data = realloc(buffer->data, capacity);
+    char *data = sev_memory_resize(buffer->data, capacity);
     if (!data) return -1;
     buffer->data = data;
     buffer->capacity = capacity;
@@ -96,20 +97,20 @@ bool sev_abi_v1_regex_matches(sev_string_view_v1 text, sev_string_view_v1 patter
     char *text_value = sev_regex_copy_view(text);
     char *pattern_value = sev_regex_copy_view(pattern);
     if (!text_value || !pattern_value) {
-        free(text_value);
-        free(pattern_value);
+        sev_memory_release(text_value);
+        sev_memory_release(pattern_value);
         return false;
     }
     regex_t expression;
     if (regcomp(&expression, pattern_value, REG_EXTENDED | REG_NOSUB) != 0) {
-        free(text_value);
-        free(pattern_value);
+        sev_memory_release(text_value);
+        sev_memory_release(pattern_value);
         return false;
     }
     bool matched = regexec(&expression, text_value, 0, NULL, 0) == 0;
     regfree(&expression);
-    free(text_value);
-    free(pattern_value);
+    sev_memory_release(text_value);
+    sev_memory_release(pattern_value);
     return matched;
 }
 
@@ -124,8 +125,8 @@ int32_t sev_abi_v1_regex_find_all(
     char *pattern_value = sev_regex_copy_view(pattern);
     sev_regex_strings *values = sev_regex_strings_new();
     if (!text_value || !pattern_value || !values) {
-        free(text_value);
-        free(pattern_value);
+        sev_memory_release(text_value);
+        sev_memory_release(pattern_value);
         sev_regex_strings_destroy(values);
         return -1;
     }
@@ -138,8 +139,8 @@ int32_t sev_abi_v1_regex_find_all(
             size_t end = offset + (size_t)match.rm_eo;
             if (sev_regex_strings_push(values, text_value + start, end - start) != 0) {
                 regfree(&expression);
-                free(text_value);
-                free(pattern_value);
+                sev_memory_release(text_value);
+                sev_memory_release(pattern_value);
                 sev_regex_strings_destroy(values);
                 return -1;
             }
@@ -153,8 +154,8 @@ int32_t sev_abi_v1_regex_find_all(
         }
         regfree(&expression);
     }
-    free(text_value);
-    free(pattern_value);
+    sev_memory_release(text_value);
+    sev_memory_release(pattern_value);
     output->value = values;
     return 0;
 }
@@ -170,8 +171,8 @@ int32_t sev_abi_v1_regex_split(
     char *pattern_value = sev_regex_copy_view(pattern);
     sev_regex_strings *values = sev_regex_strings_new();
     if (!text_value || !pattern_value || !values) {
-        free(text_value);
-        free(pattern_value);
+        sev_memory_release(text_value);
+        sev_memory_release(pattern_value);
         sev_regex_strings_destroy(values);
         return -1;
     }
@@ -179,8 +180,8 @@ int32_t sev_abi_v1_regex_split(
     int compiled = regcomp(&expression, pattern_value, REG_EXTENDED);
     if (compiled != 0) {
         if (sev_regex_strings_push(values, text_value, text.length) != 0) {
-            free(text_value);
-            free(pattern_value);
+            sev_memory_release(text_value);
+            sev_memory_release(pattern_value);
             sev_regex_strings_destroy(values);
             return -1;
         }
@@ -193,8 +194,8 @@ int32_t sev_abi_v1_regex_split(
             size_t end = offset + (size_t)match.rm_eo;
             if (sev_regex_strings_push(values, text_value + segment, start - segment) != 0) {
                 regfree(&expression);
-                free(text_value);
-                free(pattern_value);
+                sev_memory_release(text_value);
+                sev_memory_release(pattern_value);
                 sev_regex_strings_destroy(values);
                 return -1;
             }
@@ -209,15 +210,15 @@ int32_t sev_abi_v1_regex_split(
         }
         if (sev_regex_strings_push(values, text_value + segment, text.length - segment) != 0) {
             regfree(&expression);
-            free(text_value);
-            free(pattern_value);
+            sev_memory_release(text_value);
+            sev_memory_release(pattern_value);
             sev_regex_strings_destroy(values);
             return -1;
         }
         regfree(&expression);
     }
-    free(text_value);
-    free(pattern_value);
+    sev_memory_release(text_value);
+    sev_memory_release(pattern_value);
     output->value = values;
     return 0;
 }
@@ -248,12 +249,12 @@ int32_t sev_abi_v1_regex_substitute(
     char *text_value = sev_regex_copy_view(text);
     char *pattern_value = sev_regex_copy_view(pattern);
     char *replacement_value = sev_regex_copy_view(replacement);
-    sev_regex_text *value = calloc(1, sizeof(*value));
+    sev_regex_text *value = sev_memory_zeroed(1, sizeof(*value));
     if (!text_value || !pattern_value || !replacement_value || !value) {
-        free(text_value);
-        free(pattern_value);
-        free(replacement_value);
-        free(value);
+        sev_memory_release(text_value);
+        sev_memory_release(pattern_value);
+        sev_memory_release(replacement_value);
+        sev_memory_release(value);
         return -1;
     }
 
@@ -292,18 +293,18 @@ int32_t sev_abi_v1_regex_substitute(
     if (!buffer.data && sev_regex_buffer_append(&buffer, "", 0) != 0) goto failure;
     value->data = buffer.data;
     value->length = buffer.length;
-    free(text_value);
-    free(pattern_value);
-    free(replacement_value);
+    sev_memory_release(text_value);
+    sev_memory_release(pattern_value);
+    sev_memory_release(replacement_value);
     output->value = value;
     return 0;
 
 failure:
-    free(buffer.data);
-    free(text_value);
-    free(pattern_value);
-    free(replacement_value);
-    free(value);
+    sev_memory_release(buffer.data);
+    sev_memory_release(text_value);
+    sev_memory_release(pattern_value);
+    sev_memory_release(replacement_value);
+    sev_memory_release(value);
     return -1;
 }
 
@@ -315,6 +316,6 @@ sev_string_view_v1 sev_abi_v1_regex_text_value(sev_handle_v1 handle) {
 void sev_abi_v1_regex_text_release(sev_handle_v1 handle) {
     sev_regex_text *value = handle.value;
     if (!value) return;
-    free(value->data);
-    free(value);
+    sev_memory_release(value->data);
+    sev_memory_release(value);
 }

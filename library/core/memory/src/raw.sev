@@ -5,6 +5,6 @@ def raw_allocate[T](count: int) -> pointer[T]:
     unsafe:
         return allocate[T](count)
 
-def raw_free[T](value: pointer[T]):
+def raw_free[T](value: move pointer[T]):
     unsafe:
         free(value)

@@ -39,7 +39,11 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
-    run_tool([opt, intermediate + ".mlir", "--verify-each", "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership", "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-func-to-llvm", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
+    # Both compilers consume the ownership library's standard MLIR pipeline.
+    # Run it before lowering memrefs or aliases to opaque LLVM pointers.
+    ownership_pipeline = package.read_text(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline").strip()
+    run_tool([opt, intermediate + ".mlir", "--verify-each", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
+    run_tool([opt, intermediate + ".owned.mlir", "--verify-each", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", intermediate + ".llvm.mlir", "-o", intermediate + ".ll"])
     arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
     arguments.append(sysroot + "/library/core/memory/native/memory.c")

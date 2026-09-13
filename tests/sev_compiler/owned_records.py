@@ -143,7 +143,7 @@ class OwnedRecords(MigrationCase):
 
     def check_allocations(self):
         executable = self.directory / 'sanitized'
-        self.succeeds([tool('SEVERIAN_CLANG', 'clang-21'), self.directory / 'subject.ll',
+        self.succeeds([tool('SEVERIAN_CLANG', 'clang-21'), self.directory / 'subject.ll', ROOT / 'library/core/memory/native/memory.c',
                        '-fsanitize=address', '-o', executable, '-lm'])
         result = subprocess.run([executable], capture_output=True, text=True,
                                 env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0'}, timeout=30)
@@ -179,7 +179,7 @@ class OwnedRecords(MigrationCase):
             }
         ''')
         tracked = self.directory / 'tracked'
-        self.succeeds([tool('SEVERIAN_CLANG', 'clang-21'), self.directory / 'subject.ll',
+        self.succeeds([tool('SEVERIAN_CLANG', 'clang-21'), self.directory / 'subject.ll', ROOT / 'library/core/memory/native/memory.c',
                        tracker, '-Wl,--wrap=malloc', '-Wl,--wrap=calloc', '-Wl,--wrap=free', '-o', tracked, '-lm'])
         self.succeeds([tracked])
 

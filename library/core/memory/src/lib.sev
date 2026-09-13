@@ -1,4 +1,5 @@
 import * from "allocation.sev"
 import * from "buffer_intrinsics.sev"
+import * from "bytes.sev"
 import * from "raw_intrinsics.sev"
 import * from "raw.sev"

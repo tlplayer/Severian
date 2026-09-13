@@ -5,3 +5,8 @@ def allocate_buffer[T](count: index) -> buffer[T]
 
 @mlir("arith.index_cast")
 def buffer_index(count: int) -> index
+
+# Both descriptors remain visible until the ownership pipeline has accounted
+# for their aliases. This operation transfers contents, not release authority.
+@mlir("memref.copy")
+def copy_buffer[T](source: view buffer[T], destination: borrow buffer[T])

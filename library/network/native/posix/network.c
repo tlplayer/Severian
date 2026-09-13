@@ -1,3 +1,4 @@
+#include "../../../core/memory/native/memory.h"
 #include "../include/network_abi.h"
 
 #include <arpa/inet.h>
@@ -58,7 +59,7 @@ static int32_t sev_fail(sev_error_v1 *error, int32_t code, const char *message) 
 
 static char *sev_copy_view(sev_string_view_v1 view) {
     if (!view.data && view.length) return NULL;
-    char *copy = malloc(view.length + 1);
+    char *copy = sev_memory_allocate(view.length + 1);
     if (!copy) return NULL;
     if (view.length) memcpy(copy, view.data, view.length);
     copy[view.length] = '\0';
@@ -96,7 +97,7 @@ static int32_t sev_open_socket(
     const char *query_host = passive && host.length == 0 ? NULL : host_text;
     struct addrinfo *addresses = NULL;
     int resolved = getaddrinfo(query_host, service, &hints, &addresses);
-    free(host_text);
+    sev_memory_release(host_text);
     if (resolved != 0) return sev_fail(error, resolved, gai_strerror(resolved));
 
     int descriptor = -1;
@@ -119,7 +120,7 @@ static int32_t sev_open_socket(
     freeaddrinfo(addresses);
     if (descriptor < 0) return sev_fail(error, saved_error, passive ? "could not bind network address" : "could not connect to network host");
 
-    sev_network_socket *socket = calloc(1, sizeof(*socket));
+    sev_network_socket *socket = sev_memory_zeroed(1, sizeof(*socket));
     if (!socket) { close(descriptor); return sev_fail(error, ENOMEM, "could not allocate network handle"); }
     socket->kind = kind;
     socket->descriptor = descriptor;
@@ -144,7 +145,7 @@ int32_t sev_abi_v1_network_accept(sev_handle_v1 listener, sev_handle_v1 *connect
     int descriptor;
     do descriptor = accept(server->descriptor, NULL, NULL); while (descriptor < 0 && errno == EINTR);
     if (descriptor < 0) return sev_fail(error, errno, "could not accept network connection");
-    sev_network_socket *client = calloc(1, sizeof(*client));
+    sev_network_socket *client = sev_memory_zeroed(1, sizeof(*client));
     if (!client) { close(descriptor); return sev_fail(error, ENOMEM, "could not allocate connection handle"); }
     client->kind = SEV_NETWORK_TCP;
     client->descriptor = descriptor;
@@ -158,14 +159,14 @@ int32_t sev_abi_v1_network_read(sev_handle_v1 connection, size_t count, sev_hand
     if (!bytes || !sev_socket_kind(connection, SEV_NETWORK_TCP, &socket))
         return sev_fail(error, EBADF, "network connection is closed");
     if (count > (size_t)SSIZE_MAX) return sev_fail(error, EINVAL, "network read is too large");
-    sev_network_bytes *result = calloc(1, sizeof(*result));
+    sev_network_bytes *result = sev_memory_zeroed(1, sizeof(*result));
     if (!result) return sev_fail(error, ENOMEM, "could not allocate read result");
     result->kind = SEV_NETWORK_BYTES;
-    result->data = malloc(count ? count : 1);
-    if (!result->data) { free(result); return sev_fail(error, ENOMEM, "could not allocate read buffer"); }
+    result->data = sev_memory_allocate(count ? count : 1);
+    if (!result->data) { sev_memory_release(result); return sev_fail(error, ENOMEM, "could not allocate read buffer"); }
     ssize_t received;
     do received = recv(socket->descriptor, result->data, count, 0); while (received < 0 && errno == EINTR);
-    if (received < 0) { int code = errno; free(result->data); free(result); return sev_fail(error, code, "network read failed"); }
+    if (received < 0) { int code = errno; sev_memory_release(result->data); sev_memory_release(result); return sev_fail(error, code, "network read failed"); }
     result->length = (size_t)received;
     bytes->value = result;
     sev_clear_error(error);
@@ -197,7 +198,7 @@ static int32_t sev_close_socket(sev_handle_v1 handle, int kind, sev_error_v1 *er
         return sev_fail(error, EBADF, "network handle is closed");
     if (close(socket->descriptor) != 0) return sev_fail(error, errno, "could not close network handle");
     socket->closed = true;
-    free(socket);
+    sev_memory_release(socket);
     sev_clear_error(error);
     return 0;
 }
@@ -224,11 +225,11 @@ static int32_t sev_inspect_address(sev_handle_v1 handle, int kind, bool peer, se
         ? getpeername(socket->descriptor, (struct sockaddr *)&raw, &raw_size)
         : getsockname(socket->descriptor, (struct sockaddr *)&raw, &raw_size);
     if (status != 0) return sev_fail(error, errno, "could not inspect network address");
-    sev_network_address *address = calloc(1, sizeof(*address));
+    sev_network_address *address = sev_memory_zeroed(1, sizeof(*address));
     if (!address) return sev_fail(error, ENOMEM, "could not allocate network address");
     address->kind = SEV_NETWORK_ADDRESS;
     if (getnameinfo((struct sockaddr *)&raw, raw_size, address->host, sizeof(address->host), NULL, 0, NI_NUMERICHOST) != 0) {
-        free(address);
+        sev_memory_release(address);
         return sev_fail(error, EINVAL, "could not format network address");
     }
     if (raw.ss_family == AF_INET) {
@@ -267,7 +268,7 @@ int32_t sev_abi_v1_network_address_family(sev_handle_v1 handle) {
 }
 void sev_abi_v1_network_address_release(sev_handle_v1 handle) {
     sev_network_address *address = handle.value;
-    if (address && address->kind == SEV_NETWORK_ADDRESS) free(address);
+    if (address && address->kind == SEV_NETWORK_ADDRESS) sev_memory_release(address);
 }
 
 size_t sev_abi_v1_network_bytes_length(sev_handle_v1 handle) {
@@ -281,8 +282,8 @@ uint8_t sev_abi_v1_network_bytes_at(sev_handle_v1 handle, size_t index) {
 void sev_abi_v1_network_bytes_release(sev_handle_v1 handle) {
     sev_network_bytes *bytes = handle.value;
     if (!bytes || bytes->kind != SEV_NETWORK_BYTES) return;
-    free(bytes->data);
-    free(bytes);
+    sev_memory_release(bytes->data);
+    sev_memory_release(bytes);
 }
 
 sev_string_view_v1 sev_abi_v1_network_decode_utf8(sev_bytes_view_v1 bytes) {
@@ -336,9 +337,9 @@ int32_t sev_abi_v1_network_resolve(sev_string_view_v1 host, sev_handle_v1 *outpu
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *addresses = NULL;
     int status = getaddrinfo(host_text, NULL, &hints, &addresses);
-    free(host_text);
+    sev_memory_release(host_text);
     if (status != 0) return sev_fail(error, status, gai_strerror(status));
-    sev_network_address_list *list = calloc(1, sizeof(*list));
+    sev_network_address_list *list = sev_memory_zeroed(1, sizeof(*list));
     if (!list) { freeaddrinfo(addresses); return sev_fail(error, ENOMEM, "could not allocate address list"); }
     list->kind = SEV_NETWORK_ADDRESS_LIST;
     for (struct addrinfo *item = addresses; item; item = item->ai_next) {
@@ -348,17 +349,17 @@ int32_t sev_abi_v1_network_resolve(sev_string_view_v1 host, sev_handle_v1 *outpu
         for (size_t index = 0; index < list->length; ++index)
             if (strcmp(list->values[index], numeric) == 0) duplicate = true;
         if (duplicate) continue;
-        char **grown = realloc(list->values, (list->length + 1) * sizeof(*grown));
+        char **grown = sev_memory_resize(list->values, (list->length + 1) * sizeof(*grown));
         if (!grown) { status = ENOMEM; break; }
         list->values = grown;
-        list->values[list->length] = strdup(numeric);
+        list->values[list->length] = sev_memory_copy_text(numeric);
         if (!list->values[list->length]) { status = ENOMEM; break; }
         list->length += 1;
     }
     freeaddrinfo(addresses);
     if (status == ENOMEM) {
-        for (size_t index = 0; index < list->length; ++index) free(list->values[index]);
-        free(list->values); free(list);
+        for (size_t index = 0; index < list->length; ++index) sev_memory_release(list->values[index]);
+        sev_memory_release(list->values); sev_memory_release(list);
         return sev_fail(error, ENOMEM, "could not allocate resolved addresses");
     }
     output->value = list;
@@ -377,8 +378,8 @@ sev_string_view_v1 sev_abi_v1_network_address_list_at(sev_handle_v1 handle, size
 void sev_abi_v1_network_address_list_release(sev_handle_v1 handle) {
     sev_network_address_list *list = handle.value;
     if (!list || list->kind != SEV_NETWORK_ADDRESS_LIST) return;
-    for (size_t index = 0; index < list->length; ++index) free(list->values[index]);
-    free(list->values); free(list);
+    for (size_t index = 0; index < list->length; ++index) sev_memory_release(list->values[index]);
+    sev_memory_release(list->values); sev_memory_release(list);
 }
 
 int32_t sev_abi_v1_network_parse_ip(sev_string_view_v1 value, sev_handle_v1 *output, sev_error_v1 *error) {
@@ -391,15 +392,15 @@ int32_t sev_abi_v1_network_parse_ip(sev_string_view_v1 value, sev_handle_v1 *out
     hints.ai_flags = AI_NUMERICHOST;
     struct addrinfo *address = NULL;
     int status = getaddrinfo(text, NULL, &hints, &address);
-    free(text);
+    sev_memory_release(text);
     if (status != 0) return sev_fail(error, status, "invalid IP address");
-    sev_network_address *parsed = calloc(1, sizeof(*parsed));
+    sev_network_address *parsed = sev_memory_zeroed(1, sizeof(*parsed));
     if (!parsed) { freeaddrinfo(address); return sev_fail(error, ENOMEM, "could not allocate IP address"); }
     parsed->kind = SEV_NETWORK_ADDRESS;
     parsed->family = address->ai_family == AF_INET6 ? 6 : 4;
     status = getnameinfo(address->ai_addr, address->ai_addrlen, parsed->host, sizeof(parsed->host), NULL, 0, NI_NUMERICHOST);
     freeaddrinfo(address);
-    if (status != 0) { free(parsed); return sev_fail(error, status, "invalid IP address"); }
+    if (status != 0) { sev_memory_release(parsed); return sev_fail(error, status, "invalid IP address"); }
     output->value = parsed;
     sev_clear_error(error);
     return 0;
@@ -419,7 +420,7 @@ int32_t sev_abi_v1_network_udp_send_to(sev_handle_v1 handle, sev_bytes_view_v1 d
     hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_DGRAM; hints.ai_protocol = IPPROTO_UDP;
     struct addrinfo *addresses = NULL;
     int status = getaddrinfo(host_text, service, &hints, &addresses);
-    free(host_text);
+    sev_memory_release(host_text);
     if (status != 0) return sev_fail(error, status, gai_strerror(status));
     ssize_t result = -1;
     int saved_error = EIO;
@@ -439,18 +440,18 @@ int32_t sev_abi_v1_network_udp_receive_from(sev_handle_v1 handle, size_t count, 
     sev_network_socket *socket = NULL;
     if (!output || !sev_socket_kind(handle, SEV_NETWORK_UDP, &socket)) return sev_fail(error, EBADF, "UDP socket is closed");
     if (count > (size_t)SSIZE_MAX) return sev_fail(error, EINVAL, "UDP receive is too large");
-    sev_network_packet *packet = calloc(1, sizeof(*packet));
+    sev_network_packet *packet = sev_memory_zeroed(1, sizeof(*packet));
     if (!packet) return sev_fail(error, ENOMEM, "could not allocate UDP packet");
     packet->kind = SEV_NETWORK_PACKET;
-    packet->data = malloc(count ? count : 1);
-    if (!packet->data) { free(packet); return sev_fail(error, ENOMEM, "could not allocate UDP buffer"); }
+    packet->data = sev_memory_allocate(count ? count : 1);
+    if (!packet->data) { sev_memory_release(packet); return sev_fail(error, ENOMEM, "could not allocate UDP buffer"); }
     struct sockaddr_storage sender; socklen_t sender_size = sizeof(sender);
     ssize_t received;
     do received = recvfrom(socket->descriptor, packet->data, count, 0, (struct sockaddr *)&sender, &sender_size); while (received < 0 && errno == EINTR);
-    if (received < 0) { int code = errno; free(packet->data); free(packet); return sev_fail(error, code, "UDP receive failed"); }
+    if (received < 0) { int code = errno; sev_memory_release(packet->data); sev_memory_release(packet); return sev_fail(error, code, "UDP receive failed"); }
     char service[NI_MAXSERV];
     int status = getnameinfo((struct sockaddr *)&sender, sender_size, packet->host, sizeof(packet->host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
-    if (status != 0) { free(packet->data); free(packet); return sev_fail(error, status, "could not inspect UDP sender"); }
+    if (status != 0) { sev_memory_release(packet->data); sev_memory_release(packet); return sev_fail(error, status, "could not inspect UDP sender"); }
     packet->length = (size_t)received;
     packet->port = (uint16_t)strtoul(service, NULL, 10);
     output->value = packet;
@@ -480,7 +481,7 @@ uint16_t sev_abi_v1_network_packet_port(sev_handle_v1 handle) {
 void sev_abi_v1_network_packet_release(sev_handle_v1 handle) {
     sev_network_packet *packet = handle.value;
     if (!packet || packet->kind != SEV_NETWORK_PACKET) return;
-    free(packet->data); free(packet);
+    sev_memory_release(packet->data); sev_memory_release(packet);
 }
 
 int32_t sev_abi_v1_network_loopback_echo(sev_string_view_v1 message, sev_handle_v1 *output, sev_error_v1 *error) {
@@ -501,11 +502,11 @@ int32_t sev_abi_v1_network_loopback_echo(sev_string_view_v1 message, sev_handle_
         int code = errno; if (client >= 0) close(client); close(server); return sev_fail(error, code, "could not connect loopback client");
     }
     int peer = accept(server, NULL, NULL);
-    sev_network_text *text = calloc(1, sizeof(*text));
+    sev_network_text *text = sev_memory_zeroed(1, sizeof(*text));
     if (peer < 0 || !text) {
-        int code = peer < 0 ? errno : ENOMEM; if (peer >= 0) close(peer); close(client); close(server); free(text); return sev_fail(error, code, "could not accept loopback connection");
+        int code = peer < 0 ? errno : ENOMEM; if (peer >= 0) close(peer); close(client); close(server); sev_memory_release(text); return sev_fail(error, code, "could not accept loopback connection");
     }
-    text->kind = SEV_NETWORK_TEXT; text->length = message.length; text->value = malloc(message.length + 1);
+    text->kind = SEV_NETWORK_TEXT; text->length = message.length; text->value = sev_memory_allocate(message.length + 1);
     bool success = text->value != NULL;
     if (success) {
         size_t offset = 0;
@@ -518,7 +519,7 @@ int32_t sev_abi_v1_network_loopback_echo(sev_string_view_v1 message, sev_handle_
         while (success && offset < message.length) { ssize_t count = recv(client, text->value + offset, message.length - offset, 0); if (count <= 0) { success = false; break; } offset += (size_t)count; }
     }
     close(peer); close(client); close(server);
-    if (!success) { free(text->value); free(text); return sev_fail(error, errno, "loopback transfer failed"); }
+    if (!success) { sev_memory_release(text->value); sev_memory_release(text); return sev_fail(error, errno, "loopback transfer failed"); }
     text->value[text->length] = '\0';
     output->value = text;
     sev_clear_error(error);
@@ -535,7 +536,7 @@ sev_string_view_v1 sev_abi_v1_network_text_value(sev_handle_v1 handle) {
 void sev_abi_v1_network_text_release(sev_handle_v1 handle) {
     sev_network_text *text = handle.value;
     if (!text || text->kind != SEV_NETWORK_TEXT) return;
-    free(text->value); free(text);
+    sev_memory_release(text->value); sev_memory_release(text);
 }
 
 static uint8_t *sev_simple_read_buffer;
@@ -567,7 +568,7 @@ intptr_t sev_abi_v1_network_accept_simple(intptr_t listener) {
 }
 
 const char *sev_abi_v1_network_read_text_simple(intptr_t connection, int64_t count) {
-    free(sev_simple_read_buffer);
+    sev_memory_release(sev_simple_read_buffer);
     sev_simple_read_buffer = NULL;
     sev_handle_v1 bytes_handle = {0};
     sev_handle_v1 input = { .value = (void *)connection };
@@ -577,14 +578,14 @@ const char *sev_abi_v1_network_read_text_simple(intptr_t connection, int64_t cou
     }
     sev_network_bytes *bytes = bytes_handle.value;
     if (!bytes || bytes->kind != SEV_NETWORK_BYTES) return "";
-    sev_simple_read_buffer = realloc(bytes->data, bytes->length + 1);
+    sev_simple_read_buffer = sev_memory_resize(bytes->data, bytes->length + 1);
     if (!sev_simple_read_buffer) {
-        free(bytes->data);
-        free(bytes);
+        sev_memory_release(bytes->data);
+        sev_memory_release(bytes);
         return "";
     }
     sev_simple_read_buffer[bytes->length] = '\0';
-    free(bytes);
+    sev_memory_release(bytes);
     return (const char *)sev_simple_read_buffer;
 }
 
@@ -616,7 +617,7 @@ int64_t sev_abi_v1_network_close_simple(intptr_t handle) {
 }
 
 const char *sev_abi_v1_network_loopback_echo_simple(const char *message) {
-    free(sev_simple_text_buffer);
+    sev_memory_release(sev_simple_text_buffer);
     sev_simple_text_buffer = NULL;
     sev_handle_v1 output = {0};
     sev_error_v1 error = {0};
@@ -626,6 +627,6 @@ const char *sev_abi_v1_network_loopback_echo_simple(const char *message) {
     sev_network_text *text = output.value;
     if (!text || text->kind != SEV_NETWORK_TEXT) return "";
     sev_simple_text_buffer = text->value;
-    free(text);
+    sev_memory_release(text);
     return sev_simple_text_buffer;
 }

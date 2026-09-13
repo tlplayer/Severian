@@ -92,21 +92,23 @@ class MigrationCase(unittest.TestCase):
     def native(self, text, *, expected="", name="subject.sev", sysroot=ROOT):
         mlir = self.compile(text, name=name, sysroot=sysroot)
         emitted = self.directory / (Path(name).stem + ".mlir")
+        owned = emitted.with_suffix(".owned.mlir")
         lowered = emitted.with_suffix(".llvm.mlir")
         llvm = emitted.with_suffix(".ll")
         executable = emitted.with_suffix(".exe")
         emitted.write_text(mlir)
+        pipeline = (ROOT / "sev_compiler/frontend/ownership/mlir.pipeline").read_text().strip()
         self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), emitted,
-                        "--verify-each", "--lift-cf-to-scf",
-                        "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
-                        "--convert-bufferization-to-memref", "--convert-scf-to-cf",
-                        "--convert-arith-to-llvm", "--convert-cf-to-llvm",
-                        "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm",
+                        "--verify-each", "--pass-pipeline=" + pipeline, "-o", owned])
+        self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), owned,
+                        "--verify-each", "--convert-scf-to-cf",
+                        "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm",
+                        "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm",
                         "--reconcile-unrealized-casts", "-o", lowered])
         output = self.succeeds([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"),
                                "--mlir-to-llvmir", lowered])
         llvm.write_text(output)
-        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, "-o", executable, "-lm"])
+        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, ROOT / "library/core/memory/native/memory.c", "-o", executable, "-lm"])
         self.assertEqual(self.succeeds([executable]), expected)
         return mlir
 

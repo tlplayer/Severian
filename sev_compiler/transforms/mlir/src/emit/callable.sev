@@ -1,4 +1,4 @@
-import * from "../../../../transforms/mir/src/ownership.sev" as ownership
+import * from "../../../../frontend/ownership/src/plan.sev" as ownership
 import universal
 import * from "../../../../universal/type/storage.sev" as storage_types
 import * from "../../../../universal/type/scalar.sev" as scalar
@@ -351,7 +351,7 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: 
                         failed = builder_new_value(builder, integer_type(1))
                         builder_constant(builder, failed, boolean_attribute(false))
                         builder_assert(builder, failed, "unhandled typed error")
-                        builder_create_operation(builder, operation_name("llvm", "unreachable"), terminator=true)
+                        callable_unreachable(builder, module, body)
                 case FinishFields:
                     outputs: list[MlirValue] = []
                     for value in values:
@@ -364,7 +364,21 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: 
                         outputs.append(callable_mlir_value(module, returned))
                     builder_return(builder, outputs)
                 case Dead:
-                    builder_create_operation(builder, operation_name("llvm", "unreachable"), terminator=true)
+                    callable_unreachable(builder, module, body)
+
+
+# Preserve FunctionOpInterface exits until ownership has run. The assertion
+# prevents execution of the placeholder result; LLVM conversion happens later.
+def callable_unreachable(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody):
+    failed = builder_new_value(builder, integer_type(1))
+    builder_constant(builder, failed, boolean_attribute(false))
+    builder_assert(builder, failed, "unreachable control flow")
+    values: list[MlirValue] = []
+    for type_id in callable_mlir_results(body.return_type, module.records):
+        value = builder_new_value(builder, type_id)
+        builder_create_operation(builder, operation_name("ub", "poison"), [], [value])
+        values.append(value)
+    builder_return(builder, values)
 
 
 # Rank-one buffers of copyable aggregate values use byte storage. LLVM computes

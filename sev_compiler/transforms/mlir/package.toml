@@ -13,3 +13,4 @@ artifact = { path = "../../artifact" }
 target = { path = "../../target" }
 universal = { path = "../../universal" }
 mir = { path = "../mir" }
+ownership = { path = "../../frontend/ownership" }

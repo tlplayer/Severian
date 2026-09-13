@@ -10,3 +10,11 @@ def allocate[T](count: int) -> buffer[T]:
 
 def free[T](value: move buffer[T]):
     drop value
+
+
+# An independent initialized copy. The original stays borrowed, and the result
+# returns its own allocation through the standard MLIR function boundary.
+def copy[T](value: view buffer[T]) -> buffer[T]:
+    result: buffer[T] = allocate(len(value))
+    memory.copy_buffer(value, result)
+    return result

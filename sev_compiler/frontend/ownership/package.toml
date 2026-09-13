@@ -10,3 +10,4 @@ path = "src/lib.sev"
 [dependencies]
 diagnostics = { path = "../../diagnostics" }
 universal = { path = "../../universal" }
+source = { path = "../../source" }

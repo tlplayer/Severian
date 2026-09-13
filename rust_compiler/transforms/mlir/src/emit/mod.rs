@@ -2246,12 +2246,17 @@ fn render_cfg_terminator(
                 output.push_str(&format!("{indentation}return\n"));
             }
         }
-        severian_lir::Terminator::Throw(value) => {
-            let _ = value;
-            output.push_str(&format!("{indentation}llvm.unreachable\n"));
-        }
-        severian_lir::Terminator::Unreachable => {
-            output.push_str(&format!("{indentation}llvm.unreachable\n"));
+        severian_lir::Terminator::Throw(_) | severian_lir::Terminator::Unreachable => {
+            // Keep function exits in the standard control-flow interfaces until
+            // ownership has run. llvm.unreachable has no such interface.
+            let tag = output.len();
+            output.push_str(&format!("{indentation}%unreachable_condition_{tag} = arith.constant false\n{indentation}cf.assert %unreachable_condition_{tag}, \"unreachable control flow\"\n"));
+            if body.return_type == LoweredType::Unit {
+                output.push_str(&format!("{indentation}return\n"));
+            } else {
+                let ty = mlir_type(&body.return_type)?;
+                output.push_str(&format!("{indentation}%unreachable_result_{tag} = ub.poison : {ty}\n{indentation}return %unreachable_result_{tag} : {ty}\n"));
+            }
         }
     }
     Ok(())

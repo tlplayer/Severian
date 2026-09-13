@@ -798,6 +798,24 @@ fn emit_mlir_binary(
     }
     lowering_arguments.extend([
         "--one-shot-bufferize=bufferize-function-boundaries".to_owned(),
+    ]);
+    let buffered = run_tool(
+        "MLIR bufferization",
+        tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
+        &lowering_arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+        module.as_bytes(),
+    )?;
+    // The source ownership library defines the same pipeline consumed by sev.
+    // Memref ownership must be resolved before conversion erases its aliases.
+    let ownership_pipeline = include_str!("../../../../sev_compiler/frontend/ownership/mlir.pipeline").trim();
+    let owned = run_tool(
+        "MLIR ownership",
+        tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
+        &["--verify-each", &format!("--pass-pipeline={ownership_pipeline}")],
+        &buffered,
+    )?;
+    let lowering_arguments = vec![
+        "--verify-each".to_owned(),
         "--convert-linalg-to-loops".to_owned(),
         "--lower-affine".to_owned(),
         "--expand-strided-metadata".to_owned(),
@@ -817,13 +835,14 @@ fn emit_mlir_binary(
         "--convert-math-to-funcs".to_owned(),
         "--convert-math-to-llvm".to_owned(),
         "--convert-arith-to-llvm".to_owned(),
-        "--convert-cf-to-llvm".to_owned(),
         "--convert-func-to-llvm".to_owned(),
+        "--convert-cf-to-llvm".to_owned(),
+        "--convert-ub-to-llvm".to_owned(),
         "--finalize-memref-to-llvm=use-generic-functions".to_owned(),
         "--reconcile-unrealized-casts".to_owned(),
         "--ensure-debug-info-scope-on-llvm-func".to_owned(),
         "--mlir-print-debuginfo".to_owned(),
-    ]);
+    ];
     let lowering_arguments = lowering_arguments
         .iter()
         .map(String::as_str)
@@ -832,7 +851,7 @@ fn emit_mlir_binary(
         "mlir-opt",
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
         &lowering_arguments,
-        module.as_bytes(),
+        &owned,
     )?;
     let llvm_ir = run_tool(
         "mlir-translate",

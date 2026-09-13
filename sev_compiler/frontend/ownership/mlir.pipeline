@@ -1,0 +1,1 @@
+builtin.module(func.func(lift-cf-to-scf,canonicalize,lift-cf-to-scf),buffer-deallocation-pipeline{private-function-dynamic-ownership},convert-bufferization-to-memref)

@@ -1,11 +1,11 @@
 # Ownership, storage, and memory
 
-`ownership` is the compiler authority for lifetimes. `storage` owns initialized
+`ownership` is the [compiler library](../../../sev_compiler/frontend/ownership/README.md) authority for lifetimes. `storage` owns initialized
 contents. `memory` supplies physical allocation and release. These are distinct
 responsibilities with one direction of dependency:
 
 ```
-semantic ownership contracts -> checked ownership plan -> lowering
+ownership library contracts -> checked ownership plan -> MLIR ownership -> lowering
                                       |
                                   core.storage
                                       |
@@ -46,6 +46,10 @@ releasing a header adjusts payload ownership, not each field's ownership. This
 matters when a borrowed callable mutates a payload field: every header observes
 the updated field, without separately claiming to own that field. Storage invokes
 the compiler-provided active-payload destructor on final release.
+
+Source buffer ownership uses the ownership library’s shared MLIR pipeline.
+The C storage registry remains a bootstrap compatibility implementation, not the
+source of truth for source buffer lifetimes. See the [migration audit](../../../sev_compiler/frontend/ownership/AUDIT.md).
 
 The hosted provider is `core.memory/native/memory.h`; its external ABI and MLIR
 generic allocator adapters are in `memory.c`. Native runtime and system helpers

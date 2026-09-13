@@ -763,19 +763,9 @@ impl Compiler {
             .unwrap_or_default();
         let types = self.types_for(mir);
         let plan = severian_compile::plan(mir, types).map_err(CompileError::Compile)?;
-        if linker_arguments.is_empty() && !plan.has_custom_regions() {
-            let resumed = plan.resumed_mir();
-            let lir = severian_lowering::lower(&resumed, types, &self.target)
-                .map_err(CompileError::Lowering)?;
-            if severian_backend::supports_direct_lir(&lir) {
-                return severian_backend::emit_executable_optimized(
-                    &lir,
-                    output,
-                    self.native_optimization,
-                )
-                .map_err(CompileError::Backend);
-            }
-        }
+        // All source programs use the composed MLIR path, including scalar
+        // programs. The C backend remains available for legacy tooling, but
+        // must not bypass the ownership library and MLIR deallocation here.
         let program = self.compile_plan(&plan)?;
         let mut linker_arguments = linker_arguments;
         linker_arguments.push(format!("-O{}", self.native_optimization));
@@ -2374,7 +2364,7 @@ fn retain_reachable_functions(
         .filter_map(|function| function.body.as_ref().map(|body| (function.id, body)))
         .collect::<BTreeMap<_, _>>();
     let mut reachable = roots.into_iter().chain(module.functions.iter()
-        .filter(|function| function.name.starts_with("__sev_destroy_type") || function.name.starts_with("__sev_retain_type"))
+        .filter(|function| module.types.as_ref().is_some_and(|types| types.is_storage_glue(function.definition)))
         .map(|function| function.id)).collect::<BTreeSet<_>>();
     let mut queue = std::collections::VecDeque::from_iter(reachable.iter().copied());
 

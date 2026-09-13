@@ -1,0 +1,24 @@
+import * from "buffer_intrinsics.sev"
+
+
+# The source equivalent of a zeroed physical allocation. Its descriptor stays
+# visible to MLIR ownership; extracting an address does not transfer the owner.
+def zeroed_bytes(count: int) -> buffer[u8]:
+    assert(count >= 0)
+    result: buffer[u8] = allocate_buffer(buffer_index(count))
+    position := 0
+    while position < count:
+        result[position] = u8(0)
+        position += 1
+    return result
+
+
+# Resizing returns a new owner. The input is a view and remains valid until the
+# caller replaces or drops its owner; MLIR handles that release and any aliases.
+def resized_bytes(value: view buffer[u8], count: int) -> buffer[u8]:
+    result = zeroed_bytes(count)
+    position := 0
+    while position < len(value) and position < count:
+        result[position] = value[position]
+        position += 1
+    return result

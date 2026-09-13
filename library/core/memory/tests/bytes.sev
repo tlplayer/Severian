@@ -1,0 +1,18 @@
+import * from "../src/lib.sev" as memory
+
+test "zeroed bytes preserve allocation ownership across returns":
+    values = memory.zeroed_bytes(3)
+    assert(len(values) == 3)
+    assert(values[0] == u8(0))
+    assert(values[2] == u8(0))
+    values[0] = u8(42)
+    grown = memory.resized_bytes(values, 5)
+    assert(grown[0] == u8(42))
+    assert(grown[4] == u8(0))
+    grown[0] = u8(7)
+    assert(values[0] == u8(42))
+    shrunk = memory.resized_bytes(values, 1)
+    assert(len(shrunk) == 1)
+    assert(shrunk[0] == u8(42))
+    empty = memory.zeroed_bytes(0)
+    assert(len(empty) == 0)

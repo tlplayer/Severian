@@ -17,8 +17,9 @@ import * from "../../../universal/type/scalar_conversion.sev" as conversions
 import * from "../../../universal/type/integer_spelling.sev" as integer_spelling
 import * from "test_modes.sev" as test_modes
 import * from "../../../universal/primitive/slicing.sev" as slicing
-import * from "loans.sev" as loans
-import * from "parameter_effects.sev" as parameter_effects
+import * from "../../ownership/src/loans.sev" as loans
+import * from "../../ownership/src/places.sev" as places
+import * from "../../ownership/src/effects.sev" as parameter_effects
 import * from "closures.sev" as closures
 
 
@@ -1000,9 +1001,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     for field in record.fields:
                         if field.name == name:
                             if not state.initializing:
-                                for missing in state.uninitialized:
-                                    if missing[0] == loans.binding(receiver) and missing[1] == index:
-                                        return error(callable_diagnostic("read of uninitialized field " + name, expression.span))
+                                places.require_initialized(state.uninitialized, loans.binding(receiver), index, "read of uninitialized field " + name, expression.span)
                             if field.name.starts_with("__") and state.owner.index != record.type_id.index:
                                 return error(callable_diagnostic("field is private: " + name, expression.span))
                             if expected.index != 0 and expected.index != field.type_id.index:
@@ -1029,9 +1028,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         for moved in state.moved_elements:
                             if moved[0] == index:
                                 return error(callable_diagnostic("use of partially moved collection " + name, expression.span))
-                        for missing in state.uninitialized:
-                            if missing[0] == index:
-                                return error(callable_diagnostic("use of partially initialized value " + name, expression.span))
+                        places.require_initialized(state.uninitialized, index, -1, "use of partially initialized value " + name, expression.span)
                     if index in state.dead:
                         return error(callable_diagnostic("use after drop or move: " + name, expression.span))
                     loans.access(state.loans, index, false, expression.span)
@@ -1271,6 +1268,8 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 value = callable_expression(state, arguments[0].value, universal.TypeId(0))
                 if callable_pointer_element(state, value.type_id).index == 0:
                     return error(callable_diagnostic("free requires a typed pointer", expression.span))
+                root = loans.binding(value)
+                loans.release(state.loans, root, root in state.borrowed_parameters, expression.span)
                 native = universal.Expression(universal.FieldReference(value, 0), expression.span, type_id=universal.TypeId(5))
                 result = callable_raw_call(state, "__raw_free", [native], expression.span, expected)
                 match value.kind:
@@ -1696,9 +1695,7 @@ def callable_field_transfer(state: CallableAnalysis, object: universal.Expressio
             pass
         case _:
             return error(callable_diagnostic("nested partial resource moves require initialized-place tracking", span))
-    for missing in state.uninitialized:
-        if missing[0] == root and missing[1] == index:
-            return error(callable_diagnostic("use after drop or move of field", span))
+    places.require_initialized(state.uninitialized, root, index, "use after drop or move of field", span)
     if not (state.destructor and root == 0):
         for record in state.records:
             if record.type_id.index == object.type_id.index:
@@ -1759,9 +1756,7 @@ def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression
         initialized := true
         match value.kind:
             case BindingReference:
-                for missing in state.uninitialized:
-                    if missing[0] == int(binding.index) and missing[1] == cursor:
-                        initialized = false
+                initialized = places.initialized(state.uninitialized, int(binding.index), cursor)
             case _:
                 pass
         if initialized and callable_has_drop(state, field.type_id):
@@ -1796,9 +1791,7 @@ def callable_drop(state: CallableAnalysis, value: universal.Expression, output: 
                 state.loans = remaining
                 state.dead.append(index)
                 return
-            loans.access(state.loans, index, true, span)
-            if index in state.borrowed_parameters:
-                return error(callable_diagnostic("cannot drop a borrowed parameter", span))
+            loans.release(state.loans, index, index in state.borrowed_parameters, span)
             if callable_has_drop(state, resolved.type_id):
                 if index not in state.resources:
                     return error(callable_diagnostic("cannot drop a borrowed resource parameter", span))
@@ -1937,11 +1930,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 typed = callable_expression(state, value, value_type)
                 match resolved.kind:
                     case FieldReference:
-                        remaining: list[tuple[int, int]] = []
-                        for missing in state.uninitialized:
-                            if missing[0] != root or missing[1] != index:
-                                remaining.append(missing)
-                        state.uninitialized = remaining
+                        state.uninitialized = places.initialize(state.uninitialized, root, index)
                     case IndexReference:
                         remaining: list[tuple[int, int]] = []
                         for moved in state.moved_elements:

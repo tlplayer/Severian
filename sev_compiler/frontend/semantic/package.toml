@@ -12,3 +12,4 @@ diagnostics = { path = "../../diagnostics" }
 modules = { path = "../modules" }
 source = { path = "../../source" }
 universal = { path = "../../universal" }
+ownership = { path = "../ownership" }

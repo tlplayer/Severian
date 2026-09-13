@@ -602,6 +602,7 @@ impl<'context> Module<'context> {
         let mut allowed = [
             "builtin",
             "arith",
+            "ub",
             "async",
             "bufferization",
             "cf",

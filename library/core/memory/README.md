@@ -17,3 +17,15 @@ and MLIR allocator adapters in [`native/memory.c`](native/memory.c). Native
 runtime and system helpers use this boundary for raw bytes. Initialization,
 views, transfers, and destructor callbacks belong to the
 [ownership and storage contract](../storage/OWNERSHIP.md).
+
+## Source MLIR operations
+
+`zeroed_bytes(count)` returns a zero-initialized `buffer[u8]`.
+`resized_bytes(view, count)` returns an independent buffer, preserves the common
+prefix and initializes new bytes to zero. `allocate_buffer` and `copy_buffer`
+use `memref.alloc` and `memref.copy`. Their descriptors remain visible to the
+ownership library's MLIR pipeline until physical lowering.
+
+The hosted C provider is preserved for raw and foreign adapters. It does not
+replace source ownership analysis. See the
+[ownership audit](../../../sev_compiler/frontend/ownership/AUDIT.md).
