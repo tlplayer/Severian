@@ -2,6 +2,8 @@
 """Build and install the source compiler with a Rust recovery command."""
 import argparse
 import fcntl
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -11,6 +13,36 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+SMOKE_SOURCE = 'assert(20 + 22 == 42)\n'
+
+
+def smoke_identity(compiler):
+    """Bind verification to the input inventory the bootstrap just validated."""
+    if not compiler.is_file():
+        return None
+    with compiler.open('rb') as stream:
+        compiler_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
+    for path in (ROOT / 'sev_compiler/package.pkg/build/bootstrap').glob('*.json'):
+        try:
+            content = path.read_bytes()
+            record = json.loads(content)
+            output = record['output']
+            if (record['schema_version'] == 1 and
+                    Path(output['path']) == compiler.resolve() and
+                    output['sha256'] == compiler_hash):
+                return hashlib.sha256(content + SMOKE_SOURCE.encode() +
+                                      Path(__file__).read_bytes()).hexdigest()
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def smoke_verified(receipt, identity):
+    try:
+        return identity is not None and json.loads(receipt.read_text()) == {
+            'schema_version': 1, 'identity': identity}
+    except (OSError, ValueError):
+        return False
 
 
 def run(*args, capture=False, cwd=ROOT, timeout=None):
@@ -110,9 +142,18 @@ def main():
                     '--build-profile', 'release', '-o', compiler)
                 run(seed, '--version')
                 run(compiler, '--help')
-                smoke = Path(temporary) / 'smoke.sev'
-                smoke.write_text('assert(20 + 22 == 42)\n')
-                run(compiler, smoke, '--sysroot', ROOT, timeout=90)
+                identity = smoke_identity(compiler)
+                receipt = cache / 'compiler-smoke.json'
+                if smoke_verified(receipt, identity):
+                    print('fresh compiler smoke test (verified unchanged inputs and binary)')
+                else:
+                    smoke = Path(temporary) / 'smoke.sev'
+                    smoke.write_text(SMOKE_SOURCE)
+                    run(compiler, smoke, '--sysroot', ROOT, timeout=90)
+                    if identity is not None:
+                        staged = receipt.with_suffix('.json.tmp')
+                        staged.write_text(json.dumps({'schema_version': 1, 'identity': identity}) + '\n')
+                        staged.replace(receipt)
             except BaseException:
                 if previous.exists():
                     shutil.copy2(previous, compiler)

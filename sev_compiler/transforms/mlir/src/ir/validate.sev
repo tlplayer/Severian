@@ -138,7 +138,7 @@ def region_index(program: borrow MlirProgram, id: int) -> int:
     return -1
 
 
-def validate_operation_signature(program: borrow MlirProgram, operation: borrow MlirOperation) -> bool | MlirVerificationError:
+def validate_operation_signature(program: borrow MlirProgram, operation: borrow MlirOperation, block_ids: list[int] = []) -> bool | MlirVerificationError:
     name = operation_name_text(operation.name)
     dialect = operation.name.dialect
     mnemonic = operation.name.mnemonic
@@ -167,33 +167,34 @@ def validate_operation_signature(program: borrow MlirProgram, operation: borrow 
         validate_attribute(property.value)
     if len(operation.region_requires_terminator) != len(operation.regions):
         return error(InvalidRegionContract(name))
-    for successor in operation.successors:
-        found := false
+    # The module verifier supplies a compact block catalog. Do not traverse
+    # and retain every region/operation graph for each branch successor.
+    if len(operation.successors) != 0 and len(block_ids) == 0:
         for region in borrow program.regions:
             for block in borrow region.blocks:
-                if block.id == successor:
-                    found = true
-        if not found:
+                block_ids.append(block.id)
+    for successor in operation.successors:
+        if successor not in block_ids:
             return error(MissingSuccessor(name, successor))
     return true
 
 
-def validate_operation(program: borrow MlirProgram, operation: borrow MlirOperation, defined: list[int], owned_regions: list[int]) -> bool | MlirVerificationError:
+def validate_operation(program: borrow MlirProgram, operation: borrow MlirOperation, defined: list[int], owned_regions: list[int], block_ids: list[int] = []) -> bool | MlirVerificationError:
     for operand in borrow operation.operands:
         if operand.id not in defined:
             return error(UndefinedValue(operand.id))
-    validate_operation_signature(program, operation)
+    validate_operation_signature(program, operation, block_ids)
     region_index := 0
     for region in operation.regions:
         if region in owned_regions:
             return error(DuplicateRegionOwnership(region))
         owned_regions.append(region)
-        validate_region(program, region, copy_values(defined), operation.region_requires_terminator[region_index], owned_regions)
+        validate_region(program, region, copy_values(defined), operation.region_requires_terminator[region_index], owned_regions, block_ids)
         region_index += 1
     return true
 
 
-def validate_flat_region(program: borrow MlirProgram, region: borrow MlirRegion, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
+def validate_flat_region(program: borrow MlirProgram, region: borrow MlirRegion, inherited: list[int], requires_terminator: bool, owned_regions: list[int], block_ids: list[int] = []) -> bool | MlirVerificationError:
     parents = region_dominators(region)
     count := int(len(inherited))
     for block in borrow region.blocks:
@@ -227,7 +228,7 @@ def validate_flat_region(program: borrow MlirProgram, region: borrow MlirRegion,
                 if not availability.usable(definitions, parents, operand.id, block_index, position):
                     return error(UndefinedValue(operand.id))
                 known.append(operand.id)
-            validate_operation(program, operation, known, owned_regions)
+            validate_operation(program, operation, known, owned_regions, block_ids)
             terminated = operation.terminator
             position += 1
         if requires_terminator and not terminated:
@@ -236,7 +237,7 @@ def validate_flat_region(program: borrow MlirProgram, region: borrow MlirRegion,
     return true
 
 
-def validate_region(program: borrow MlirProgram, region_id: int, inherited: list[int], requires_terminator: bool, owned_regions: list[int]) -> bool | MlirVerificationError:
+def validate_region(program: borrow MlirProgram, region_id: int, inherited: list[int], requires_terminator: bool, owned_regions: list[int], block_ids: list[int] = []) -> bool | MlirVerificationError:
     index = region_index(program, region_id)
     if index < 0:
         return error(MissingRegion(region_id))
@@ -249,7 +250,7 @@ def validate_region(program: borrow MlirProgram, region_id: int, inherited: list
             if len(operation.regions) != 0:
                 flat = false
     if flat:
-        return validate_flat_region(program, region, inherited, requires_terminator, owned_regions)
+        return validate_flat_region(program, region, inherited, requires_terminator, owned_regions, block_ids)
     dominators = region_dominators(region)
     block_index := 0
     for block in borrow region.blocks:
@@ -274,7 +275,7 @@ def validate_region(program: borrow MlirProgram, region_id: int, inherited: list
         for operation in borrow block.operations:
             if terminated:
                 return error(OperationAfterTerminator(block.id))
-            validate_operation(program, operation, defined, owned_regions)
+            validate_operation(program, operation, defined, owned_regions, block_ids)
             if operation.terminator:
                 terminated = true
             for result in borrow operation.results:
@@ -300,7 +301,7 @@ def validate(program: borrow MlirProgram) -> bool | MlirVerificationError:
         names.append(function.name)
     owned_regions: list[int] = []
     for operation in borrow program.operations:
-        validate_operation(program, operation, [], owned_regions)
+        validate_operation(program, operation, [], owned_regions, blocks)
     for function in borrow program.functions:
         location ?= function.location
         if location != None:
@@ -313,7 +314,7 @@ def validate(program: borrow MlirProgram) -> bool | MlirVerificationError:
             if function.body_region in owned_regions:
                 return error(DuplicateRegionOwnership(function.body_region))
             owned_regions.append(function.body_region)
-            validate_region(program, function.body_region, [], true, owned_regions)
+            validate_region(program, function.body_region, [], true, owned_regions, blocks)
             region = program.regions[region_index(program, function.body_region)]
             entry = region.blocks[0]
             if len(entry.arguments) != len(function.arguments):

@@ -1024,6 +1024,8 @@ fn run_tool(
     arguments: &[&str],
     input: &[u8],
 ) -> Result<Vec<u8>, BackendError> {
+    let started = (std::env::var("SEVERIAN_PROFILE_ACTIVE").as_deref() == Ok("1"))
+        .then(std::time::Instant::now);
     let mut child = Command::new(program)
         .args(arguments)
         .stdin(Stdio::piped())
@@ -1040,6 +1042,9 @@ fn run_tool(
     let result = child
         .wait_with_output()
         .map_err(|source| BackendError::ToolWait { tool: name, source })?;
+    if let Some(started) = started {
+        eprintln!("  Stage backend/{name}: {:.6}s wall", started.elapsed().as_secs_f64());
+    }
     if !result.status.success() {
         return Err(BackendError::ToolFailed {
             tool: name,
@@ -1057,6 +1062,7 @@ mod tests {
     #[test]
     fn c_spelling_is_selected_in_the_c_emitter() {
         let module = LoweredModule {
+            sources: vec![],
             values: vec![Value {
                 id: ValueId(0),
                 ty: LoweredType::Integer {

@@ -14,7 +14,7 @@ def bounded_work(limit: int) -> int:
 test with profile "bounded work stays within its resource budget" with
 {
     defer time < 1s,
-    defer memory < 16mb,
+    defer memory < 16MB,
     defer allocations < 50000,
 }:
     assert(bounded_work(4096) == 8386560)

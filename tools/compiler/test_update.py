@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exercise update safety against local Git repositories and real launchers."""
 import importlib.util
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -118,6 +120,29 @@ class CompilerUpdate(unittest.TestCase):
                 update.main()
             install.assert_not_called()
         self.assertEqual(compiler.read_bytes(), b'working compiler')
+
+    def test_smoke_receipt_tracks_binary_and_bootstrap_inputs(self):
+        compiler = self.root / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'
+        compiler.parent.mkdir(parents=True)
+        compiler.write_bytes(b'verified compiler')
+        inventory = self.root / 'sev_compiler/package.pkg/build/bootstrap/output.json'
+        inventory.parent.mkdir(parents=True)
+        record = {'schema_version': 1, 'output': {
+            'path': str(compiler), 'sha256': hashlib.sha256(compiler.read_bytes()).hexdigest()},
+            'snapshot': {'inputs': ['first']}}
+        inventory.write_text(json.dumps(record))
+        receipt = self.root / 'receipt.json'
+        with patch.object(update, 'ROOT', self.root):
+            identity = update.smoke_identity(compiler)
+            self.assertIsNotNone(identity)
+            receipt.write_text(json.dumps({'schema_version': 1, 'identity': identity}))
+            self.assertTrue(update.smoke_verified(receipt, update.smoke_identity(compiler)))
+            record['snapshot']['inputs'] = ['changed']
+            inventory.write_text(json.dumps(record))
+            self.assertFalse(update.smoke_verified(receipt, update.smoke_identity(compiler)))
+            compiler.write_bytes(b'damaged compiler')
+            self.assertIsNone(update.smoke_identity(compiler))
+            self.assertFalse(update.smoke_verified(receipt, None))
 
 
 if __name__ == '__main__':

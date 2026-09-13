@@ -35,4 +35,6 @@ static inline char *sev_memory_copy_text(const char *text) { return sev_memory_c
 void *__sev_memory_allocate(size_t bytes);
 void *__sev_memory_zeroed(size_t count, size_t width);
 void __sev_memory_release(void *allocation);
+uint64_t __sev_memory_thread_allocations(void);
+uint64_t __sev_memory_thread_allocated_bytes(void);
 #endif

@@ -46,11 +46,15 @@ trait IntegrationLong: TestMode:
 
 trait Profile: TestMode:
     name: string = "profile"
-    context: T = int
-    begin: F = profile.begin
-    ready: F = profile.ready
-    before: F = profile.before
-    after: F = profile.after
-    finish: F = profile.finish
-    failure: F = profile.finish
-    bindings: {string: F} = {}
+    context: T = profile.Measurement
+    begin: F = profile.measure
+    ready: F = profile.prepared
+    before: F = profile.measure_before
+    after: F = profile.report
+    finish: F = profile.measured_finish
+    failure: F = profile.measured_finish
+    bindings: {string: F} = {
+        "time": profile.time,
+        "memory": profile.memory,
+        "allocations": profile.allocations,
+    }

@@ -1,4 +1,5 @@
 mod api;
+mod build_cache;
 mod example_validation;
 mod mutation;
 mod profiling;
@@ -505,9 +506,12 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
         }
         match &target {
             DeclaredTarget::Binary(binary) => {
-                compiler
-                    .compile_file(&binary.path, &output)
-                    .map_err(|error| error.to_string())?;
+                let roots = manifest.map(|m| m.package_graph.packages.values().map(|p| p.root.clone()).collect()).unwrap_or_else(|| vec![root.to_path_buf()]);
+                let configuration = format!("{config:?}\n{target:?}\n{:?}", manifest.map(|m| &m.package_graph));
+                if !build_cache::compile(&compiler, &binary.path, &output, root, configuration, roots)? {
+                    artifacts.push(output);
+                    continue;
+                }
             }
             DeclaredTarget::Library(library) => {
                 compiler

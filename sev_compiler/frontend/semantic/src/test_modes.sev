@@ -388,6 +388,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                 contexts: list[string] = []
                 failures: list[universal.Statement] = []
                 cleanup: list[universal.Statement] = []
+                prepare: list[universal.Statement] = []
                 seen: list[string] = []
                 for mode in declaration.source_modes:
                     if mode in seen:
@@ -401,9 +402,11 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                             continue
                         context = "$mode$" + mode
                         parameters.append(universal.FunctionParameter(context, universal.named_type(selected.context, [], declaration.span), None, declaration.span))
-                        values.append(call(selected.before, [name(context, declaration.span)], declaration.span))
+                        prepared = "$prepared$" + mode + "$" + string(case_index)
+                        prepare.append(universal.BindingStatement(universal.Binding(prepared, None, call(selected.before, [name(context, declaration.span)], declaration.span), false, false, declaration.span)))
+                        values.append(name(prepared, declaration.span))
                         failures.append(universal.ExpressionStatement(call(selected.failure, [name(context, declaration.span)], declaration.span)))
-                        cleanup.append(universal.ExpressionStatement(call(selected.after, [name(context, declaration.span)], declaration.span)))
+                        cleanup.append(universal.ExpressionStatement(call(selected.after, [name(prepared, declaration.span)], declaration.span)))
                         index := 0
                         for binding in selected.names:
                             if binding in names:
@@ -417,7 +420,14 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                 body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0])
                 function = universal.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
                 items.append(universal.Function(function))
-                execution = universal.Block([universal.ExpressionStatement(call(function_name, values, declaration.span))])
+                execution = universal.Block(prepare)
+                execution.statements.append(universal.ExpressionStatement(call(function_name, values, declaration.span)))
+                measured_contexts: list[string] = []
+                for context in contexts:
+                    measured_contexts.append(context.replace("$mode$", "$prepared$") + "$" + string(case_index - 1))
+                for contract in declaration.contracts:
+                    condition = project(contract, names, getters, measured_contexts, [])
+                    execution.statements.append(universal.Assert(condition, None, contract.span, contract.span))
                 for statement in cleanup[::-1]:
                     execution.statements.append(statement)
                 for statement in runner_block(declaration, execution, case_index).statements:

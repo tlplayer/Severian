@@ -143,6 +143,20 @@ def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[T
     return tokens
 
 
+test with profile "source text scanning stays within its allocation budget" with
+{
+    defer time < 1s,
+    defer memory < 32MB,
+    defer allocations < 200000,
+}:
+    text = string()
+    for index in range(128):
+        text.append("value = 123\n")
+    input = source.virtual_source("profile.sev", text)
+    tokens = scan_tokens(input, [])
+    assert(len(tokens) >= 512)
+
+
 test "lexical classes preserve numeric forms and identifier boundaries":
     input = source.virtual_source("lexemes.sev", "12 12.5 .5 1_024 2e-3 foo_2 fuse_count")
     tokens = scan_tokens(input, [])

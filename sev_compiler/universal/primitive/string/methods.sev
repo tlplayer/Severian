@@ -305,8 +305,30 @@ test "4096 character appends reuse vector capacity":
             previous = current
     assert(value.length() == 4096)
     assert(value.capacity() == 4096)
-    assert(allocations <= 5)
-    assert(allocated_units <= 7936)
+    assert(allocations <= 6)
+    assert(allocated_units <= 11008)
+
+
+test with profile "string append keeps bounded spare capacity" with
+{
+    defer time < 1s,
+    defer memory < 16MB,
+    defer allocations < 50000,
+}:
+    value = string()
+    for index in range(2049):
+        value.append('x')
+        if index == 256:
+            assert(value.capacity() == 512)
+        if index == 512:
+            assert(value.capacity() == 1024)
+        if index == 1024:
+            assert(value.capacity() == 2048)
+    assert(value.capacity() == 3072)
+    assert(value.length() == 2049)
+    value.append("λ😀")
+    assert(value.length() == 2051)
+    assert(value.capacity() == 3072)
 
 
 test "string encoding and initial capacity are parameters":

@@ -195,7 +195,11 @@ def render_lock(packages: list[ResolvedPackage], edges: list[DependencyEdge]) ->
     for index in range(int(len(packages))):
         resolved = packages[index]
         identity = resolved.identity
-        record := "\n[[package]]\nname = " + toml_quote(identity.name) + "\nversion = " + toml_quote(identity.version) + "\nsource = " + toml_quote(identity.source) + "\nchecksum = " + toml_quote(resolved.checksum) + "\n"
+        record := "\n[[package]]\nname = " + toml_quote(identity.name) + "\nversion = " + toml_quote(identity.version) + "\nsource = " + toml_quote(identity.source) + "\n"
+        # A lock fixes dependency selection. Mutable workspace/path sources
+        # use content hashes in build identities, not immutable lock checksums.
+        if identity.source != "root" and not identity.source.starts_with("path:"):
+            record += "checksum = " + toml_quote(resolved.checksum) + "\n"
         dependencies: list[string] = []
         for edge in edges:
             if edge.parent == index:
@@ -279,7 +283,7 @@ def validate_lock(entries: list[Entry], packages: list[ResolvedPackage]) -> unit
         for entry in entries:
             if entry.key == "name" and entry.table.starts_with("package.") and unquote(entry.value) == resolved.identity.name:
                 if text_setting(entries, entry.table, "version") == resolved.identity.version and text_setting(entries, entry.table, "source") == resolved.identity.source:
-                    if text_setting(entries, entry.table, "checksum") != resolved.checksum:
+                    if resolved.identity.source != "root" and not resolved.identity.source.starts_with("path:") and text_setting(entries, entry.table, "checksum") != resolved.checksum:
                         throw Error("locked content changed: " + resolved.identity.name)
                     matched = true
         if not matched:

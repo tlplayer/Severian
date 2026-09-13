@@ -154,6 +154,8 @@ impl PassManager {
         let mut invariants = stage_invariants(*stage);
         for pass in &self.passes {
             let metadata = pass.metadata();
+            let started = (std::env::var("SEVERIAN_PROFILE_ACTIVE").as_deref() == Ok("1"))
+                .then(std::time::Instant::now);
             if metadata.accepted_stage != *stage {
                 return Err(PassError {
                     span: None,
@@ -245,6 +247,9 @@ impl PassManager {
             invariants.retain(|invariant| metadata.contract.preserves.contains(invariant));
             invariants.extend(metadata.contract.establishes.iter().copied());
             *stage = metadata.produced_stage;
+            if let Some(started) = started {
+                eprintln!("  Stage mir/{}: {:.6}s wall", metadata.name, started.elapsed().as_secs_f64());
+            }
         }
         Ok(())
     }
@@ -384,15 +389,14 @@ impl Pass for VerifyPass {
 
     fn run_module(
         &self,
-        module: &mut Module,
-        context: &PassContext<'_>,
+        _module: &mut Module,
+        _context: &PassContext<'_>,
         _analyses: &mut AnalysisManager,
     ) -> Result<(), PassError> {
-        verify(module, context.universal).map_err(|error| PassError {
-            span: None,
-            pass: self.metadata.name,
-            message: error.to_string(),
-        })
+        // PassManager verifies every WellFormed guarantee before advancing
+        // the stage. Repeating the same whole-module verifier here doubled
+        // both verification-only passes without checking a different state.
+        Ok(())
     }
 }
 
@@ -522,6 +526,20 @@ pub fn run_required_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verification_stage_rejects_malformed_ir_before_advancing() {
+        let universal = UniversalContext::new(severian_universal::TypeContext::default());
+        let context = PassContext { universal: &universal, storage_glue: false };
+        let mut module = Module::default();
+        module.initializer.entry = crate::BlockId(7);
+        let mut stage = IrStage::Constructed;
+        let mut manager = PassManager::default();
+        manager.add(VerifyPass::new(IrStage::Constructed, IrStage::LoweringReady));
+        let error = manager.run(&mut module, &context, &mut stage).unwrap_err();
+        assert!(error.message.contains("invalid basic block 7"), "{error}");
+        assert_eq!(stage, IrStage::Constructed);
+    }
 
     fn metadata(contract: PassContract) -> PassMetadata {
         PassMetadata {

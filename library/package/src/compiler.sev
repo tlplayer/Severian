@@ -146,7 +146,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         identity := "unit-cache-4\n" + portable_graph(scoped) + "\n" + digest(compiler.executable) + "\n" + portable_path(input, scoped, root, sysroot) + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
         if source_path != "":
             identity += "\n" + registry_discovery_state()
-        for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), environment.get("SEVERIAN_AR", "llvm-ar-21")]:
+        for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), environment.get("SEVERIAN_LLVM_OPT", "opt-21"), environment.get("SEVERIAN_AR", "llvm-ar-21")]:
             identity += "\n" + tool + "\n" + capture([tool, "--version"])
         write_text(stage + "/key", identity)
         build_id = digest(stage + "/key").replace(":", "-")

@@ -1,0 +1,37 @@
+test with profile "growth and UTF-8 append" with
+{
+    defer time < 1s,
+    defer memory < 16MB,
+    defer allocations < 50000,
+    defer allocations > 0,
+}:
+    value = string()
+    assert(value.capacity() == 256)
+    for index in range(2049):
+        value.append('x')
+        if index == 256:
+            assert(value.capacity() == 512)
+        if index == 512:
+            assert(value.capacity() == 1024)
+        if index == 1024:
+            assert(value.capacity() == 2048)
+    assert(value.capacity() == 3072)
+    assert(value.length() == 2049)
+    value.append("λ😀")
+    assert(value.length() == 2051)
+    assert(value.capacity() == 3072)
+
+test "append preserves Unicode and copied aliases":
+    value = string()
+    value.append("λ😀")
+    saved = copy value
+    value.append(saved)
+    assert(value == "λ😀λ😀")
+    assert(saved == "λ😀")
+    wide: string[u32, 2] = ""
+    wide.append('λ')
+    wide.append('😀')
+    wide.append('!')
+    assert(wide.length() == 3)
+    assert(wide.capacity() == 4)
+    assert(string(wide) == "λ😀!")

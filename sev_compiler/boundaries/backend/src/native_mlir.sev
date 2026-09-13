@@ -31,7 +31,7 @@ def run_tool(arguments: list[string]):
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = ""):
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = []):
     package.mkdir(path.dirname(output))
     intermediate = package.temporary("package.pkg/cache/native", "run-") + "/module"
     if file.write(intermediate + ".mlir", mlir) != 0:
@@ -45,6 +45,16 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     run_tool([opt, intermediate + ".mlir", "--verify-each", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
     run_tool([opt, intermediate + ".owned.mlir", "--verify-each", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", intermediate + ".llvm.mlir", "-o", intermediate + ".ll"])
+    if library:
+        # Native providers remain explicit link inputs. This object owns only
+        # this compilation unit; it deliberately contains no executable main.
+        # Ownership lowering also generates helper definitions. Internalize
+        # every non-exported definition after those passes have run.
+        run_tool([environment.get("SEVERIAN_LLVM_OPT", "opt-21"), "--passes=internalize", "--internalize-public-api-list=" + exports.join(","), "-S", intermediate + ".ll", "-o", intermediate + ".internal.ll"])
+        run_tool([clang, "-c", intermediate + ".internal.ll", "-o", output + ".o", "-O" + string(optimization), "-fPIC"])
+        run_tool([environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", output, output + ".o"])
+        package.copy_file(intermediate + ".mlir", output + ".mlir")
+        return
     arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
     arguments.append(sysroot + "/library/core/memory/native/memory.c")
     for argument in native_arguments:

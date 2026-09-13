@@ -16,7 +16,35 @@ class string[T: u8 | u32 = u8, N = 256]:
     def capacity() -> int:
         return storage.capacity()
 
+    # Capacity is in encoding units; growth thresholds are always in bytes.
+    # Double small allocations, then grow in 1024-byte steps.
+    def reserve(self: borrow Self, required: int):
+        assert(required >= 0)
+        capacity := storage.capacity()
+        if required <= capacity:
+            return
+        width = int(bytes(T).amount / 8.0)
+        step = 1024 / width
+        assert(required <= 9223372036854775807 / width)
+        if capacity == 0:
+            capacity = N
+            if capacity == 0:
+                capacity = 1
+        while capacity < required and capacity < step:
+            capacity *= 2
+            if capacity > step:
+                capacity = step
+        if capacity < required:
+            increments = (required - capacity - 1) / step + 1
+            if increments > (9223372036854775807 / width - capacity) / step:
+                capacity = required
+            else:
+                capacity += increments * step
+        storage.reserve_exact(capacity)
+
     def length() -> int:
+        if bytes(T).amount == 32.0:
+            return storage.used
         position := 0
         count := 0
         while position < storage.used:
@@ -67,11 +95,12 @@ class string[T: u8 | u32 = u8, N = 256]:
     def append(self: borrow Self, value: char) -> borrow Self:
         codepoint = encoding.codepoint(value)
         if bytes(T).amount == 32.0:
+            reserve(storage.used + 1)
             storage.append(T(codepoint))
         else:
             width = encoding.width(codepoint)
             assert(storage.used <= 9223372036854775807 - width)
-            storage.reserve(storage.used + width)
+            reserve(storage.used + width)
             if width == 1:
                 storage.append(T(codepoint))
             elif width == 2:
@@ -90,6 +119,15 @@ class string[T: u8 | u32 = u8, N = 256]:
 
     def append(self: borrow Self, value: string) -> borrow Self:
         count = value.storage.used
+        if bytes(T).amount == 8.0:
+            assert(storage.used <= 9223372036854775807 - count)
+            reserve(storage.used + count)
+            position := 0
+            while position < count:
+                storage.data[storage.used + position] = T(value.storage.get(position))
+                position += 1
+            storage.used += count
+            return self
         position := 0
         while position < count:
             codepoint = value.__decode(position)

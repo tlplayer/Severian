@@ -7,6 +7,7 @@ import * from "archive.sev"
 import os
 import path
 import process
+import file
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
     return project.root + "/package.pkg/bin/" + safe_name(platform) + "/" + safe_name(profile)
@@ -25,6 +26,22 @@ def dependency_build_order(resolution: Resolution, index: int, ordered: list[int
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
     mutable_project(project.root)
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
+    if not request.locked and project.lock_text != resolution.lock:
+        lock = file.native_lock(project.root + "/.sev-edit.lock")
+        if lock < 0:
+            throw Error("could not lock package resolution")
+        try:
+            destination = project_lock_file(project.root)
+            current = read_text(destination) if os.is_file(destination) else ""
+            if current != project.lock_text or read_text(project.root + "/package.toml") != project.manifest_text:
+                throw Error("package changed while resolving; retry the build")
+            staged = project.root + "/.sev-build.lock.new"
+            write_text(staged, resolution.lock)
+            replace_file(staged, destination)
+            file.unlock(lock)
+        catch error: Error:
+            file.unlock(lock)
+            throw Error(error.message)
     platform = request.platform if request.platform != "" else text_setting(project.manifest.entries, "build", "target", "host")
     profile = request.profile if request.profile != "" else text_setting(project.manifest.entries, "build", "profile", "dev")
     root = output_root(project, platform, profile)

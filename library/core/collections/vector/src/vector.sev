@@ -32,6 +32,13 @@ class vector[T, N = 256]:
         data[used] = value
         used += 1
 
+    # Callers with a byte-based allocation policy can request an exact
+    # capacity without changing the general vector growth policy.
+    def reserve_exact(self: borrow Self, required: int):
+        assert(required >= used)
+        if required > len(data):
+            data = __vector_resize(data, used, required)
+
     def get(position: int) -> T:
         assert(position >= 0 and position < used)
         return data[position]
@@ -65,6 +72,10 @@ def __vector_grow[T](data: view buffer[T], used: int, required: int, initial: in
             capacity = required
         else:
             capacity *= 2
+    return __vector_resize(data, used, capacity)
+
+
+def __vector_resize[T](data: view buffer[T], used: int, capacity: int) -> buffer[T]:
     width = int(bytes(T).amount / 8.0)
     assert(width > 0)
     assert(capacity <= 9223372036854775807 / width)

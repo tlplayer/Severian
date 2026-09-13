@@ -11,3 +11,18 @@ test "checked reads distinguish empty files and missing paths":
     result ?= file.read_checked(directory + "/missing")
     assert(result is Error)
     os.remove_tree(directory)
+
+
+test with profile "small source reads have bounded interop overhead" with
+{
+    defer time < 1s,
+    defer memory < 16MB,
+    defer allocations < 50000,
+}:
+    directory = os.temporary("/tmp", "sev-file-profile-")
+    location = directory + "/source.sev"
+    contents = "def greeting():\n    print(\"hello λ😀\")\n"
+    assert(file.write(location, contents) == 0)
+    for index in range(128):
+        assert(file.read_checked(location) == contents)
+    os.remove_tree(directory)

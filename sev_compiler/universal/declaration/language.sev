@@ -161,6 +161,7 @@ class TestDeclaration:
     case_names: list[string] = []
     case_rows: list[TestCaseRow] = []
     mode_arguments: list[TestModeArguments] = []
+    contracts: list[Expression] = []
 
 
 def test_mode_name(mode: TestMode) -> string:

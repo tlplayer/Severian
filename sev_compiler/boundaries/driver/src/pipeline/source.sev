@@ -200,6 +200,9 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         if contract == "":
             export_names.clear()
             export_symbols.clear()
+        else:
+            for symbol in export_symbols:
+                interface.append(symbol)
     lowered = mir.build_callables(typed, library_sources)
     timing.finish_stage(timings, "mir")
     if emit == "agent-ir":

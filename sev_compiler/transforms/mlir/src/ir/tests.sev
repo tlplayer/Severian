@@ -1,6 +1,32 @@
 import * from "validate.sev"
 
 
+def profile_branch(builder: MlirOpBuilder, ordinal: int):
+    function = builder_create_function(builder, "branch_" + string(ordinal), public_visibility(), [], [])
+    end = builder_create_block(builder, function.entry.region)
+    builder_set_insertion_point(builder, function.entry)
+    builder_create(builder, MlirOperationState(operation_definition("cf", "br", true), successors=[end.block]))
+    builder_set_insertion_point(builder, end)
+    builder_return(builder, [])
+
+
+test with profile "branch verification shares the module block catalog" with
+{
+    defer time < 1s,
+    defer memory < 64MB,
+    defer allocations < 500000,
+}:
+    builder = MlirOpBuilder(0)
+    for index in range(128):
+        profile_branch(builder, index)
+    assert(program_is_valid(builder.program))
+    # Catalog reuse must retain the missing-target diagnostic.
+    invalid = builder_create_function(builder, "missing_target", public_visibility(), [], [])
+    builder_set_insertion_point(builder, invalid.entry)
+    builder_create(builder, MlirOperationState(operation_definition("cf", "br", true), successors=[999999]))
+    assert(not program_is_valid(builder.program))
+
+
 test "open operation identities do not require compiler enum cases":
     builder = MlirOpBuilder(0)
     argument = builder_value(builder, 0, integer_type(32))

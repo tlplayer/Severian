@@ -80,7 +80,15 @@ const char *__sev_file_read_text(const char *path) {
         fclose(file);
         return "";
     }
-    size_t length = 0, capacity = 8192;
+    if (info.st_size < 0 || (uintmax_t)info.st_size > SIZE_MAX - 2) {
+        sev_file_error = EOVERFLOW;
+        fclose(file);
+        return "";
+    }
+    /* One extra read byte lets fread observe EOF without reallocating a
+     * regular file whose size was just obtained by fstat. Small source files
+     * no longer each reserve 8 KiB; growing files still use the loop below. */
+    size_t length = 0, capacity = (size_t)info.st_size + 1;
     char *contents = sev_memory_allocate(capacity + 1);
     if (contents == NULL) abort();
     for (;;) {
