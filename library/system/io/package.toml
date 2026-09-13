@@ -6,7 +6,7 @@ description = "Portable streams, standard handles, and printing"
 
 [package.unsafe]
 capabilities = ["native-abi"]
-sources = ["src/lib.sev"]
+sources = ["src/lib.sev", "src/buffer.sev"]
 
 [lib]
 path = "src/lib.sev"
@@ -16,3 +16,9 @@ category = "system"
 implementation = "native-abi"
 status = "experimental"
 version = 1
+
+[xxi.c]
+sources = ["extern/posix/descriptor.c"]
+
+[dependencies]
+memory = { package = "core.memory", path = "../../core/memory", version = "0.1.0" }

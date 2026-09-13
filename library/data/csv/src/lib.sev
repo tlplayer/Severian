@@ -3,6 +3,7 @@ from data import Row
 from data import Schema
 from data import Table
 import file
+import * from "../../../system/file/src/text.sev" as text
 import tensor
 import os
 
@@ -13,6 +14,9 @@ class CsvFile: File
 class Csv: Data
     source_text: string
     content: Table
+
+    operator <=>(self) -> string:
+        return source_text
 
     operator [](column: string) -> list[Any]:
         return content.get(column)
@@ -104,7 +108,7 @@ def decode(source: string) -> Csv:
     return Csv(source, Table(csv_columns_native(source), csv_rows_native(source)))
 
 def csv_decode_file(path: string) -> Csv:
-    source: string = file.raw(path)
+    source: string = text.read(path)
     return decode(source)
 
 def encode(value: Csv) -> string:

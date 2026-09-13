@@ -19,9 +19,42 @@ def stdout() -> int:
 def stderr() -> int:
     return 2
 
-# `list[u8]` remains a source-level value. Semantic lowering passes its native
-# storage to the runtime writer rather than exposing that representation here.
-def write_all(writer: int, data: list[u8]) -> data_size
+# IO owns transfer algorithms for every descriptor, including files and pipes.
+# The compiler only adapts collection storage at these two primitive calls.
+def __io_read_chunk(reader: int, count: int) -> list[u8]
+def __io_write_chunk(writer: int, data: list[u8], offset: int) -> int
+
+@c(symbol = "__sev_io_error")
+def error() -> i32
+
+@c(symbol = "close")
+def close(handle: i32) -> i32
+
+def read(reader: int, count: data_size = 16KiB) -> list[u8]:
+    result = __io_read_chunk(reader, int(count))
+    code = error()
+    if code != 0:
+        throw IOError("could not read stream (OS error " + string(code) + ")")
+    return result
+
+def read_all(reader: int) -> list[u8]:
+    result: list[u8] = []
+    while true:
+        chunk = read(reader)
+        if len(chunk) == 0:
+            return result
+        for byte in chunk:
+            result.append(byte)
+    return result
+
+def write_all(writer: int, data: list[u8]) -> data_size:
+    offset := 0
+    while offset < len(data):
+        count = __io_write_chunk(writer, data, offset)
+        if count <= 0:
+            throw IOError("could not write stream (OS error " + string(error()) + ")")
+        offset += count
+    return data_size(offset)
 
 
 @c(symbol = "__sev_print_string")

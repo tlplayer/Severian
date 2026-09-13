@@ -1,0 +1,15 @@
+import * from "../src/text.sev" as text
+
+test "UTF-8 text decodes each scalar width":
+    assert(text.decode([97, 206, 187, 240, 159, 152, 128, 122]) == "aλ😀z")
+    assert(text.decode([]) == "")
+
+test "UTF-8 text rejects invalid byte sequences":
+    inputs: list[list[u8]] = [[0], [128], [192, 128], [224, 128, 128], [237, 160, 128], [244, 144, 128, 128], [240, 159], [206, 32]]
+    for data in inputs:
+        failed := false
+        try:
+            text.decode(data)
+        catch failure: Error:
+            failed = true
+        assert(failed)

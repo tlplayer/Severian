@@ -3,15 +3,19 @@ from data import Row
 from data import Schema
 from data import Table
 import file
+import * from "../../../system/file/src/text.sev" as text
 import tensor
 
 class JsonFile: File
     def read(path: string) -> Json with { path.ends_with(".json") }:
-        return decode(file.raw(path))
+        return decode(text.read(path))
 
 class Json: Data
     source_text: string
     content: Table
+
+    operator <=>(self) -> string:
+        return source_text
 
     operator [](column: string) -> list[Any]:
         return content.get(column)
@@ -95,12 +99,28 @@ class Json: Data
     def tensor(columns: list[string] = []) -> tensor.Tensor[f64]:
         return content.tensor(columns)
 
-def json_columns_native(source: string) -> list[string]
+# A document handle is private to the codec and released before decode returns.
+@c(symbol="__sev_json_open")
+def __parse(source: string) -> usize
 
-def json_rows_native(source: string) -> list[list[Any]]
+@c(symbol="__sev_json_error")
+def __error() -> i32
 
-def decode(source: string) -> Json:
-    return Json(source, Table(json_columns_native(source), json_rows_native(source)))
+@c(symbol="__sev_json_close")
+def __release(document: usize)
+
+def json_columns_native(document: usize) -> list[string]
+
+def json_rows_native(document: usize) -> list[list[Any]]
+
+def decode(source: string) -> Json | Error:
+    document = __parse(source)
+    if __error() != 0:
+        throw Error("invalid JSON table document")
+    columns = json_columns_native(document)
+    rows = json_rows_native(document)
+    __release(document)
+    return Json(source, Table(columns, rows))
 
 def encode(value: Json) -> string:
     return value.text()
@@ -113,7 +133,7 @@ def encode(values: list[Any]) -> string:
     return string(values)
 
 def read(path: string) -> Json:
-    return decode(file.raw(path))
+    return decode(text.read(path))
 
 test "JSON values implement Data directly":
     value = decode("[{\"name\": \"Ada\", \"age\": 36}, {\"name\": \"Grace\", \"active\": true}]")
@@ -123,3 +143,14 @@ test "JSON values implement Data directly":
     assert(value[0].get("name") == "Ada")
     assert(value["name"] == ["Ada", "Grace"])
     assert(value[1, "active"] == "true")
+
+test "JSON preserves Unicode escapes and rejects malformed records":
+    value = decode("[{\"name\":\"\\u03bb\\ud83d\\ude00\"}]")
+    assert(value[0].get("name") == "λ😀")
+    assert(string(value) == value.text())
+    failed := false
+    try:
+        decode("[{\"name\":}]")
+    catch failure: Error:
+        failed = true
+    assert(failed)

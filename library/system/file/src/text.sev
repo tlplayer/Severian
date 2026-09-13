@@ -1,79 +1,45 @@
-# Hosted text operations over source-owned UTF-8 strings. Scalar C pointers
-# remain inside this module; callers own ordinary source strings and buffers.
-import * from "../../../core/storage/src/buffer.sev" as storage
-import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
+# Text is an encoding over file bytes. IO and ownership stay below this module.
+import * from "streams.sev" as streams
 
-@c(symbol="__sev_file_write_text")
-def __write(path: native_ptr, contents: native_ptr) -> i32
-@c(symbol="__sev_file_read_text")
-def __read(path: native_ptr) -> native_ptr
-@c(symbol="__sev_file_error")
-def __error() -> i32
-@c(symbol="mkstemp")
-def __temporary(path: native_ptr) -> i32
-@c(symbol="close")
-def __close(handle: i32) -> i32
-@c(symbol="unlink")
-def __remove(path: native_ptr) -> i32
-@c(symbol="strlen")
-def __length(text: native_ptr) -> u64
+def decode(data: list[u8]) -> string:
+    parts: list[string] = []
+    offset := 0
+    while offset < len(data):
+        first = int(data[offset])
+        width := 1
+        value := first
+        minimum := 0
+        if first >= 194 and first <= 223:
+            width = 2
+            value = first - 192
+            minimum = 128
+        elif first >= 224 and first <= 239:
+            width = 3
+            value = first - 224
+            minimum = 2048
+        elif first >= 240 and first <= 244:
+            width = 4
+            value = first - 240
+            minimum = 65536
+        elif first >= 128:
+            throw Error("invalid UTF-8 leading byte")
+        if offset + width > len(data):
+            throw Error("truncated UTF-8 sequence")
+        for index in range(1, width):
+            byte = int(data[offset + index])
+            if byte < 128 or byte > 191:
+                throw Error("invalid UTF-8 continuation byte")
+            value = value * 64 + byte - 128
+        if value < minimum or value > 1114111 or (value >= 55296 and value <= 57343):
+            throw Error("invalid UTF-8 scalar")
+        if value == 0:
+            throw Error("text contains NUL; use file bytes for binary contents")
+        parts.append(string(char(value)))
+        offset += width
+    return parts.join("")
 
-def __address(data: buffer[u8]) -> native_ptr:
-    return raw.__raw_pointer(raw.__raw_index(raw.__raw_buffer_address(data)))
-
-def __terminated(value: string) -> buffer[u8]:
-    count = value.storage.used
-    assert(count < 9223372036854775807)
-    result: buffer[u8] = storage.allocate(count + 1)
-    for offset in range(count):
-        byte = value.storage.data[offset]
-        assert(byte != 0)
-        result[offset] = byte
-    result[count] = 0
-    return result
-
-def __copy(value: native_ptr) -> string:
-    count = int(__length(value))
-    result = string()
-    result.reserve(count)
-    for offset in range(count):
-        result.storage.data[offset] = raw.__raw_load[u8](raw.__raw_offset(value, offset))
-    result.storage.used = count
-    return result
+def read(path: string) -> string:
+    return decode(streams.read(path))
 
 def write(path: string, contents: string) -> i32:
-    name = __terminated(path)
-    text = __terminated(contents)
-    return __write(__address(name), __address(text))
-
-# The provider owns successful reads, including empty files. Failures return a
-# borrowed sentinel: inspect its error before copying or releasing the pointer.
-class ReadResult:
-    contents: string
-    error: i32
-
-def read_checked(path: string) -> ReadResult:
-    name = __terminated(path)
-    value = __read(__address(name))
-    code = __error()
-    if code != 0:
-        return ReadResult("", code)
-    result = __copy(value)
-    raw.__raw_free(value)
-    return ReadResult(result, 0)
-
-# Create a unique empty file, close its handle, and return its owned path.
-# The caller removes it when finished. Template must end with six X characters.
-def temporary(template: string = "/tmp/sev-file-XXXXXX") -> string:
-    name = __terminated(template)
-    handle = __temporary(__address(name))
-    assert(handle >= 0)
-    result = __copy(__address(name))
-    if __close(handle) != 0:
-        __remove(__address(name))
-        assert(false)
-    return result
-
-def remove(path: string) -> i32:
-    name = __terminated(path)
-    return __remove(__address(name))
+    return streams.write(path, contents.bytes())

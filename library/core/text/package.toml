@@ -6,7 +6,7 @@ description = "Core textual conversion and type names"
 
 [package.unsafe]
 capabilities = ["native-abi"]
-sources = ["src/lib.sev"]
+sources = ["src/lib.sev", "src/format.sev"]
 
 [lib]
 path = "src/lib.sev"

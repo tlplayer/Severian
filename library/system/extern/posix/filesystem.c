@@ -57,59 +57,6 @@ _Bool __sev_os_make_directories(const char *value) {
     return __sev_path_is_dir(path);
 }
 
-int32_t __sev_file_write_text(const char *path, const char *contents) {
-    FILE *file = fopen(path, "wb");
-    if (file == NULL) return -1;
-    size_t length = strlen(contents);
-    int32_t result = fwrite(contents, 1, length, file) == length ? 0 : -1;
-    if (fclose(file) != 0) result = -1;
-    return result;
-}
-
-
-static _Thread_local int sev_file_error;
-int32_t __sev_file_error(void) { return sev_file_error; }
-
-const char *__sev_file_read_text(const char *path) {
-    sev_file_error = 0;
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) { sev_file_error = errno; return ""; }
-    struct stat info;
-    if (fstat(fileno(file), &info) != 0 || !S_ISREG(info.st_mode)) {
-        sev_file_error = EINVAL;
-        fclose(file);
-        return "";
-    }
-    if (info.st_size < 0 || (uintmax_t)info.st_size > SIZE_MAX - 2) {
-        sev_file_error = EOVERFLOW;
-        fclose(file);
-        return "";
-    }
-    /* One extra read byte lets fread observe EOF without reallocating a
-     * regular file whose size was just obtained by fstat. Small source files
-     * no longer each reserve 8 KiB; growing files still use the loop below. */
-    size_t length = 0, capacity = (size_t)info.st_size + 1;
-    char *contents = sev_memory_allocate(capacity + 1);
-    if (contents == NULL) abort();
-    for (;;) {
-        size_t count = fread(contents + length, 1, capacity - length, file);
-        length += count;
-        if (ferror(file)) { sev_file_error = errno ? errno : EIO; break; }
-        if (feof(file)) break;
-        if (capacity > (SIZE_MAX - 1) / 2) { sev_file_error = EOVERFLOW; break; }
-        capacity *= 2;
-        char *expanded = sev_memory_resize(contents, capacity + 1);
-        if (expanded == NULL) abort();
-        contents = expanded;
-    }
-    if (fclose(file) != 0 && !sev_file_error) sev_file_error = errno;
-    // A C text boundary cannot represent embedded NUL bytes. Byte APIs can.
-    if (!sev_file_error && memchr(contents, 0, length) != NULL) sev_file_error = EILSEQ;
-    if (sev_file_error) { sev_memory_release(contents); return ""; }
-    contents[length] = 0;
-    return contents;
-}
-
 _Bool __sev_os_copy(const char *source, const char *destination) {
     FILE *input = fopen(source, "rb");
     if (input == NULL) return 0;

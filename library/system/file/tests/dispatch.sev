@@ -1,0 +1,60 @@
+import file
+import os
+import io
+
+test "text extensions dispatch through file.read":
+    directory = os.temporary("/tmp", "sev-dispatch-")
+    for extension in [".txt", ".sev"]:
+        location = directory + "/example" + extension
+        assert(file.write(location, "hello λ😀") == 0)
+        assert(string(file.read(location)) == "hello λ😀")
+    os.remove_tree(directory)
+
+test "JSON dispatch parses and displays the document":
+    directory = os.temporary("/tmp", "sev-json-dispatch-")
+    location = directory + "/example.json"
+    source = "[{\"name\":\"Ada\",\"age\":36}]"
+    assert(file.write(location, source) == 0)
+    assert(string(file.read(location)) == source)
+    os.remove_tree(directory)
+
+
+test "file bytes preserve NUL and IO reads use the opened descriptor":
+    directory = os.temporary("/tmp", "sev-byte-dispatch-")
+    location = directory + "/example.bin"
+    data: list[u8] = [0, 127, 128, 255]
+    assert(file.write(location, data) == 0)
+    assert(file.map(location) == data)
+    handle = file.open(location)
+    assert(handle >= 0)
+    assert(file.read_bytes(handle, 2B) == [0, 127])
+    assert(file.read_bytes(handle, 2B) == [128, 255])
+    assert(file.read_bytes(handle, 2B) == [])
+    assert(io.close(i32(handle)) == 0)
+    os.remove_tree(directory)
+
+test "text and format reads propagate IO errors":
+    directory = os.temporary("/tmp", "sev-missing-dispatch-")
+    for extension in [".txt", ".sev", ".json", ".csv", ".yaml"]:
+        failed := false
+        try:
+            file.read(directory + "/missing" + extension)
+        catch failure: Error:
+            failed = true
+        print(extension, failed)
+        assert(failed)
+    assert(file.write(directory + "/empty.txt", "") == 0)
+    assert(string(file.read(directory + "/empty.txt")) == "")
+    os.remove_tree(directory)
+
+test "file owns metadata and permission changes":
+    directory = os.temporary("/tmp", "sev-permissions-")
+    location = directory + "/example.txt"
+    assert(file.write(location, "abc") == 0)
+    assert(file.metadata(location).is_file)
+    assert(file.metadata(location).size == 3B)
+    assert(file.set_permissions(location, 384) == 0)
+    assert(file.permissions(location) == 384)
+    assert(file.set_permissions(location, 448) == 0)
+    assert(file.permissions(location) == 448)
+    os.remove_tree(directory)

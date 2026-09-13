@@ -12,7 +12,7 @@ export SEVERIAN_SYSROOT="$root"
 export SEVERIAN_HOME="$workspace/home"
 cp "$root/test/validation/performance/fixtures/string_growth.sev" "$workspace/string_growth.sev"
 "$compiler" test "$workspace/string_growth.sev" 2>&1 | tee "$evidence/string-growth.log"
-"$compiler" test "$root/test/validation/performance/fixtures/file_io.sev" 2>&1 | tee "$evidence/file-io.log"
+"$compiler" test "$root/library/system/file/tests/buffer.sev" 2>&1 | tee "$evidence/file-io.log"
 # A false resource budget must fail; counting zero or ignoring contracts fails
 # this regression even when the positive case happens to finish quickly.
 sed 's/defer allocations < 50000/defer allocations < 0/' "$workspace/string_growth.sev" > "$workspace/impossible.sev"

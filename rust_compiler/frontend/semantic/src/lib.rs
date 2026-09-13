@@ -296,6 +296,7 @@ pub(crate) fn analyze_with_package_functions(
         enum_binding_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
+        class_traits: BTreeMap::new(),
         class_defining_modules: BTreeMap::new(),
         module_class_scopes: BTreeMap::new(),
         module_enum_scopes: BTreeMap::new(),
@@ -469,16 +470,21 @@ pub(crate) fn analyze_with_package_functions(
         _ => None,
     }) {
         let mut methods = Vec::with_capacity(declaration.methods.len());
+        let mut symbolic_types = declaration.type_parameters.clone();
+        symbolic_types.extend(registry_ast.items.iter().filter_map(|item| match item {
+            severian_ast::Item::Trait(trait_declaration) => Some(trait_declaration.name.clone()),
+            _ => None,
+        }));
         for method in &declaration.methods {
             let parameters = method
                 .parameters
                 .iter()
                 .map(|parameter| {
-                    analyzer.resolve_trait_type(&parameter.annotation, &declaration.type_parameters)
+                    analyzer.resolve_trait_type(&parameter.annotation, &symbolic_types)
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
             let result =
-                analyzer.resolve_trait_type(&method.result, &declaration.type_parameters)?;
+                analyzer.resolve_trait_type(&method.result, &symbolic_types)?;
             methods.push(HirTraitMethodDeclaration {
                 name: method.name.clone(),
                 parameters,
@@ -1436,6 +1442,7 @@ struct Analyzer<'a> {
     enum_binding_variants: BTreeMap<severian_hir::VariableId, (String, String)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
+    class_traits: BTreeMap<TypeId, Vec<String>>,
     class_defining_modules: BTreeMap<TypeId, severian_modules::ModuleId>,
     module_class_scopes:
         BTreeMap<severian_modules::ModuleId, BTreeMap<(String, Vec<TypeId>), ClassInstance>>,
@@ -1966,6 +1973,8 @@ impl Analyzer<'_> {
         // annotations may refer forward and through an imported namespace.
         let mut resolved_visible_instances = self.class_instances.clone();
         for package_class in classes {
+            self.class_traits.insert(package_class.ty, package_class.declaration.traits.iter()
+                .filter_map(|annotation| annotation.simple_name().map(str::to_owned)).collect());
             self.class_defining_modules
                 .insert(package_class.ty, package_class.module);
             if !package_class.declaration.type_parameters.is_empty() {
@@ -11162,6 +11171,9 @@ impl Analyzer<'_> {
     }
 
     fn source_type_satisfies_trait(&self, ty: TypeId, required: &str) -> bool {
+        if self.class_traits.get(&ty).is_some_and(|traits| traits.iter().any(|name| name == required)) {
+            return true;
+        }
         if self.types.primitive(ty).is_some() {
             return matches!(required, "Copy" | "Default");
         }
@@ -12849,14 +12861,7 @@ impl Analyzer<'_> {
                 .expect("bootstrap defines unit");
             return self.default_expression(unit, span).map(Some);
         }
-        let builtin_file_read = callable.as_deref() == Some("file.read_bytes")
-            && self.functions.contains_key("file.read_bytes")
-            && arguments.len() == 2;
-        if !builtin_file_read
-            && callable
-                .as_ref()
-                .is_some_and(|path| self.namespace_methods.contains_key(path))
-        {
+        if callable.as_ref().is_some_and(|path| self.namespace_methods.contains_key(path)) {
             return Ok(None);
         }
         let positional = arguments
@@ -12897,20 +12902,6 @@ impl Analyzer<'_> {
                 &[any],
                 boolean,
                 vec![value],
-                span,
-            )));
-        }
-        if callable.as_deref() == Some("file.read_text") && arguments.len() == 1 && positional {
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            let path = self.expression(&arguments[0].value, Some(string))?;
-            return Ok(Some(self.runtime_call(
-                "__sev_file_read_text",
-                &[string],
-                string,
-                vec![path],
                 span,
             )));
         }
@@ -12972,9 +12963,10 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("string")
                 .expect("bootstrap defines string");
-            let source = self.expression(&arguments[0].value, Some(string))?;
-            let storage =
-                self.runtime_call("__sev_json_columns", &[string], string, vec![source], span);
+            let source = self.expression(&arguments[0].value, None)?;
+            let parameter = source.type_id;
+            let symbol = if parameter == string { "__sev_json_columns" } else { "__sev_json_handle_columns" };
+            let storage = self.runtime_call(symbol, &[parameter], string, vec![source], span);
             let result = self.instantiate_list_type(string);
             return Ok(Some(Expression {
                 id: self.next_id(),
@@ -12996,127 +12988,13 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("string")
                 .expect("bootstrap defines string");
-            let source = self.expression(&arguments[0].value, Some(string))?;
-            let storage =
-                self.runtime_call("__sev_json_rows", &[string], string, vec![source], span);
+            let source = self.expression(&arguments[0].value, None)?;
+            let parameter = source.type_id;
+            let symbol = if parameter == string { "__sev_json_rows" } else { "__sev_json_handle_rows" };
+            let storage = self.runtime_call(symbol, &[parameter], string, vec![source], span);
             let any = self.ensure_any_type();
             let row = self.instantiate_list_type(any);
             let result = self.instantiate_list_type(row);
-            return Ok(Some(Expression {
-                id: self.next_id(),
-                type_id: result,
-                kind: ExpressionKind::Aggregate {
-                    class: result,
-                    fields: vec![storage],
-                },
-                span,
-            }));
-        }
-        if callable.as_deref() == Some("file.write") && arguments.len() == 2 && positional {
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            let result = self
-                .types
-                .resolve_name("i32")
-                .expect("bootstrap defines i32");
-            let path = self.expression(&arguments[0].value, Some(string))?;
-            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
-            let byte_list = self.instantiate_list_type(byte);
-            let contents = if matches!(arguments[1].value.kind, AstExpressionKind::List(_)) {
-                self.expression(&arguments[1].value, Some(byte_list))?
-            } else {
-                self.expression(&arguments[1].value, None)?
-            };
-            if contents.type_id == string {
-                return Ok(Some(self.runtime_call(
-                    "__sev_file_write_text",
-                    &[string, string],
-                    result,
-                    vec![path, contents],
-                    span,
-                )));
-            }
-            if self.list_elements.get(&contents.type_id) == Some(&byte) {
-                let storage = self.list_storage_expression(contents, span);
-                return Ok(Some(self.runtime_call(
-                    "__sev_file_write_bytes",
-                    &[string, storage.type_id],
-                    result,
-                    vec![path, storage],
-                    span,
-                )));
-            }
-            return Err(Diagnostic::new(
-                "E000206",
-                "`file.write` expects string or list[u8] contents",
-                Some(arguments[1].value.span),
-            ));
-        }
-        if callable.as_deref() == Some("file.open") && arguments.len() == 1 && positional {
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            let integer = self
-                .types
-                .resolve_name("int")
-                .expect("bootstrap defines int");
-            let path = self.expression(&arguments[0].value, Some(string))?;
-            return Ok(Some(self.runtime_call(
-                "__sev_file_open",
-                &[string],
-                integer,
-                vec![path],
-                span,
-            )));
-        }
-        if callable.as_deref() == Some("file.read_bytes") && positional {
-            if let [handle, count] = arguments {
-                let integer = self
-                    .types
-                    .resolve_name("int")
-                    .expect("bootstrap defines int");
-                let string = self
-                    .types
-                    .resolve_name("string")
-                    .expect("bootstrap defines string");
-                let data_size = self
-                    .types
-                    .resolve_name("data_size")
-                    .expect("bootstrap defines data_size");
-                let handle = self.expression(&handle.value, Some(integer))?;
-                let count = self.expression(&count.value, Some(data_size))?;
-                let storage = self.runtime_call(
-                    "__sev_file_read_bytes",
-                    &[integer, data_size],
-                    string,
-                    vec![handle, count],
-                    span,
-                );
-                let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
-                let result = self.instantiate_list_type(byte);
-                return Ok(Some(Expression {
-                    id: self.next_id(),
-                    type_id: result,
-                    kind: ExpressionKind::Aggregate {
-                        class: result,
-                        fields: vec![storage],
-                    },
-                    span,
-                }));
-            }
-        }
-        if callable.as_deref() == Some("file.map") && arguments.len() == 1 && positional {
-            let string = self
-                .types
-                .resolve_name("string")
-                .expect("bootstrap defines string");
-            let path = self.expression(&arguments[0].value, Some(string))?;
-            let storage = self.runtime_call("__sev_file_map", &[string], string, vec![path], span);
-            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
-            let result = self.instantiate_list_type(byte);
             return Ok(Some(Expression {
                 id: self.next_id(),
                 type_id: result,
@@ -13241,30 +13119,33 @@ impl Analyzer<'_> {
                 span,
             }));
         }
-        if callable_path(callee).as_deref() == Some("io.write_all")
-            && arguments.len() == 2
-            && arguments.iter().all(|argument| argument.name.is_none())
-        {
-            let integer = self
-                .types
-                .resolve_name("int")
-                .expect("bootstrap defines int");
+        if callable.as_deref().is_some_and(|name| name == "__io_read_chunk" || name.ends_with(".__io_read_chunk")) && arguments.len() == 2 && positional {
+            let integer = self.types.resolve_name("int").expect("bootstrap defines int");
+            let string = self.types.resolve_name("string").expect("bootstrap defines string");
+            let reader = self.expression(&arguments[0].value, Some(integer))?;
+            let count = self.expression(&arguments[1].value, Some(integer))?;
+            let storage = self.runtime_call(
+                "__sev_io_read_chunk", &[integer, integer], string, vec![reader, count], span,
+            );
+            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
+            let result = self.instantiate_list_type(byte);
+            return Ok(Some(Expression {
+                id: self.next_id(), type_id: result,
+                kind: ExpressionKind::Aggregate { class: result, fields: vec![storage] }, span,
+            }));
+        }
+        if callable.as_deref().is_some_and(|name| name == "__io_write_chunk" || name.ends_with(".__io_write_chunk")) && arguments.len() == 3 && positional {
+            let integer = self.types.resolve_name("int").expect("bootstrap defines int");
             let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
             let bytes_type = self.instantiate_list_type(byte);
             let writer = self.expression(&arguments[0].value, Some(integer))?;
             let bytes = self.expression(&arguments[1].value, Some(bytes_type))?;
+            let offset = self.expression(&arguments[2].value, Some(integer))?;
             let storage = self.list_storage_expression(bytes, span);
             let storage_type = storage.type_id;
-            let data_size = self
-                .types
-                .resolve_name("data_size")
-                .expect("bootstrap defines data_size");
             return Ok(Some(self.runtime_call(
-                "__sev_io_write_all",
-                &[integer, storage_type],
-                data_size,
-                vec![writer, storage],
-                span,
+                "__sev_io_write_chunk", &[integer, storage_type, integer], integer,
+                vec![writer, storage, offset], span,
             )));
         }
         let AstExpressionKind::Member { object, name } = &callee.kind else {
@@ -13473,10 +13354,15 @@ impl Analyzer<'_> {
                 operator: AstBinaryOperator::Contains,
                 left,
                 right,
-            } => Some(
-                self.static_contract_string(right, values)?
-                    .contains(&self.static_contract_string(left, values)?),
-            ),
+            } => {
+                let needle = self.static_contract_string(left, values)?;
+                match &right.kind {
+                    AstExpressionKind::List(items) | AstExpressionKind::Tuple(items) =>
+                        items.iter().try_fold(false, |found, item| self.static_contract_string(item, values)
+                            .map(|candidate| found || candidate == needle)),
+                    _ => Some(self.static_contract_string(right, values)?.contains(&needle)),
+                }
+            }
             AstExpressionKind::Call { callee, arguments } if arguments.len() == 1 => {
                 let AstExpressionKind::Member { object, name } = &callee.kind else {
                     return None;
@@ -13501,6 +13387,15 @@ impl Analyzer<'_> {
     ) -> Option<String> {
         match &expression.kind {
             AstExpressionKind::Literal(AstLiteral::String(value)) => Some(value.clone()),
+            AstExpressionKind::Slice { object, start, end, step: None, start_exclusive: false, end_inclusive: false } => {
+                let value = self.static_contract_string(object, values)?;
+                let characters = value.chars().collect::<Vec<_>>();
+                let length = i64::try_from(characters.len()).ok()?;
+                let normalize = |index: i64| if index < 0 { (length + index).max(0) } else { index.min(length) };
+                let start = normalize(match start { Some(index) => static_integer(index)?, None => 0 });
+                let end = normalize(match end { Some(index) => static_integer(index)?, None => length });
+                Some(characters[start as usize..end.max(start) as usize].iter().collect())
+            }
             AstExpressionKind::Name(name) => values
                 .get(name)
                 .cloned()
@@ -16606,7 +16501,49 @@ impl Analyzer<'_> {
         let result_annotation = static_implementation
             .map(|index| &namespace_method.implementations[index].1.result)
             .unwrap_or(&declaration.result);
-        let result = self.resolve_source_type(result_annotation)?;
+        let abstract_result = static_implementation.is_none() && type_annotation_mentions(
+            result_annotation, &self.trait_names.iter().cloned().collect::<Vec<_>>());
+        let result = match self.resolve_source_type(result_annotation) {
+            Ok(result) if !abstract_result => result,
+            resolution if static_implementation.is_none() => {
+                let diagnostic = resolution.err().unwrap_or_else(|| Diagnostic::new(
+                    "E000212", "namespace trait result has no concrete implementation", Some(span)));
+                // A namespace contract may name a trait (e.g. Data). Its
+                // runtime representation is the closed set of concrete result
+                // types supplied by the registered implementations.
+                let alternatives = match &result_annotation.kind {
+                    severian_ast::TypeAnnotationKind::Union(members) => members.as_slice(),
+                    _ => std::slice::from_ref(result_annotation),
+                };
+                let mut results = Vec::new();
+                for (_, implementation) in &namespace_method.implementations {
+                    let result = self.resolve_source_type(&implementation.result)?;
+                    let mut allowed = false;
+                    for alternative in alternatives {
+                        if self.resolve_source_type(alternative).ok() == Some(result)
+                            || alternative.simple_name().is_some_and(|name| self.source_type_satisfies_trait(result, name))
+                        {
+                            allowed = true;
+                        }
+                    }
+                    if !allowed {
+                        return Err(Diagnostic::new("E000212", format!(
+                            "namespace implementation result `{}` does not satisfy `{}`",
+                            render_type_annotation(&implementation.result), render_type_annotation(result_annotation)
+                        ), Some(implementation.span)));
+                    }
+                    results.push(result);
+                }
+                results.sort();
+                results.dedup();
+                match results.as_slice() {
+                    [] => return Err(diagnostic),
+                    [result] => *result,
+                    _ => self.instantiate_union_type(&results),
+                }
+            }
+            resolution => resolution?,
+        };
         if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
             return Err(semantic_error(
                 "namespace method result does not satisfy the expected type".into(),
@@ -16711,6 +16648,7 @@ impl Analyzer<'_> {
             self.allow_qualified_function_suffix = previous_suffix_resolution;
             self.value_substitutions = previous;
             let (condition, value) = candidate?;
+            let value = self.coerce(value, result, false)?;
             selected = Expression {
                 id: self.next_id(),
                 type_id: result,
@@ -18245,7 +18183,7 @@ impl Analyzer<'_> {
                     let value = self.expression(argument, None)?;
                     parameters.push((
                         parameter.name.clone(),
-                        self.coerce(value, parameter_type, true)?,
+                        self.coerce(value, parameter_type, false)?,
                     ));
                 }
                 self.value_substitutions.insert("self".into(), object.clone());
@@ -22053,6 +21991,28 @@ def interpolate(text: string) -> string:
                 if *type_id == integer
         ));
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn index_overloads_do_not_apply_explicit_text_conversions() {
+        let source = "class Values:\n    operator [](position: int) -> int:\n        return 10\n    operator [](name: string) -> int:\n        return 20\ndef selected() -> int:\n    values = Values()\n    return values[0] + values[\"name\"]\n";
+        let (program, _) = analyze_source(source);
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn namespace_dispatch_materializes_concrete_trait_result_union() {
+        let source = "trait Document:\n    def text() -> string\ntrait Reader:\n    @reader\n    def read(path: string) -> string | Document with { (path) -> bool }\nclass Record: Document\n    contents: string\n    def text() -> string:\n        return contents\n    operator <=>(self) -> string:\n        return text()\nclass TextReader: Reader\n    def read(path: string) -> string with { path.ends_with(\".txt\") }:\n        return \"text\"\ndef document_value() -> Record:\n    return Record(\"record\")\nclass RecordReader: Reader\n    def read(path: string) -> Record with { path.ends_with(\".json\") }:\n        return document_value()\ndef selected(path: string) -> string:\n    return string(reader.read(path))\n";
+        // Nominal result types are installed by package declaration collection.
+        let root = std::env::temp_dir().join(format!("sev-namespace-results-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let input = root.join("main.sev");
+        std::fs::write(&input, source).unwrap();
+        let graph = severian_modules::resolve(&input).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let program = analyze_package(&graph, &context).unwrap();
+        severian_mir::build(&program.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

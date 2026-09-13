@@ -11,10 +11,12 @@ def __output_byte(value: int) -> i32
 
 
 def __write(value: string, offset: int):
-    if offset < text.byte_count(value):
-        result = __putchar(__output_byte(text.byte_at(value, offset)))
+    position := offset
+    count = text.byte_count(value)
+    while position < count:
+        result = __putchar(__output_byte(text.byte_at(value, position)))
         assert(result >= 0)
-        __write(value, offset + 1)
+        position += 1
 
 
 def __separator(value: string) -> view string:

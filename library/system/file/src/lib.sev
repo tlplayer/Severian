@@ -1,29 +1,39 @@
+import io
+import os
 from data import Data
+import * from "text.sev" as text
+import * from "streams.sev" as streams
 
 trait File:
     @file
     def read(path: string) -> string | Data with { (path) -> bool }
 
 class TextFile: File
-    def read(path: string) -> string with { path.ends_with(".txt") }:
-        return file.read_text(path)
+    def read(path: string) -> string with { path[-4:] in [".txt", ".sev"] }:
+        return text.read(path)
 
-@c(symbol = "__sev_file_write_text")
-def write(path: string, contents: string) -> i32
+def write(path: string, contents: string) -> i32:
+    return text.write(path, contents)
 
-def write(path: string, contents: list[u8]) -> i32
+def write(path: string, contents: list[u8]) -> i32:
+    return streams.write(path, contents)
 
 
-# The untyped storage boundary used by format packages and File dispatch
-# implementations. Applications should normally call `file.read`.
-@c(symbol = "__sev_file_read_text")
-def raw(path: string) -> string
+# Compatibility entry point; codecs use system.file.text directly.
+def raw(path: string) -> string:
+    return text.read(path)
 
-def open(path: string) -> int
+def open(path: string) -> int:
+    return int(streams.open_read(path))
 
-def read(handle: int, count: data_size) -> list[u8]
+def read(handle: int, count: data_size) -> list[u8]:
+    return io.read(handle, count)
 
-def map(path: string) -> list[u8]
+def read_bytes(handle: int, count: data_size) -> list[u8]:
+    return io.read(handle, count)
+
+def map(path: string) -> list[u8]:
+    return streams.read(path)
 
 @c(symbol = "__sev_file_lock")
 def native_lock(path: string) -> int
@@ -37,13 +47,16 @@ def lock(path: string) -> int | None:
 @c(symbol = "__sev_file_unlock")
 def unlock(lock: int) -> bool
 
-@c(symbol = "__sev_file_error")
-def native_error() -> i32
-
-# Unlike raw(), this checked API distinguishes an empty file from failed IO.
+# Compatibility API: ordinary callers use the constrained file.read dispatch.
 def read_checked(path: string) -> string | Error:
-    contents = raw(path)
-    code = native_error()
-    if code != 0:
-        throw Error("could not read text file " + path + " (OS error " + string(code) + ")")
-    return contents
+    return text.read(path)
+
+# File metadata and permissions are path operations, independent of encoding.
+def metadata(path: string) -> os.Metadata:
+    return streams.metadata(path)
+
+def permissions(path: string) -> i32:
+    return streams.permissions(path)
+
+def set_permissions(path: string, mode: u32) -> i32:
+    return streams.set_permissions(path, mode)

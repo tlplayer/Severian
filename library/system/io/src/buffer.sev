@@ -1,0 +1,34 @@
+# Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
+import * from "../../../core/memory/src/raw_intrinsics.sev" as memory
+
+@c(symbol="__sev_io_read")
+def __read(handle: int, destination: native_ptr, count: int) -> int
+@c(symbol="__sev_io_write")
+def __write(handle: int, source: native_ptr, count: int) -> int
+@c(symbol="__sev_io_error")
+def error() -> i32
+@c(symbol="close")
+def close(handle: i32) -> i32
+
+def __address(data: buffer[u8], offset: int) -> native_ptr:
+    return memory.__raw_pointer(memory.__raw_index(memory.__raw_buffer_address(data)) + offset)
+
+def read(handle: int, data: borrow buffer[u8], offset: int, count: int) -> int:
+    assert(offset >= 0 and count >= 0)
+    assert(offset <= len(data) and count <= len(data) - offset)
+    return __read(handle, __address(data, offset), count)
+
+def write(handle: int, data: view buffer[u8], offset: int, count: int) -> int:
+    assert(offset >= 0 and count >= 0)
+    assert(offset <= len(data) and count <= len(data) - offset)
+    return __write(handle, __address(data, offset), count)
+
+def write_all(handle: int, data: view buffer[u8], count: int) -> int:
+    assert(count >= 0 and count <= len(data))
+    offset := 0
+    while offset < count:
+        written = write(handle, data, offset, count - offset)
+        if written <= 0:
+            return -1
+        offset += written
+    return offset

@@ -3,6 +3,7 @@ from data import Row
 from data import Schema
 from data import Table
 import file
+import * from "../../../system/file/src/text.sev" as text
 import tensor
 
 class YamlStreamFile: File
@@ -17,6 +18,9 @@ class Yaml: Data
     source_text: string
     stream: bool
     content: Table
+
+    operator <=>(self) -> string:
+        return source_text
 
     operator [](column: string) -> list[Any]:
         return content.get(column)
@@ -133,11 +137,11 @@ def decode_stream(source: string) -> Yaml:
     return tabular(source, true)
 
 def yaml_decode_file(path: string) -> Yaml:
-    source: string = file.raw(path)
+    source: string = text.read(path)
     return decode(source)
 
 def yaml_decode_stream_file(path: string) -> Yaml:
-    source: string = file.raw(path)
+    source: string = text.read(path)
     return decode_stream(source)
 
 def encode(value: Yaml) -> string:

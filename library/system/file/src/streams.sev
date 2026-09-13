@@ -1,0 +1,39 @@
+import io
+import os
+
+@c(symbol = "__sev_file_open_read")
+def open_read(path: string) -> i32
+@c(symbol = "__sev_file_open_write")
+def open_write(path: string) -> i32
+@c(symbol = "__sev_file_permissions")
+def permissions(path: string) -> i32
+@c(symbol = "chmod")
+def set_permissions(path: string, mode: u32) -> i32
+
+def read(path: string) -> list[u8]:
+    handle = open_read(path)
+    if handle < 0:
+        throw io.IOError("could not open file for reading: " + path)
+    result: list[u8] := []
+    try:
+        result = io.read_all(int(handle))
+    catch failure: Error:
+        io.close(handle)
+        throw failure
+    if io.close(handle) != 0:
+        throw io.IOError("could not close file: " + path)
+    return result
+
+def write(path: string, contents: list[u8]) -> i32:
+    handle = open_write(path)
+    if handle < 0:
+        return -1
+    try:
+        io.write_all(int(handle), contents)
+    catch failure: Error:
+        io.close(handle)
+        throw failure
+    return io.close(handle)
+
+def metadata(path: string) -> os.Metadata:
+    return os.stat(path)

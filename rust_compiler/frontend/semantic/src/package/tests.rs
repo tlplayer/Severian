@@ -236,15 +236,14 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
     let universal = severian_bootstrap::load().unwrap();
     let typed = analyze_package(&graph, &universal).unwrap();
     assert_eq!(typed.hir.modules.len(), 2);
-    assert_eq!(
-        typed
-            .hir
-            .modules
-            .iter()
-            .map(|module| module.functions.len())
-            .sum::<usize>(),
-        3
-    );
+    // Retain/release functions may accompany these declarations; they are not
+    // additional source overloads or a change in package name resolution.
+    let mut names = typed.hir.modules.iter()
+        .flat_map(|module| module.functions.iter())
+        .filter(|function| !function.name.starts_with("__sev_"))
+        .map(|function| function.name.as_str()).collect::<Vec<_>>();
+    names.sort_unstable();
+    assert_eq!(names, ["choose", "choose", "selected"]);
     std::fs::remove_dir_all(root).unwrap();
 }
 

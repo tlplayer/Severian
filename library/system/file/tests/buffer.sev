@@ -1,0 +1,31 @@
+import * from "../src/path_buffer.sev" as file
+import * from "../../io/src/buffer.sev" as io
+import * from "../../../core/storage/src/buffer.sev" as storage
+
+test with profile "file bytes use caller owned IO buffers" with
+{
+    defer time < 1s,
+    defer memory < 16MB,
+    defer allocations < 50000,
+}:
+    path = file.temporary_path()
+    handle = file.temporary(path)
+    assert(handle >= 0)
+    contents: buffer[u8] = storage.allocate(4097)
+    for offset in range(4097):
+        contents[offset] = u8(offset % 256)
+    assert(io.write_all(int(handle), contents, 4097) == 4097)
+    assert(io.close(handle) == 0)
+    destination: buffer[u8] = storage.allocate(8192)
+    for iteration in range(128):
+        reader = file.open_read(path)
+        assert(reader >= 0)
+        assert(io.read(int(reader), destination, 0, 8192) == 4097)
+        for offset in range(4097):
+            assert(destination[offset] == contents[offset])
+        assert(io.read(int(reader), destination, 0, 8192) == 0)
+        assert(io.close(reader) == 0)
+    assert(file.remove(path) == 0)
+    assert(file.open_read(path) < 0)
+    assert(io.read(-1, destination, 0, 1) == -1)
+    assert(io.error() != 0)

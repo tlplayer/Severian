@@ -6,17 +6,7 @@ Run from the checkout, with the native compiler installed:
 bash test/validation/performance/bootstrap_freshness.sh
 bash test/validation/performance/native.sh
 bash test/validation/packages/native_artifacts.sh
-clang-21 -Wall -Wextra -Werror test/validation/performance/native_io.c \
-  library/system/extern/posix/filesystem.c library/core/memory/native/memory.c \
-  library/core/storage/native/statistics.c \
-  -o /tmp/sev-native-io-test
-/tmp/sev-native-io-test
-clang-21 -Wall -Wextra -Werror -DSEV_TEST_OWNERSHIP \
-  test/validation/performance/native_io.c \
-  library/system/extern/posix/filesystem.c library/core/memory/native/memory.c \
-  library/core/storage/native/statistics.c library/core/storage/native/storage.c \
-  -o /tmp/sev-owned-io-test
-/tmp/sev-owned-io-test
+bash test/validation/performance/libraries.sh
 ```
 
 The shell tests invoke concrete compiler executables. `SEVERIAN_SOURCE_COMPILER`
@@ -67,3 +57,20 @@ the file package rejects its existing `@file` trait syntax, and native MLIR test
 reject owned buffer elements. The bootstrap MLIR suite instead stops at the
 existing unchecked optional `emitted.location.line` access. Those suites are not
 claimed as passing gates; use the runnable baselines above for measured results.
+
+The `libraries.sh` runner checks the C file provider in
+`library/system/file/tests/native_io.c`, ownership accounting in
+`library/core/storage/tests/statistics.c`, and the JSON provider in
+`library/data/json/tests/native_json.c`. The former ad hoc `native_io.c` under
+this directory has been removed after splitting these checks by their owners.
+
+Native text tests exercise `core.text` formatting, escaping, object conversion,
+and captured print output. The public `.txt`/`.sev`/`.json` `file.read` dispatch
+and Data indexing tests run through the explicitly named bootstrap executable;
+they are not presented as passing native-frontend tests. The native frontend's
+`@file` parsing limitation remains a separate unresolved issue.
+
+JSON's retained-storage check covers all decoded strings and rows, including
+failure cleanup. Its old implementation leaked rows and used untracked malloc
+strings; its old allocation count therefore understates the work it did and
+should not be directly compared with the new owned allocation count.

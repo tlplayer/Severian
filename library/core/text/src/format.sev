@@ -1,0 +1,311 @@
+import * from "../../../../sev_compiler/universal/primitive/string/core.sev" as text
+
+@mlir("arith.divsi")
+def __divide(value: int, divisor: int) -> int
+
+@mlir("arith.remsi")
+def __remainder(value: int, divisor: int) -> int
+
+@mlir("arith.trunci")
+def __byte(value: int) -> u8
+
+@mlir("arith.extsi")
+def __widen(value: i8) -> int
+
+@mlir("arith.extsi")
+def __widen(value: i16) -> int
+
+@mlir("arith.extsi")
+def __widen(value: i32) -> int
+
+@mlir("arith.extui")
+def __unsigned(value: u8) -> int
+
+@mlir("arith.extui")
+def __unsigned(value: u16) -> int
+
+@mlir("arith.extui")
+def __unsigned(value: u32) -> int
+
+@mlir("arith.bitcast")
+def __unsigned_digit(value: u64) -> int
+
+@mlir("arith.divui")
+def __unsigned_divide(value: u64, divisor: u64) -> u64
+
+@mlir("arith.remui")
+def __unsigned_remainder(value: u64, divisor: u64) -> u64
+
+
+def __negative_digits(value: int, negative: bool = false) -> string:
+    remaining := value
+    count := 1
+    while remaining <= -10:
+        remaining = __divide(remaining, 10)
+        count += 1
+    if negative:
+        count += 1
+    result = text.__allocate(text.__index(count))
+    position := count
+    remaining = value
+    while position > (1 if negative else 0):
+        position -= 1
+        __store_byte(result, position, 48 - __remainder(remaining, 10))
+        remaining = __divide(remaining, 10)
+    if negative:
+        __store_byte(result, 0, 45)
+    return result
+
+
+def string(value: int) -> string:
+    if value < 0:
+        return __negative_digits(value, true)
+    return __negative_digits(0 - value)
+
+
+def string(value: i8) -> string:
+    return string(__widen(value))
+
+
+def string(value: i16) -> string:
+    return string(__widen(value))
+
+
+def string(value: i32) -> string:
+    return string(__widen(value))
+
+
+def string(value: u8) -> string:
+    return string(__unsigned(value))
+
+
+def string(value: u16) -> string:
+    return string(__unsigned(value))
+
+
+def string(value: u32) -> string:
+    return string(__unsigned(value))
+
+
+def string(value: u64) -> string:
+    remaining := value
+    count := 1
+    while remaining >= 10:
+        remaining = __unsigned_divide(remaining, 10)
+        count += 1
+    result = text.__allocate(text.__index(count))
+    position := count
+    remaining = value
+    while position > 0:
+        position -= 1
+        __store_byte(result, position, 48 + __unsigned_digit(__unsigned_remainder(remaining, 10)))
+        remaining = __unsigned_divide(remaining, 10)
+    return result
+
+
+def string(value: bool) -> string:
+    return "true" if value else "false"
+
+
+def string(value: string) -> view string:
+    return value
+
+
+def __store_byte(destination: borrow string, position: int, value: int):
+    text.__store(__byte(value), destination, text.__index(position))
+
+
+def string(value: char) -> string:
+    codepoint = text.character.codepoint(value)
+    width = text.character.width(codepoint)
+    result = text.__allocate(text.__index(width))
+    if width == 1:
+        __store_byte(result, 0, codepoint)
+    else:
+        __store_byte(result, width - 1, 128 + __remainder(codepoint, 64))
+        if width == 2:
+            __store_byte(result, 0, 192 + __divide(codepoint, 64))
+        else:
+            __store_byte(result, width - 2, 128 + __remainder(__divide(codepoint, 64), 64))
+            if width == 3:
+                __store_byte(result, 0, 224 + __divide(codepoint, 4096))
+            else:
+                __store_byte(result, 1, 128 + __remainder(__divide(codepoint, 4096), 64))
+                __store_byte(result, 0, 240 + __divide(codepoint, 262144))
+    return result
+
+
+# Hosted decimal conversion boundary. Buffers, counted UTF-8 results, and the
+# search for the first significant-digit precision that round-trips are .sev.
+# The current hosted target is glibc in its default C numeric locale.
+@mlir("memref.extract_aligned_pointer_as_index")
+def __buffer_base(value: buffer[u8]) -> index
+
+
+def __base(value: string) -> index:
+    return __buffer_base(value.storage.data)
+
+@mlir("llvm.inttoptr")
+def __pointer(value: int) -> native_ptr
+
+@c(symbol="strfromd")
+def __decimal(destination: native_ptr, capacity: int, format: native_ptr, value: f64) -> i32
+
+@c(symbol="strtod")
+def __parse(value: native_ptr, end: native_ptr) -> f64
+
+
+# Only whole buffers with offset zero are passed to this boundary.
+def __address(value: string) -> native_ptr:
+    return __pointer(text.__size(__base(value)))
+
+
+# Keep the memref borrow across the entire C call. Returning a raw address to
+# the allocating caller would hide its last use from buffer deallocation.
+def __decimal_into(destination: borrow string, format: string, value: f64) -> i32:
+    return __decimal(__address(destination), 128, __address(format), value)
+
+
+def __parse_buffer(value: string) -> f64:
+    return __parse(__address(value), __pointer(0))
+
+
+def __terminated(value: string) -> string:
+    size = text.byte_count(value)
+    result = text.__allocate(text.__index(size + 1))
+    text.__copy(value, result, 0, 0)
+    __store_byte(result, size, 0)
+    return result
+
+
+def __float(value: f64, precision: int) -> string:
+    format = text.__allocate(text.__index(6))
+    __store_byte(format, 0, 37)
+    __store_byte(format, 1, 46)
+    buffer = text.__allocate(text.__index(128))
+    digits := precision
+    count := 0
+    while digits <= 17:
+        if digits < 10:
+            __store_byte(format, 2, 48 + digits)
+            __store_byte(format, 3, 103)
+            __store_byte(format, 4, 0)
+        else:
+            __store_byte(format, 2, 49)
+            __store_byte(format, 3, 48 + digits - 10)
+            __store_byte(format, 4, 103)
+            __store_byte(format, 5, 0)
+        count = __widen(__decimal_into(buffer, format, value))
+        assert(count >= 0 and count < 128)
+        if value != value or __parse_buffer(buffer) == value or digits == 17:
+            break
+        digits += 1
+    buffer.storage.used = count
+    return buffer
+
+
+def string(value: f64) -> string:
+    # NaN's sign is not part of the language's display representation. Hosted
+    # arithmetic and strfromd may preserve a negative NaN sign bit.
+    if value != value:
+        return "nan"
+    return __float(value, 1)
+
+
+def string(value: f32) -> string:
+    return string(f64(value))
+
+
+def string(value: None) -> string:
+    return "None"
+
+
+# Structured formatting shares the same append builder as ordinary strings.
+def quoted(value: string) -> string:
+    result = string()
+    result.append('"')
+    digits = "0123456789abcdef"
+    position := 0
+    count = text.byte_count(value)
+    result.reserve(count + 2)
+    while position < count:
+        code = text.byte_at(value, position)
+        if code == 34:
+            result.append("\\\"")
+        elif code == 92:
+            result.append("\\\\")
+        elif code < 32:
+            result.append("\\u00")
+            result.reserve(result.storage.used + 2)
+            result.storage.append(digits.storage.data[code / 16])
+            result.storage.append(digits.storage.data[code % 16])
+        else:
+            result.reserve(result.storage.used + 1)
+            result.storage.append(value.storage.data[position])
+        position += 1
+    result.append('"')
+    return result
+
+def __field_text(value: string) -> string:
+    return quoted(value)
+
+def __field_text(value: char) -> string:
+    return quoted(string(value))
+
+def __field_text(value: None) -> string:
+    return "null"
+
+trait StringRepresentation:
+    operator string(self) -> string
+
+def __field_text[T: StringRepresentation](value: T) -> string:
+    return string(value)
+
+def __field_text(value: int) -> string:
+    return string(value)
+
+def __field_text(value: u64) -> string:
+    return string(value)
+
+def __field_text(value: i8) -> string:
+    return string(value)
+
+def __field_text(value: i16) -> string:
+    return string(value)
+
+def __field_text(value: i32) -> string:
+    return string(value)
+
+def __field_text(value: u8) -> string:
+    return string(value)
+
+def __field_text(value: u16) -> string:
+    return string(value)
+
+def __field_text(value: u32) -> string:
+    return string(value)
+
+def __field_text(value: bool) -> string:
+    return string(value)
+
+def __field_text(value: f64) -> string:
+    assert(value == value and value != 1.0 / 0.0 and value != -1.0 / 0.0)
+    return string(value)
+
+def __field_text(value: f32) -> string:
+    return __field_text(f64(value))
+
+# Field tuples are specialized at compilation, preserving their concrete types.
+def object_text(*fields: V) -> string:
+    result = string()
+    result.append('{')
+    first := true
+    for field in fields:
+        if not first:
+            result.append(',')
+        result.append(quoted(field[0]))
+        result.append(':')
+        result.append(__field_text(field[1]))
+        first = false
+    result.append('}')
+    return result

@@ -1,0 +1,46 @@
+import * from "../../../core/storage/src/buffer.sev" as storage
+import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
+
+@c(symbol="__sev_file_open_read")
+def __open_read(path: native_ptr) -> i32
+@c(symbol="__sev_file_open_write")
+def __open_write(path: native_ptr) -> i32
+@c(symbol="mkstemp")
+def __temporary(path: native_ptr) -> i32
+@c(symbol="unlink")
+def __remove(path: native_ptr) -> i32
+
+def __address(data: buffer[u8]) -> native_ptr:
+    return raw.__raw_pointer(raw.__raw_index(raw.__raw_buffer_address(data)))
+
+def __terminated(value: string) -> buffer[u8]:
+    count = value.storage.used
+    assert(count < 9223372036854775807)
+    result: buffer[u8] = storage.allocate(count + 1)
+    for offset in range(count):
+        byte = value.storage.data[offset]
+        assert(byte != 0)
+        result[offset] = byte
+    result[count] = 0
+    return result
+
+def open_read(path: string) -> i32:
+    name = __terminated(path)
+    return __open_read(__address(name))
+
+def open_write(path: string) -> i32:
+    name = __terminated(path)
+    return __open_write(__address(name))
+
+# A temporary path is an owned NUL-terminated buffer mutated by mkstemp.
+def temporary_path(template: string = "/tmp/sev-file-XXXXXX") -> buffer[u8]:
+    return __terminated(template)
+
+def temporary(path: borrow buffer[u8]) -> i32:
+    return __temporary(__address(path))
+
+def open_read(path: view buffer[u8]) -> i32:
+    return __open_read(__address(path))
+
+def remove(path: view buffer[u8]) -> i32:
+    return __remove(__address(path))

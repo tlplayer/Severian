@@ -1,0 +1,19 @@
+test with profile "format 1000 signed integers" with
+{
+    defer time < 1s,
+    defer memory < 512KB,
+    defer allocations < 1200,
+}:
+    for index in range(1000):
+        value = string(-9223372036854775808 + index)
+        assert(value.length() == 20)
+
+test with profile "format 100 full precision floats" with
+{
+    defer time < 1s,
+    defer memory < 128KB,
+    defer allocations < 300,
+}:
+    for index in range(100):
+        value = string(1.2345678901234567)
+        assert(value == "1.2345678901234567")
