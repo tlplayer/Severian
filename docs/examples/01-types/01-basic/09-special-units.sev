@@ -71,11 +71,10 @@ test "frequency":
 
 
 # Unit values work naturally in contracts.
-def process(data: string) with
-{
-    # bytes is a keyword that means how much memory does this object consume in B
-    defer bytes(data) < 64MiB -> Error("memory limit exceeded"),
-}:
+def process(data: string):
+    #Number of bytes an object uses
+    print(bytes(data))
+    #Number of elements
     print(size(data))
 
 
@@ -84,7 +83,7 @@ def process(data: string) with
 #     defer time < 10ms -> Error("operation took too long"),
 # }
 test with profile "latency":
-    process("")
+    process("a")
 
 # Temperature suffixes are dimensioned literals supplied by the prelude.
 
@@ -112,8 +111,8 @@ test "temperature":
 #     offset: f64
 # Electrical suffixes are dimensioned literals supplied by the prelude.
 
-core_voltage := 950mV
-power := 220W
+#core_voltage := 950mV
+#power := 220W
 
 
 # Different dimensions cannot be compared.
