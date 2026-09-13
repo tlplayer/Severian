@@ -1,0 +1,80 @@
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import os
+
+# Cache paths describe a role in the resolved graph, never a producer checkout.
+# Prefer the most specific root (a workspace can also be the compiler sysroot).
+def portable_path(location: string, resolution: Resolution, root: string, sysroot: string) -> string:
+    for index in range(int(len(resolution.packages))):
+        if location == resolution.packages[index].interface_path:
+            return "@interface/" + string(index)
+        if location == resolution.packages[index].archive_path:
+            return "@archive/" + string(index)
+    selected := root
+    token := "@unit"
+    for index in range(int(len(resolution.packages))):
+        candidate = resolution.packages[index].root
+        if (location == candidate or location.starts_with(candidate + "/")) and (not (location == selected or location.starts_with(selected + "/")) or len(candidate) >= len(selected)):
+            selected = candidate
+            token = "@package/" + string(index)
+    if (location == sysroot or location.starts_with(sysroot + "/")) and (not (location == selected or location.starts_with(selected + "/")) or len(sysroot) > len(selected)):
+        selected = sysroot
+        token = "@sysroot"
+    if location == selected or location.starts_with(selected + "/"):
+        return token + location[int(len(selected)):]
+    return location
+
+def relocated_path(location: string, resolution: Resolution, root: string, sysroot: string) -> string | Error:
+    if location.starts_with("@interface/"):
+        return resolution.packages[int(location.split("/")[1])].interface_path
+    if location.starts_with("@archive/"):
+        return resolution.packages[int(location.split("/")[1])].archive_path
+    if location == "@unit" or location.starts_with("@unit/"):
+        return root + location[5:]
+    if location == "@sysroot" or location.starts_with("@sysroot/"):
+        return sysroot + location[8:]
+    if location.starts_with("@package/"):
+        pieces = location.split("/")
+        index = int(pieces[1])
+        if index < 0 or index >= int(len(resolution.packages)):
+            throw Error("invalid cached package reference")
+        return resolution.packages[index].root + ("/" + pieces[2:].join("/") if len(pieces) > 2 else "")
+    return location
+
+def portable_inputs(source: string, destination: string, resolution: Resolution, root: string, sysroot: string) -> unit | Error:
+    records: list[string] = []
+    for entry in parse_document(read_text(source)):
+        records.append(toml_quote(portable_path(entry.key, resolution, root, sysroot)) + " = " + entry.value)
+    write_text(destination, records.join("\n") + "\n")
+
+def reusable_inputs(location: string, resolution: Resolution, root: string, sysroot: string) -> bool:
+    try:
+        if not os.is_file(location):
+            return false
+        entries = parse_document(read_text(location))
+        if len(entries) == 0:
+            return false
+        for entry in entries:
+            expected = unquote(entry.value)
+            input = relocated_path(entry.key, resolution, root, sysroot)
+            if expected == "missing":
+                if os.exists(input):
+                    return false
+            elif not os.is_file(input) or digest(input) != expected:
+                return false
+        return true
+    catch failure: Error:
+        return false
+
+def portable_graph(resolution: Resolution) -> string:
+    records: list[string] = []
+    for resolved in resolution.packages:
+        identity = resolved.identity
+        # Root/path spelling affects discovery, not the identity of these bytes.
+        origin = "source"
+        records.append(toml_quote(identity.name) + " " + toml_quote(identity.version) + " " + toml_quote(origin) + " " + toml_quote(resolved.checksum))
+        records.append(toml_quote(resolved.build_id))
+    for edge in resolution.edges:
+        records.append(string(edge.parent) + " " + string(edge.child) + " " + toml_quote(edge.alias) + " " + string(edge.development))
+    return records.join("\n")

@@ -9,10 +9,18 @@ import path
 import process
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return project.root + "/package.pkg/" + safe_name(platform) + "/" + safe_name(profile)
+    return project.root + "/package.pkg/bin/" + safe_name(platform) + "/" + safe_name(profile)
 
 def test_output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return project.root + "/package.pkg/debug/tests/" + safe_name(platform) + "/" + safe_name(profile)
+    return project.root + "/package.pkg/debug/test/" + safe_name(platform) + "/" + safe_name(profile)
+
+def dependency_build_order(resolution: Resolution, index: int, ordered: list[int]):
+    if index in ordered:
+        return
+    for edge in resolution.edges:
+        if edge.parent == index:
+            dependency_build_order(resolution, edge.child, ordered)
+    ordered.append(index)
 
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
     mutable_project(project.root)
@@ -21,11 +29,15 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
     profile = request.profile if request.profile != "" else text_setting(project.manifest.entries, "build", "profile", "dev")
     root = output_root(project, platform, profile)
     units: list[BuildUnit] = []
-    # Dependency units use their own transitive graph and reusable source listing.
-    for index in range(int(len(resolution.packages)) - 1, 0, -1):
+    # A dependency unit produces a linkable archive and an explicit interface.
+    ordered: list[int] = []
+    dependency_build_order(resolution, 0, ordered)
+    for index in ordered:
+        if index == 0:
+            continue
         dependency = resolution.packages[index]
         target = library_target(dependency.manifest)
-        units.append(BuildUnit(index, target, platform, profile, project.root + "/package.pkg/build/dependencies/" + string(index) + ".sources", false))
+        units.append(BuildUnit(index, target, platform, profile, "", false))
     selected := request.target
     if mode == "run" and selected == "":
         selected = project.manifest.default_run
@@ -35,11 +47,11 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
             continue
         if mode == "run" and target.kind != "binary":
             continue
-        destination := root + "/bin/" + target.name if target.kind == "binary" else root + "/pkg/" + target.name + "-" + project.manifest.version + ".pkg"
+        destination := ""
         if mode == "test":
             destination = test_output_root(project, platform, profile) + "/bin/" + target.name
         elif request.emit != "":
-            destination += ".json" if request.emit == "agent-ir" else "." + request.emit
+            destination = project.root + "/package.pkg/cache/emit/" + target.name + (".json" if request.emit == "agent-ir" else "." + request.emit)
         if request.output != "":
             destination = request.output
         units.append(BuildUnit(0, target, platform, profile, destination, mode == "test"))
@@ -64,14 +76,21 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
     artifacts: list[Artifact] = []
     for unit in plan.units:
         if unit.package_index != 0:
-            compile_unit(compiler, unit, plan.resolution, "sources", guard_tests=plan.mode == "test")
+            dependency = plan.resolution.packages[unit.package_index]
+            # Source-only contracts are checked with their consumer. Building a
+            # source listing here previously repeated the full semantic pass.
+            if setting(dependency.manifest.entries, "package", "export", "[]") == "[]":
+                continue
+            artifact = compile_unit(compiler, unit, plan.resolution, "library", guard_tests=plan.mode == "test")
+            if artifact.interface_path != "":
+                dependency.interface_path = artifact.interface_path
+                dependency.archive_path = artifact.path
+                dependency.build_id = artifact.build_id
+                plan.resolution.packages[unit.package_index] = dependency
         elif plan.mode == "check" and plan.emit == "":
             compile_unit(compiler, unit, plan.resolution, "check", guard_tests=plan.mode == "test")
         elif unit.target.kind == "library" and not unit.include_tests and plan.emit == "":
-            listing = BuildUnit(unit.package_index, unit.target, unit.platform, unit.profile, unit.output + ".sources", false)
-            compile_unit(compiler, listing, plan.resolution, "sources")
-            bundle(plan.project, unit.target, unit.output, read_text(listing.output).strip().split("\n"))
-            artifacts.append(Artifact(unit.target, unit.platform, unit.profile, "bundle", unit.output))
+            artifacts.append(compile_unit(compiler, unit, plan.resolution, "library"))
         else:
             mkdir(path.dirname(unit.output))
             artifacts.append(compile_unit(compiler, unit, plan.resolution, plan.emit))

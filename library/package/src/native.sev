@@ -64,6 +64,8 @@ def native_arguments(resolution: Resolution, sources: list[string]) -> list[stri
     seen: list[string] = []
     arguments: list[string] = []
     for package in resolution.packages:
+        if package.archive_path != "" and package.archive_path not in arguments:
+            arguments.append(package.archive_path)
         native_package(package.root, seen, arguments, false)
     for source in sources:
         directory := path.dirname(canonical(source))

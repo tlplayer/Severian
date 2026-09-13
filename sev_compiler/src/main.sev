@@ -36,7 +36,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     application: list[string] := []
     cursor := 1
     if len(arguments) > 1:
-        if arguments[1] in ["build", "run", "test", "check", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean"]:
+        if arguments[1] in ["build", "run", "test", "check", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean"]:
             command = arguments[1]
             cursor += 1
     while cursor < len(arguments):
@@ -46,7 +46,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
             print(package.compiler_build_info())
             return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [calls|memory|time] --profile-output DIR")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run add remove update resolve tree metadata publish install clean\nprofiling: --profile [calls|memory|time] --profile-output DIR")
             return 0
         if argument == "--":
             application = arguments[cursor + 1:]

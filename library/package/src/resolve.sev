@@ -34,6 +34,10 @@ def registry_root(selected: string = "") -> string | Error:
 def registry_release(name: string, version: string, registry: string = "") -> string | Error:
     root = registry_root(registry)
     release = root + "/" + safe_name(name) + "/" + safe_name(version)
+    for marker in ["index.toml", ".sev-index.toml"]:
+        if os.is_file(release + "/" + marker):
+            index = parse_document(read_text(release + "/" + marker))
+            return release + "/" + relative_path(text_setting(index, "", "package"))
     legacy = root + "/packages/" + safe_name(name) + "/" + safe_name(version)
     return legacy if not os.exists(release) and os.is_dir(legacy) else release
 
@@ -77,7 +81,7 @@ def registry_discovery_state() -> string | Error:
             if not os.is_dir(directory) or name.starts_with("."):
                 continue
             for version in os.list(directory):
-                release = directory + "/" + version
+                release = registry_release(name, version, registry)
                 marker = release + "/metadata/publication.toml"
                 if os.is_file(marker):
                     records.append(release + " " + digest(marker))
@@ -233,6 +237,8 @@ def dependency_source(resolution: Resolution, importer: string, alias: string) -
     for edge in resolution.edges:
         if edge.parent == owner and edge.alias == alias:
             child = resolution.packages[edge.child]
+            if child.interface_path != "":
+                return child.interface_path
             return inside(child.root, library_target(child.manifest).path)
     throw Error("undeclared dependency import * from " + alias + " in " + manifest.name)
 

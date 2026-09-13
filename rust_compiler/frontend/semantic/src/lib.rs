@@ -9037,6 +9037,10 @@ impl Analyzer<'_> {
                         });
                     }
                 }
+                // Native-operator probes must share the resolved operand.
+                // Re-analyzing a left-associated tree in each probe makes a
+                // chain of n additions grow exponentially instead of linearly.
+                let mut arithmetic_left = None;
                 if matches!(
                     *operator,
                     AstBinaryOperator::Add
@@ -9072,6 +9076,7 @@ impl Analyzer<'_> {
                             ast.span,
                         )?);
                     }
+                    arithmetic_left = Some(left_value);
                 }
                 if matches!(
                     *operator,
@@ -9229,7 +9234,7 @@ impl Analyzer<'_> {
                     *operator,
                     AstBinaryOperator::Add | AstBinaryOperator::Subtract
                 ) {
-                    let resolved_left = self.expression(left, None)?;
+                    let resolved_left = arithmetic_left.take().expect("arithmetic probe resolved its operand");
                     if let Some(element) =
                         self.pointer_elements.get(&resolved_left.type_id).copied()
                     {
@@ -9264,6 +9269,7 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
+                    arithmetic_left = Some(resolved_left);
                 }
                 if matches!(
                     *operator,
@@ -9756,7 +9762,11 @@ impl Analyzer<'_> {
                 let operator = universal_binary(*operator);
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
-                let left = self.prepare(left)?;
+                let left = match arithmetic_left {
+                    // Keep contextual literal inference in prepare/finish.
+                    Some(value) if !matches!(left.kind, AstExpressionKind::Literal(_) | AstExpressionKind::Unary { .. }) => Prepared::Resolved(value),
+                    _ => self.prepare(left)?,
+                };
                 let right = self.prepare(right)?;
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
@@ -22931,6 +22941,16 @@ def interpolate(text: string) -> string:
         let ast = severian_parser::parse(&tokens).unwrap();
         let error = analyze(&ast, &context.types).unwrap_err();
         assert!(error.to_string().contains("expected type"));
+    }
+
+    #[test]
+    fn long_arithmetic_chains_resolve_without_revisiting_subtrees() {
+        let strings = std::iter::repeat_n("part", 32).collect::<Vec<_>>().join(" + ");
+        let numbers = std::iter::repeat_n("value", 32).collect::<Vec<_>>().join(" + ");
+        let (program, _) = analyze_source(&format!(
+            "def joined(part: string) -> string:\n    return {strings}\ndef added(value: i32) -> i32:\n    return {numbers}\ndef inferred(value: i32) -> i32:\n    return 1 + value\n"
+        ));
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

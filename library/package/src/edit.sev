@@ -129,3 +129,21 @@ def new(location: string, name: string = "", library: bool = false) -> Project |
     write_text(stage + "/package.lock", resolve(open(stage)).lock)
     replace_file(stage, location)
     return open(location)
+
+# init also supports an existing empty directory, without overwriting files.
+def init(location: string = ".", name: string = "", library: bool = false) -> Project | Error:
+    if not os.exists(location):
+        return new(location, name, library)
+    root = canonical(location)
+    if not os.is_dir(root) or len(os.list(root)) != 0:
+        throw Error("init requires an empty directory: " + root)
+    stage = temporary(path.dirname(root))
+    try:
+        project = new(stage + "/project", name if name != "" else path.basename(root), library)
+        for entry in os.list(project.root):
+            replace_file(project.root + "/" + entry, root + "/" + entry)
+    catch failure: Error:
+        remove_tree(stage)
+        throw Error(failure.message)
+    remove_tree(stage)
+    return open(root)

@@ -1,0 +1,107 @@
+import * from "host.sev"
+import * from "manifest.sev"
+import * from "model.sev"
+import * from "edit.sev"
+import os
+import path
+import environment
+
+def retain_file(source: string, destination: string) -> unit | Error:
+    if not os.is_file(destination) or digest(source) != digest(destination):
+        copy_file(source, destination)
+
+# Completed artifacts have a portable inventory, separate from mutable worker
+# state. File digests occur once in this inventory; references use relative paths.
+def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compiler, cache: string, build_id: string, emit: string) -> Artifact | Error:
+    owner = resolution.packages[0]
+    root = path.dirname(path.dirname(cache))
+    triple = capture([environment.get("SEVERIAN_CLANG", "clang-21"), "-dumpmachine"])
+    prefix = "artifacts/" + safe_name(triple) + "/" + safe_name(unit.profile) + "/" + build_id
+    name = safe_name(unit.target.name.replace("/", "_"))
+    output := "bin/" + triple + "/" + unit.profile + "/" + build_id + "/" + name
+    if unit.include_tests:
+        output = "debug/test/" + build_id + "/" + name
+    interface := ""
+    inventory: list[string] = []
+    if emit == "library":
+        output = prefix + "/archive/lib" + name + ".a"
+        object = prefix + "/object/" + name + ".o"
+        ir = prefix + "/ir/" + name + ".mlir"
+        interface = "package.pkgi/severian/" + build_id + "/interface.sev"
+        retain_file(cache + "/artifact.o", root + "/" + object)
+        retain_file(cache + "/artifact.mlir", root + "/" + ir)
+        retain_file(cache + "/artifact.interface.sev", root + "/" + interface)
+        for relative in [object, ir, interface]:
+            inventory.append(toml_quote(relative) + " = " + toml_quote(digest(root + "/" + relative)))
+        index = root + "/package.pkgi/index.toml"
+        previous = read_text(index) if os.is_file(index) else "format = 1\n"
+        if not previous.contains(toml_quote(build_id)):
+            write_text(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\npath = " + toml_quote(interface) + "\nabi = \"severian-scalar-c-1\"\nsource-fallback = true\n")
+    retain_file(cache + "/artifact", root + "/" + output)
+    if emit == "":
+        require_command(["chmod", "755", "--", root + "/" + output])
+    inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))
+    text = "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
+    write_text(root + "/metadata/realizations/" + build_id + ".toml", text)
+    index = root + "/metadata/artifacts.toml"
+    previous = read_text(index) if os.is_file(index) else "format = 1\n"
+    if not previous.contains(toml_quote(build_id)):
+        write_text(index, previous + "\n[[realization]]\nbuild-id = " + toml_quote(build_id) + "\nmanifest = " + toml_quote("realizations/" + build_id + ".toml") + "\n")
+    if os.is_file(cache + "/inputs"):
+        retain_file(cache + "/inputs", root + "/metadata/realizations/" + build_id + ".inputs.toml")
+    write_text(root + "/metadata/package.toml", render_manifest(owner.manifest.entries))
+    lock = project_lock_file(owner.root)
+    write_text(root + "/metadata/package.lock", read_text(lock) if os.is_file(lock) else resolution.lock)
+    source_index: list[string] = []
+    source_paths: list[string] = []
+    for location in files(owner.root):
+        relative = location[int(len(owner.root)) + 1:]
+        retain_file(location, root + "/source/" + relative)
+        source_paths.append(relative)
+        source_index.append(toml_quote(relative) + " = " + toml_quote(digest(location)))
+    write_text(root + "/metadata/source-index.toml", "format = 1\n\n[files]\n" + source_index.join("\n") + "\n")
+    for location in files(root + "/source", true):
+        if location[int(len(root + "/source/")):] not in source_paths:
+            os.remove(location)
+    usable = interface != "" and read_text(root + "/" + interface).strip() != ""
+    return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "native", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
+
+def sidecars_match(cache: string) -> bool:
+    if not os.is_file(cache + "/sidecars.toml"):
+        return false
+    for entry in parse_document(read_text(cache + "/sidecars.toml")):
+        location = cache + "/" + relative_path(entry.key)
+        if not os.is_file(location) or digest(location) != unquote(entry.value):
+            return false
+    return true
+
+def restore_realization(root: string, cache: string, build_id: string, emit: string) -> bool:
+    manifest = root + "/metadata/realizations/" + build_id + ".toml"
+    if not os.is_file(manifest) or emit != "library":
+        return false
+    entries = parse_document(read_text(manifest))
+    if text_setting(entries, "", "build-id") != build_id:
+        return false
+    for entry in entries:
+        if entry.table == "files":
+            location = root + "/" + relative_path(entry.key)
+            if not os.is_file(location) or digest(location) != unquote(entry.value):
+                return false
+    output = text_setting(entries, "", "output")
+    interface = text_setting(entries, "", "interface")
+    if interface == "":
+        return false
+    copy_file(root + "/" + relative_path(output), cache + "/artifact")
+    copy_file(root + "/" + relative_path(interface), cache + "/artifact.interface.sev")
+    for entry in entries:
+        if entry.table == "files" and entry.key.ends_with(".o"):
+            copy_file(root + "/" + relative_path(entry.key), cache + "/artifact.o")
+        if entry.table == "files" and entry.key.ends_with(".mlir"):
+            copy_file(root + "/" + relative_path(entry.key), cache + "/artifact.mlir")
+    sidecars: list[string] = []
+    for suffix in [".o", ".mlir", ".interface.sev"]:
+        sidecars.append(toml_quote("artifact" + suffix) + " = " + toml_quote(digest(cache + "/artifact" + suffix)))
+    write_text(cache + "/sidecars.toml", sidecars.join("\n"))
+    copy_file(root + "/metadata/realizations/" + build_id + ".inputs.toml", cache + "/inputs")
+    write_text(cache + "/output", digest(cache + "/artifact"))
+    return true

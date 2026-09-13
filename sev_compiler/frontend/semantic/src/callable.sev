@@ -1,4 +1,7 @@
 import diagnostics
+import environment
+import time
+import process
 from diagnostics import Diagnostic
 import source
 import universal
@@ -73,6 +76,7 @@ class CallableAnalysis:
     function_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     generic_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     template_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
+    registered_methods: list[int] = []
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -160,7 +164,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
                 parameter.type_id = argument.value.type_id
                 parameter.annotation = universal.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
         parameters.append(parameter)
-    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
     for parameter in parameters:
         local.names.append(parameter.name)
         local.types.append(parameter.type_id)
@@ -2302,9 +2306,19 @@ def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block
     return true
 
 
+def semantic_stage(previous: float, name: string) -> float:
+    if environment.get("SEVERIAN_PROFILE_ACTIVE", "") == "1":
+        now = time.monotonic()
+        process.write_error("  Semantic " + name + ": " + string(now - previous) + "s\n")
+        return now
+    return previous
+
+
 def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "", source_files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
+    measured := time.monotonic()
     module = test_modes.expand(module, include_tests, initializer_namespace)
     registered = definitions.register_declarations(module, environment)
+    measured = semantic_stage(measured, "declarations")
     state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace, source_files=source_files, excluded_functions=module.excluded_functions, prelude_sources=module.prelude_sources)
     own_index := 0
     function_names: list[string] = []
@@ -2401,7 +2415,9 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for record in state.records:
         callable_record_layout(state.records, record.type_id, [])
     module.records = state.records
+    measured = semantic_stage(measured, "records")
     callable_register_operators(state, module)
+    measured = semantic_stage(measured, "operators")
     for item in module.items:
         match item:
             case Function:
@@ -2465,7 +2481,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     signature.id = own_ids[own_index]
                     signature.definition = universal.DefId(0, 0, universal.DeclarationId(signature.id.value))
                 own_index += 1
-                for previous in state.functions:
+                for previous in borrow state.functions:
                     if previous.prelude and not signature.prelude and signature.name in module.excluded_functions:
                         continue
                     if previous.name == signature.name and len(previous.parameter_types) == len(signature.parameter_types):
@@ -2483,6 +2499,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case _:
                 pass
     callable_validate_implementations(state)
+    measured = semantic_stage(measured, "signatures")
     # Immutable literal globals are safe to materialize in each function. Other
     # globals keep initializer order and cannot be captured by this slice yet.
     global_names: list[string] = []
@@ -2505,6 +2522,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case _:
                 pass
     callable_validate_generics(state, module)
+    measured = semantic_stage(measured, "generic contracts")
     for item in module.items:
         match item:
             case BindingItem:
@@ -2591,6 +2609,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             # Function signatures and specializations can introduce outcome and
             # aggregate layouts after the initial declaration pass.
     module.records = state.records
+    measured = semantic_stage(measured, "bodies")
     return module
 
 
@@ -2668,7 +2687,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2763,7 +2782,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                     arguments.append(binding.type_id)
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
-    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
     local.destructor = function.name.ends_with(".drop")
     if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
         return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
@@ -2870,7 +2889,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
             case OperatorItem:
                 namespace := ""
                 operation_span = declaration.span
-                for source_item in module.items:
+                for source_item in borrow module.items:
                     match source_item:
                         case Function:
                             origin ?= declaration.span
@@ -2889,7 +2908,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                     callable_register_generic(state, function)
                     continue
                 signature = callable_signature(function, int(len(state.functions)), state.records, state.declarations)
-                for previous in state.functions:
+                for previous in borrow state.functions:
                     syntax ?= previous.operator_syntax
                     if syntax != None:
                         if syntax.symbol == operation.syntax.symbol and callable_same_types(previous.parameter_types, signature.parameter_types):
@@ -3714,14 +3733,19 @@ def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId
 
 
 def callable_register_record_methods(state: CallableAnalysis, owner: universal.TypeId) -> unit | diagnostics.Diagnostic:
-    for record in state.records:
-        if record.type_id.index != owner.index or definitions.record_instance(state.declarations, record.type_id) == None:
+    # Record method contracts are immutable within this function catalog.
+    # String is a record instance with a primitive ID, so query the declaration
+    # registry instead of classifying instances by a numeric ID range.
+    if int(owner.index) in state.registered_methods or definitions.record_instance(state.declarations, owner) == None:
+        return
+    for record in borrow state.records:
+        if record.type_id.index != owner.index:
             continue
         local = callable_scope(state)
         local.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances, expression_functions=state.declarations.expression_functions)
         callable_record_environment(local, owner)
         constructors_registered := false
-        for function in state.functions:
+        for function in borrow state.functions:
             if function.constructor and function.owner_type.index == owner.index:
                 constructors_registered = true
         for template in state.templates:
@@ -3737,7 +3761,7 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
                 return error(callable_diagnostic("generic record methods require method argument inference", method.span))
             name = record.name + "." + method.name
             found := false
-            for function in state.functions:
+            for function in borrow state.functions:
                 if function.name == name:
                     previous ?= function.span
                     declared ?= method.span
@@ -3769,7 +3793,7 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
 
         for operation in record.operators:
             found := false
-            for function in state.functions:
+            for function in borrow state.functions:
                 syntax ?= function.operator_syntax
                 if syntax != None:
                     if function.owner_type.index == owner.index and syntax.symbol == operation.syntax.symbol:
@@ -3780,6 +3804,7 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
             function = callable_operator_function(operation, owner, record.lookup, state.records)
             function.owner_type = owner
             state.functions.append(callable_signature(function, int(len(state.functions)), state.records, local.declarations))
+    state.registered_methods.append(int(owner.index))
 
 
 def callable_infer_annotation(state: CallableAnalysis, annotation: universal.TypeAnnotation, actual: universal.TypeId, parameters: list[string], actuals: list[universal.TypeId], namespace: string) -> unit | diagnostics.Diagnostic:

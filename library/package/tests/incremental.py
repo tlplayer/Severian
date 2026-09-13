@@ -96,7 +96,7 @@ class Incremental(unittest.TestCase):
     def test_default_registry_and_named_local_publication(self):
         producer = self.package('published', library=True)
         self.invoke('publish', 'published', '--local', cwd=producer)
-        release = self.root / 'home/registry/packages/published/0.1.0'
+        release = self.root / 'home/packages/registry/published/0.1.0'
         self.assertTrue(release.is_dir())
         before = self.records(release)
         consumer = self.package('unrelated')

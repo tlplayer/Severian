@@ -226,7 +226,7 @@ def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[M
     return handle
 
 
-def lower_callables(module: borrow universal.Module) -> MlirProgram:
+def lower_callables(module: borrow universal.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = []) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
     for function in borrow module.functions:
@@ -248,6 +248,26 @@ def lower_callables(module: borrow universal.Module) -> MlirProgram:
             ownership.authorize_lowering(module, module.cfg_bodies[function.cfg_index], function.values)
             callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry)
         index += 1
+    if library:
+        export_index := 0
+        for name in export_names:
+            for function in borrow module.functions:
+                if function.name != name:
+                    continue
+                parameters: list[MlirValue] = []
+                for type_id in function.parameter_types:
+                    parameters.append(builder_new_value(builder, callable_mlir_type(type_id, module.records)))
+                results = callable_mlir_results(function.result_type, module.records)
+                wrapper = builder_create_function(builder, export_symbols[export_index], public_visibility(), parameters, results)
+                builder_set_insertion_point(builder, wrapper.entry)
+                values: list[MlirValue] = []
+                for result in results:
+                    values.append(builder_new_value(builder, result))
+                builder_call(builder, callable_function_symbol(function.id), parameters, values)
+                builder_return(builder, values)
+            export_index += 1
+        validate(builder.program)
+        return builder.program
     entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
     builder_set_insertion_point(builder, entry.entry)
     if len(module.cfg_bodies) != 0:

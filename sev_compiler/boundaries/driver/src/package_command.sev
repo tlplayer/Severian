@@ -4,6 +4,10 @@ import process
 def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool) -> int:
     compiler = package.Compiler(process.executable(), sysroot)
     location = input if input != "" else "."
+    if command == "init":
+        project = package.init(location, "", library)
+        print("created " + project.root)
+        return 0
     if command == "new":
         project = package.new(location, "", library)
         print("created " + project.root)

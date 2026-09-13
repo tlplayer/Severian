@@ -262,6 +262,8 @@ def print_function(program: borrow MlirProgram, function: borrow MlirFunctionOp)
     output += parameters.join(", ") + ")" + result
     if function.declaration:
         return output + "\n"
+    if not function.native and visibility_name(function.visibility) == "private":
+        output += " attributes {llvm.linkage = #llvm.linkage<internal>}"
     output += " " + print_region(program, function.body_region, "    ", true) + "\n"
     return output
 

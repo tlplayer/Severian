@@ -1,0 +1,62 @@
+import package
+import universal
+
+# Version one uses the existing scalar C ABI. Unsupported contracts retain
+# source fallback; never describe records, effects or generics as scalar ABI.
+def interface_type(type_id: universal.TypeId) -> string:
+    if type_id.index == 2:
+        return "unit"
+    if type_id.index == 32:
+        return "i32"
+    if type_id.index == 64:
+        return "i64"
+    if type_id.index == 532:
+        return "u32"
+    if type_id.index == 564:
+        return "u64"
+    if type_id.index == 163:
+        return "f32"
+    if type_id.index == 164:
+        return "f64"
+    return ""
+
+def scalar_interface(module: borrow universal.Module, resolution: package.Resolution, names: list[string], symbols: list[string]) -> string:
+    if len(resolution.packages) == 0:
+        return ""
+    for item in borrow module.items:
+        match item:
+            case BindingItem:
+                if int(binding.span.source.index) not in module.prelude_sources:
+                    return ""
+            case ExpressionItem:
+                if int(expression.span.source.index) not in module.prelude_sources:
+                    return ""
+            case _:
+                pass
+    owner = resolution.packages[0]
+    exports = package.string_array(package.setting(owner.manifest.entries, "package", "export", "[]"))
+    lines: list[string] = []
+    for name in exports:
+        found := 0
+        for function in borrow module.functions:
+            if function.name != name:
+                continue
+            found += 1
+            result = interface_type(function.result_type)
+            if result == "" or len(function.type_parameters) != 0 or len(function.constraints) != 0 or function.result_mode != "" or len(function.decorators) != 0:
+                return ""
+            parameters: list[string] = []
+            index := 0
+            for parameter in borrow function.parameters:
+                spelling = interface_type(function.parameter_types[index])
+                if spelling in ["", "unit"] or parameter.default != None or parameter.variadic or parameter.keyword_only or len(parameter.modifiers) != 0:
+                    return ""
+                parameters.append(parameter.name + ": " + spelling)
+                index += 1
+            symbol = "__sev_pkg_" + owner.checksum.replace("sha256:", "") + "_" + name
+            names.append(name)
+            symbols.append(symbol)
+            lines.append("@c(symbol=" + package.toml_quote(symbol) + ")\ndef " + name + "(" + parameters.join(", ") + ") -> " + result)
+        if found != 1:
+            return ""
+    return lines.join("\n\n")

@@ -32,8 +32,16 @@ def select(root: string, requirements: Requirements) -> Selection | Error:
         compatible = text_setting(provenance, "", "architecture") == capture(["uname", "-m"]) and text_setting(provenance, "", "os") == capture(["uname", "-s"]) and text_setting(provenance, "", "runtime-abi") == "severian-source-1"
     if os.is_file(native) and requirements.platform == "host" and compatible:
         return Selection("native", native, rejected)
+    if requirements.platform == "host" and compatible and os.is_dir(root + "/metadata/realizations"):
+        for location in files(root + "/metadata/realizations"):
+            if not location.ends_with(".toml") or location.ends_with(".inputs.toml"):
+                continue
+            realization = parse_document(read_text(location))
+            if text_setting(realization, "", "kind", "") == "native" and text_setting(realization, "", "profile", "") == requirements.profile:
+                output = relative_path(text_setting(realization, "", "output"))
+                if path.basename(output) == selected and output.starts_with("bin/") and os.is_file(root + "/" + output):
+                    return Selection("native", root + "/" + output, rejected)
     rejected.append("no compatible native artifact for " + requirements.platform + "/" + requirements.profile)
-    rejected.append("compiler/backend artifact loading is not supported by this compiler")
     if os.is_file(root + "/source/package.toml"):
         return Selection("source", root + "/source", rejected)
     rejected.append("distribution contains no source fallback")
@@ -57,13 +65,12 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         throw Error("package is marked publish = false")
     mutable_project(project.root)
     root = registry_root(request.registry)
-    release = registry_release(project.manifest.name, project.manifest.version, request.registry)
+    release := registry_release(project.manifest.name, project.manifest.version, request.registry)
+    version_root = root + "/" + safe_name(project.manifest.name) + "/" + safe_name(project.manifest.version)
     name = project.manifest.name + "-" + project.manifest.version + ".pkg"
     include_source = request.include_source and setting(project.manifest.entries, "publish", "include-source") != "false"
     if not include_source:
-        for target in project.manifest.targets:
-            if target.kind == "library":
-                throw Error("source-free libraries require compiler interfaces and compatible library artifacts")
+        throw Error("published packages must include source")
     resolved = resolve(project, Resolve("publish", false, request.registry))
     frozen = frozen_manifest(project, resolved)
     # Resolve the frozen graph before building: sibling checkouts cannot satisfy
@@ -72,21 +79,26 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
     checksum = source_checksum(project.root, frozen)
     identity = "source = " + toml_quote(checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\nprofile = " + toml_quote(request.profile) + "\nplatform = " + toml_quote(request.platform) + "\ninclude-source = " + ("true" if include_source else "false") + "\n" + published.lock
     if os.exists(release) or os.is_symlink(release):
-        if not os.is_file(release + "/metadata/publication.toml") or read_text(release + "/metadata/publication.toml") != identity:
+        if not os.is_file(release + "/metadata/publication.toml"):
             throw Error("PackageVersionConflict: release already exists with different content: " + release)
         verify_publication(release, name)
-        return release + "/" + name
+        previous = read_text(release + "/metadata/publication.toml")
+        if previous == identity:
+            return release + "/" + name
+        if text_setting(parse_document(previous), "", "source") != checksum:
+            throw Error("PackageVersionConflict: release already exists with different source: " + release)
     stage = temporary(root)
     try:
-        result = build(project, compiler, Build("", request.platform, request.profile, "", "", false))
+        write_text(stage + "/identity", identity)
+        relative_release = checksum.replace(":", "-") + "/realizations/" + digest(stage + "/identity").replace(":", "-") + "/package.pkg"
+        release = version_root + "/" + relative_release
         if source_checksum(project.root, frozen) != checksum:
             throw Error("package source changed during publication")
         distribution = stage + "/distribution"
         mkdir(distribution)
         write_text(distribution + "/metadata/build.toml", "architecture = " + toml_quote(capture(["uname", "-m"])) + "\nos = " + toml_quote(capture(["uname", "-s"])) + "\nruntime-abi = \"severian-source-1\"\n")
         write_text(distribution + "/metadata/package.toml", frozen)
-        write_text(distribution + "/metadata/sev.lock", published.lock)
-        write_text(distribution + "/metadata/publication.toml", identity)
+        write_text(distribution + "/metadata/package.lock", published.lock)
         if include_source:
             for location in files(project.root):
                 relative = location[int(len(project.root)) + 1:]
@@ -99,13 +111,25 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
                 throw Error("package source changed while staging publication")
             source_project = Project(distribution + "/source", parse_manifest(frozen), frozen, "")
             source_resolution = resolve(source_project, Resolve("publish", false, request.registry))
-            write_text(distribution + "/source/sev.lock", source_resolution.lock)
-            write_text(distribution + "/metadata/sev.lock", source_resolution.lock)
+            write_text(distribution + "/source/package.lock", source_resolution.lock)
+            write_text(distribution + "/metadata/package.lock", source_resolution.lock)
+        # Build the exact frozen source shipped to clients. Its content identity
+        # and relative inputs then match a client on any checkout path.
+        result = build(open(distribution + "/source"), compiler, Build("", request.platform, request.profile, "", "", true))
         for artifact in result.artifacts:
-            if artifact.format == "native":
-                destination = distribution + "/artifacts/" + artifact.platform + "/" + artifact.profile + "/bin/" + artifact.target.name
-                copy_file(artifact.path, destination)
-                require_command(["chmod", "755", "--", destination])
+            for directory in ["package.pkgi", "metadata/realizations", "artifacts", "bin", "container"]:
+                selected = artifact.package_root + "/" + directory
+                if os.is_dir(selected):
+                    for location in files(selected, true):
+                        destination = distribution + "/" + directory + location[int(len(selected)):]
+                        copy_file(location, destination)
+                        if directory == "bin":
+                            require_command(["chmod", "755", "--", destination])
+            retain_file(artifact.package_root + "/metadata/source-index.toml", distribution + "/metadata/source-index.toml")
+            retain_file(artifact.package_root + "/metadata/artifacts.toml", distribution + "/metadata/artifacts.toml")
+        # Worker state exists only while staging, never in the publication.
+        remove_tree(distribution + "/source/package.pkg")
+        write_text(distribution + "/metadata/publication.toml", identity)
         entries: list[ArchiveEntry] = []
         for location in files(distribution, true):
             relative = location[int(len(distribution)) + 1:]
@@ -119,12 +143,22 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         if lock < 0:
             throw Error("could not lock registry publication")
         try:
+            current = registry_release(project.manifest.name, project.manifest.version, request.registry)
+            if os.is_file(current + "/metadata/publication.toml"):
+                previous = parse_document(read_text(current + "/metadata/publication.toml"))
+                if text_setting(previous, "", "source") != checksum:
+                    throw Error("PackageVersionConflict: another revision already owns this version")
             if os.exists(release) or os.is_symlink(release):
                 if not os.is_file(release + "/metadata/publication.toml") or read_text(release + "/metadata/publication.toml") != identity:
                     throw Error("PackageVersionConflict: release already exists with different content: " + release)
                 verify_publication(release, name)
             else:
                 os.publish_directory(distribution, release)
+                write_text(stage + "/index.toml", "format = 1\npackage = " + toml_quote(relative_release) + "\n")
+                # A legacy flat payload's inventory must remain valid. Its
+                # discovery marker uses the already-excluded local prefix.
+                marker = ".sev-index.toml" if os.is_file(version_root + "/metadata/publication.toml") else "index.toml"
+                replace_file(stage + "/index.toml", version_root + "/" + marker)
             file.unlock(lock)
         catch error: Error:
             file.unlock(lock)

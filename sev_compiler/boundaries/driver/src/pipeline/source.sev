@@ -14,6 +14,7 @@ import * from "../../../../transforms/mlir/src/emit/callable.sev" as mlir
 import * from "../../../../transforms/mlir/src/ir/text.sev" as text
 import * from "../../../../frontend/modules/src/source.sev"
 import * from "timing.sev" as timing
+import * from "package_interface.sev" as package_interface
 import * from "../../../backend/src/native_mlir.sev" as native
 
 
@@ -58,8 +59,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = []) -> string | Error:
-    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = []) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface)
     if result is string:
         return result
     if result is Diagnostic:
@@ -69,7 +70,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = []) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
@@ -191,13 +192,21 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     timing.finish_stage(timings, "subject")
     typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace, files)
     timing.finish_stage(timings, "semantic")
+    export_names: list[string] = []
+    export_symbols: list[string] = []
+    if emit == "library":
+        contract = package_interface.scalar_interface(typed, resolution, export_names, export_symbols)
+        interface.append(contract)
+        if contract == "":
+            export_names.clear()
+            export_symbols.clear()
     lowered = mir.build_callables(typed, library_sources)
     timing.finish_stage(timings, "mir")
     if emit == "agent-ir":
         result = agent_ir.emit(lowered, files)
         timing.finish_stage(timings, "agent-ir")
         return result
-    program = mlir.lower_callables(lowered)
+    program = mlir.lower_callables(lowered, emit == "library", export_names, export_symbols)
     timing.finish_stage(timings, "mlir")
     layout_query := false
     for body in lowered.cfg_bodies:
