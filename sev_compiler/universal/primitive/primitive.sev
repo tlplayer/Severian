@@ -1,4 +1,5 @@
 import * from "../type/type.sev"
+import * from "error.sev"
 
 enum PrimitiveCategory:
     Boolean

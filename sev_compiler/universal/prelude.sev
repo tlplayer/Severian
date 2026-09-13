@@ -1,5 +1,6 @@
 # Ordered source providers. Add library behavior here without rebuilding the compiler.
 import * from "grammar/contracts.sev"
+import * from "primitive/error.sev"
 import * from "primitive/string/storage.sev"
 import * from "primitive/tuple.sev"
 import * from "primitive/enum.sev"

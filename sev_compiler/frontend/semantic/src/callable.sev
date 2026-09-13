@@ -77,6 +77,8 @@ class CallableAnalysis:
     generic_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     template_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     registered_methods: list[int] = []
+    return_type: universal.TypeId = universal.TypeId(2)
+    catching_error: bool = false
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -749,6 +751,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             return expression
         case Evaluate:
             return expression
+        case ThrowValue:
+            raised = callable_raised_value(state, value, state.return_type)
+            result_type = expected if expected.index != 0 else universal.TypeId(2)
+            return universal.Expression(universal.ThrowValue(raised), expression.span, type_id=result_type)
         case UpdateOperand:
             result_type = expression.type_id
         case Fallback:
@@ -1629,6 +1635,18 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
         case Call:
             match callee.kind:
                 case Name:
+                    if name == "throws":
+                        if not state.test_context:
+                            return error(callable_diagnostic("throws is only available in tests", expression.span))
+                        if len(arguments) != 1 or arguments[0].name != None or arguments[0].spread:
+                            return error(callable_diagnostic("throws requires exactly one positional expression", expression.span))
+                        local = callable_scope(state)
+                        local.catching_error = true
+                        value = callable_success(local, callable_expression(local, arguments[0].value, universal.TypeId(0)))
+                        no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), expression.span)
+                        message = universal.Expression(universal.LiteralValue(universal.StringValue("expected an error to be thrown")), expression.span)
+                        failure = callable_assertion(state, no, message, expression.span, arguments[0].value.span)
+                        return callable_control(state, "Throws", [value], [universal.Block([failure])], expression.span)
                     if name == "assert" and not callable_excluded(state, "assert", expression.span):
                         if len(arguments) < 1 or len(arguments) > 2:
                             return error(callable_diagnostic("assert requires a condition and optional message", expression.span))
@@ -1646,6 +1664,21 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
         case _:
             pass
     return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
+
+
+def callable_raised_value(state: CallableAnalysis, value: universal.Expression, result_type: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
+    if state.destructor:
+        return error(callable_diagnostic("a destructor cannot throw", value.span))
+    raised = callable_expression(state, value, universal.TypeId(0))
+    if not definitions.error_conformance(state.declarations, state.records, raised.type_id):
+        return error(callable_diagnostic("throw requires a value conforming to Error", value.span))
+    target := result_type
+    if target.index == 2 or state.catching_error:
+        # A local error edge needs an envelope with a storable success slot;
+        # it never produces a success value or changes the function's result.
+        alternatives = [universal.named_type("bool", [], value.span), universal.named_type(definitions.type_name(raised.type_id, state.records), [], value.span)]
+        target = callable_annotation(universal.TypeAnnotation(universal.Union(alternatives), value.span), state.records, state.namespace, state.declarations)
+    return callable_expression(state, raised, target)
 
 
 def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
@@ -1984,10 +2017,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
             case Throw:
                 if state.destructor:
                     return error(callable_diagnostic("a destructor cannot throw", span))
-                error_value = callable_expression(state, value, universal.TypeId(0))
-                if not definitions.error_conformance(state.declarations, state.records, error_value.type_id):
-                    return error(callable_diagnostic("throw requires a value conforming to Error", span))
-                wrapped = callable_expression(state, error_value, result_type)
+                wrapped = callable_raised_value(state, value, result_type)
                 saved = callable_binding(state, universal.Binding("$throw$" + string(state.next_id[0]), None, wrapped, false, true, span))
                 output.statements.append(universal.BindingStatement(saved))
                 callable_deferred_cleanup(state, output, 0)
@@ -2687,7 +2717,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2787,6 +2817,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
     if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
         return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
     local.test_context = function.name.starts_with("__test_") or function.name.starts_with("$case$")
+    local.return_type = function.result_type
     local.result_mode = function.result_mode
     local.result_origin = function.result_origin
     namespace ?= function.lookup

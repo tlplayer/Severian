@@ -1,0 +1,6 @@
+class MessageError: Error
+    message: string
+
+
+def Error(message: string) -> MessageError:
+    return MessageError(message)

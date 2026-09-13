@@ -480,6 +480,19 @@ trait Outcome: G:
         return payload
 
 
+trait Throws: G:
+    control_flow: ControlFlow = Error
+
+    def semantic(value: Ex, failure: B):
+        caught = cfg.block()
+        cfg.catch(caught)
+        lower(value)
+        cfg.end_catch()
+        lower(failure)
+        cfg.fallthrough(caught)
+        cfg.at(caught)
+
+
 trait List: G:
     construction: string = "list_create"
 
