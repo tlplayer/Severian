@@ -1,22 +1,5 @@
-# Monotonic wall-clock measurements for source test policies (hosted POSIX).
-@c(symbol="clock_gettime")
-def __clock_gettime(clock: i32, result: native_ptr) -> i32
-
-@mlir("memref.extract_aligned_pointer_as_index")
-def __address(value: buffer[int]) -> index
-
-@mlir("arith.index_cast")
-def __integer(value: index) -> int
-
-@mlir("llvm.inttoptr")
-def __pointer(value: int) -> native_ptr
-
-
-def begin() -> int:
-    storage = [0, 0]
-    assert(__clock_gettime(1, __pointer(__integer(__address(storage)))) == 0)
-    return storage[0] * 1000000000 + storage[1]
-
+# Test lifecycle adapters over the reusable system profiling API.
+import * from "../../system/profiling/src/measurement.sev"
 
 def ready(context: int) -> int:
     return context
@@ -32,4 +15,20 @@ def after(context: int):
 
 
 def finish(context: int):
+    pass
+
+
+def prepared(context: Measurement) -> Measurement:
+    return context
+
+def measure_before(context: Measurement) -> Measurement:
+    return measure()
+
+def report(context: Measurement):
+    elapsed = time(context)
+    calls = allocations(context)
+    allocated = memory(context)
+    print("profile:", elapsed.amount, "ns;", calls, "allocations;", allocated.amount / 8.0, "allocated bytes")
+
+def measured_finish(context: Measurement):
     pass

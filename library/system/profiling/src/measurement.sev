@@ -1,0 +1,27 @@
+import * from "../../../core/storage/src/statistics.sev" as storage
+import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
+
+@c(symbol="clock_gettime")
+def __clock_gettime(clock: i32, result: native_ptr) -> i32
+
+def begin() -> int:
+    value = [0, 0]
+    assert(__clock_gettime(1, raw.__raw_pointer(raw.__raw_index(raw.__raw_buffer_address(value)))) == 0)
+    return value[0] * 1000000000 + value[1]
+
+class Measurement:
+    started: int
+    allocation_start: u64
+    bytes_start: u64
+
+def measure() -> Measurement:
+    return Measurement(begin(), storage.allocation_count(), storage.allocated_bytes())
+
+def time(context: Measurement) -> Duration:
+    return Duration(float(begin() - context.started))
+
+def allocations(context: Measurement) -> int:
+    return int(storage.allocation_count() - context.allocation_start)
+
+def memory(context: Measurement) -> DataSize:
+    return DataSize(float(storage.allocated_bytes() - context.bytes_start) * 8.0)

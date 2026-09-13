@@ -1,4 +1,5 @@
-import * from "profile.sev" as clock
+import * from "../../system/profiling/src/measurement.sev" as clock
+import * from "../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="fork")
 def __test_fork() -> i32
@@ -14,8 +15,6 @@ def __test_sleep(microseconds: u32) -> i32
 def __test_flush(stream: native_ptr) -> i32
 @c(symbol="_exit")
 def __test_exit(status: i32)
-@mlir("memref.extract_aligned_pointer_as_index")
-def __test_status_address(status: buffer[i32]) -> index
 
 class TestDeadline:
     process: i32
@@ -41,7 +40,7 @@ def __test_start(limit: Duration, label: string) -> TestDeadline:
     assert(limit.amount > 0.0 and limit.amount < 9223372036854775808.0, "timeout requires a positive finite duration")
     nanoseconds = int(limit.amount)
     assert(nanoseconds > 0, "timeout must be at least one nanosecond")
-    assert(__test_flush(clock.__pointer(0)) == 0)
+    assert(__test_flush(raw.__raw_pointer(0)) == 0)
     started = clock.begin()
     child = __test_fork()
     assert(child >= 0, "could not start isolated test")
@@ -57,12 +56,12 @@ def __test_is_child(ticket: TestDeadline) -> bool:
     return ticket.process == 0
 
 def __test_complete():
-    __test_flush(clock.__pointer(0))
+    __test_flush(raw.__raw_pointer(0))
     __test_exit(0)
 
 def __test_wait(ticket: TestDeadline):
     status = [i32(0)]
-    address = clock.__pointer(clock.__integer(__test_status_address(status)))
+    address = raw.__raw_pointer(raw.__raw_index(raw.__raw_buffer_address(status)))
     while true:
         waited = __test_waitpid(ticket.process, address, 1)
         if waited == ticket.process:

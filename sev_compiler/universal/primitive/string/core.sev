@@ -23,7 +23,7 @@ def __character(value: int) -> char
 
 def __allocate(size: index) -> string:
     result = string()
-    result.storage.reserve(__size(size))
+    result.reserve(__size(size))
     result.storage.used = __size(size)
     return result
 

@@ -13,3 +13,5 @@ sources = ["src/capture.sev"]
 
 [dependencies]
 process = { path = "../system/process", version = "0.1.0" }
+profiling = { path = "../system/profiling", version = "0.1.0" }
+memory = { package = "core.memory", path = "../core/memory", version = "0.1.0" }

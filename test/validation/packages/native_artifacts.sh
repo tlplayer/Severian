@@ -82,7 +82,7 @@ fi
 sev test --build-profile release
 # Source edits in the consumer must still link the same dependency archive.
 printf '\n# consumer-only change\n' >> src/main.sev
-sev build --build-profile release 2>"$workspace/changed.log"
+sev build --build-profile release --locked 2>"$workspace/changed.log"
 cat "$workspace/changed.log"
 if rg 'compiling .*hello_world.*src/lib.sev' "$workspace/changed.log"; then
     exit 1

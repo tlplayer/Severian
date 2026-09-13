@@ -6,7 +6,7 @@ description = "Typed file access"
 
 [package.unsafe]
 capabilities = ["native-abi"]
-sources = ["src/lib.sev"]
+sources = ["src/lib.sev", "src/text.sev"]
 
 [lib]
 path = "src/lib.sev"
@@ -14,6 +14,8 @@ path = "src/lib.sev"
 [dependencies]
 system = { path = "..", version = "0.1.0" }
 data = { path = "../../data", version = "0.1.0" }
+storage = { package = "core.storage", path = "../../core/storage", version = "0.1.0" }
+memory = { package = "core.memory", path = "../../core/memory", version = "0.1.0" }
 
 [dev-dependencies]
 os = { path = "../os", version = "0.1.0" }

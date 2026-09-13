@@ -1,0 +1,7 @@
+# Cumulative allocations owned by the current thread's storage providers.
+# Released allocations remain in the totals; these are not live bytes or RSS.
+@c(symbol="__sev_storage_measured_allocations")
+def allocation_count() -> u64
+
+@c(symbol="__sev_storage_measured_bytes")
+def allocated_bytes() -> u64
