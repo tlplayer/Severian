@@ -1,8 +1,8 @@
 # Hosted raw-memory boundaries; typed buffers use the same target memory lowering.
-@c(symbol="calloc")
+@c(symbol="__sev_memory_zeroed")
 def __raw_calloc(count: int, width: int) -> native_ptr
 
-@c(symbol="free")
+@c(symbol="__sev_memory_release")
 def __raw_free(value: native_ptr)
 
 @mlir("llvm.ptrtoint")

@@ -16,7 +16,8 @@ pub use string::{StringAbiV1, StringStatusV1, StringViewAbiV1, STRING_ABI_VERSIO
 
 /// Native runtime translation units linked by artifact backends.
 ///
-/// Runtime owns these implementations. Backends only pass the sources to the
+/// Core memory/storage own allocation and initialized contents; the runtime
+/// provides operation adapters. Backends only pass the sources to the
 /// platform linker after lowering has selected versioned runtime symbols.
 pub fn native_sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("native");
@@ -36,6 +37,7 @@ pub fn native_sources() -> Vec<PathBuf> {
     ]
     .into_iter()
     .map(|source| root.join(source))
+    .chain(std::iter::once(root.join("../../../library/core/memory/native/memory.c")))
     .collect()
 }
 
@@ -70,6 +72,10 @@ mod tests {
             .arg("-Wextra")
             .arg("-Werror")
             .arg(&source)
+            .arg(manifest.join("native/list.c"))
+            .arg(manifest.join("native/string.c"))
+            .arg(manifest.join("native/owned.c"))
+            .arg(manifest.join("native/any.c"))
             .arg("-lm")
             .arg("-o")
             .arg(&executable)

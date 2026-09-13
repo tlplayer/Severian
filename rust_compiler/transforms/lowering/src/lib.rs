@@ -29,7 +29,9 @@ mod cfg_lowering_entry {
             values: Vec::new(),
             task_locals: BTreeSet::new(),
         };
-        let mut initializer_cfg = context.lower_cfg_body(&mir.initializer)?;
+        let initializer = severian_mir::ownership_plan(&mir.initializer, types)
+            .map_err(LoweringError::Ownership)?;
+        let mut initializer_cfg = context.lower_cfg_body(initializer.body())?;
         initializer_cfg.return_type = LoweredType::Unit;
         let functions = mir
             .functions
@@ -69,7 +71,16 @@ mod cfg_lowering_entry {
                     cfg: function
                         .body
                         .as_ref()
-                        .map(|body| context.lower_cfg_body(body))
+                        .map(|body| {
+                            // Generated storage glue implements the universal type contract;
+                            // ordinary bodies must carry a fresh checked ownership plan.
+                            if types.is_storage_glue(function.definition) {
+                                context.lower_cfg_body(body)
+                            } else {
+                                let plan = severian_mir::ownership_plan(body, types).map_err(LoweringError::Ownership)?;
+                                context.lower_cfg_body(plan.body())
+                            }
+                        })
                         .transpose()?,
                 })
             })
@@ -92,6 +103,7 @@ mod cfg_lowering_entry {
             .enumerate()
             .map(|(id, declaration)| {
                 Ok(severian_lir::ClassDeclaration {
+                    payload_destroy: types.payload_destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
                     destroy: types.destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
                     retain: types.retention(declaration.id).map(|id| FunctionId(id.declaration.0)),
                     variants: declaration.variants.clone(),
@@ -1458,6 +1470,7 @@ fn task_locals(body: &severian_mir::CfgBody) -> BTreeSet<severian_mir::LocalId> 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringError {
+    Ownership(Vec<severian_mir::OwnershipError>),
     NotPrimitive(TypeId),
     UnknownLocal(u32),
     UnknownGlobal(u32),
@@ -1837,7 +1850,8 @@ mod legacy_structured_lowering {
                 .enumerate()
                 .map(|(id, declaration)| {
                     Ok(severian_lir::ClassDeclaration {
-                        destroy: types.destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
+                        payload_destroy: types.payload_destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
+                    destroy: types.destruction(declaration.id).map(|id| FunctionId(id.declaration.0)),
                         retain: types.retention(declaration.id).map(|id| FunctionId(id.declaration.0)),
                         variants: declaration.variants.clone(),
                         id: id as u32,

@@ -40,7 +40,7 @@ def package_module(resolution: package.Resolution, importer: string, locator: st
 def standard_source(root: string, name: string, importer: string) -> string | diagnostics.Diagnostic:
     if root == "":
         return error(diagnostics.diagnostic("E000124", "named import requires a sysroot or resolved package: " + name))
-    selected ?= package.standalone_dependency(root + "/library", importer, name)
+    selected ?= package.standalone_source(root + "/library", importer, name)
     if selected is string:
         return selected
     if selected is Error:

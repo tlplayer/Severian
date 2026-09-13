@@ -1851,3 +1851,20 @@ fn unsupported_bootstrap_destructors_cannot_silently_skip_cleanup() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("bootstrap class destruction lowering is not implemented"));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn releasing_a_view_reports_the_offending_source_span() {
+    for name in ["consume", "__sev_retain_type99"] {
+        let root = temporary("view-release");
+        let source = root.join("main.sev");
+        fs::write(&source, format!("def {name}(value: borrow string):\n    drop value\n")).unwrap();
+        let output = sev().arg("check").arg(&source).output().unwrap();
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "view release compiled: {name}");
+        assert!(diagnostic.contains("E000303"), "{diagnostic}");
+        assert!(diagnostic.contains("cannot consume or release view"), "{diagnostic}");
+        assert!(diagnostic.contains("main.sev:2:5"), "{diagnostic}");
+        assert!(diagnostic.contains("drop value"), "{diagnostic}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}

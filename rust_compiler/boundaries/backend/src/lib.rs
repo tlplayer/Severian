@@ -819,7 +819,7 @@ fn emit_mlir_binary(
         "--convert-arith-to-llvm".to_owned(),
         "--convert-cf-to-llvm".to_owned(),
         "--convert-func-to-llvm".to_owned(),
-        "--finalize-memref-to-llvm".to_owned(),
+        "--finalize-memref-to-llvm=use-generic-functions".to_owned(),
         "--reconcile-unrealized-casts".to_owned(),
         "--ensure-debug-info-scope-on-llvm-func".to_owned(),
         "--mlir-print-debuginfo".to_owned(),

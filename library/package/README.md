@@ -185,8 +185,20 @@ options. Package timestamps alone do not establish cache validity.
 
 The current compilation-unit cache verifies actual source input hashes, the
 resolved graph, compiler identity, native tool versions, build settings, and
-output digests. Its records live in `package.pkg/build/units/`. This implements
-unit reuse; declaration-level interface invalidation remains a separate step.
+output digests. Its records and reusable outputs live in
+`package.pkg/build/units/`. A unit is keyed by its own transitive graph, so
+building another consumer or editing consumer code does not rebuild the
+dependency unit. Temporary test/run destinations are restored from the same
+cache. Cache lookup precedes prelude preparation, including standalone source
+invocations. Missing, damaged, or changed inputs invalidate the entry; failed
+compilation never marks an entry reusable. `build.incremental = false` bypasses
+reuse. Concurrent invocations serialize writes to each cache entry.
+
+Published packages remain immutable: local unit state for these dependencies
+lives under `${SEVERIAN_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/severian}`
+in `packages/build/units/`, shared by consumers. This implements compilation
+unit reuse; declaration-level interface invalidation and source-free dependency
+consumption remain separate steps.
 
 ## Package operations
 
@@ -256,9 +268,10 @@ ${XDG_DATA_HOME:-$HOME/.local/share}/severian/
 
 `SEVERIAN_HOME` can select an isolated Severian root. Registry releases are
 immutable published realizations; Git checkouts are independent package
-sources. The designed publication command is `sev publish <package> --local`.
-The exact publication CLI and storage migration are not complete; consult the
-current API for supported operations.
+sources. The publication command `sev publish <package> --local` accepts the current
+manifest name, and `sev publish` publishes the current package. The current
+release contents use the archive compatibility layout described below; the
+SIP interface and storage migration remain incomplete.
 
 Publication must preserve package identity, validate indexed content, and
 exclude mutable `package.pkg/build/` state. Current publication stages a

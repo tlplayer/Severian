@@ -1,3 +1,4 @@
+#include "../../../library/core/memory/native/memory.h"
 #include <float.h>
 #include <fcntl.h>
 #include <math.h>
@@ -53,7 +54,7 @@ static void sev_tensor_allocation_retain(void *allocated, void *aligned) {
             pthread_mutex_unlock(&sev_tensor_allocation_mutex);
             return;
         }
-        entry = calloc(1, sizeof(*entry));
+        entry = sev_memory_zeroed(1, sizeof(*entry));
         if (entry == NULL) abort();
         entry->allocation = allocated;
         entry->next = sev_tensor_allocations;
@@ -99,8 +100,8 @@ static void sev_tensor_allocation_release(void *allocated, void *aligned) {
     }
     if (entry->references == 0) {
         *link = entry->next;
-        free(entry);
-        free(allocated);
+        sev_memory_release(entry);
+        sev_memory_release(allocated);
     }
     pthread_mutex_unlock(&sev_tensor_allocation_mutex);
 }
@@ -109,7 +110,7 @@ void *__sev_tensor_box_unranked(int64_t rank, const void *descriptor) {
     if (rank < 0 || rank > 64 || descriptor == NULL) abort();
     size_t words = 3u + 2u * (size_t)rank;
     if (words > (SIZE_MAX - sizeof(sev_unranked_tensor_box)) / sizeof(uintptr_t)) abort();
-    sev_unranked_tensor_box *box = malloc(
+    sev_unranked_tensor_box *box = sev_memory_allocate(
         sizeof(sev_unranked_tensor_box) + words * sizeof(uintptr_t));
     if (box == NULL) abort();
     box->rank = rank;
@@ -140,7 +141,7 @@ void __sev_tensor_local_release(void *local) {
         (void *)box->descriptor[0],
         (void *)box->descriptor[1]
     );
-    free(box);
+    sev_memory_release(box);
     *slot = NULL;
 }
 
@@ -277,7 +278,7 @@ static _Bool sev_safetensor_object(
     const uint8_t **object_end
 ) {
     size_t name_length = strlen(name);
-    char *quoted = malloc(name_length + 3);
+    char *quoted = sev_memory_allocate(name_length + 3);
     sev_tensor_abort_if(quoted == NULL);
     quoted[0] = '"';
     memcpy(quoted + 1, name, name_length);
@@ -286,7 +287,7 @@ static _Bool sev_safetensor_object(
     const uint8_t *header = store->bytes + 8;
     const uint8_t *header_end = header + store->header_length;
     const uint8_t *cursor = sev_find_bytes(header, store->header_length, quoted);
-    free(quoted);
+    sev_memory_release(quoted);
     if (cursor == NULL) return 0;
     cursor += name_length + 2;
     cursor = sev_skip_json_space(cursor, header_end);
@@ -392,7 +393,7 @@ int64_t __sev_safetensor_open(const char *path) {
         close(descriptor);
         return 0;
     }
-    sev_safetensor *store = malloc(sizeof(*store));
+    sev_safetensor *store = sev_memory_allocate(sizeof(*store));
     if (store == NULL) abort();
     *store = (sev_safetensor){descriptor, length, bytes, header_length};
     return (int64_t)(intptr_t)store;
@@ -403,7 +404,7 @@ int32_t __sev_safetensor_close(int64_t handle) {
     if (store == NULL) return -1;
     int result = munmap((void *)store->bytes, store->length);
     if (close(store->descriptor) != 0) result = -1;
-    free(store);
+    sev_memory_release(store);
     return result;
 }
 
@@ -527,7 +528,7 @@ sev_storage_view_abi *__sev_safetensor_view(int64_t handle, const char *name) {
         if (shape_cursor < object_end && *shape_cursor == ',') ++shape_cursor;
         shape_cursor = sev_skip_json_space(shape_cursor, object_end);
     }
-    int64_t *shape = calloc(rank == 0 ? 1 : rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(rank == 0 ? 1 : rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     for (size_t axis = 0; axis < rank; ++axis) {
         uint64_t dimension;
@@ -542,7 +543,7 @@ sev_storage_view_abi *__sev_safetensor_view(int64_t handle, const char *name) {
     uint64_t data_start = 8 + store->header_length;
     sev_tensor_abort_if(data_start + relative_end > store->length);
     sev_tensor *tensor = sev_tensor_new(rank, shape, storage_dtype);
-    free(shape);
+    sev_memory_release(shape);
     size_t byte_width = storage_dtype == 4 || storage_dtype == 9 || storage_dtype == 16
         ? 16
         : storage_dtype == 17
@@ -556,12 +557,12 @@ sev_storage_view_abi *__sev_safetensor_view(int64_t handle, const char *name) {
                     : 1;
     sev_tensor_abort_if(relative_end - relative_start != tensor->count * byte_width);
     const uint8_t *data = store->bytes + data_start + relative_start;
-    free(tensor->values);
+    sev_memory_release(tensor->values);
     tensor->values = NULL;
     tensor->owns_values = 0;
     tensor->mapped_values = data;
     tensor->mapped_byte_width = byte_width;
-    sev_storage_view_abi *view = calloc(1, sizeof(*view));
+    sev_storage_view_abi *view = sev_memory_zeroed(1, sizeof(*view));
     sev_tensor_abort_if(view == NULL);
     view->magic = SEV_STORAGE_VIEW_ABI_MAGIC;
     view->abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
@@ -678,15 +679,15 @@ void *__sev_tensor_test_storage_view(int32_t kind, int32_t bits, int32_t format)
     const int64_t shape[] = {2, 2};
     sev_tensor *tensor = sev_tensor_new(2, shape, dtype);
     size_t byte_width = ((size_t)bits + 7) / 8;
-    uint8_t *data = calloc(tensor->count == 0 ? 1 : tensor->count, byte_width);
+    uint8_t *data = sev_memory_zeroed(tensor->count == 0 ? 1 : tensor->count, byte_width);
     sev_tensor_abort_if(data == NULL);
-    free(tensor->values);
+    sev_memory_release(tensor->values);
     tensor->values = NULL;
     tensor->mapped_values = data;
     tensor->mapped_byte_width = byte_width;
     tensor->owns_values = 0;
 
-    sev_storage_view_abi *view = calloc(1, sizeof(*view));
+    sev_storage_view_abi *view = sev_memory_zeroed(1, sizeof(*view));
     sev_tensor_abort_if(view == NULL);
     view->magic = SEV_STORAGE_VIEW_ABI_MAGIC;
     view->abi_version = SEV_STORAGE_VIEW_ABI_VERSION;
@@ -963,7 +964,7 @@ static size_t sev_tensor_element_count(size_t rank, const int64_t *shape) {
 }
 
 static int64_t *sev_tensor_contiguous_strides(size_t rank, const int64_t *shape) {
-    int64_t *strides = calloc(rank == 0 ? 1 : rank, sizeof(*strides));
+    int64_t *strides = sev_memory_zeroed(rank == 0 ? 1 : rank, sizeof(*strides));
     sev_tensor_abort_if(strides == NULL);
     int64_t stride = 1;
     for (size_t axis = rank; axis > 0; --axis) {
@@ -975,16 +976,16 @@ static int64_t *sev_tensor_contiguous_strides(size_t rank, const int64_t *shape)
 }
 
 static sev_tensor *sev_tensor_new(size_t rank, const int64_t *shape, int32_t dtype) {
-    sev_tensor *tensor = calloc(1, sizeof(*tensor));
+    sev_tensor *tensor = sev_memory_zeroed(1, sizeof(*tensor));
     sev_tensor_abort_if(tensor == NULL);
     tensor->rank = rank;
     tensor->dtype = dtype;
-    tensor->shape = calloc(rank == 0 ? 1 : rank, sizeof(*tensor->shape));
+    tensor->shape = sev_memory_zeroed(rank == 0 ? 1 : rank, sizeof(*tensor->shape));
     sev_tensor_abort_if(tensor->shape == NULL);
     memcpy(tensor->shape, shape, rank * sizeof(*shape));
     tensor->strides = sev_tensor_contiguous_strides(rank, shape);
     tensor->count = sev_tensor_element_count(rank, shape);
-    tensor->values = calloc(tensor->count == 0 ? 1 : tensor->count, sizeof(*tensor->values));
+    tensor->values = sev_memory_zeroed(tensor->count == 0 ? 1 : tensor->count, sizeof(*tensor->values));
     sev_tensor_abort_if(tensor->values == NULL);
     tensor->owns_values = 1;
     return tensor;
@@ -1035,13 +1036,13 @@ static sev_tensor_cell sev_tensor_value(const sev_tensor *tensor, size_t physica
 void *__sev_tensor_from_elements(void *values_storage, void *shape_storage) {
     sev_list *values = values_storage;
     sev_list *shape = shape_storage;
-    int64_t *dimensions = calloc(shape->length == 0 ? 1 : shape->length, sizeof(*dimensions));
+    int64_t *dimensions = sev_memory_zeroed(shape->length == 0 ? 1 : shape->length, sizeof(*dimensions));
     sev_tensor_abort_if(dimensions == NULL);
     for (size_t axis = 0; axis < shape->length; ++axis) {
         dimensions[axis] = (int64_t)shape->values[axis];
     }
     sev_tensor *tensor = sev_tensor_new(shape->length, dimensions, 15);
-    free(dimensions);
+    sev_memory_release(dimensions);
     sev_tensor_abort_if(tensor->count != values->length);
     for (size_t index = 0; index < tensor->count; ++index) {
         tensor->values[index] = sev_tensor_from_float(
@@ -1113,7 +1114,7 @@ static void sev_tensor_broadcast_shape(
     int64_t **shape
 ) {
     *rank = left->rank > right->rank ? left->rank : right->rank;
-    *shape = calloc(*rank == 0 ? 1 : *rank, sizeof(**shape));
+    *shape = sev_memory_zeroed(*rank == 0 ? 1 : *rank, sizeof(**shape));
     sev_tensor_abort_if(*shape == NULL);
     for (size_t offset = 0; offset < *rank; ++offset) {
         int64_t l = offset < left->rank ? left->shape[left->rank - 1 - offset] : 1;
@@ -1198,7 +1199,7 @@ static void *sev_tensor_binary(
     int64_t *shape = NULL;
     sev_tensor_broadcast_shape(left, right, &rank, &shape);
     sev_tensor *result = sev_tensor_new(rank, shape, left->dtype);
-    free(shape);
+    sev_memory_release(shape);
     for (size_t index = 0; index < result->count; ++index) {
         sev_tensor_cell l = sev_tensor_value(
             left,
@@ -1261,13 +1262,13 @@ void *__sev_tensor_sum_axis(void *value, int64_t requested_axis) {
     sev_tensor_abort_if(normalized_axis < 0 || normalized_axis >= (int64_t)source->rank);
     size_t axis = (size_t)normalized_axis;
     size_t rank = source->rank - 1;
-    int64_t *shape = calloc(rank == 0 ? 1 : rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(rank == 0 ? 1 : rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     for (size_t source_axis = 0, result_axis = 0; source_axis < source->rank; ++source_axis) {
         if (source_axis != axis) shape[result_axis++] = source->shape[source_axis];
     }
     sev_tensor *result = sev_tensor_new(rank, shape, source->dtype);
-    free(shape);
+    sev_memory_release(shape);
     int32_t accumulation_dtype = sev_tensor_accumulation_dtype(source->dtype);
     for (size_t output = 0; output < result->count; ++output) {
         size_t coordinates = output;
@@ -1312,7 +1313,7 @@ void *__sev_tensor_matmul(void *left_value, void *right_value) {
         ? left->rank - 2
         : right->rank - 2;
     size_t rank = batch_rank + 2;
-    int64_t *shape = calloc(rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     for (size_t offset = 0; offset < batch_rank; ++offset) {
         int64_t l = offset < left->rank - 2
@@ -1327,7 +1328,7 @@ void *__sev_tensor_matmul(void *left_value, void *right_value) {
     shape[rank - 2] = left->shape[left->rank - 2];
     shape[rank - 1] = right->shape[right->rank - 1];
     sev_tensor *result = sev_tensor_new(rank, shape, left->dtype);
-    free(shape);
+    sev_memory_release(shape);
     int32_t accumulation_dtype = sev_tensor_accumulation_dtype(left->dtype);
     size_t batch_count = 1;
     for (size_t axis = 0; axis < batch_rank; ++axis) {
@@ -1402,11 +1403,11 @@ void *__sev_tensor_matmul(void *left_value, void *right_value) {
 void *__sev_tensor_transpose(void *value) {
     sev_tensor *source = sev_tensor_get(value);
     sev_tensor_abort_if(source->rank != 2);
-    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor *result = sev_memory_zeroed(1, sizeof(*result));
     sev_tensor_abort_if(result == NULL);
     *result = *source;
-    result->shape = calloc(2, sizeof(*result->shape));
-    result->strides = calloc(2, sizeof(*result->strides));
+    result->shape = sev_memory_zeroed(2, sizeof(*result->shape));
+    result->strides = sev_memory_zeroed(2, sizeof(*result->strides));
     sev_tensor_abort_if(result->shape == NULL || result->strides == NULL);
     result->shape[0] = source->shape[1];
     result->shape[1] = source->shape[0];
@@ -1429,11 +1430,11 @@ void *__sev_tensor_slice(
     sev_list *steps = steps_storage;
     sev_tensor_abort_if(starts->length != source->rank || ends->length != source->rank
         || steps->length != source->rank);
-    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor *result = sev_memory_zeroed(1, sizeof(*result));
     sev_tensor_abort_if(result == NULL);
     *result = *source;
-    result->shape = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->shape));
-    result->strides = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
+    result->shape = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*result->shape));
+    result->strides = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
     sev_tensor_abort_if(result->shape == NULL || result->strides == NULL);
     result->count = 1;
     result->owns_values = 0;
@@ -1454,7 +1455,7 @@ void *__sev_tensor_slice(
 void *__sev_tensor_reshape(void *value, void *shape_storage) {
     sev_tensor *source = sev_tensor_get(value);
     sev_list *shape = shape_storage;
-    int64_t *dimensions = calloc(shape->length == 0 ? 1 : shape->length, sizeof(*dimensions));
+    int64_t *dimensions = sev_memory_zeroed(shape->length == 0 ? 1 : shape->length, sizeof(*dimensions));
     sev_tensor_abort_if(dimensions == NULL);
     int64_t inferred_axis = -1;
     size_t known = 1;
@@ -1485,8 +1486,8 @@ void *__sev_tensor_reshape(void *value, void *shape_storage) {
     }
     if (!contiguous) {
         materialized = sev_tensor_get(__sev_tensor_materialize(source));
-        free(materialized->shape);
-        free(materialized->strides);
+        sev_memory_release(materialized->shape);
+        sev_memory_release(materialized->strides);
         materialized->rank = shape->length;
         materialized->shape = dimensions;
         materialized->strides = sev_tensor_contiguous_strides(
@@ -1495,7 +1496,7 @@ void *__sev_tensor_reshape(void *value, void *shape_storage) {
         materialized->offset = 0;
         return sev_tensor_wrap(materialized);
     }
-    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor *result = sev_memory_zeroed(1, sizeof(*result));
     sev_tensor_abort_if(result == NULL);
     *result = *source;
     result->rank = shape->length;
@@ -1511,12 +1512,12 @@ void *__sev_tensor_permute(void *value, void *axes_storage) {
     sev_tensor *source = sev_tensor_get(value);
     sev_list *axes = axes_storage;
     sev_tensor_abort_if(axes->length != source->rank);
-    sev_tensor *result = calloc(1, sizeof(*result));
+    sev_tensor *result = sev_memory_zeroed(1, sizeof(*result));
     sev_tensor_abort_if(result == NULL);
     *result = *source;
-    result->shape = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->shape));
-    result->strides = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
-    _Bool *seen = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*seen));
+    result->shape = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*result->shape));
+    result->strides = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*result->strides));
+    _Bool *seen = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*seen));
     sev_tensor_abort_if(result->shape == NULL || result->strides == NULL || seen == NULL);
     for (size_t axis = 0; axis < source->rank; ++axis) {
         size_t selected = (size_t)axes->values[axis];
@@ -1525,7 +1526,7 @@ void *__sev_tensor_permute(void *value, void *axes_storage) {
         result->shape[axis] = source->shape[selected];
         result->strides[axis] = source->strides[selected];
     }
-    free(seen);
+    sev_memory_release(seen);
     result->owns_values = 0;
     result->gradient = NULL;
     return sev_tensor_wrap(result);
@@ -1797,8 +1798,8 @@ void *__sev_tensor_layer_norm_backward(
 
 void *__sev_tensor_backward_mse(void *output_value) {
     sev_tensor *output = sev_tensor_get(output_value);
-    free(output->gradient);
-    output->gradient = calloc(output->count == 0 ? 1 : output->count, sizeof(*output->gradient));
+    sev_memory_release(output->gradient);
+    output->gradient = sev_memory_zeroed(output->count == 0 ? 1 : output->count, sizeof(*output->gradient));
     sev_tensor_abort_if(output->gradient == NULL);
     for (size_t index = 0; index < output->count; ++index) {
         output->gradient[index] = sev_tensor_value(
@@ -1808,8 +1809,8 @@ void *__sev_tensor_backward_mse(void *output_value) {
     }
     if (output->parent != NULL && output->operation == 'r') {
         sev_tensor *parent = output->parent;
-        free(parent->gradient);
-        parent->gradient = calloc(parent->count == 0 ? 1 : parent->count, sizeof(*parent->gradient));
+        sev_memory_release(parent->gradient);
+        parent->gradient = sev_memory_zeroed(parent->count == 0 ? 1 : parent->count, sizeof(*parent->gradient));
         sev_tensor_abort_if(parent->gradient == NULL);
         for (size_t index = 0; index < parent->count; ++index) {
             sev_tensor_cell input = sev_tensor_value(
@@ -1856,13 +1857,13 @@ void *__sev_tensor_sgd(void *value, double learning_rate) {
 void *__sev_tensor_mean_last(void *value) {
     sev_tensor *source = sev_tensor_get(value);
     sev_tensor_abort_if(source->rank == 0);
-    int64_t *shape = calloc(source->rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(source->rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     memcpy(shape, source->shape, source->rank * sizeof(*shape));
     int64_t width = shape[source->rank - 1];
     shape[source->rank - 1] = 1;
     sev_tensor *result = sev_tensor_new(source->rank, shape, source->dtype);
-    free(shape);
+    sev_memory_release(shape);
     for (size_t outer = 0; outer < result->count; ++outer) {
         __float128 total = 0.0Q;
         for (int64_t column = 0; column < width; ++column) {
@@ -1918,12 +1919,12 @@ void *__sev_tensor_gather(void *value, void *indices_value) {
     sev_tensor *indices = sev_tensor_get(indices_value);
     sev_tensor_abort_if(source->rank == 0);
     size_t rank = indices->rank + source->rank - 1;
-    int64_t *shape = calloc(rank == 0 ? 1 : rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(rank == 0 ? 1 : rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     memcpy(shape, indices->shape, indices->rank * sizeof(*shape));
     memcpy(shape + indices->rank, source->shape + 1, (source->rank - 1) * sizeof(*shape));
     sev_tensor *result = sev_tensor_new(rank, shape, source->dtype);
-    free(shape);
+    sev_memory_release(shape);
     size_t row_width = source->shape[0] == 0 ? 0 : source->count / (size_t)source->shape[0];
     for (size_t index = 0; index < indices->count; ++index) {
         sev_tensor_cell cell = sev_tensor_value(
@@ -1952,7 +1953,7 @@ void *__sev_tensor_concatenate(void *left_value, void *right_value, void *axis_s
     sev_tensor_abort_if(axis_list->length != 1 || left->rank != right->rank || left->dtype != right->dtype);
     size_t axis = (size_t)axis_list->values[0];
     sev_tensor_abort_if(axis >= left->rank);
-    int64_t *shape = calloc(left->rank == 0 ? 1 : left->rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(left->rank == 0 ? 1 : left->rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     memcpy(shape, left->shape, left->rank * sizeof(*shape));
     for (size_t current = 0; current < left->rank; ++current) {
@@ -1960,7 +1961,7 @@ void *__sev_tensor_concatenate(void *left_value, void *right_value, void *axis_s
     }
     shape[axis] += right->shape[axis];
     sev_tensor *result = sev_tensor_new(left->rank, shape, left->dtype);
-    free(shape);
+    sev_memory_release(shape);
     size_t inner = 1;
     for (size_t current = axis + 1; current < left->rank; ++current) inner *= (size_t)left->shape[current];
     size_t outer = left->count / ((size_t)left->shape[axis] * inner);
@@ -1991,12 +1992,12 @@ void *__sev_tensor_repeat(void *value, void *spec_storage) {
     size_t axis = (size_t)spec->values[0];
     size_t repeats = (size_t)spec->values[1];
     sev_tensor_abort_if(axis >= source->rank || repeats == 0);
-    int64_t *shape = calloc(source->rank == 0 ? 1 : source->rank, sizeof(*shape));
+    int64_t *shape = sev_memory_zeroed(source->rank == 0 ? 1 : source->rank, sizeof(*shape));
     sev_tensor_abort_if(shape == NULL);
     memcpy(shape, source->shape, source->rank * sizeof(*shape));
     shape[axis] *= (int64_t)repeats;
     sev_tensor *result = sev_tensor_new(source->rank, shape, source->dtype);
-    free(shape);
+    sev_memory_release(shape);
     size_t inner = 1;
     for (size_t current = axis + 1; current < source->rank; ++current) inner *= (size_t)source->shape[current];
     size_t axis_width = (size_t)source->shape[axis];
@@ -2070,10 +2071,10 @@ void *__sev_tensor_rope(void *value, void *configuration_value) {
 int32_t __sev_tensor_release(void *value) {
     sev_tensor *tensor = value;
     if (tensor == NULL) return -1;
-    if (tensor->owns_values) free(tensor->values);
-    free(tensor->gradient);
-    free(tensor->shape);
-    free(tensor->strides);
-    free(tensor);
+    if (tensor->owns_values) sev_memory_release(tensor->values);
+    sev_memory_release(tensor->gradient);
+    sev_memory_release(tensor->shape);
+    sev_memory_release(tensor->strides);
+    sev_memory_release(tensor);
     return 0;
 }

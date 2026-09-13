@@ -239,3 +239,40 @@ def validate_lock(entries: list[Entry], packages: list[ResolvedPackage]) -> unit
                     matched = true
         if not matched:
             throw Error("lock is stale for " + resolved.identity.name)
+
+# Standalone files share registry and explicit dependency semantics with builds.
+# The sysroot workspace remains the first choice for undeclared standard names.
+def standalone_source(root: string, importer: string, alias: string) -> string | Error:
+    directory := path.dirname(importer)
+    while true:
+        if os.is_file(directory + "/package.toml"):
+            entries = parse_document(read_text(directory + "/package.toml"))
+            for entry in entries:
+                if entry.table == "dependencies" and entry.key == alias:
+                    dependency = parse_dependency(alias, entry.value, false)
+                    ref := dependency.reference
+                    if ref.source == "path":
+                        location = canonical(ref.location if ref.location.starts_with("/") else directory + "/" + ref.location)
+                        manifest = parse_manifest(read_text(location + "/package.toml"))
+                        if manifest.name != ref.name or not version_matches(manifest.version, ref.selector):
+                            throw Error("dependency package identity mismatch: " + alias)
+                        return inside(location, library_target(manifest).path)
+                    lock = directory + "/package.lock" if os.is_file(directory + "/package.lock") else directory + "/sev.lock"
+                    if ref.source == "registry" and os.is_file(lock):
+                        ref.selector = locked_version(parse_document(read_text(lock)), ref)
+                    project = open(fetch(ref))
+                    if project.manifest.name != ref.name:
+                        throw Error("dependency package name mismatch: " + alias)
+                    return inside(project.root, library_target(project.manifest).path)
+            break
+        parent = path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+    try:
+        return workspace_library(root, alias)
+    catch failure: Error:
+        if not failure.message.starts_with("unknown workspace library:"):
+            throw Error(failure.message)
+    project = open(fetch(reference(alias)))
+    return inside(project.root, library_target(project.manifest).path)

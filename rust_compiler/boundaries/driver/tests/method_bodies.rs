@@ -418,3 +418,159 @@ def main():
         "imported\n",
     );
 }
+
+#[test]
+fn rebound_string_arguments_retain_their_replacement() {
+    run(
+        r#"def normalize(value: string) -> string:
+    while len(value) > 1 and value.starts_with("0"):
+        value = value[1:]
+    return value
+
+def consume(value: string):
+    value = value[1:]
+    assert(value == "0042")
+
+def main():
+    original = "000" + "42"
+    consume(original)
+    result := ""
+    for index in range(100):
+        result = normalize(original)
+        assert(result == "42")
+        assert(original == "00042")
+    print(original)
+"#,
+        "00042\n",
+    );
+}
+
+#[test]
+fn borrowed_record_fields_retain_assigned_list_storage() {
+    run(
+        r#"class Item:
+    name: string
+class Parameters:
+    items: list[Item]
+
+def copy_items(value: Parameters) -> Parameters:
+    value.items = value.items[:]
+    return value
+
+def main():
+    original = Parameters([Item("first")])
+    copied = copy_items(original)
+    copied.items.append(Item("second"))
+    assert(copied.items[0].name == "first")
+    assert(copied.items[1].name == "second")
+    print(len(copied.items))
+"#,
+        "2\n",
+    );
+}
+
+#[test]
+fn enum_payload_mutation_preserves_shared_field_storage() {
+    run(
+        r#"class Record:
+    name: string
+enum Item:
+    RecordValue(record: Record)
+    Empty
+
+def rename_record(record: Record, name: string) -> Record:
+    record.name = name
+    return record
+
+def rename(item: Item, name: string):
+    match item:
+        case RecordValue:
+            renamed = rename_record(record, name)
+            assert(renamed.name == name)
+        case _:
+            pass
+
+def update(items: list[Item], names: list[string]):
+    for item in items:
+        rename(item, names[0])
+
+def main():
+    names = ["dy" + "namic"]
+    items = [Item.RecordValue(Record("old"))]
+    for index in range(100):
+        update(items, names)
+        assert(names[0] == "dynamic")
+    print(names[0])
+"#,
+        "dynamic\n",
+    );
+}
+
+#[test]
+fn imported_sum_payload_keeps_its_registered_storage_destructor() {
+    run_with_modules(
+        r#"import * from "items.sev" as items
+@c(symbol = "__sev_storage_live_bytes")
+def live_bytes() -> int
+
+def work():
+    value = items.make()
+    print(items.name(value))
+
+def main():
+    before = live_bytes()
+    work()
+    assert(live_bytes() == before)
+"#,
+        &[("items.sev", r#"class Text:
+    value: string
+enum Item:
+    TextValue(text: Text)
+    Empty
+
+def make() -> Item:
+    return Item.TextValue(Text(string(42)))
+
+def name(item: Item) -> string:
+    match item:
+        case TextValue:
+            return text.value
+        case _:
+            return ""
+"#)],
+        "42\n",
+    );
+}
+
+#[test]
+fn constructor_cleanup_only_visits_initialized_fields() {
+    run(
+        r#"@c(symbol = "__sev_storage_live_bytes")
+def live_bytes() -> int
+class SourceId:
+    index: u32
+class SourceFile:
+    id: SourceId
+    path: string
+    text: string
+    characters: list[string]
+    def SourceFile(source_id: SourceId, source_path: string, source_text: string):
+        id = source_id
+        path = source_path
+        text = source_text
+        characters = source_text.characters()
+
+def work():
+    source = SourceFile(SourceId(u32(0)), string(12), string(42))
+    assert(source.characters.join("") == "42")
+    assert(source.path == "12")
+    print(source.text)
+
+def main():
+    before = live_bytes()
+    work()
+    assert(live_bytes() == before)
+"#,
+        "42\n",
+    );
+}

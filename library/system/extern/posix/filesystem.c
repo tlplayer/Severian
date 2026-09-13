@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "../../../core/memory/native/memory.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -80,7 +81,7 @@ const char *__sev_file_read_text(const char *path) {
         return "";
     }
     size_t length = 0, capacity = 8192;
-    char *contents = malloc(capacity + 1);
+    char *contents = sev_memory_allocate(capacity + 1);
     if (contents == NULL) abort();
     for (;;) {
         size_t count = fread(contents + length, 1, capacity - length, file);
@@ -89,14 +90,14 @@ const char *__sev_file_read_text(const char *path) {
         if (feof(file)) break;
         if (capacity > (SIZE_MAX - 1) / 2) { sev_file_error = EOVERFLOW; break; }
         capacity *= 2;
-        char *expanded = realloc(contents, capacity + 1);
+        char *expanded = sev_memory_resize(contents, capacity + 1);
         if (expanded == NULL) abort();
         contents = expanded;
     }
     if (fclose(file) != 0 && !sev_file_error) sev_file_error = errno;
     // A C text boundary cannot represent embedded NUL bytes. Byte APIs can.
     if (!sev_file_error && memchr(contents, 0, length) != NULL) sev_file_error = EILSEQ;
-    if (sev_file_error) { free(contents); return ""; }
+    if (sev_file_error) { sev_memory_release(contents); return ""; }
     contents[length] = 0;
     return contents;
 }
@@ -161,10 +162,10 @@ _Bool __sev_os_is_symlink(const char *path) {
 
 const char *__sev_os_temporary(const char *parent, const char *prefix) {
     size_t size = strlen(parent) + strlen(prefix) + 9;
-    char *path = malloc(size);
+    char *path = sev_memory_allocate(size);
     if (!path) abort();
     snprintf(path, size, "%s/%sXXXXXX", parent, prefix);
-    if (mkdtemp(path) == NULL) { free(path); return ""; }
+    if (mkdtemp(path) == NULL) { sev_memory_release(path); return ""; }
     return path;
 }
 
@@ -210,11 +211,11 @@ int32_t __sev_os_remove_tree(const char *path) {
         if (!entry) { if (errno) result = errno; break; }
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         size_t size = strlen(path) + strlen(entry->d_name) + 2;
-        char *child = malloc(size);
+        char *child = sev_memory_allocate(size);
         if (!child) abort();
         snprintf(child, size, "%s/%s", path, entry->d_name);
         result = __sev_os_remove_tree(child);
-        free(child);
+        sev_memory_release(child);
         if (result) break;
     }
     if (closedir(directory) != 0 && !result) result = errno;

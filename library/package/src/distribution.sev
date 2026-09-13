@@ -147,8 +147,21 @@ def materialize(value: string, compiler: Compiler, request: Run) -> string | Err
     if selected.kind == "native":
         return selected.path
     if selected.kind == "source":
-        stage = temporary(registry_root() + "/cache/build")
-        require_command(["cp", "-R", "--", selected.path, stage + "/source"])
+        stage = registry_root() + "/cache/build/" + source_checksum(selected.path).replace(":", "-")
+        mkdir(stage)
+        lock = file.native_lock(stage + "/.sev-build.lock")
+        if lock < 0:
+            throw Error("could not lock installed source realization")
+        try:
+            if not os.is_dir(stage + "/source"):
+                staging = temporary(stage)
+                require_command(["cp", "-R", "--", selected.path, staging + "/source"])
+                replace_file(staging + "/source", stage + "/source")
+                remove_tree(staging)
+            file.unlock(lock)
+        catch failure: Error:
+            file.unlock(lock)
+            throw Error(failure.message)
         result = execute(plan(open(stage + "/source"), Build(request.target, platform, profile, "", "", true), "run"), compiler)
         return result.artifacts[0].path
     throw Error(selected.rejections.join("; "))

@@ -3,12 +3,16 @@ use super::*;
 impl Analyzer<'_> {
     pub(super) fn class_needs_destruction(&self, ty: TypeId, visiting: &mut BTreeSet<TypeId>) -> bool {
         if self.types.tensor(ty).is_some() { return false; }
+        // Imported records are not in this module's lowered_classes. Their
+        // registered destruction contract still applies to enclosing records.
+        if self.types.destruction(ty).is_some() { return true; }
         if self.types.resolve_name("string") == Some(ty) || self.any_type == Some(ty) { return true; }
         if !visiting.insert(ty) { return false; }
         self.class_instances_by_type.get(&ty).is_some_and(|class|
             class.methods.iter().any(|method| method.name == "drop" && method.parameters.is_empty() && method.result.simple_name() == Some("unit")))
             || self.lowered_classes.iter().find(|class| class.id == ty).is_some_and(|class|
-                class.fields.iter().any(|field| self.class_needs_destruction(field.ty, visiting)))
+                (!class.variants.is_empty() && class.variants.iter().any(|fields| !fields.is_empty()))
+                    || class.fields.iter().any(|field| self.class_needs_destruction(field.ty, visiting)))
     }
 
     pub(super) fn register_class_destruction(&mut self) -> Result<(), Diagnostic> {
@@ -65,6 +69,14 @@ impl Analyzer<'_> {
         });
         self.types.register_destruction_fields(ty, owner.fields.iter().map(|field| field.ty).collect(),
             owner.methods.iter().any(|method| method.name == "drop" && method.parameters.is_empty() && method.result.simple_name() == Some("unit")));
+        // A sum has one shared storage owner. Field cleanup belongs to its
+        // payload's final release, never to each borrowed/copied header.
+        if retain && !record.variants.is_empty() {
+            let call = self.runtime_call("__sev_storage_owner_retain_aggregate", &[ty], unit, vec![receiver], span);
+            self.register_storage_glue(ty, definition, binding, prefix,
+                Block { statements: vec![Statement::Expression(call), Statement::Return(None)] });
+            return Ok(definition);
+        }
         let mut body = Block::default();
         if let Some(method) = owner.methods.iter().find(|method| !retain && method.name == "drop" && method.parameters.is_empty() && method.result.simple_name() == Some("unit")) {
             if !method.parameters.is_empty() || method.result.simple_name() != Some("unit") {
@@ -103,6 +115,14 @@ impl Analyzer<'_> {
             }
         }
         body.statements.push(Statement::Return(None));
+        if !record.variants.is_empty() {
+            let payload_prefix = "__sev_destroy_payload_type";
+            let payload = synthetic_runtime_definition(&format!("{payload_prefix}{}", ty.0));
+            self.types.register_payload_destruction(ty, payload);
+            self.register_storage_glue(ty, payload, binding, payload_prefix, body);
+            let call = self.runtime_call("__sev_storage_owner_release_aggregate", &[ty], unit, vec![receiver], span);
+            body = Block { statements: vec![Statement::Expression(call), Statement::Return(None)] };
+        }
         self.register_storage_glue(ty, definition, binding, prefix, body);
         Ok(definition)
     }

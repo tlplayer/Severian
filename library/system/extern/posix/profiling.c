@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "../../../core/memory/native/memory.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -29,7 +30,7 @@ static uint64_t name_hash(const char *name) {
 static int grow(profile_table *table) {
     size_t capacity = table->capacity ? table->capacity * 2 : 1024;
     if (capacity < table->capacity || capacity > SIZE_MAX / sizeof(profile_row)) return EOVERFLOW;
-    profile_row *slots = calloc(capacity, sizeof(*slots));
+    profile_row *slots = sev_memory_zeroed(capacity, sizeof(*slots));
     if (!slots) return ENOMEM;
     for (size_t i = 0; i < table->capacity; ++i) {
         profile_row row = table->slots[i];
@@ -38,7 +39,7 @@ static int grow(profile_table *table) {
         while (slots[index].name) index = (index + 1) & (capacity - 1);
         slots[index] = row;
     }
-    free(table->slots);
+    sev_memory_release(table->slots);
     table->slots = slots;
     table->capacity = capacity;
     return 0;
@@ -54,7 +55,7 @@ static int add_cost(profile_table *table, const char *name, uint64_t cost, int m
         index = (index + 1) & (table->capacity - 1);
     profile_row *row = &table->slots[index];
     if (!row->name) {
-        row->name = strdup(name);
+        row->name = sev_memory_copy_text(name);
         if (!row->name) return ENOMEM;
         ++table->length;
     }
@@ -103,7 +104,7 @@ static int read_costs(profile_table *table, const char *path, int metric) {
         if (error) break;
     }
     if (!error && ferror(input)) error = EIO;
-    free(line);
+    sev_memory_release(line);
     if (fclose(input) && !error) error = EIO;
     return error;
 }
@@ -127,8 +128,8 @@ int64_t __sev_profile_function_table(const char *allocations, const char *peak,
     char *temporary = NULL;
     FILE *stream = NULL;
     if (!error) {
-        rows = calloc(table.length ? table.length : 1, sizeof(*rows));
-        temporary = malloc(strlen(output) + 12);
+        rows = sev_memory_zeroed(table.length ? table.length : 1, sizeof(*rows));
+        temporary = sev_memory_allocate(strlen(output) + 12);
         if (!rows || !temporary) error = ENOMEM;
     }
     if (!error) {
@@ -156,9 +157,9 @@ int64_t __sev_profile_function_table(const char *allocations, const char *peak,
         }
         if (error) unlink(temporary);
     }
-    free(temporary);
-    free(rows);
-    for (size_t i = 0; i < table.capacity; ++i) free(table.slots[i].name);
-    free(table.slots);
+    sev_memory_release(temporary);
+    sev_memory_release(rows);
+    for (size_t i = 0; i < table.capacity; ++i) sev_memory_release(table.slots[i].name);
+    sev_memory_release(table.slots);
     return error;
 }

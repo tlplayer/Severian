@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include "../../../library/core/memory/native/memory.h"
 #include <pthread.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -94,12 +95,12 @@ int64_t __sev_tokenizer_open_v1(const char *path) {
     void *context = sev_tokenizer_provider_context;
     pthread_mutex_unlock(&sev_tokenizer_mutex);
     if (provider.open == NULL) return 0;
-    sev_tokenizer_handle *handle = calloc(1, sizeof(*handle));
+    sev_tokenizer_handle *handle = sev_memory_zeroed(1, sizeof(*handle));
     if (handle == NULL) return 0;
     handle->provider = provider;
     if (provider.open(context, path, &handle->instance) != SEV_TOKENIZER_OK ||
         handle->instance == NULL) {
-        free(handle);
+        sev_memory_release(handle);
         return 0;
     }
     return (int64_t)(intptr_t)handle;
@@ -108,12 +109,12 @@ int64_t __sev_tokenizer_open_v1(const char *path) {
 int64_t __sev_tokenizer_encode_v1(int64_t raw_handle, const char *text) {
     sev_tokenizer_handle *handle = (sev_tokenizer_handle *)(intptr_t)raw_handle;
     if (handle == NULL || text == NULL) return 0;
-    sev_tokenizer_encoding *encoding = calloc(1, sizeof(*encoding));
+    sev_tokenizer_encoding *encoding = sev_memory_zeroed(1, sizeof(*encoding));
     if (encoding == NULL) return 0;
     encoding->tokenizer = handle;
     if (handle->provider.encode(handle->instance, text, &encoding->tokens, &encoding->count) !=
         SEV_TOKENIZER_OK || (encoding->count != 0 && encoding->tokens == NULL)) {
-        free(encoding);
+        sev_memory_release(encoding);
         return 0;
     }
     return (int64_t)(intptr_t)encoding;
@@ -138,7 +139,7 @@ int32_t __sev_tokenizer_encoding_release_v1(int64_t raw_encoding) {
         encoding->tokens,
         encoding->count
     );
-    free(encoding);
+    sev_memory_release(encoding);
     return SEV_TOKENIZER_OK;
 }
 
@@ -146,6 +147,6 @@ int32_t __sev_tokenizer_close_v1(int64_t raw_handle) {
     sev_tokenizer_handle *handle = (sev_tokenizer_handle *)(intptr_t)raw_handle;
     if (handle == NULL) return SEV_TOKENIZER_INVALID_ARGUMENT;
     handle->provider.close(handle->instance);
-    free(handle);
+    sev_memory_release(handle);
     return SEV_TOKENIZER_OK;
 }

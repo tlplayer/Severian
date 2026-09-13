@@ -68,6 +68,7 @@ pub struct PassMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassError {
+    pub span: Option<severian_source::Span>,
     pub pass: &'static str,
     pub message: String,
 }
@@ -155,6 +156,7 @@ impl PassManager {
             let metadata = pass.metadata();
             if metadata.accepted_stage != *stage {
                 return Err(PassError {
+                    span: None,
                     pass: metadata.name,
                     message: format!(
                         "pass accepts {:?}, current stage is {:?}",
@@ -170,6 +172,7 @@ impl PassManager {
                 .collect::<Vec<_>>();
             if !missing.is_empty() {
                 return Err(PassError {
+                    span: None,
                     pass: metadata.name,
                     message: format!("required invariants are not established: {missing:?}"),
                 });
@@ -182,6 +185,7 @@ impl PassManager {
                 .collect::<Vec<_>>();
             if !unavailable_preservation.is_empty() {
                 return Err(PassError {
+                    span: None,
                     pass: metadata.name,
                     message: format!(
                         "pass claims to preserve unavailable invariants: {unavailable_preservation:?}"
@@ -203,7 +207,7 @@ impl PassManager {
                                 eprintln!("MIR {}: {} ({} blocks, {} locals)", metadata.name, function.name, body.blocks.len(), body.locals.len());
                             }
                             pass.run_function(body, &PassContext { universal: context.universal,
-                                storage_glue: function.name.starts_with("__sev_destroy_type") || function.name.starts_with("__sev_retain_type") }, &mut analyses).map_err(
+                                storage_glue: context.universal.types.is_storage_glue(function.definition) }, &mut analyses).map_err(
                                 |mut error| {
                                     error.message = format!(
                                         "in function `{}`: {}",
@@ -232,6 +236,7 @@ impl PassManager {
                     .contains(&Invariant::WellFormed);
             if must_verify {
                 verify(module, context.universal).map_err(|error| PassError {
+                    span: None,
                     pass: metadata.name,
                     message: format!("post-pass MIR verification failed: {error}"),
                 })?;
@@ -307,6 +312,7 @@ fn enforce_entity_contract(
         let new = after.get(&kind).copied().unwrap_or(0);
         if new > old && !metadata.contract.may_introduce.contains(&kind) {
             return Err(PassError {
+                span: None,
                 pass: metadata.name,
                 message: format!(
                     "introduced {} {kind:?} entities without declaring it",
@@ -316,6 +322,7 @@ fn enforce_entity_contract(
         }
         if old > new && !metadata.contract.may_remove.contains(&kind) {
             return Err(PassError {
+                span: None,
                 pass: metadata.name,
                 message: format!(
                     "removed {} {kind:?} entities without declaring it",
@@ -382,6 +389,7 @@ impl Pass for VerifyPass {
         _analyses: &mut AnalysisManager,
     ) -> Result<(), PassError> {
         verify(module, context.universal).map_err(|error| PassError {
+            span: None,
             pass: self.metadata.name,
             message: error.to_string(),
         })
@@ -429,6 +437,7 @@ impl Pass for DropElaborationPass {
     ) -> Result<(), PassError> {
         if context.storage_glue { return Ok(()); }
         elaborate_drops(body, &context.universal.types).map_err(|errors| PassError {
+            span: errors.first().and_then(|error| crate::ownership_error_span(body, &context.universal.types, error)),
             pass: self.metadata.name,
             message: errors
                 .iter()
@@ -481,6 +490,7 @@ impl Pass for OwnershipPass {
         analyze_ownership(body, &context.universal.types)
             .map(|_| ())
             .map_err(|errors| PassError {
+                span: errors.first().and_then(|error| crate::ownership_error_span(body, &context.universal.types, error)),
                 pass: self.metadata.name,
                 message: errors
                     .iter()

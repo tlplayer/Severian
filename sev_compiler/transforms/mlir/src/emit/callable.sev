@@ -1,3 +1,4 @@
+import * from "../../../../transforms/mir/src/ownership.sev" as ownership
 import universal
 import * from "../../../../universal/type/storage.sev" as storage_types
 import * from "../../../../universal/type/scalar.sev" as scalar
@@ -244,11 +245,13 @@ def lower_callables(module: borrow universal.Module) -> MlirProgram:
     index := 0
     for function in borrow module.functions:
         if function.cfg_index >= 0:
+            ownership.authorize_lowering(module, module.cfg_bodies[function.cfg_index], function.values)
             callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry)
         index += 1
     entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
     builder_set_insertion_point(builder, entry.entry)
     if len(module.cfg_bodies) != 0:
+        ownership.authorize_lowering(module, module.cfg_bodies[0], [])
         # The package initializer is an ordinary CFG function too.
         init = builder_create_function(builder, "__sev_initializer", private_visibility(), [], [])
         callable_cfg(builder, module, module.cfg_bodies[0], init.entry)

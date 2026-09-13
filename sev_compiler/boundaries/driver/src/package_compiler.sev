@@ -1,7 +1,55 @@
 import package
 import source
+import os
+import path
 import * from "pipeline/source.sev" as pipeline
 import * from "../../backend/src/native_mlir.sev" as backend
+
+# Record the exact text read by the frontend and the native provider assets.
+# Missing manifests/locks are recorded too, so adding one invalidates a build.
+def record_inputs(files: list[source.SourceFile], resolution: package.Resolution, destination: string, sysroot: string) -> unit | Error:
+    records: list[string] = []
+    recorded: list[string] = []
+    for file in files:
+        location = package.canonical(file.path)
+        package.write_text(destination + ".source", file.text)
+        records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(destination + ".source")))
+        recorded.append(location)
+    roots: list[string] = []
+    for resolved in resolution.packages:
+        roots.append(resolved.root)
+    for file in files:
+        directory := path.dirname(package.canonical(file.path))
+        while directory != "/":
+            for name in ["package.toml", "package.lock", "sev.lock"]:
+                location = directory + "/" + name
+                if location not in recorded:
+                    records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if os.is_file(location) else "missing"))
+                    recorded.append(location)
+            if os.is_file(directory + "/package.toml"):
+                if directory not in roots:
+                    roots.append(directory)
+                break
+            directory = path.dirname(directory)
+    for directory in roots:
+        entries = package.parse_document(package.read_text(directory + "/package.toml"))
+        for entry in entries:
+            if entry.table == "xxi.c" and entry.key == "sources":
+                for source in package.string_array(entry.value):
+                    provider = package.inside(directory, source)
+                    # Local headers and native sources share the provider directory.
+                    for location in package.files(path.dirname(provider), true):
+                        if location not in recorded:
+                            records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
+                            recorded.append(location)
+    # The physical buffer provider is linked even when no package declares a
+    # native extension. Changing it must invalidate already-built artifacts.
+    for name in ["memory.c", "memory.h"]:
+        location = package.canonical(sysroot + "/library/core/memory/native/" + name)
+        if location not in recorded:
+            records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
+    package.write_text(destination + ".inputs", records.join("\n") + "\n")
+
 
 # This private entry consumes the package library's immutable resolved graph.
 # It performs one compilation unit and never discovers or resolves packages.
@@ -14,11 +62,7 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
     emit = arguments[4]
     files: list[source.SourceFile] = []
     text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files)
-    input_records: list[string] = []
-    for file in files:
-        package.write_text(arguments[6] + ".source", file.text)
-        input_records.append(package.toml_quote(file.path) + " = " + package.toml_quote(package.digest(arguments[6] + ".source")))
-    package.write_text(arguments[6] + ".inputs", input_records.join("\n") + "\n")
+    record_inputs(files, resolution, arguments[6], arguments[5])
     if emit == "check":
         return
     if emit == "sources":
@@ -30,7 +74,9 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
     if emit != "":
         package.write_text(arguments[3], text)
     else:
-        entries = resolution.packages[0].manifest.entries
+        entries: list[package.Entry] := []
+        if len(resolution.packages) > 0:
+            entries = resolution.packages[0].manifest.entries
         profile = arguments[9]
         if profile not in ["dev", "release"]:
             throw Error("unsupported compiler profile: " + profile)
@@ -44,4 +90,4 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
         sources: list[string] = []
         for file in files:
             sources.append(file.path)
-        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources))
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5])

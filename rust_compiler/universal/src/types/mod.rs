@@ -52,6 +52,7 @@ pub struct ResolvedUnary {
 pub struct TypeContext {
     destruction: BTreeMap<TypeId, DefId>,
     retention: BTreeMap<TypeId, DefId>,
+    payload_destruction: BTreeMap<TypeId, DefId>,
     borrowed_results: BTreeSet<DefId>,
     transferred_arguments: BTreeMap<DefId, BTreeSet<usize>>,
     destruction_fields: BTreeMap<TypeId, Vec<TypeId>>,
@@ -75,6 +76,12 @@ pub struct TypeContext {
 }
 
 impl TypeContext {
+    /// Shared payloads own their fields once; copied handles retain storage.
+    pub fn is_storage_glue(&self, function: DefId) -> bool {
+        self.destruction.values().chain(self.retention.values()).chain(self.payload_destruction.values()).any(|known| *known == function)
+    }
+    pub fn payload_destruction(&self, ty: TypeId) -> Option<DefId> { self.payload_destruction.get(&ty).copied() }
+    pub fn register_payload_destruction(&mut self, ty: TypeId, function: DefId) { self.payload_destruction.insert(ty, function); }
     pub fn destruction(&self, ty: TypeId) -> Option<DefId> { self.destruction.get(&ty).copied() }
     pub fn register_transferred_argument(&mut self, function: DefId, index: usize) { self.transferred_arguments.entry(function).or_default().insert(index); }
     pub fn transfers_argument(&self, function: DefId, index: usize) -> bool { self.transferred_arguments.get(&function).is_some_and(|indices| indices.contains(&index)) }

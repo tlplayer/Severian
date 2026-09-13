@@ -17,7 +17,7 @@ pub use cfg::{
 };
 pub use operation::Operation;
 pub use ownership::{
-    analyze_ownership, elaborate_drops, Loan, LoanKind, OwnershipError, OwnershipReport,
+    analyze_ownership, elaborate_drops, ownership_error_span, ownership_plan, Loan, LoanKind, OwnershipError, OwnershipReport, OwnershipPlan,
 };
 pub use passes::{
     run_required_pipeline, AnalysisId, AnalysisManager, EntityKind, EntitySet, Invariant,

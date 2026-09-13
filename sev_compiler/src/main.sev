@@ -51,7 +51,10 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         if argument == "--":
             application = arguments[cursor + 1:]
             break
-        if argument == "--locked":
+        if argument == "--local":
+            if command != "publish":
+                throw Error("--local requires publish")
+        elif argument == "--locked":
             locked = true
         elif argument == "--lib":
             library = true
@@ -93,7 +96,6 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):
         if command in ["build", "check", "test", "run", "install"] and emit != "plan":
-            compiler.prepare_prelude(sysroot)
             client = process.session_start()
             if client < 0:
                 throw Error("could not start package compilation session")
@@ -103,30 +105,29 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         if status != 0:
             return status
         return 0
-    files: list[source.SourceFile] = []
-    resolution = package.Resolution([], [], "")
-    mlir = compiler.compile_to_mlir(compiler.load_input(input), command == "test" or command == "check", sysroot, emit, resolution, files)
-    if emit != "":
-        if output == "":
-            print(mlir)
-        else:
-            if file.write(output, mlir) != 0:
-                throw Error("could not write MLIR output")
-        return 0
-    if command == "check":
-        return 0
-    if output == "":
+    selected_profile = profile if profile != "" else "dev"
+    selected_platform = platform if platform != "" else "host"
+    emission = "check" if command == "check" and emit == "" else emit
+    print_emission = emit != "" and output == ""
+    if output == "" and emission != "check":
         name = path.basename(input).replace(".sev", "")
-        if command == "build":
+        if emit != "":
+            output = "package.pkg/build/emitted/" + name + "." + emit
+        elif command == "build":
             output = "package.pkg/bin/" + name
         elif command == "test":
             output = package.temporary("package.pkg/debug/tests", "run-") + "/bin/" + name
         else:
             output = package.temporary("package.pkg/cache/run", "run-") + "/bin/" + name
-    sources: list[string] = []
-    for file in files:
-        sources.append(file.path)
-    backend.emit_native(mlir, output, native_arguments=package.native_arguments(resolution, sources))
+    unit = package.BuildUnit(0, package.Target(path.basename(input), "binary", input), selected_platform, selected_profile, output, command == "test" or command == "check")
+    package.compile_unit(package.Compiler(process.executable(), sysroot), unit, package.Resolution([], [], ""), emission, source_path=input)
+    if emit != "":
+        if print_emission:
+            print(package.read_text(output))
+        return 0
+    if command == "check":
+        return 0
+
     if command == "build":
         print("built " + output)
     else:

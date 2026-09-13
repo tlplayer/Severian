@@ -25,6 +25,8 @@ pub enum OwnershipError {
     EscapingBorrow(LocalId),
     ResourceNotConsumed(LocalId),
     DoubleDrop(LocalId),
+    ConsumeView(LocalId),
+    UninitializedUse(LocalId),
 }
 
 impl fmt::Display for OwnershipError {
@@ -40,6 +42,8 @@ impl fmt::Display for OwnershipError {
                 write!(formatter, "resource local {} is not consumed", local.0)
             }
             Self::DoubleDrop(local) => write!(formatter, "local {} is dropped twice", local.0),
+            Self::UninitializedUse(local) => write!(formatter, "use of uninitialized field in local {}", local.0),
+            Self::ConsumeView(local) => write!(formatter, "cannot consume or release view local {}; transfer ownership explicitly", local.0),
         }
     }
 }
@@ -49,6 +53,7 @@ pub struct OwnershipState {
     pub initialized: BTreeSet<LocalId>,
     pub moved: BTreeSet<LocalId>,
     pub moved_fields: BTreeSet<Place>,
+    pub uninitialized_fields: BTreeSet<Place>,
     pub loans: BTreeSet<Loan>,
     pub consumed_resources: BTreeSet<LocalId>,
 }
@@ -80,11 +85,66 @@ struct BlockLiveness {
     after_statements: Vec<BTreeSet<LocalId>>,
 }
 
+/// A checked body is borrowed immutably for the lifetime of its ownership plan.
+/// Lowering cannot mutate the graph while using this proof. Any transformation
+/// must finish first and obtain a fresh plan from this authority.
+pub struct OwnershipPlan<'a> {
+    body: &'a CfgBody,
+    types: &'a TypeContext,
+    report: OwnershipReport,
+}
+
+impl<'a> OwnershipPlan<'a> {
+    pub fn body(&self) -> &'a CfgBody { self.body }
+    pub fn types(&self) -> &'a TypeContext { self.types }
+    pub fn report(&self) -> &OwnershipReport { &self.report }
+}
+
+pub fn ownership_plan<'a>(body: &'a CfgBody, types: &'a TypeContext) -> Result<OwnershipPlan<'a>, Vec<OwnershipError>> {
+    analyze_ownership(body, types).map(|report| OwnershipPlan { body, types, report })
+}
+
+fn view_consumption_errors(body: &CfgBody, types: &TypeContext) -> BTreeSet<OwnershipError> {
+    let views = class_borrowed_locals(body, types);
+    let mut errors = BTreeSet::new();
+    for block in &body.blocks {
+        for statement in &block.statements {
+            let operands: Vec<&Operand> = match statement {
+                CfgStatement::Assign(_, Rvalue::Use(operand) | Rvalue::Unary { operand, .. } | Rvalue::Convert { operand, .. }) => vec![operand],
+                CfgStatement::Assign(_, Rvalue::Binary { left, right, .. }) => vec![left, right],
+                CfgStatement::Assign(_, Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. }) => fields.iter().collect(),
+                CfgStatement::Operation { operands, .. } => operands.iter().collect(),
+                _ => vec![],
+            };
+            for operand in operands {
+                if let Operand::Move(place) = operand {
+                    if place.local_id().is_some_and(|local| views.contains(&local)) {
+                        errors.insert(OwnershipError::ConsumeView(place.local_id().unwrap()));
+                    }
+                }
+            }
+            if let CfgStatement::Drop(place) = statement {
+                if place.projection.is_empty() && place.local_id().is_some_and(|local| views.contains(&local)) {
+                    errors.insert(OwnershipError::ConsumeView(place.local_id().unwrap()));
+                }
+            }
+        }
+        for operand in terminator_operands(&block.terminator) {
+            if let Operand::Move(place) = operand {
+                if place.local_id().is_some_and(|local| views.contains(&local)) {
+                    errors.insert(OwnershipError::ConsumeView(place.local_id().unwrap()));
+                }
+            }
+        }
+    }
+    errors
+}
+
 pub fn analyze_ownership(
     body: &CfgBody,
     types: &TypeContext,
 ) -> Result<OwnershipReport, Vec<OwnershipError>> {
-    let (inputs, outputs, errors, escaped) = solve(body);
+    let (inputs, outputs, errors, escaped) = solve(body, types);
     let mut report = OwnershipReport {
         block_inputs: inputs,
         block_outputs: outputs,
@@ -102,6 +162,7 @@ pub fn analyze_ownership(
 
     let resources = resource_locals(body, types);
     let mut errors = errors;
+    errors.extend(view_consumption_errors(body, types));
     for block in &body.blocks {
         if !matches!(
             block.terminator,
@@ -114,7 +175,10 @@ pub fn analyze_ownership(
         };
         for local in &resources {
             if state.initialized.contains(local) && !state.consumed_resources.contains(local) {
-                errors.insert(OwnershipError::ResourceNotConsumed(*local));
+                let mut remaining = Vec::new();
+                remaining_field_drops(Place::local(*local), body.locals[local.0 as usize].ty,
+                    &state.moved_fields.union(&state.uninitialized_fields).cloned().collect(), types, &mut remaining);
+                if !remaining.is_empty() { errors.insert(OwnershipError::ResourceNotConsumed(*local)); }
             }
         }
     }
@@ -127,6 +191,11 @@ pub fn analyze_ownership(
 }
 
 pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Vec<OwnershipError>> {
+    // Reject invalid source lifetimes before emitting any cleanup operations.
+    // Cleanup cannot repair a borrow by deleting the loan that forbids a free.
+    let (_, _, mut errors, _) = solve(body, types);
+    errors.extend(view_consumption_errors(body, types));
+    if !errors.is_empty() { return Err(errors.into_iter().collect()); }
     prepare_class_transfers(body, types);
     retain_storage_copies(body, types);
     let resources = resource_locals(body, types);
@@ -153,7 +222,7 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
             }
         }
     }
-    let (_, outputs, errors, _) = solve(body);
+    let (_, outputs, errors, _) = solve(body, types);
     if !errors.is_empty() {
         if std::env::var_os("SEVERIAN_OWNERSHIP_TRACE").is_some() { eprintln!("{body:#?}"); }
         return Err(errors.into_iter().collect());
@@ -168,30 +237,26 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
         let Some(state) = outputs.get(&block.id) else {
             continue;
         };
-        let already_dropped = block
-            .statements
-            .iter()
-            .filter_map(|statement| match statement {
-                CfgStatement::Drop(place) => place.local_id(),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
         let transferred = match &block.terminator {
             Terminator::Return(Some(operand)) | Terminator::Throw(operand) => {
                 operand_local(operand)
             }
             _ => None,
         };
+        // A previous drop in this block may have released an older assignment.
+        // The final state determines whether the current value still needs cleanup.
         for local in resources.iter().rev() {
             if state.initialized.contains(local)
                 && !state.consumed_resources.contains(local)
-                && !already_dropped.contains(local)
                 && transferred != Some(*local)
             {
-                block
-                    .statements
-                    .push(CfgStatement::Drop(Place::local(*local)));
-                block.statement_spans.push(None);
+                let mut drops = Vec::new();
+                remaining_field_drops(Place::local(*local), body.locals[local.0 as usize].ty,
+                    &state.moved_fields.union(&state.uninitialized_fields).cloned().collect(), types, &mut drops);
+                for place in drops {
+                    block.statements.push(CfgStatement::Drop(place));
+                    block.statement_spans.push(body.locals[local.0 as usize].span);
+                }
             }
         }
     }
@@ -202,7 +267,7 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
 }
 
 fn elaborate_storage_destruction(body: &mut CfgBody, resources: &BTreeSet<LocalId>, types: &TypeContext) {
-    let (inputs, _, _, _) = solve(body);
+    let (inputs, _, _, _) = solve(body, types);
     for block in &mut body.blocks {
         let Some(mut state) = inputs.get(&block.id).cloned() else { continue; };
         let original = std::mem::take(&mut block.statements);
@@ -211,7 +276,7 @@ fn elaborate_storage_destruction(body: &mut CfgBody, resources: &BTreeSet<LocalI
             let span = spans.get(index).copied().flatten();
             if let CfgStatement::Assign(place, value) = &statement {
                 if !place.projection.is_empty() && place.local_id().is_some_and(|local| state.initialized.contains(&local))
-                    && !state.moved_fields.iter().any(|missing| place_prefix(missing, place))
+                    && !state.moved_fields.iter().chain(&state.uninitialized_fields).any(|missing| place_prefix(missing, place))
                     && !matches!(value, Rvalue::Use(Operand::Copy(source) | Operand::Move(source)) if source == place)
                 {
                     let mut ty = body.locals[place.local_id().unwrap().0 as usize].ty;
@@ -239,7 +304,7 @@ fn elaborate_storage_destruction(body: &mut CfgBody, resources: &BTreeSet<LocalI
             if let Some(local) = old.filter(|local| resources.contains(local) && state.initialized.contains(local)) {
                 let mut drops = Vec::new();
                 remaining_field_drops(Place::local(local), body.locals[local.0 as usize].ty,
-                    &state.moved_fields, types, &mut drops);
+                    &state.moved_fields.union(&state.uninitialized_fields).cloned().collect(), types, &mut drops);
                 for place in drops {
                     block.statements.push(CfgStatement::Drop(place));
                     block.statement_spans.push(span);
@@ -249,7 +314,10 @@ fn elaborate_storage_destruction(body: &mut CfgBody, resources: &BTreeSet<LocalI
             }
             match &statement {
                 CfgStatement::Assign(place, value) => {
+                    let pending = construction_fields(place, value, types, &state);
                     inspect_rvalue(value, place, block.id, &mut state, &mut BTreeSet::new());
+                    state.uninitialized_fields.retain(|field| !place_prefix(place, field));
+                    state.uninitialized_fields.extend(pending);
                     if let Some(local) = place.local_id() {
                         state.moved_fields.retain(|missing| !place_prefix(place, missing));
                         state.initialized.insert(local);
@@ -274,6 +342,26 @@ fn elaborate_storage_destruction(body: &mut CfgBody, resources: &BTreeSet<LocalI
     }
 }
 
+fn construction_fields(destination: &Place, value: &Rvalue, types: &TypeContext, state: &OwnershipState) -> Vec<Place> {
+    match value {
+        Rvalue::Aggregate { type_id, fields } if fields.is_empty() => {
+            types.destruction_fields(*type_id).iter().enumerate().map(|(index, _)| {
+                let mut field = destination.clone();
+                field.projection.push(crate::Projection::Field(index as u32));
+                field
+            }).collect()
+        }
+        Rvalue::Use(Operand::Copy(source) | Operand::Move(source)) => state.uninitialized_fields.iter()
+            .filter(|field| place_prefix(source, field))
+            .map(|field| {
+                let mut target = destination.clone();
+                target.projection.extend_from_slice(&field.projection[source.projection.len()..]);
+                target
+            }).collect(),
+        _ => vec![],
+    }
+}
+
 fn place_prefix(prefix: &Place, place: &Place) -> bool {
     prefix.base == place.base && place.projection.starts_with(&prefix.projection)
 }
@@ -291,8 +379,32 @@ fn remaining_field_drops(place: Place, ty: severian_universal::TypeId, moved: &B
     }
 }
 
+fn rebound_storage_arguments(body: &CfgBody, types: &TypeContext) -> BTreeSet<LocalId> {
+    let mut rebound = BTreeSet::new();
+    for block in &body.blocks {
+        let destinations = block.statements.iter().filter_map(|statement| match statement {
+            CfgStatement::Assign(place, _) => Some(place),
+            _ => None,
+        }).chain(match &block.terminator {
+            Terminator::Call { destination, .. } => destination.as_ref(),
+            _ => None,
+        });
+        for place in destinations {
+            if !place.projection.is_empty() { continue; }
+            if let Some(local) = place.local_id() {
+                let declaration = &body.locals[local.0 as usize];
+                if declaration.argument && types.retention(declaration.ty).is_some() {
+                    rebound.insert(local);
+                }
+            }
+        }
+    }
+    rebound
+}
+
 fn class_borrowed_locals(body: &CfgBody, types: &TypeContext) -> BTreeSet<LocalId> {
-    let mut borrowed = body.locals.iter().filter(|local| local.borrowed || (local.argument && types.retention(local.ty).is_some())).map(|local| local.id).collect::<BTreeSet<_>>();
+    let rebound = rebound_storage_arguments(body, types);
+    let mut borrowed = body.locals.iter().filter(|local| !rebound.contains(&local.id) && (local.borrowed || (local.argument && types.retention(local.ty).is_some()))).map(|local| local.id).collect::<BTreeSet<_>>();
     for block in &body.blocks {
         if let Terminator::Call { callee: crate::Callee::Direct { function, .. }, destination: Some(place), .. } = &block.terminator {
             if types.borrowed_result(*function) {
@@ -333,6 +445,14 @@ fn copied_storage_type(body: &CfgBody, place: &Place, types: &TypeContext) -> Op
 }
 
 fn retain_storage_copies(body: &mut CfgBody, types: &TypeContext) {
+    // A rebound parameter owns its local value, including the initial borrowed
+    // argument. Otherwise assigning a temporary leaves a dangling borrowed
+    // alias as soon as that temporary is destroyed.
+    for local in rebound_storage_arguments(body, types) {
+        let entry = &mut body.blocks[body.entry.0 as usize];
+        entry.statements.insert(0, CfgStatement::Retain(Place::local(local)));
+        entry.statement_spans.insert(0, None);
+    }
     let borrowed = class_borrowed_locals(body, types);
     let snapshot = body.clone();
     let mut borrowed_returns = Vec::new();
@@ -348,25 +468,43 @@ fn retain_storage_copies(body: &mut CfgBody, types: &TypeContext) {
         block.statements.insert(0, CfgStatement::Retain(place));
         block.statement_spans.insert(0, None);
     }
+    let (construction_inputs, _, _, _) = solve(&snapshot, types);
     for block in &mut body.blocks {
+        let mut construction = construction_inputs.get(&block.id).cloned().unwrap_or_default();
         let statements = std::mem::take(&mut block.statements);
         let spans = std::mem::take(&mut block.statement_spans);
         for (index, statement) in statements.into_iter().enumerate() {
             let span = spans.get(index).copied().flatten();
             if let CfgStatement::Assign(destination, value) = &statement {
                 let copies: Vec<&Operand> = match value {
-                    Rvalue::Use(operand) if destination.local_id().is_none_or(|id| !borrowed.contains(&id)) => vec![operand],
+                    // Borrowing a record does not borrow a new value assigned
+                    // into one of its owning fields.
+                    Rvalue::Use(operand) if !destination.projection.is_empty()
+                        || destination.local_id().is_none_or(|id| !borrowed.contains(&id)) => vec![operand],
                     Rvalue::Aggregate { fields, .. } | Rvalue::Variant { fields, .. } => fields.iter().collect(),
                     _ => vec![],
                 };
                 for operand in copies {
                     if let Operand::Copy(place) = operand {
                         if place.local_id().is_none() || copied_storage_type(&snapshot, place, types).is_some() {
-                            block.statements.push(CfgStatement::Retain(place.clone()));
-                            block.statement_spans.push(span);
+                            let mut retained = Vec::new();
+                            if let Some(ty) = copied_storage_type(&snapshot, place, types) {
+                                remaining_field_drops(place.clone(), ty, &construction.uninitialized_fields, types, &mut retained);
+                            } else if !construction.uninitialized_fields.iter().any(|field| place_prefix(place, field)) {
+                                retained.push(place.clone());
+                            }
+                            for place in retained {
+                                block.statements.push(CfgStatement::Retain(place));
+                                block.statement_spans.push(span);
+                            }
                         }
                     }
                 }
+            }
+            if let CfgStatement::Assign(place, value) = &statement {
+                let pending = construction_fields(place, value, types, &construction);
+                construction.uninitialized_fields.retain(|field| !place_prefix(place, field));
+                construction.uninitialized_fields.extend(pending);
             }
             block.statements.push(statement);
             block.statement_spans.push(span);
@@ -493,7 +631,32 @@ fn elaborate_temporary_strings(body: &mut CfgBody, types: &TypeContext) {
     }
 }
 
-fn solve(body: &CfgBody) -> OwnershipSolution {
+fn solve(body: &CfgBody, types: &TypeContext) -> OwnershipSolution { solve_detailed(body, types).0 }
+
+pub fn ownership_error_span(body: &CfgBody, types: &TypeContext, error: &OwnershipError) -> Option<severian_source::Span> {
+    if let Some(span) = solve_detailed(body, types).1.get(error) { return Some(*span); }
+    let local = match error {
+        OwnershipError::UseAfterMove(local) | OwnershipError::DoubleMove(local)
+        | OwnershipError::ConflictingLoan(local) | OwnershipError::EscapingBorrow(local)
+        | OwnershipError::ResourceNotConsumed(local) | OwnershipError::DoubleDrop(local)
+        | OwnershipError::ConsumeView(local) | OwnershipError::UninitializedUse(local) => *local,
+    };
+    if matches!(error, OwnershipError::ConsumeView(_)) {
+        for block in &body.blocks {
+            for (index, statement) in block.statements.iter().enumerate() {
+                if matches!(statement, CfgStatement::Drop(place) if place.local_id() == Some(local)) {
+                    if let Some(span) = block.statement_spans.get(index).copied().flatten() { return Some(span); }
+                }
+            }
+            if terminator_operands(&block.terminator).iter().any(|operand| matches!(operand, Operand::Move(place) if place.local_id() == Some(local))) {
+                if block.terminator_span.is_some() { return block.terminator_span; }
+            }
+        }
+    }
+    body.locals.get(local.0 as usize).and_then(|local| local.span)
+}
+
+fn solve_detailed(body: &CfgBody, types: &TypeContext) -> (OwnershipSolution, BTreeMap<OwnershipError, severian_source::Span>) {
     let predecessors = predecessors(body);
     let reachable = reachable_blocks(body);
     let liveness = calculate_liveness(body, &reachable);
@@ -546,6 +709,8 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
             &mut BTreeSet::new(),
             &arguments,
             liveness.get(&block_id).expect("reachable block is live"),
+            types,
+            &mut BTreeMap::new(),
         );
         if outputs.get(&block_id) == Some(&output) {
             continue;
@@ -562,6 +727,7 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
     // all predecessor outputs are available.
     let mut errors = BTreeSet::new();
     let mut escaped = BTreeSet::new();
+    let mut locations = BTreeMap::new();
     for block_id in &reachable {
         let Some(block) = body.blocks.get(block_id.0 as usize) else {
             continue;
@@ -574,9 +740,11 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
             &mut escaped,
             &arguments,
             liveness.get(block_id).expect("reachable block is live"),
+            types,
+            &mut locations,
         );
     }
-    (inputs, outputs, errors, escaped)
+    ((inputs, outputs, errors, escaped), locations)
 }
 
 fn join_predecessors(
@@ -598,6 +766,7 @@ fn join_predecessors(
             .collect();
         joined.moved.extend(&state.moved);
         joined.moved_fields.extend(state.moved_fields.iter().cloned());
+        joined.uninitialized_fields.extend(state.uninitialized_fields.iter().cloned());
         joined.loans.extend(state.loans.iter().cloned());
         joined.consumed_resources.extend(&state.consumed_resources);
     }
@@ -611,14 +780,21 @@ fn transfer_block(
     escaped: &mut BTreeSet<LocalId>,
     arguments: &BTreeSet<LocalId>,
     liveness: &BlockLiveness,
+    types: &TypeContext,
+    locations: &mut BTreeMap<OwnershipError, severian_source::Span>,
 ) {
     state
         .loans
         .retain(|loan| liveness.live_in.contains(&loan.holder));
     for (index, statement) in block.statements.iter().enumerate() {
+        let before = errors.clone();
         match statement {
             CfgStatement::Assign(place, value) => {
+                inspect_write(place, state, errors);
+                let pending = construction_fields(place, value, types, state);
                 inspect_rvalue(value, place, block.id, state, errors);
+                state.uninitialized_fields.retain(|field| !place_prefix(place, field));
+                state.uninitialized_fields.extend(pending);
                 if let Some(local) = place.local_id() {
                     state.moved_fields.retain(|missing| !place_prefix(place, missing));
                     state.initialized.insert(local);
@@ -635,6 +811,12 @@ fn transfer_block(
                     inspect_operand(&Operand::Move(place.clone()), state, errors);
                     continue;
                 }
+                if state.loans.iter().any(|loan| loan.place.local_id() == Some(local) && loan.holder != local) {
+                    errors.insert(OwnershipError::ConflictingLoan(local));
+                }
+                if state.uninitialized_fields.iter().any(|field| place_prefix(place, field)) {
+                    errors.insert(OwnershipError::UninitializedUse(local));
+                }
                 if !state.initialized.remove(&local) || !state.consumed_resources.insert(local) {
                     errors.insert(OwnershipError::DoubleDrop(local));
                 }
@@ -644,11 +826,16 @@ fn transfer_block(
             }
             CfgStatement::StorageLive(local) => {
                 state.initialized.remove(local);
+                state.uninitialized_fields.retain(|field| field.local_id() != Some(*local));
                 state.moved.remove(local);
                 state.consumed_resources.remove(local);
             }
             CfgStatement::StorageDead(local) => {
+                if state.loans.iter().any(|loan| loan.place.local_id() == Some(*local) && loan.holder != *local) {
+                    errors.insert(OwnershipError::ConflictingLoan(*local));
+                }
                 state.initialized.remove(local);
+                state.uninitialized_fields.retain(|field| field.local_id() != Some(*local));
                 state
                     .loans
                     .retain(|loan| loan.place.local_id() != Some(*local) && loan.holder != *local);
@@ -676,10 +863,14 @@ fn transfer_block(
             }
             CfgStatement::Coverage(_) => {}
         }
+        if let Some(span) = block.statement_spans.get(index).copied().flatten() {
+            for error in errors.difference(&before) { locations.entry(error.clone()).or_insert(span); }
+        }
         if let Some(live) = liveness.after_statements.get(index) {
             state.loans.retain(|loan| live.contains(&loan.holder));
         }
     }
+    let before = errors.clone();
     for operand in terminator_operands(&block.terminator) {
         inspect_operand(operand, state, errors);
     }
@@ -740,6 +931,9 @@ fn transfer_block(
             }
         }
     }
+    if let Some(span) = block.terminator_span {
+        for error in errors.difference(&before) { locations.entry(error.clone()).or_insert(span); }
+    }
     state
         .loans
         .retain(|loan| liveness.live_out.contains(&loan.holder));
@@ -777,7 +971,9 @@ fn inspect_rvalue(
             } else {
                 Vec::new()
             };
-            inspect_operand(operand, state, errors);
+            let construction = matches!(operand, Operand::Copy(place) if place.projection.is_empty()
+                && state.uninitialized_fields.iter().any(|field| place_prefix(place, field)));
+            if !construction { inspect_operand(operand, state, errors); }
             state.loans.extend(propagated);
         }
         Rvalue::Unary { operand, .. }
@@ -809,6 +1005,20 @@ fn inspect_rvalue(
     }
 }
 
+fn inspect_write(place: &Place, state: &OwnershipState, errors: &mut BTreeSet<OwnershipError>) {
+    let Some(local) = place.local_id() else { return; };
+    for loan in &state.loans {
+        if loan.place.local_id() == Some(local)
+            && (place_prefix(place, &loan.place) || place_prefix(&loan.place, place))
+            && loan.holder != local {
+            errors.insert(OwnershipError::ConflictingLoan(local));
+        }
+        if !place.projection.is_empty() && loan.holder == local && loan.kind == LoanKind::Shared {
+            errors.insert(OwnershipError::ConflictingLoan(local));
+        }
+    }
+}
+
 fn add_loan(
     place: &Place,
     holder: &Place,
@@ -822,6 +1032,10 @@ fn add_loan(
     };
     if !state.initialized.contains(&local) || state.moved.contains(&local) {
         errors.insert(OwnershipError::UseAfterMove(local));
+        return;
+    }
+    if state.uninitialized_fields.iter().any(|missing| place_prefix(missing, place) || place_prefix(place, missing)) {
+        errors.insert(OwnershipError::UninitializedUse(local));
         return;
     }
     if state.moved_fields.iter().any(|missing| place_prefix(missing, place) || place_prefix(place, missing)) {
@@ -858,6 +1072,10 @@ fn inspect_operand(
     };
     if !state.initialized.contains(&local) || state.moved.contains(&local) {
         errors.insert(OwnershipError::UseAfterMove(local));
+        return;
+    }
+    if state.uninitialized_fields.iter().any(|missing| place_prefix(missing, place) || place_prefix(place, missing)) {
+        errors.insert(OwnershipError::UninitializedUse(local));
         return;
     }
     if state.moved_fields.iter().any(|missing| place_prefix(missing, place) || place_prefix(place, missing)) {
@@ -1155,6 +1373,88 @@ mod tests {
         )
     }
 
+    fn borrowed_owner_body(invalidation: CfgStatement) -> CfgBody {
+        let span = severian_source::Span::new(severian_source::SourceId(7), 20, 30);
+        CfgBody {
+            entry: BlockId(0),
+            locals: vec![local(0, true), local(1, false)],
+            return_type: TypeId(0),
+            blocks: vec![BasicBlock {
+                id: BlockId(0), execution: None, parameters: vec![],
+                statements: vec![
+                    CfgStatement::Assign(Place::local(LocalId(1)), Rvalue::BorrowShared(Place::local(LocalId(0)))),
+                    invalidation,
+                    CfgStatement::Retain(Place::local(LocalId(1))),
+                ],
+                statement_spans: vec![None, Some(span), None],
+                terminator: Terminator::Return(None), terminator_span: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn live_views_forbid_owner_release_reassignment_and_scope_end() {
+        for invalidation in [CfgStatement::Drop(Place::local(LocalId(0))), initialize(0), CfgStatement::StorageDead(LocalId(0))] {
+            let body = borrowed_owner_body(invalidation);
+            let error = OwnershipError::ConflictingLoan(LocalId(0));
+            assert!(analyze_ownership(&body, &TypeContext::default()).unwrap_err().contains(&error));
+            assert_eq!(ownership_error_span(&body, &TypeContext::default(), &error), body.blocks[0].statement_spans[1]);
+        }
+    }
+
+    #[test]
+    fn a_view_never_acquires_release_authority_from_drop_elaboration() {
+        let mut body = borrowed_owner_body(CfgStatement::Drop(Place::local(LocalId(0))));
+        body.locals[0].borrowed = true;
+        let before = body.clone();
+        assert!(elaborate_drops(&mut body, &TypeContext::default()).unwrap_err().contains(&OwnershipError::ConsumeView(LocalId(0))));
+        assert_eq!(body, before, "an invalid source lifetime must not be rewritten");
+    }
+
+    #[test]
+    fn lowering_plan_expires_when_the_body_is_changed() {
+        let mut body = borrowed_owner_body(CfgStatement::Drop(Place::local(LocalId(0))));
+        body.blocks[0].statements.swap(1, 2); // view's last use precedes release
+        let types = TypeContext::default();
+        assert!(ownership_plan(&body, &types).is_ok());
+        body.blocks[0].statements.swap(1, 2);
+        assert!(ownership_plan(&body, &types).is_err());
+    }
+
+    #[test]
+    fn partial_construction_releases_only_initialized_fields_and_cannot_escape() {
+        let mut types = TypeContext::default();
+        let owner_drop = DefId { package: 0, module: 0, declaration: DeclarationId(100) };
+        let field_drop = DefId { package: 0, module: 0, declaration: DeclarationId(101) };
+        types.register_destruction(TypeId(0), owner_drop);
+        types.register_destruction(TypeId(1), field_drop);
+        types.register_destruction_fields(TypeId(0), vec![TypeId(1), TypeId(1)], false);
+        let first = Place { base: crate::PlaceBase::Local(LocalId(0)), projection: vec![crate::Projection::Field(0)] };
+        let span = severian_source::Span::new(severian_source::SourceId(3), 40, 50);
+        let mut body = CfgBody {
+            entry: BlockId(0), locals: vec![local(0, false)], return_type: TypeId(0),
+            blocks: vec![BasicBlock {
+                id: BlockId(0), execution: None, parameters: vec![],
+                statements: vec![
+                    CfgStatement::Assign(Place::local(LocalId(0)), Rvalue::Aggregate { type_id: TypeId(0), fields: vec![] }),
+                    CfgStatement::Assign(first.clone(), Rvalue::Use(Operand::Constant { value: LiteralValue::String("initialized".into()), ty: TypeId(1) })),
+                ],
+                statement_spans: vec![None, None],
+                terminator: Terminator::Return(Some(Operand::Copy(Place::local(LocalId(0))))), terminator_span: Some(span),
+            }],
+        };
+        let error = OwnershipError::UninitializedUse(LocalId(0));
+        assert!(elaborate_drops(&mut body, &types).unwrap_err().contains(&error));
+        assert_eq!(ownership_error_span(&body, &types, &error), Some(span));
+        body.blocks[0].terminator = Terminator::Return(None);
+        elaborate_drops(&mut body, &types).unwrap();
+        let drops = body.blocks[0].statements.iter().filter_map(|statement| match statement {
+            CfgStatement::Drop(place) => Some(place.clone()), _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(drops, vec![first]);
+        analyze_ownership(&body, &types).unwrap();
+    }
+
     #[test]
     fn direct_call_borrows_end_at_the_call_boundary() {
         let source = LocalId(0);
@@ -1206,7 +1506,7 @@ mod tests {
             return_type: TypeId(0),
         };
 
-        let (_, _, errors, _) = solve(&body);
+        let (_, _, errors, _) = solve(&body, &TypeContext::default());
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -1245,7 +1545,7 @@ mod tests {
             return_type: TypeId(0),
         };
 
-        let (_, _, errors, _) = solve(&body);
+        let (_, _, errors, _) = solve(&body, &TypeContext::default());
         assert!(errors.contains(&OwnershipError::ConflictingLoan(LocalId(0))));
     }
 
@@ -1285,7 +1585,7 @@ mod tests {
             return_type: TypeId(0),
         };
 
-        let (_, _, errors, _) = solve(&body);
+        let (_, _, errors, _) = solve(&body, &TypeContext::default());
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -1319,10 +1619,10 @@ mod tests {
             return_type: TypeId(0),
         };
 
-        let (_, _, local_errors, _) = solve(&body(false));
+        let (_, _, local_errors, _) = solve(&body(false), &TypeContext::default());
         assert!(local_errors.contains(&OwnershipError::EscapingBorrow(LocalId(0))));
 
-        let (_, _, argument_errors, _) = solve(&body(true));
+        let (_, _, argument_errors, _) = solve(&body(true), &TypeContext::default());
         assert!(argument_errors.is_empty(), "{argument_errors:?}");
     }
 }

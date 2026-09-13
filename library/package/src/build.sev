@@ -21,11 +21,11 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
     profile = request.profile if request.profile != "" else text_setting(project.manifest.entries, "build", "profile", "dev")
     root = output_root(project, platform, profile)
     units: list[BuildUnit] = []
-    # Dependencies are checked first; compilation receives the same whole graph.
+    # Dependency units use their own transitive graph and reusable source listing.
     for index in range(int(len(resolution.packages)) - 1, 0, -1):
         dependency = resolution.packages[index]
         target = library_target(dependency.manifest)
-        units.append(BuildUnit(index, target, platform, profile, "", false))
+        units.append(BuildUnit(index, target, platform, profile, project.root + "/package.pkg/build/dependencies/" + string(index) + ".sources", false))
     selected := request.target
     if mode == "run" and selected == "":
         selected = project.manifest.default_run
@@ -63,7 +63,9 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
 def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
     artifacts: list[Artifact] = []
     for unit in plan.units:
-        if unit.package_index != 0 or (plan.mode == "check" and plan.emit == ""):
+        if unit.package_index != 0:
+            compile_unit(compiler, unit, plan.resolution, "sources", guard_tests=plan.mode == "test")
+        elif plan.mode == "check" and plan.emit == "":
             compile_unit(compiler, unit, plan.resolution, "check", guard_tests=plan.mode == "test")
         elif unit.target.kind == "library" and not unit.include_tests and plan.emit == "":
             listing = BuildUnit(unit.package_index, unit.target, unit.platform, unit.profile, unit.output + ".sources", false)

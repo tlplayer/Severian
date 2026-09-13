@@ -12,3 +12,4 @@ profiling = { path = "../../../library/system/profiling" }
 artifact = { path = "../../artifact" }
 target = { path = "../../target" }
 universal = { path = "../../universal" }
+mir = { path = "../mir" }

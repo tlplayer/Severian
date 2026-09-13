@@ -10,14 +10,9 @@ import * from "../../backend/src/native_mlir.sev" as backend
 def worker_exit(status: i32)
 
 
-def run_source(input: string, sysroot: string, output: string) -> int | Error:
-    files: list[source.SourceFile] = []
-    resolution = package.Resolution([], [], "")
-    mlir = compiler.compile_to_mlir(compiler.load_input(input), true, sysroot, "", resolution, files)
-    paths: list[string] = []
-    for file in files:
-        paths.append(file.path)
-    backend.emit_native(mlir, output, native_arguments=package.native_arguments(resolution, paths))
+def run_source(input: string, sysroot: string, output: string, profile: string = "dev", platform: string = "host") -> int | Error:
+    unit = package.BuildUnit(0, package.Target(input, "test", input), platform, profile, output, true)
+    package.compile_unit(package.Compiler(process.executable(), sysroot), unit, package.Resolution([], [], ""), "", source_path=input)
     return backend.execute_native(output, [])
 
 
@@ -51,7 +46,6 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
     if executable == "":
         throw Error("could not find the native compiler executable")
     failed := 0
-    compiler.prepare_prelude(sysroot)
     for index in range(int(len(selected))):
         source = selected[index]
         print("testing " + source)
@@ -71,7 +65,7 @@ def run(directory: string, sysroot: string, output: string, profile: string, pla
                     if timing_path != "":
                         if not environment.set("SEVERIAN_TIMINGS", timing_path + ".unit-" + string(index)):
                             throw Error("could not select worker timing output")
-                    status = run_source(source, sysroot, stage + "/bin/test-" + string(index))
+                    status = run_source(source, sysroot, stage + "/bin/test-" + string(index), profile if profile != "" else "dev", platform if platform != "" else "host")
                 catch failure: Error:
                     process.write_error("error: " + failure.message + "\n")
                 worker_exit(i32(status))

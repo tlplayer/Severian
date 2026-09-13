@@ -57,6 +57,36 @@ def work():
     assert(item.text == "42")
 ''')
 
+    def test_shared_sum_payload_has_one_owner_for_mutable_contents(self):
+        self.native('''
+enum Wrapped:
+    Present(item: Item)
+    Empty
+
+def replace(item: Item) -> Item:
+    item.text = string(43)
+    return item
+
+def rename(value: Wrapped):
+    match value:
+        case Present:
+            renamed = replace(item)
+            assert(renamed.text == "43")
+        case _:
+            pass
+
+def work():
+    values = [Wrapped.Present(Item(string(42))), Wrapped.Empty]
+    selected = values[0]
+    rename(selected)
+    values.clear()
+    match selected:
+        case Present:
+            assert(item.text == "43")
+        case _:
+            assert(false)
+''')
+
     def test_runtime_recursive_storage_and_alias_replacement(self):
         with tempfile.TemporaryDirectory(prefix='sev-storage-asan-') as temporary:
             binary = Path(temporary) / 'storage'

@@ -140,7 +140,8 @@ def write_archive(destination: string, archive: Archive) -> unit | Error:
     write_bytes(stage + "/archive", bytes)
     # Validate the complete index before committing any public output.
     read_archive(stage + "/archive")
-    replace_file(stage + "/archive", destination)
+    if not os.is_file(destination) or digest(destination) != digest(stage + "/archive"):
+        replace_file(stage + "/archive", destination)
     remove_tree(stage)
 
 def extract(archive: Archive, destination: string) -> unit | Error:

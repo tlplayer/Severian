@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include "../../../library/core/memory/native/memory.h"
 #include <pthread.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -119,7 +120,7 @@ static uint64_t sev_tensor_jit_env_u64(const char *name, uint64_t fallback) {
 
 static void sev_tensor_jit_destroy_entry(sev_tensor_jit_cache_entry *entry) {
     if (entry->compiled.destroy != NULL) entry->compiled.destroy(entry->compiled.instance);
-    free(entry);
+    sev_memory_release(entry);
     --sev_tensor_jit_cache_size;
 }
 
@@ -222,7 +223,7 @@ static void sev_tensor_jit_clear_locked(void) {
         sev_tensor_jit_cache_entry *entry = sev_tensor_jit_cache;
         sev_tensor_jit_cache = entry->next;
         if (entry->compiled.destroy != NULL) entry->compiled.destroy(entry->compiled.instance);
-        free(entry);
+        sev_memory_release(entry);
     }
     sev_tensor_jit_cache_size = 0;
 }
@@ -277,7 +278,7 @@ int32_t __sev_tensor_jit_launch_v1(
             pthread_mutex_unlock(&sev_tensor_jit_mutex);
             return SEV_TENSOR_JIT_NO_COMPILER;
         }
-        entry = calloc(1, sizeof(*entry));
+        entry = sev_memory_zeroed(1, sizeof(*entry));
         if (entry == NULL) {
             pthread_mutex_unlock(&sev_tensor_jit_mutex);
             return SEV_TENSOR_JIT_OUT_OF_MEMORY;
@@ -288,7 +289,7 @@ int32_t __sev_tensor_jit_launch_v1(
         if (status != SEV_TENSOR_JIT_OK || entry->compiled.abi_version != SEV_TENSOR_JIT_ABI_VERSION ||
             entry->compiled.byte_size != sizeof(entry->compiled) || entry->compiled.launch == NULL) {
             if (entry->compiled.destroy != NULL) entry->compiled.destroy(entry->compiled.instance);
-            free(entry);
+            sev_memory_release(entry);
             pthread_mutex_unlock(&sev_tensor_jit_mutex);
             return SEV_TENSOR_JIT_COMPILE_FAILED;
         }

@@ -1744,3 +1744,27 @@ fn importing_a_field_only_record_does_not_import_its_modules_functions() {
     .unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn enclosing_records_preserve_imported_storage_contracts() {
+    let root = temporary();
+    std::fs::write(
+        root.join("provider.sev"),
+        "class Id:\n    index: int\nclass File:\n    id: Id\n    path: string\n    def File(path: string):\n        id = Id(1)\n        self.path = path\n",
+    ).unwrap();
+    std::fs::write(
+        root.join("consumer.sev"),
+        "import * from \"provider.sev\"\nclass Input:\n    file: File\ndef identifier(input: Input) -> Id:\n    return input.file.id\n",
+    ).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(
+        &severian_modules::resolve(&root.join("consumer.sev")).unwrap(),
+        &universal,
+    ).unwrap();
+    let input = typed.hir.modules.iter().flat_map(|module| &module.classes)
+        .find(|class| class.name == "Input").expect("Input record");
+    assert!(typed.types.destruction(input.id).is_some());
+    assert!(typed.types.retention(input.id).is_some());
+    assert_eq!(typed.types.destruction_fields(input.id).len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -736,7 +736,10 @@ impl Compiler {
             .clone()
             .expect("the source pipeline installed its structural type catalog");
         severian_mir::run_required_pipeline(&mut merged, &context)
-            .map_err(CompileError::MirPass)?;
+            .map_err(|error| match error.span {
+                Some(span) => CompileError::Diagnostic(Diagnostic::new("E000303", error.message, Some(span)).with_sources(sources.iter().cloned())),
+                None => CompileError::MirPass(error),
+            })?;
         if let Some(source) = sources.last() {
             attach_assertion_locations(&mut merged, source);
         }

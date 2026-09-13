@@ -11,3 +11,9 @@ policies. Both interfaces use the existing memory primitives and compiler
 lowering, rather than separate collection allocation backends.
 
 The existing `Allocation[T]` interface remains available to its current callers.
+
+The hosted native provider is [`native/memory.h`](native/memory.h), with external
+and MLIR allocator adapters in [`native/memory.c`](native/memory.c). Native
+runtime and system helpers use this boundary for raw bytes. Initialization,
+views, transfers, and destructor callbacks belong to the
+[ownership and storage contract](../storage/OWNERSHIP.md).

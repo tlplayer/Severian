@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "../../../core/memory/native/memory.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
@@ -43,7 +44,7 @@ static char *string_field(const char *line, const char *key) {
         if (*end == '\\' && end[1]) ++end;
         ++end;
     }
-    return *end == '"' ? strndup(start, (size_t)(end - start + 1)) : NULL;
+    return *end == '"' ? sev_memory_copy_text_n(start, (size_t)(end - start + 1)) : NULL;
 }
 
 static int compare_cost(const void *left, const void *right) {
@@ -80,7 +81,7 @@ int64_t __sev_hook_function_table(const char *input, const char *output) {
                 ++finish;
             }
             if (*finish != '"') { status = EINVAL; break; }
-            char *label = strndup(name, (size_t)(finish - name + 1));
+            char *label = sev_memory_copy_text_n(name, (size_t)(finish - name + 1));
             if (!label) { status = ENOMEM; break; }
             size_t index = 0;
             for (; index < count; ++index) {
@@ -91,20 +92,20 @@ int64_t __sev_hook_function_table(const char *input, const char *output) {
             if (index == count) {
                 if (count == capacity) {
                     size_t next = capacity ? capacity * 2 : 16;
-                    if (next < capacity || next > SIZE_MAX / sizeof(*functions)) { free(label); status = EOVERFLOW; break; }
-                    void *storage = realloc(functions, next * sizeof(*functions));
-                    if (!storage) { free(label); status = ENOMEM; break; }
+                    if (next < capacity || next > SIZE_MAX / sizeof(*functions)) { sev_memory_release(label); status = EOVERFLOW; break; }
+                    void *storage = sev_memory_resize(functions, next * sizeof(*functions));
+                    if (!storage) { sev_memory_release(label); status = ENOMEM; break; }
                     functions = storage; capacity = next;
                 }
                 char *file = string_field(line, "\"file\":");
-                if (!file) file = strdup("\"\"");
-                if (!file) { free(label); status = ENOMEM; break; }
+                if (!file) file = sev_memory_copy_text("\"\"");
+                if (!file) { sev_memory_release(label); status = ENOMEM; break; }
                 uint64_t row = 0, column = 0;
                 (void)number(line, "\"line\":", &row);
                 (void)number(line, "\"column\":", &column);
                 functions[count++] = (function_cost){ .name = label, .file = file, .line = row, .column = column,
                     .source = source, .start = start, .end = end };
-            } else free(label);
+            } else sev_memory_release(label);
             invocation *parent = NULL;
             for (invocation *call = active; call; call = call->next) {
                 if (call->pid == pid && call->thread == thread) {
@@ -113,7 +114,7 @@ int64_t __sev_hook_function_table(const char *input, const char *output) {
                 }
             }
             if (status) break;
-            invocation *call = malloc(sizeof(*call));
+            invocation *call = sev_memory_allocate(sizeof(*call));
             if (!call) { status = ENOMEM; break; }
             *call = (invocation){ .pid = pid, .thread = thread, .id = id,
                 .function = index, .parent = parent, .next = active };
@@ -158,15 +159,15 @@ int64_t __sev_hook_function_table(const char *input, const char *output) {
             }
             if (call->parent) call->parent->children += duration;
             *position = call->next;
-            free(call);
+            sev_memory_release(call);
         } else { status = EINVAL; break; }
     }
     if (ferror(stream) && !status) status = EIO;
-    fclose(stream); free(line);
+    fclose(stream); sev_memory_release(line);
     while (active) {
         invocation *next = active->next;
         functions[active->function].incomplete++;
-        free(active); active = next;
+        sev_memory_release(active); active = next;
     }
     if (!status) {
         if (count > 1) qsort(functions, count, sizeof(*functions), compare_cost);
@@ -186,7 +187,7 @@ int64_t __sev_hook_function_table(const char *input, const char *output) {
             if (fclose(report) && !status) status = errno;
         }
     }
-    for (size_t index = 0; index < count; ++index) { free(functions[index].name); free(functions[index].file); }
-    free(functions);
+    for (size_t index = 0; index < count; ++index) { sev_memory_release(functions[index].name); sev_memory_release(functions[index].file); }
+    sev_memory_release(functions);
     return status;
 }

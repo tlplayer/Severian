@@ -2,7 +2,7 @@ import package
 import process
 
 def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool) -> int:
-    compiler = package.Compiler(process.arguments()[0], sysroot)
+    compiler = package.Compiler(process.executable(), sysroot)
     location = input if input != "" else "."
     if command == "new":
         project = package.new(location, "", library)
@@ -22,7 +22,9 @@ def package_command(command: string, input: string, sysroot: string, binary: str
         else:
             package.update(project, input)
         return 0
-    project = package.open(location)
+    project = package.open("." if command == "publish" and input != "" and not package.exists(input) else location)
+    if command == "publish" and input != "" and not package.exists(input) and input != project.manifest.name:
+        throw Error("publish name does not match package.toml: " + input)
     if command == "build":
         request = package.Build(binary, platform, profile, "" if emit == "plan" else emit, output, locked)
         if emit == "plan":

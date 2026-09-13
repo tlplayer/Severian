@@ -42,6 +42,13 @@ int main(void) {
         __sev_storage_release(characters);
         assert(__sev_storage_live_bytes() == 0);
     }
+    /* Grow the ownership registry, then remove entries in a different order.
+     * Rehashing must preserve every owner's backlink and reference count. */
+    void *owners[40000];
+    for (unsigned index = 0; index < 40000; ++index) owners[index] = __sev_storage_new(1, NULL);
+    for (unsigned index = 0; index < 40000; index += 2) __sev_storage_release(owners[index]);
+    for (unsigned index = 39999; index < 40000; index -= 2) __sev_storage_release(owners[index]);
+    assert(__sev_storage_live_bytes() == 0);
     void *list = __sev_list_create();
     char *text = __sev_storage_new(4, NULL);
     memcpy(text, "abc", 4);

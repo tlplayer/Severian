@@ -172,6 +172,10 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         matches!(&function.linkage, FunctionLinkage::External { symbol } if symbol == "__sev_hook_record_with")) {
         render_hook_sources(&mut output, module);
     }
+    render_storage_payload_callbacks(&mut output, module)?;
+    if module.classes.iter().any(|class| class.payload_destroy.is_some()) && !runtime_signatures.contains_key("__sev_storage_new") {
+        output.push_str("  func.func private @__sev_storage_new(i64, !llvm.ptr) -> !llvm.ptr\n");
+    }
     let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
         symbol.contains("_aggregate")
@@ -472,6 +476,10 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     if runtime_signatures.contains_key("__sev_hook_record_with") || module.functions.iter().any(|function|
         matches!(&function.linkage, FunctionLinkage::External { symbol } if symbol == "__sev_hook_record_with")) {
         render_hook_sources(&mut output, module);
+    }
+    render_storage_payload_callbacks(&mut output, module)?;
+    if module.classes.iter().any(|class| class.payload_destroy.is_some()) && !runtime_signatures.contains_key("__sev_storage_new") {
+        output.push_str("  func.func private @__sev_storage_new(i64, !llvm.ptr) -> !llvm.ptr\n");
     }
     let mut declared_external_symbols = BTreeSet::new();
     let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
@@ -2524,7 +2532,18 @@ fn render_runtime_call(
                 "native runtime symbol `{symbol}` cannot receive an MLIR builtin tensor; use a !llvm.ptr StorageViewAbi at the host boundary"
             )));
         }
-        if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
+        if matches!(symbol, "__sev_storage_owner_retain_aggregate" | "__sev_storage_owner_release_aggregate") {
+            let LoweredType::Aggregate(id) = ty else {
+                return Err(MlirError::UnsupportedOperation("storage owner projection requires a sum".into()));
+            };
+            if !module.classes.iter().any(|class| class.id == id && class.payload_destroy.is_some()) {
+                return Err(MlirError::UnsupportedOperation("missing checked payload ownership contract".into()));
+            }
+            let owner = format!("%storage_owner_{tag}_{index}");
+            output.push_str(&format!("{indentation}{owner} = llvm.extractvalue %v{}[1] : !sev_class_{id}\n", value.0));
+            argument_values.push(owner);
+            argument_types.push("!llvm.ptr".into());
+        } else if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
             let LoweredType::Aggregate(class_id) = ty else { unreachable!() };
             let class = module.classes.iter().find(|class| class.id == class_id);
             let owns_contents = severian_universal::native_container_stores_values(symbol);
@@ -4015,7 +4034,7 @@ mod tests {
         let module = Module {
             classes: vec![
                 severian_lir::ClassDeclaration {
-                    destroy: None, retain: None,
+                    payload_destroy: None, destroy: None, retain: None,
                     variants: Vec::new(),
                     id: 3,
                     name: "Outer".into(),
@@ -4025,7 +4044,7 @@ mod tests {
                     }],
                 },
                 severian_lir::ClassDeclaration {
-                    destroy: None, retain: None,
+                    payload_destroy: None, destroy: None, retain: None,
                     variants: Vec::new(),
                     id: 22,
                     name: "Inner".into(),
@@ -4663,6 +4682,24 @@ fn sum_payload_type(
 /// Sums use a finite discriminant/reference header. Only the selected payload
 /// is materialized. Heap storage deliberately follows the bootstrap's current
 /// process-lifetime policy; a stack temporary would dangle on return.
+// Layout adapter only: semantic ownership supplies the destruction function;
+// storage invokes it exactly once when the payload's final owner is released.
+fn render_storage_payload_callbacks(output: &mut String, module: &Module) -> Result<(), MlirError> {
+    for class in &module.classes {
+        let Some(destroy) = class.payload_destroy else { continue; };
+        let function = module.functions.iter().find(|function| function.id == destroy)
+            .ok_or_else(|| MlirError::UnsupportedOperation("missing payload destruction function".into()))?;
+        let tag_type = mlir_type(&class.fields[0].ty)?;
+        let header = format!("!sev_class_{}", class.id);
+        for (variant, fields) in class.variants.iter().enumerate() {
+            if fields.is_empty() { continue; }
+            output.push_str(&format!("  llvm.func @__sev_payload_destroy_{}_{variant}(%payload: !llvm.ptr) {{\n", class.id));
+            output.push_str(&format!("    %tag = arith.constant {variant} : {tag_type}\n    %zero = llvm.mlir.zero : {header}\n    %tagged = llvm.insertvalue %tag, %zero[0] : {header}\n    %value = llvm.insertvalue %payload, %tagged[1] : {header}\n    %one = arith.constant 1 : i64\n    %slot = llvm.alloca %one x {header} : (i64) -> !llvm.ptr\n    llvm.store %value, %slot : {header}, !llvm.ptr\n    func.call @{}(%slot) : (!llvm.ptr) -> ()\n    llvm.return\n  }}\n", function_symbol(function)));
+        }
+    }
+    Ok(())
+}
+
 fn render_variant(
     output: &mut String,
     module: &Module,
@@ -4692,11 +4729,16 @@ fn render_variant(
         // This uses MLIR allocation, not a compiler-specific runtime helper.
         output.push_str(&format!("{indentation}{stem}_end = llvm.getelementptr {stem}_null[1] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
         output.push_str(&format!("{indentation}{stem}_bytes = llvm.ptrtoint {stem}_end : !llvm.ptr to i64\n"));
-        output.push_str(&format!("{indentation}{stem}_size = arith.index_cast {stem}_bytes : i64 to index\n"));
-        output.push_str(&format!("{indentation}{stem}_storage = memref.alloc({stem}_size) {{alignment = 64 : i64}} : memref<?xi8>\n"));
-        output.push_str(&format!("{indentation}{stem}_address = memref.extract_aligned_pointer_as_index {stem}_storage : memref<?xi8> -> index\n"));
-        output.push_str(&format!("{indentation}{stem}_address_int = arith.index_cast {stem}_address : index to i64\n"));
-        output.push_str(&format!("{indentation}{stem}_payload = llvm.inttoptr {stem}_address_int : i64 to !llvm.ptr\n"));
+        if declaration.payload_destroy.is_some() {
+            output.push_str(&format!("{indentation}{stem}_destroy = llvm.mlir.addressof @__sev_payload_destroy_{class}_{variant} : !llvm.ptr\n"));
+            output.push_str(&format!("{indentation}{stem}_payload = func.call @__sev_storage_new({stem}_bytes, {stem}_destroy) : (i64, !llvm.ptr) -> !llvm.ptr\n"));
+        } else {
+            output.push_str(&format!("{indentation}{stem}_size = arith.index_cast {stem}_bytes : i64 to index\n"));
+            output.push_str(&format!("{indentation}{stem}_storage = memref.alloc({stem}_size) {{alignment = 64 : i64}} : memref<?xi8>\n"));
+            output.push_str(&format!("{indentation}{stem}_address = memref.extract_aligned_pointer_as_index {stem}_storage : memref<?xi8> -> index\n"));
+            output.push_str(&format!("{indentation}{stem}_address_int = arith.index_cast {stem}_address : index to i64\n"));
+            output.push_str(&format!("{indentation}{stem}_payload = llvm.inttoptr {stem}_address_int : i64 to !llvm.ptr\n"));
+        }
         for (index, (field, logical)) in fields.iter().zip(logical_fields).enumerate() {
             let field_type = value_type(module, *field)?;
             let target_type = declaration.fields[*logical as usize].ty.clone();

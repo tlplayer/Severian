@@ -460,6 +460,7 @@ pub struct ClassFieldDeclaration {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassDeclaration {
+    pub payload_destroy: Option<FunctionId>,
     pub destroy: Option<FunctionId>,
     pub retain: Option<FunctionId>,
     pub id: u32,

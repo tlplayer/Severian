@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "../../../core/memory/native/memory.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -44,7 +45,7 @@ static source_location location(int64_t source, int64_t start) {
 static char *escape(const char *text) {
     size_t length = strlen(text);
     if (length > (SIZE_MAX - 1) / 6) return NULL;
-    char *result = malloc(length * 6 + 1);
+    char *result = sev_memory_allocate(length * 6 + 1);
     if (!result) return NULL;
     char *cursor = result;
     for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
@@ -101,10 +102,10 @@ int64_t __sev_hook_record_with(const char *function, int64_t source,
     source_location source_at = location(source, start);
     char *escaped = escape(function);
     char *file = escape(source_at.path);
-    if (!escaped || !file) { free(escaped); free(file); return -ENOMEM; }
+    if (!escaped || !file) { sev_memory_release(escaped); sev_memory_release(file); return -ENOMEM; }
     size_t length = strlen(escaped) + strlen(file) + 768;
-    char *line = malloc(length);
-    if (!line) { free(escaped); free(file); return -ENOMEM; }
+    char *line = sev_memory_allocate(length);
+    if (!line) { sev_memory_release(escaped); sev_memory_release(file); return -ENOMEM; }
     char costs[192];
     allocation_snapshot(costs, sizeof(costs));
     uint64_t now;
@@ -118,7 +119,7 @@ int64_t __sev_hook_record_with(const char *function, int64_t source,
         if (count < 0 || (size_t)count >= length) error = EOVERFLOW;
         else error = record(path, line, (size_t)count);
     }
-    free(escaped); free(file); free(line);
+    sev_memory_release(escaped); sev_memory_release(file); sev_memory_release(line);
     return error ? -(int64_t)error : (int64_t)id;
 }
 

@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "../../../core/memory/native/memory.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,10 +40,10 @@ void __sev_process_write_error(const char *text) {
     fflush(stderr);
 }
 const char *__sev_process_executable(void) {
-    char *path = malloc(4096);
+    char *path = sev_memory_allocate(4096);
     if (!path) abort();
     ssize_t length = readlink("/proc/self/exe", path, 4095);
-    if (length < 0 || length == 4095) { free(path); return ""; }
+    if (length < 0 || length == 4095) { sev_memory_release(path); return ""; }
     path[length] = 0;
     return path;
 }
@@ -116,17 +117,17 @@ typedef struct {
 } SevCommand;
 
 int64_t __sev_command_create(void) {
-    SevCommand *command = calloc(1, sizeof(*command));
+    SevCommand *command = sev_memory_zeroed(1, sizeof(*command));
     if (!command) abort();
     command->status = -1;
     return (int64_t)(intptr_t)command;
 }
 void __sev_command_argument(int64_t handle, const char *argument) {
     SevCommand *command = (SevCommand *)(intptr_t)handle;
-    char **values = realloc(command->arguments, (command->count + 2) * sizeof(char *));
+    char **values = sev_memory_resize(command->arguments, (command->count + 2) * sizeof(char *));
     if (!values) abort();
     command->arguments = values;
-    values[command->count++] = strdup(argument);
+    values[command->count++] = sev_memory_copy_text(argument);
     if (!values[command->count - 1]) abort();
     values[command->count] = NULL;
 }
@@ -158,7 +159,7 @@ static const char *sev_command_text(FILE *file) {
     if (!file || fseek(file, 0, SEEK_END) != 0) return "";
     long length = ftell(file);
     if (length < 0 || fseek(file, 0, SEEK_SET) != 0) return "";
-    char *text = malloc((size_t)length + 1);
+    char *text = sev_memory_allocate((size_t)length + 1);
     if (!text) abort();
     size_t count = fread(text, 1, (size_t)length, file);
     text[count] = 0;
@@ -174,9 +175,9 @@ void __sev_command_drop(int64_t handle) {
     SevCommand *command = (SevCommand *)(intptr_t)handle;
     if (command->output) fclose(command->output);
     if (command->errors) fclose(command->errors);
-    for (size_t i = 0; i < command->count; ++i) free(command->arguments[i]);
-    free(command->arguments);
-    free(command);
+    for (size_t i = 0; i < command->count; ++i) sev_memory_release(command->arguments[i]);
+    sev_memory_release(command->arguments);
+    sev_memory_release(command);
 }
 
 #include <time.h>

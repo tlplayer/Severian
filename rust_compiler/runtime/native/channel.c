@@ -1,3 +1,4 @@
+#include "../../../library/core/memory/native/memory.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,11 +23,11 @@ typedef struct {
 static _Thread_local sev_channel *sev_claimed_channel;
 
 void *__sev_channel_create(size_t capacity) {
-    sev_channel *channel = calloc(1, sizeof(sev_channel));
+    sev_channel *channel = sev_memory_zeroed(1, sizeof(sev_channel));
     if (channel == NULL) abort();
     channel->unbounded = capacity == 0;
     channel->capacity = channel->unbounded ? 16 : capacity;
-    channel->values = calloc(channel->capacity, sizeof(uintptr_t));
+    channel->values = sev_memory_zeroed(channel->capacity, sizeof(uintptr_t));
     if (channel->values == NULL) abort();
     if (pthread_mutex_init(&channel->mutex, NULL) != 0
         || pthread_cond_init(&channel->readable, NULL) != 0
@@ -39,12 +40,12 @@ static void sev_channel_send(sev_channel *channel, uintptr_t value) {
     while (channel->length == channel->capacity) {
         if (channel->unbounded) {
             size_t next_capacity = channel->capacity * 2;
-            uintptr_t *next = calloc(next_capacity, sizeof(uintptr_t));
+            uintptr_t *next = sev_memory_zeroed(next_capacity, sizeof(uintptr_t));
             if (next == NULL) abort();
             for (size_t index = 0; index < channel->length; index += 1) {
                 next[index] = channel->values[(channel->head + index) % channel->capacity];
             }
-            free(channel->values);
+            sev_memory_release(channel->values);
             channel->values = next;
             channel->capacity = next_capacity;
             channel->head = 0;

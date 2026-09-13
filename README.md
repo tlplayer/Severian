@@ -55,7 +55,11 @@ commit. Failed builds or smoke tests preserve the previous compiler.
 
 Local builds write generated files to `package.pkg/`. Cargo places the seed
 binary at `package.pkg/debug/sev`; Severian packages place binaries at
-`package.pkg/<platform>/<profile>/bin/`. `sev clean` removes package artifacts.
+`package.pkg/<platform>/<profile>/bin/`. Reusable compilation outputs and input
+fingerprints live in `package.pkg/build/units/`. Unchanged package builds and
+standalone `sev file.sev` runs restore these outputs before loading the prelude;
+changing a run/test output path does not force compilation. `sev clean` removes
+package artifacts.
 
 ## Bootstrap compiler checkpoint
 

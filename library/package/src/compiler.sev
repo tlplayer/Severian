@@ -6,6 +6,7 @@ import path
 import os
 import environment
 import process
+import file
 
 
 # Package sessions own the lifetime of shared provider state. A worker may
@@ -55,6 +56,40 @@ def decode_resolution(text: string) -> Resolution | Error:
             throw Error("compilation graph edge has an invalid package identity")
     return Resolution(packages, edges, "")
 
+# Re-root a unit's graph so its identity is independent of consumers and of
+# their package indices. Only the transitive dependencies of this unit matter.
+def unit_packages(resolution: Resolution, index: int, indices: list[int]) -> unit:
+    if index in indices:
+        return
+    indices.append(index)
+    aliases: list[string] = []
+    for edge in resolution.edges:
+        if edge.parent == index:
+            aliases.append(edge.alias)
+    for alias in sorted_strings(aliases):
+        for edge in resolution.edges:
+            if edge.parent == index and edge.alias == alias:
+                unit_packages(resolution, edge.child, indices)
+
+
+def unit_resolution(resolution: Resolution, index: int) -> Resolution:
+    indices: list[int] = []
+    unit_packages(resolution, index, indices)
+    packages: list[ResolvedPackage] = []
+    edges: list[DependencyEdge] = []
+    for original in indices:
+        resolved = resolution.packages[original]
+        identity = resolved.identity
+        # A checkout has the same identity when built directly or as a path dep.
+        packages.append(ResolvedPackage(PackageIdentity(identity.name, identity.version, "path:" + resolved.root if identity.source == "root" else identity.source), resolved.root, resolved.manifest, resolved.checksum))
+    for parent in range(int(len(indices))):
+        for child in range(int(len(indices))):
+            for edge in resolution.edges:
+                if edge.parent == indices[parent] and edge.child == indices[child]:
+                    edges.append(DependencyEdge(parent, child, edge.alias, edge.development))
+    return Resolution(packages, edges, "")
+
+
 def cached_inputs_match(location: string) -> bool:
     try:
         if not os.is_file(location):
@@ -63,36 +98,73 @@ def cached_inputs_match(location: string) -> bool:
         if len(entries) == 0:
             return false
         for entry in entries:
-            if not os.is_file(entry.key) or digest(entry.key) != unquote(entry.value):
+            expected = unquote(entry.value)
+            if expected == "missing":
+                if os.exists(entry.key):
+                    return false
+            elif not os.is_file(entry.key) or digest(entry.key) != expected:
                 return false
         return true
     catch error: Error:
         # Mutable build state is disposable; a damaged cache requests a build.
         return false
 
-def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false) -> Artifact | Error:
+
+def source_cache_root(input: string) -> string:
+    directory := path.dirname(input)
+    while directory != "/":
+        if os.is_file(directory + "/package.toml"):
+            return directory
+        directory = path.dirname(directory)
+    return path.dirname(input)
+
+
+def unit_cache_root(root: string) -> string | Error:
+    if not published_project(root):
+        return root + "/package.pkg/build/units"
+    # Published realizations are immutable. Their local compiler state is shared
+    # across consumers, outside the verified publication.
+    home = environment.get("SEVERIAN_HOME", environment.get("XDG_DATA_HOME", environment.get("HOME", "") + "/.local/share") + "/severian")
+    return home + "/packages/build/units"
+
+
+def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false, source_path: string = "") -> Artifact | Error:
     if unit.output != "":
         mkdir(path.dirname(unit.output))
     stage = temporary("/tmp")
+    cache_lock := -1
     try:
-        graph = encode_resolution(resolution)
+        scoped = unit_resolution(resolution, unit.package_index) if len(resolution.packages) > 0 else resolution
+        graph = encode_resolution(scoped)
         write_text(stage + "/resolution.toml", graph)
-        input = inside(resolution.packages[unit.package_index].root, unit.target.path)
-        identity := graph + "\n" + digest(compiler.executable) + "\n" + compiler.sysroot + "\n" + input + "\n" + unit.output + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
-        # Tool identities and source inputs are semantic build inputs too.
+        input = canonical(source_path) if source_path != "" else inside(scoped.packages[0].root, unit.target.path)
+        root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
+        identity := "unit-cache-2\n" + graph + "\n" + digest(compiler.executable) + "\n" + canonical(compiler.sysroot) + "\n" + input + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
+        if source_path != "":
+            identity += "\n" + registry_root()
         for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")]:
             identity += "\n" + tool + "\n" + capture([tool, "--version"])
         write_text(stage + "/key", identity)
-        cache = resolution.packages[0].root + "/package.pkg/build/units/" + digest(stage + "/key").replace(":", "-")
+        cache = unit_cache_root(root) + "/" + digest(stage + "/key").replace(":", "-")
+        mkdir(cache)
+        cache_lock = file.native_lock(cache + "/lock")
+        if cache_lock < 0:
+            throw Error("could not lock compilation cache")
+        incremental := true
+        if len(scoped.packages) > 0:
+            incremental = setting(scoped.packages[0].manifest.entries, "build", "incremental", "true") != "false"
         reused := false
-        if cached_inputs_match(cache + "/inputs") and os.is_file(cache + "/output"):
+        if incremental and cached_inputs_match(cache + "/inputs") and os.is_file(cache + "/output"):
             recorded = read_text(cache + "/output")
-            reused = recorded == "check" if emit == "check" else os.is_file(unit.output) and digest(unit.output) == recorded
+            reused = recorded == "check" if emit == "check" else os.is_file(cache + "/artifact") and digest(cache + "/artifact") == recorded
         if not reused:
-            arguments := [compiler.executable, "__compile-unit", input, unit.output, emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+            # Never let a failed compilation validate a previous artifact.
+            if os.is_file(cache + "/output"):
+                os.remove(cache + "/output")
+            arguments := [compiler.executable, "__compile-unit", input, stage + "/artifact", emit, compiler.sysroot, stage + "/resolution.toml", "test" if unit.include_tests else "build", unit.platform, unit.profile]
             memory := 0
             seconds := 0
-            if unit.include_tests or guard_tests:
+            if (unit.include_tests or guard_tests) and len(resolution.packages) > 0:
                 config = resolution.packages[0].manifest.entries
                 memory = process.memory_budget(text_setting(config, "test", "memory-max", "4GB"))
                 seconds = int(setting(config, "test", "timeout-seconds", "60"))
@@ -112,12 +184,24 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                 status = command(arguments)
             if status != 0:
                 throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
-            # Only a compiler that reports its actual source inputs can cache.
+            if emit != "check":
+                copy_file(stage + "/artifact", cache + "/artifact")
             if cached_inputs_match(stage + "/resolution.toml.inputs"):
-                mkdir(cache)
                 copy_file(stage + "/resolution.toml.inputs", cache + "/inputs")
-                write_text(cache + "/output", "check" if emit == "check" else digest(unit.output))
+                write_text(cache + "/output", "check" if emit == "check" else digest(cache + "/artifact"))
+        if emit != "check" and unit.output != "":
+            if not reused or not os.is_file(unit.output) or digest(unit.output) != digest(cache + "/artifact"):
+                delivery = temporary(path.dirname(unit.output))
+                copy_file(cache + "/artifact", delivery + "/artifact")
+                if emit == "":
+                    require_command(["chmod", "755", "--", delivery + "/artifact"])
+                replace_file(delivery + "/artifact", unit.output)
+                remove_tree(delivery)
+        file.unlock(cache_lock)
+        cache_lock = -1
     catch error: Error:
+        if cache_lock >= 0:
+            file.unlock(cache_lock)
         remove_tree(stage)
         throw Error(error.message)
     remove_tree(stage)

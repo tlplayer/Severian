@@ -14,3 +14,7 @@ cleanup and the source compiler’s `operator drop(move self) -> unit` hook: cus
 runs first, followed by automatic destruction of remaining owned fields and
 storage. General collection and bootstrap object-graph destruction remain incomplete;
 see the implementation status and tested limits in that contract.
+
+The [ownership boundary](OWNERSHIP.md) describes the checked compiler plan and
+the canonical native implementation in [`native/storage.c`](native/storage.c),
+including shared enum payload ownership and its tested limits.

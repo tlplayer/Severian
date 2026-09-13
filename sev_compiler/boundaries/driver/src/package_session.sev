@@ -1,6 +1,7 @@
 import package
 import process
 import environment
+import * from "pipeline/source.sev" as pipeline
 import * from "package_compiler.sev"
 
 @c(symbol="exit")
@@ -11,6 +12,7 @@ def session_exit(status: i32)
 # compilation workers; unit analysis can never modify the next unit's prelude.
 def serve_package_session(client: int) -> int | Error:
     ordinal := 0
+    prepared: list[string] = []
     while true:
         request = process.session_request()
         if request == "":
@@ -21,6 +23,9 @@ def serve_package_session(client: int) -> int | Error:
             arguments = package.string_array(package.setting(entries, "", "arguments"))
             seconds = int(package.setting(entries, "", "seconds"))
             bytes = int(package.setting(entries, "", "bytes"))
+            if arguments[5] not in prepared:
+                pipeline.prepare_prelude(arguments[5])
+                prepared.append(arguments[5])
             worker = package.fork_compilation_unit()
             if worker == 0:
                 process.session_detach()

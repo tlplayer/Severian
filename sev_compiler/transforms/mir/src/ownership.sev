@@ -8,18 +8,20 @@ class ValueAlias:
     target: universal.ValueId
 
 
-class OwnershipReport:
+class OwnershipPlan:
+    # Function inputs are views; only explicit ownership operations may consume.
+    views: list[universal.ValueId] = []
     storage: list[universal.ValueId] = []
     aliases: list[ValueAlias] = []
 
 
-# The callable frontend currently admits stack storage and SSA string buffers.
-# Record their aliases on the executable graph; buffer deallocation consumes
-# these same SSA edges in MLIR. General resource loans and cleanup are not yet
-# admitted by this frontend and must not use the former linear statement walk.
-def analyze_ownership(module: universal.Module, body: universal.CfgBody, parameters: list[universal.ValueId]) -> OwnershipReport | diagnostics.Diagnostic:
+# Semantic checking supplies explicit moves and destructor calls. This plan
+# verifies the executable graph and its stack/view lifetimes before lowering.
+# Typed buffer ownership is carried by SSA aliases into MLIR's deallocation
+# analysis; its physical release adapter belongs to core.memory.
+def analyze_ownership(module: universal.Module, body: universal.CfgBody, parameters: list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
     cfg.verify_availability(body, parameters)
-    report = OwnershipReport()
+    report = OwnershipPlan(views=parameters[:])
     for block in body.blocks:
         for operation in block.operations:
             match operation:
@@ -27,6 +29,8 @@ def analyze_ownership(module: universal.Module, body: universal.CfgBody, paramet
                     report.storage.append(result)
                 case Alias:
                     report.aliases.append(ValueAlias(value, result))
+                case FieldAddress:
+                    report.aliases.append(ValueAlias(object, result))
                 case _:
                     pass
         terminal ?= block.terminator
@@ -36,4 +40,45 @@ def analyze_ownership(module: universal.Module, body: universal.CfgBody, paramet
                 for argument in edge.arguments:
                     report.aliases.append(ValueAlias(argument, body.blocks[edge.target].parameters[index]))
                     index += 1
+    verify_escapes(body, report)
     return report
+
+
+def stack_owner(plan: borrow OwnershipPlan, value: universal.ValueId) -> bool:
+    reachable: list[int] = [int(value.index)]
+    cursor := 0
+    while cursor < len(reachable):
+        current = reachable[cursor]
+        cursor += 1
+        for storage in borrow plan.storage:
+            if int(storage.index) == current:
+                return true
+        for alias in borrow plan.aliases:
+            if int(alias.target.index) == current and int(alias.source.index) not in reachable:
+                reachable.append(int(alias.source.index))
+    return false
+
+
+def verify_escapes(body: borrow universal.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
+    for block in borrow body.blocks:
+        terminal ?= block.terminator
+        if terminal != None:
+            returned_values: list[universal.ValueId] := []
+            match terminal.exit:
+                case Finish:
+                    returned ?= value
+                    if returned != None:
+                        returned_values.append(returned)
+                case FinishFields:
+                    returned_values = values[:]
+                case _:
+                    pass
+            for value in returned_values:
+                if stack_owner(plan, value):
+                    return error(diagnostics.Diagnostic("E000303", "returned view outlives its local storage owner", terminal.span))
+
+
+# Every lowering entry obtains a new plan for the exact executable graph.
+# HIR diagnostics alone do not authorize a graph changed by later transforms.
+def authorize_lowering(module: borrow universal.Module, body: borrow universal.CfgBody, parameters: borrow list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+    return analyze_ownership(module, body, parameters)

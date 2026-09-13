@@ -1,3 +1,4 @@
+#include "../../../library/core/memory/native/memory.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -40,7 +41,7 @@ static void sev_csv_field_push(sev_csv_field *field, char value) {
     if (field->length == field->capacity) {
         size_t capacity = field->capacity == 0 ? 64 : field->capacity * 2;
         if (capacity < field->capacity) abort();
-        char *bytes = realloc(field->bytes, capacity);
+        char *bytes = sev_memory_resize(field->bytes, capacity);
         if (bytes == NULL) abort();
         field->bytes = bytes;
         field->capacity = capacity;
@@ -55,7 +56,7 @@ static char *sev_csv_field_copy(const sev_csv_field *field, _Bool trim) {
         while (start < end && (field->bytes[start] == ' ' || field->bytes[start] == '\t')) ++start;
         while (end > start && (field->bytes[end - 1] == ' ' || field->bytes[end - 1] == '\t')) --end;
     }
-    char *value = malloc(end - start + 1);
+    char *value = sev_memory_allocate(end - start + 1);
     if (value == NULL) abort();
     memcpy(value, field->bytes + start, end - start);
     value[end - start] = '\0';
@@ -72,7 +73,7 @@ static void sev_csv_finish_field(
     char *value = sev_csv_field_copy(field, record == 0);
     if (record == 0) {
         if (columns != NULL) __sev_list_push_ptr(columns, value);
-        else free(value);
+        else sev_memory_release(value);
     } else {
         __sev_list_push_any(row, __sev_any_from_string(value));
     }
@@ -123,12 +124,12 @@ static void *sev_csv_parse(const char *source, _Bool columns_only) {
                 if (record == 0) {
                     width = field_count;
                     if (columns_only) {
-                        free(field.bytes);
+                        sev_memory_release(field.bytes);
                         return result;
                     }
                 } else {
                     while (field_count < width) {
-                        __sev_list_push_any(row, __sev_any_from_string(strdup("")));
+                        __sev_list_push_any(row, __sev_any_from_string(sev_memory_copy_text("")));
                         ++field_count;
                     }
                     sev_csv_list list = {row};
@@ -151,7 +152,7 @@ static void *sev_csv_parse(const char *source, _Bool columns_only) {
         sev_csv_field_push(&field, character);
         ++cursor;
     }
-    free(field.bytes);
+    sev_memory_release(field.bytes);
     return result;
 }
 
@@ -176,7 +177,7 @@ static const char *sev_json_space(const char *cursor) {
 
 static char *sev_json_string(const char **position) {
     const char *cursor = *position;
-    if (*cursor != '"') return strdup("");
+    if (*cursor != '"') return sev_memory_copy_text("");
     ++cursor;
     sev_csv_field field = {0};
     while (*cursor != '\0' && *cursor != '"') {
@@ -200,7 +201,7 @@ static char *sev_json_string(const char **position) {
     if (*cursor == '"') ++cursor;
     *position = cursor;
     char *result = sev_csv_field_copy(&field, 0);
-    free(field.bytes);
+    sev_memory_release(field.bytes);
     return result;
 }
 
@@ -230,9 +231,9 @@ static char *sev_json_value(const char **position) {
     while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) --end;
     char *value;
     if ((size_t)(end - start) == 4 && memcmp(start, "null", 4) == 0) {
-        value = strdup("");
+        value = sev_memory_copy_text("");
     } else {
-        value = malloc((size_t)(end - start) + 1);
+        value = sev_memory_allocate((size_t)(end - start) + 1);
         if (value == NULL) abort();
         memcpy(value, start, (size_t)(end - start));
         value[end - start] = '\0';
@@ -248,12 +249,12 @@ static size_t sev_json_column(sev_json_columns *columns, const char *key, _Bool 
     if (!insert) return SIZE_MAX;
     if (columns->length == columns->capacity) {
         size_t capacity = columns->capacity == 0 ? 16 : columns->capacity * 2;
-        char **values = realloc(columns->values, capacity * sizeof(char *));
+        char **values = sev_memory_resize(columns->values, capacity * sizeof(char *));
         if (values == NULL) abort();
         columns->values = values;
         columns->capacity = capacity;
     }
-    columns->values[columns->length] = strdup(key);
+    columns->values[columns->length] = sev_memory_copy_text(key);
     if (columns->values[columns->length] == NULL) abort();
     return columns->length++;
 }
@@ -281,9 +282,9 @@ static const char *sev_json_object(
         if (row != NULL && column != SIZE_MAX) {
             __sev_list_set_any(row, (int64_t)column, __sev_any_from_string(value));
         } else {
-            free(value);
+            sev_memory_release(value);
         }
-        free(key);
+        sev_memory_release(key);
         cursor = sev_json_space(cursor);
         if (*cursor == ',') ++cursor;
     }
@@ -306,7 +307,7 @@ void *__sev_json_columns(const char *source) {
     for (size_t index = 0; index < columns.length; ++index) {
         __sev_list_push_ptr(result, columns.values[index]);
     }
-    free(columns.values);
+    sev_memory_release(columns.values);
     return result;
 }
 
@@ -322,14 +323,14 @@ void *__sev_json_rows(const char *source) {
         }
         void *row = __sev_list_create();
         for (size_t index = 0; index < columns.length; ++index) {
-            __sev_list_push_any(row, __sev_any_from_string(strdup("")));
+            __sev_list_push_any(row, __sev_any_from_string(sev_memory_copy_text("")));
         }
         cursor = sev_json_object(cursor, &columns, row, 0);
         sev_csv_list list = {row};
         __sev_list_push_list(result, list);
     }
-    for (size_t index = 0; index < columns.length; ++index) free(columns.values[index]);
-    free(columns.values);
+    for (size_t index = 0; index < columns.length; ++index) sev_memory_release(columns.values[index]);
+    sev_memory_release(columns.values);
     return result;
 }
 
@@ -406,7 +407,7 @@ static void *sev_file_read_json_boole(const char *path, _Bool keys) {
         }
         if (keys) {
             size_t length = (size_t)(key_end - key_start);
-            char *key = malloc(length + 1);
+            char *key = sev_memory_allocate(length + 1);
             if (key == NULL) abort();
             memcpy(key, key_start, length);
             key[length] = '\0';
