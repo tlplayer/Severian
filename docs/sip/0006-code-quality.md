@@ -73,18 +73,338 @@ Linting
 
 ## Examples
 
+* `sev build`
+
+  * Run configured lint rules.
+  * Run documentation validation.
+  * Run coverage thresholds.
+  * Run leak/allocation checks when enabled.
+  * Emit deterministic diagnostics in source order.
+
+Lint is defaulted on in the package with sev init. 
+* `sev build --lint`
+
+  * Flag files over 1000 LOC.
+  * Flag methods over 400 LOC.
+  * Flag excessive parameter counts.
+  * Flag classes with excessive responsibilities.
+  * Flag dead code and unused variables.
+  * Flag duplicate implementations.
+  * Flag middle-man classes.
+  * Flag large `match` expressions.
+  * Flag repeated conditional dispatch that could use a map, trait, or polymorphic operation.
+  * Flag suspected speculative generality.
+  * Flag churn hotspots.
+  * Flag standalone files not exposed by the package.
+  * Flag expensive allocation patterns.
+  * Flag comments that only restate code.
+
+Coverage is defaulted on
+* `sev test --coverage`
+
+  * Line coverage.
+  * Branch coverage.
+  * Function coverage.
+  * Condition coverage.
+  * Optional path coverage.
+  * Optional mutation testing.
+
+* Function documentation:
+
+  ```sev WIP feel free to edit it 
+   Parses one source file into a syntax tree.
+  
+   Parameters:
+   - source: Source text to parse.
+  
+   Returns:
+   - Parsed syntax tree.
+  
+   Errors:
+   - ParseError when source cannot satisfy the grammar.
+  
+   Complexity:
+   - O(n)
+  def parse(source: string) -> Result[Tree, ParseError]:
+      ...
+  ```
+
+* Class documentation:
+
+  ```sev
+   Owns package dependency resolution.
+  
+   Responsibilities:
+   - Resolve package versions.
+   - Validate dependency constraints.
+   - Produce the dependency graph.
+  
+   Invariants:
+   - Graph contains no unresolved dependency.
+   - Package identity is unique.
+  class Resolver:
+      ...
+  ```
+
+* Editor:
+
+  * Go to definition.
+  * Find references/usages.
+  * Go to implementation.
+  * Call hierarchy.
+  * Type hierarchy.
+  * Hover documentation.
+  * Parameter hints.
+  * Return-type hints.
+  * Inlay type hints.
+  * Semantic highlighting.
+  * Deprecated-code highlighting.
+  * Dead-code dimming.
+  * Complexity warnings.
+  * Coverage gutters.
+  * Breakpoints.
+  * Step in/out/over.
+  * Variable inspection.
+  * Watch expressions.
+  * Stack inspection.
+  * Ownership/lifetime inspection.
 
 ## Illustration
 
+* Source code flows through one quality pipeline:
+
+  * Parse.
+  * Resolve symbols.
+  * Build semantic information.
+  * Run static lint rules.
+  * Build executable/tests.
+  * Run tests.
+  * Collect coverage.
+  * Collect allocation/leak data.
+  * Collect profiling data.
+  * Compare results against package policy.
+  * Emit diagnostics.
+  * Expose results through CLI and editor.
+
+* Diagnostics use one severity model:
+
+  * `info`: informational metric.
+  * `hint`: suggested simplification.
+  * `warning`: quality threshold violated.
+  * `error`: configured package policy violated.
+
+* Every diagnostic contains:
+
+  * Stable rule ID.
+  * File.
+  * Source range.
+  * Explanation.
+  * Measured value.
+  * Configured threshold.
+  * Suggested remediation.
+  * Optional automatic fix.
+
+* Quality rules are deterministic:
+
+  * Same source + configuration produces the same diagnostics.
+  * Rules operate on compiler facts where possible.
+  * Git history rules use an explicit revision window.
+  * No lint rule silently rewrites source.
+  * Heuristic rules default to hints or warnings rather than errors.
 
 ## Testing
 
+* Unit-test every lint rule with:
+
+  * Passing example.
+  * Failing example.
+  * Boundary value.
+  * Suppressed rule.
+  * Package override.
+
+* Golden diagnostic tests:
+
+  * Stable diagnostic ID.
+  * Stable source span.
+  * Stable severity.
+  * Stable message.
+  * Stable suggested fix.
+
+* Coverage tests:
+
+  * Line coverage measurement.
+  * Branch coverage measurement.
+  * Function coverage measurement.
+  * Condition coverage measurement.
+  * Threshold pass.
+  * Threshold failure.
+  * Excluded/generated source handling.
+
+* Documentation tests:
+
+  * Public function missing documentation.
+  * Public class missing documentation.
+  * Parameter documentation mismatch.
+  * Return documentation mismatch.
+  * Error documentation mismatch.
+  * Invalid documentation reference.
+  * Documentation updated after signature changes.
+
+* Editor tests:
+
+  * Definition lookup.
+  * Reference lookup.
+  * Rename.
+  * Hover.
+  * Semantic tokens.
+  * Inlay hints.
+  * Diagnostics.
+  * Breakpoints.
+  * Variable watches.
+  * Stack frames.
+
+* Debugger tests:
+
+  * Local variables.
+  * Arguments.
+  * Returned values.
+  * Ownership state.
+  * Moved values.
+  * Borrowed values.
+  * Mirror/view state.
+  * Collection contents.
+  * Source-to-generated-code mapping.
+
+* Determinism test:
+
+  * Run lint/build/test twice from the same source tree.
+  * Require identical diagnostic ordering and results.
+
+* Regression tests:
+
+  * Quality tooling cannot change program semantics.
+  * Disabling lint rules cannot change generated code.
+  * Editor analysis cannot change compiler state.
 
 ## Performance
 
+* Measure quality pipeline stages independently:
+
+  * Parsing.
+  * Semantic analysis.
+  * Linting.
+  * Coverage instrumentation.
+  * Documentation indexing.
+  * Editor indexing.
+  * Debug metadata generation.
+
+* Required properties:
+
+  * Incremental analysis only revisits affected files.
+  * Unchanged packages reuse cached quality results.
+  * Editor diagnostics operate incrementally.
+  * Coverage instrumentation is disabled for release builds unless requested.
+  * Git-history analysis is cached by commit.
+  * Duplicate-code analysis uses indexed representations rather than pairwise source comparison.
+
+* Report:
+
+  * Wall time.
+  * CPU time.
+  * Peak memory.
+  * Allocation count.
+  * Cache hits/misses.
+  * Files/functions analyzed.
+
+* Package policy may define:
+
+  * Maximum lint overhead.
+  * Maximum analysis memory.
+  * Maximum incremental-analysis latency.
+
 ## Optimization
 
+* Reuse compiler IR rather than reparsing source for lint rules.
+
+* Attach quality metadata to existing symbols, functions, classes, CFGs, and packages.
+
+* Compute shared metrics once:
+
+  * LOC.
+  * Cyclomatic complexity.
+  * Parameter count.
+  * Call count.
+  * Allocation count.
+  * Branch count.
+  * Churn.
+  * Coverage.
+
+* Cache metrics by:
+
+  * File hash.
+  * Function hash.
+  * Package version.
+  * Compiler version.
+  * Rule configuration.
+
+* Re-run only checks affected by:
+
+  * Changed source.
+  * Changed dependencies.
+  * Changed quality policy.
+  * Changed compiler version.
+
+* Prefer compiler-known facts over heuristics.
+
+* Keep heuristic refactoring suggestions non-destructive.
+
+* Allow profiling data to strengthen static warnings:
+
+  * High allocation count.
+  * Expensive hot path.
+  * Large object lifetime.
+  * Repeated conversion.
+  * Excessive dispatch.
+
+* Use editor analysis results from the same semantic database as `sev build` to prevent CLI/editor disagreement.
+
 ## Rollback Procedure
+
+* All new quality checks begin as:
+
+  * Disabled.
+  * `info`.
+  * `hint`.
+  * Or `warning`.
+
+* Promote rules to errors only after:
+
+  * Compiler tests pass.
+  * Package-library tests pass.
+  * Existing packages are measured.
+  * False-positive rate is acceptable.
+
+* Every rule has:
+
+  * Stable rule ID.
+  * Package-level configuration.
+  * Severity override.
+  * Explicit suppression mechanism.
+
+* Rollback options:
+
+  * Disable individual rule.
+  * Downgrade error to warning.
+  * Disable coverage enforcement.
+  * Disable mutation testing.
+  * Disable expensive analysis.
+  * Revert package quality profile.
+
+* Rollback must not require source changes.
+
+* Existing builds remain reproducible using their recorded quality configuration.
+
+* Removed rules remain recognized as deprecated configuration keys for at least one migration period.
 
 ## Migration
 1. All package.toml files become json files for readability and easier handling a json version that allows comments
