@@ -124,8 +124,7 @@ def unit_cache_root(root: string) -> string | Error:
         return root + "/package.pkg/build/units"
     # Published realizations are immutable. Their local compiler state is shared
     # across consumers, outside the verified publication.
-    home = environment.get("SEVERIAN_HOME", environment.get("XDG_DATA_HOME", environment.get("HOME", "") + "/.local/share") + "/severian")
-    return home + "/packages/build/units"
+    return package_home() + "/packages/build/units"
 
 
 def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false, source_path: string = "") -> Artifact | Error:
@@ -141,7 +140,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
         identity := "unit-cache-2\n" + graph + "\n" + digest(compiler.executable) + "\n" + canonical(compiler.sysroot) + "\n" + input + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
         if source_path != "":
-            identity += "\n" + registry_root()
+            identity += "\n" + registry_discovery_state()
         for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")]:
             identity += "\n" + tool + "\n" + capture([tool, "--version"])
         write_text(stage + "/key", identity)
@@ -158,6 +157,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             recorded = read_text(cache + "/output")
             reused = recorded == "check" if emit == "check" else os.is_file(cache + "/artifact") and digest(cache + "/artifact") == recorded
         if not reused:
+            process.write_error("compiling " + input + "\n")
             # Never let a failed compilation validate a previous artifact.
             if os.is_file(cache + "/output"):
                 os.remove(cache + "/output")

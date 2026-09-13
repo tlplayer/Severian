@@ -4,7 +4,9 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +24,15 @@ class CompilerUpdate(unittest.TestCase):
     def git(self, cwd, *args):
         return subprocess.run(['git', '-C', str(cwd), *args], check=True,
                               text=True, capture_output=True).stdout.strip()
+
+    def test_timed_command_stops_children_holding_output_open(self):
+        script = ('import subprocess, sys, time; '
+                  'subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"]); '
+                  'time.sleep(5)')
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            update.run(sys.executable, '-c', script, capture=True, timeout=0.2)
+        self.assertLess(time.monotonic() - started, 4)
 
     def test_install_preserves_old_commands_and_dispatches_update(self):
         directory = self.root / 'bin'
@@ -74,6 +85,36 @@ class CompilerUpdate(unittest.TestCase):
         with patch.object(update, 'ROOT', self.root), patch.object(update, 'run', fail_build), \
              patch.object(update, 'install') as install, patch('sys.argv', ['update.py', '--local']):
             with self.assertRaisesRegex(RuntimeError, 'build failed'):
+                update.main()
+            install.assert_not_called()
+        self.assertEqual(compiler.read_bytes(), b'working compiler')
+
+    def test_update_builds_optimized_compiler_at_launcher_path(self):
+        compiler = self.root / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'
+        commands = []
+        def record(*args, **kwargs):
+            commands.append(tuple(map(str, args)))
+            return 'revision' if kwargs.get('capture') else None
+        with patch.object(update, 'ROOT', self.root), patch.object(update, 'run', record), \
+             patch('sys.argv', ['update.py', '--local', '--no-install']):
+            update.main()
+        build = next(command for command in commands if command[1] == 'build' and command[0] != 'cargo')
+        self.assertEqual(build[build.index('--build-profile') + 1], 'release')
+        self.assertEqual(build[build.index('-o') + 1], str(compiler))
+
+    def test_slow_cold_smoke_restores_working_binary(self):
+        compiler = self.root / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'
+        compiler.parent.mkdir(parents=True)
+        compiler.write_bytes(b'working compiler')
+        def run_candidate(*args, **kwargs):
+            if len(args) > 1 and args[1] == 'build' and args[0] != 'cargo':
+                compiler.write_bytes(b'slow candidate')
+            if len(args) > 1 and str(args[1]).endswith('smoke.sev'):
+                self.assertEqual(kwargs.get('timeout'), 90)
+                raise subprocess.TimeoutExpired(list(args), 90)
+        with patch.object(update, 'ROOT', self.root), patch.object(update, 'run', run_candidate), \
+             patch.object(update, 'install') as install, patch('sys.argv', ['update.py', '--local']):
+            with self.assertRaises(subprocess.TimeoutExpired):
                 update.main()
             install.assert_not_called()
         self.assertEqual(compiler.read_bytes(), b'working compiler')

@@ -5,20 +5,37 @@ import * from "archive.sev"
 import environment
 import os
 import path
+import process
+
+# Registry directories need not exist before the first publication. realpath
+# would reject that normal case; anchor relative overrides without creating it.
+def package_location(value: string) -> string:
+    return value if value.starts_with("/") else process.current_directory() + "/" + value
+
+def package_home() -> string | Error:
+    configured = environment.get("SEVERIAN_HOME", "")
+    if configured != "":
+        return package_location(configured)
+    home = environment.get("HOME", "")
+    if home == "":
+        throw Error("packages need SEVERIAN_HOME or HOME")
+    return home + "/.severian"
 
 def registry_root(selected: string = "") -> string | Error:
     if selected != "" and selected != "default":
-        return selected
+        return package_location(selected)
     configured = environment.get("SEVERIAN_REGISTRY", "")
     if configured != "":
-        return configured
-    severian = environment.get("SEVERIAN_HOME", "")
-    if severian != "":
-        return severian + "/registry"
-    home = environment.get("HOME", "")
-    if home == "":
-        throw Error("registry needs SEVERIAN_REGISTRY or HOME")
-    return environment.get("XDG_DATA_HOME", home + "/.local/share") + "/severian/registry"
+        return package_location(configured)
+    return package_home() + "/packages/registry"
+
+# All writers use the same package/version layout. Readers also accept the
+# earlier extra `packages/` level inside an explicitly selected registry.
+def registry_release(name: string, version: string, registry: string = "") -> string | Error:
+    root = registry_root(registry)
+    release = root + "/" + safe_name(name) + "/" + safe_name(version)
+    legacy = root + "/packages/" + safe_name(name) + "/" + safe_name(version)
+    return legacy if not os.exists(release) and os.is_dir(legacy) else release
 
 def version_matches(version: string, selector: string) -> bool:
     return selector == "*" or version == selector or version.starts_with(selector + ".")
@@ -34,15 +51,37 @@ def newer(left: string, right: string) -> bool:
     return false
 
 def versions(name: string, registry: string = "") -> list[string] | Error:
-    root = registry_root(registry) + "/packages/" + safe_name(name)
-    if not os.is_dir(root):
-        return []
     result: list[string] = []
-    for value in os.list(root):
-        if os.is_dir(root + "/" + value) and int(len(value.split("."))) == 3:
-            reference(name + "@" + value)
-            result.append(value)
+    selected = registry_root(registry)
+    for root in [selected + "/" + safe_name(name), selected + "/packages/" + safe_name(name)]:
+        if not os.is_dir(root):
+            continue
+        for value in os.list(root):
+            if os.is_dir(root + "/" + value) and int(len(value.split("."))) == 3:
+                reference(name + "@" + value)
+                if value not in result:
+                    result.append(value)
     return sorted_strings(result)
+
+# A standalone program has no resolved graph in its unit-cache key. Record
+# discovery state too: publishing a newer unpinned release must invalidate its
+# previous selection even though every previously read source is unchanged.
+def registry_discovery_state() -> string | Error:
+    registry = registry_root()
+    records: list[string] = [registry]
+    for root in [registry, registry + "/packages"]:
+        if not os.is_dir(root):
+            continue
+        for name in os.list(root):
+            directory = root + "/" + name
+            if not os.is_dir(directory) or name.starts_with("."):
+                continue
+            for version in os.list(directory):
+                release = directory + "/" + version
+                marker = release + "/metadata/publication.toml"
+                if os.is_file(marker):
+                    records.append(release + " " + digest(marker))
+    return sorted_strings(records).join("\n")
 
 def fetch(ref: Reference, registry: string = "") -> string | Error:
     if ref.source == "git":
@@ -65,7 +104,7 @@ def fetch_registry(ref: Reference, registry: string) -> string | Error:
             selected = version
     if selected == "":
         throw Error("no registry release for " + ref.name + "@" + ref.selector)
-    release = registry_root(selected_registry[:]) + "/packages/" + ref.name + "/" + selected
+    release = registry_release(ref.name, selected, selected_registry[:])
     return materialize_release(release, ref.name, selected, selected_registry)
 
 def materialize_release(release: string, name: string, version: string, registry: string) -> string | Error:
@@ -98,7 +137,7 @@ def source_checksum(root: string, manifest_text: string = "") -> string | Error:
         write_text(stage + "/manifest", manifest_text)
     for location in files(root):
         relative = location[int(int(len(root))) + 1:]
-        if relative.starts_with("package.pkg/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative == "sev.lock":
+        if relative.starts_with("package.pkg/") or relative.starts_with(".git/") or relative.starts_with(".sev-") or relative in ["sev.lock", "package.lock"]:
             continue
         checksum = digest(stage + "/manifest") if relative == "package.toml" and manifest_text != "" else digest(location)
         lines.append(relative + " " + checksum)
@@ -168,10 +207,10 @@ def resolve(project: Project, request: Resolve) -> Resolution | Error:
     packages: list[ResolvedPackage] = []
     edges: list[DependencyEdge] = []
     locked: list[Entry] := []
-    if request.locked:
-        if project.lock_text == "":
-            throw Error("sev.lock is missing")
+    if project.lock_text != "":
         locked = parse_document(project.lock_text)
+    elif request.locked:
+        throw Error("package lock is missing")
     visit(project, "root", request.mode == "test" or request.mode == "edit", request.registry, packages, edges, [], [project.manifest.name], locked)
     lock = render_lock(packages, edges)
     if request.locked:
@@ -241,7 +280,7 @@ def validate_lock(entries: list[Entry], packages: list[ResolvedPackage]) -> unit
             throw Error("lock is stale for " + resolved.identity.name)
 
 # Standalone files share registry and explicit dependency semantics with builds.
-# The sysroot workspace remains the first choice for undeclared standard names.
+# Explicit dependencies win; otherwise published packages precede the sysroot.
 def standalone_source(root: string, importer: string, alias: string) -> string | Error:
     directory := path.dirname(importer)
     while true:
@@ -269,6 +308,9 @@ def standalone_source(root: string, importer: string, alias: string) -> string |
         if parent == directory:
             break
         directory = parent
+    if len(versions(alias)) > 0:
+        project = open(fetch(reference(alias)))
+        return inside(project.root, library_target(project.manifest).path)
     try:
         return workspace_library(root, alias)
     catch failure: Error:

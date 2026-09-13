@@ -1,0 +1,15 @@
+[package]
+name = "package-registry-tests"
+version = "0.1.0"
+
+[lib]
+path = "main.sev"
+
+[dependencies]
+package = { path = "../../../../library/package" }
+environment = { path = "../../../../library/system/environment" }
+os = { path = "../../../../library/system/os" }
+
+[test]
+timeout-seconds = 120
+memory-max = "4GB"

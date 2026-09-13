@@ -21,6 +21,7 @@ import * from "../../ownership/src/loans.sev" as loans
 import * from "../../ownership/src/places.sev" as places
 import * from "../../ownership/src/effects.sev" as parameter_effects
 import * from "closures.sev" as closures
+import * from "callable_index.sev" as callable_index
 
 
 class TransitionState:
@@ -69,6 +70,9 @@ class CallableAnalysis:
     source_files: list[source.SourceFile] = []
     excluded_functions: list[string] = []
     prelude_sources: list[int] = []
+    function_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
+    generic_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
+    template_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
 
 
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
@@ -156,7 +160,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
                 parameter.type_id = argument.value.type_id
                 parameter.annotation = universal.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
         parameters.append(parameter)
-    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
     for parameter in parameters:
         local.names.append(parameter.name)
         local.types.append(parameter.type_id)
@@ -511,25 +515,12 @@ def callable_specialization_count(state: CallableAnalysis) -> int:
 
 def callable_select_function(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument], expected: universal.TypeId = universal.TypeId(0), allow_prelude: bool = true) -> CallableOptionalSelection | diagnostics.Diagnostic:
     lookup := state.namespace + name
-    local := false
-    for template in state.generics:
-        if template.name == lookup and (allow_prelude or not template.prelude):
-            local = true
-    for template in state.templates:
-        if template.name == lookup and (allow_prelude or not template.prelude):
-            local = true
-    for function in state.functions:
-        if function.name == lookup and (allow_prelude or not function.prelude):
-            local = true
+    local = len(callable_index.named(state.generic_index, state.generics, lookup, allow_prelude)) > 0 or len(callable_index.named(state.template_index, state.templates, lookup, allow_prelude)) > 0 or len(callable_index.named(state.function_index, state.functions, lookup, allow_prelude)) > 0
     if not local:
         lookup = "format.string" if name == "string" and allow_prelude else name
-    for template in state.templates:
-        if template.name == lookup and (allow_prelude or not template.prelude):
-            return CallableOptionalSelection(callable_select_pack(state, template, arguments))
-    candidates: list[universal.FunctionDeclaration] = []
-    for function in state.functions:
-        if function.name == lookup and (allow_prelude or not function.prelude):
-            candidates.append(function)
+    for template in callable_index.named(state.template_index, state.templates, lookup, allow_prelude):
+        return CallableOptionalSelection(callable_select_pack(state, template, arguments))
+    candidates = callable_index.named(state.function_index, state.functions, lookup, allow_prelude)
     if len(candidates) == 0:
         generic = callable_select_generic(state, lookup, arguments, expected, allow_prelude)
         return generic
@@ -1499,17 +1490,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     state.next_id[0] += 1
                     return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.TypeId(3))
                 return error(callable_diagnostic("type requires a concrete value", expression.span))
-            named_operation := false
-            for function in state.functions:
-                syntax ?= function.operator_syntax
-                if syntax != None:
-                    if syntax.symbol == name:
-                        named_operation = true
-            for function in state.generics:
-                syntax ?= function.operator_syntax
-                if syntax != None:
-                    if syntax.symbol == name:
-                        named_operation = true
+            named_operation = callable_index.has_operator(state.function_index, state.functions, name) or callable_index.has_operator(state.generic_index, state.generics, name)
             if named_operation:
                 operands: list[universal.Expression] = []
                 types: list[universal.TypeId] = []
@@ -1851,8 +1832,10 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     return error(callable_diagnostic("compiler expectations require a test body", span))
                 isolated = callable_scope(state)
                 isolated.functions = state.functions[:]
+                isolated.function_index = callable_index.FunctionIndex()
                 isolated.records = state.records[:]
                 isolated.generics = state.generics[:]
+                isolated.generic_index = callable_index.FunctionIndex()
                 isolated.declarations = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
                 checked ?= callable_check_compiler_case(isolated, body)
                 rejected := false
@@ -2685,7 +2668,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -2780,7 +2763,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                     arguments.append(binding.type_id)
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
-    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index)
     local.destructor = function.name.ends_with(".drop")
     if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
         return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
@@ -3071,7 +3054,7 @@ def callable_operator(state: CallableAnalysis, symbol: string, operands: list[un
     for operand in operands:
         callable_register_record_methods(state, operand)
     selected: universal.FunctionDeclaration | None := None
-    for function in state.functions:
+    for function in callable_index.matching_operators(state.function_index, state.functions, symbol):
         syntax ?= function.operator_syntax
         if syntax != None:
             if syntax.symbol == symbol and callable_same_types(function.parameter_types, operands):
@@ -3080,7 +3063,7 @@ def callable_operator(state: CallableAnalysis, symbol: string, operands: list[un
                 selected = function
     if selected != None:
         return CallableOptionalFunction(selected)
-    for template in state.generics:
+    for template in callable_index.matching_operators(state.generic_index, state.generics, symbol):
         syntax ?= template.operator_syntax
         if syntax != None:
             if syntax.symbol != symbol or len(template.parameters) != len(operands):
@@ -3346,7 +3329,7 @@ def callable_validate_generics(state: CallableAnalysis, module: universal.Module
 
 
 def callable_select_generic(state: CallableAnalysis, name: string, arguments: list[universal.CallArgument], expected: universal.TypeId = universal.TypeId(0), allow_prelude: bool = true) -> CallableOptionalSelection | diagnostics.Diagnostic:
-    for template in state.generics:
+    for template in callable_index.named(state.generic_index, state.generics, name, allow_prelude):
         if template.name != name or (not allow_prelude and template.prelude):
             continue
         bound = packs.bind_arguments(template, arguments)

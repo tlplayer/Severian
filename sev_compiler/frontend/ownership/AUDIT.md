@@ -43,3 +43,21 @@ passes alias, initialization, destruction, error-path, and sanitizer validation.
 The source compiler's unoptimized development build exceeded the test harness's
 60-second compilation budget. Source checks use the release build with an
 explicit 180-second budget; this does not establish a 60-second cold-build target.
+
+## Cold-compilation follow-up
+
+The installed compiler rebuilt by `sev update` used the package's development
+profile. A fresh hello-world compilation spent 229 seconds in semantic analysis;
+a debugger sample found declaration retention during prelude generic checking.
+Concurrent invocations waited on the active compilation's cache lock. This was
+active CPU work, not evidence of a deadlock left by an interrupted test.
+
+Update now selects the release profile and requires its cold smoke test to finish
+within 90 seconds, restoring the previous compiler and stopping the smoke-test
+process group on timeout. Source semantic lookup indexes retain names and operator
+symbols once, then copy only matching declarations through normal storage. They
+extend when declarations are registered and remain separate for isolated analyses.
+The measured release candidate took 50 seconds for a cold hello-world run and
+passed all three getting-started test files. Cold compilation remains expensive;
+these changes do not complete prelude artifact reuse or the ownership migration.
+Cache misses now print the source being compiled to stderr.

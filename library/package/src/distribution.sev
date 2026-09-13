@@ -57,7 +57,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         throw Error("package is marked publish = false")
     mutable_project(project.root)
     root = registry_root(request.registry)
-    release = root + "/packages/" + project.manifest.name + "/" + project.manifest.version
+    release = registry_release(project.manifest.name, project.manifest.version, request.registry)
     name = project.manifest.name + "-" + project.manifest.version + ".pkg"
     include_source = request.include_source and setting(project.manifest.entries, "publish", "include-source") != "false"
     if not include_source:
@@ -90,7 +90,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         if include_source:
             for location in files(project.root):
                 relative = location[int(len(project.root)) + 1:]
-                if relative == "package.toml" or relative == "sev.lock":
+                if relative in ["package.toml", "sev.lock", "package.lock"]:
                     continue
                 # Include native providers, headers and other package assets.
                 copy_file(location, distribution + "/source/" + relative_path(relative))

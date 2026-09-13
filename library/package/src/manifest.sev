@@ -242,7 +242,8 @@ def open(location: string = ".") -> Project | Error:
         root = parent
     if published_project(root):
         original = read_text(root + "/package.toml")
-        lock = read_text(root + "/sev.lock") if os.is_file(root + "/sev.lock") else ""
+        lock_path = project_lock_file(root)
+        lock = read_text(lock_path) if os.is_file(lock_path) else ""
         manifest = parse_manifest(original)
         for target in manifest.targets:
             inside(root, target.path)
@@ -255,8 +256,9 @@ def open(location: string = ".") -> Project | Error:
     try:
         recover_edit(root)
         original = read_text(root + "/package.toml")
-        if os.is_file(root + "/sev.lock"):
-            lock = read_text(root + "/sev.lock")
+        lock_path = project_lock_file(root)
+        if os.is_file(lock_path):
+            lock = read_text(lock_path)
         file.unlock(handle)
     catch failure: Error:
         file.unlock(handle)

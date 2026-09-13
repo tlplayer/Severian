@@ -5,6 +5,7 @@ import fcntl
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -12,8 +13,26 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run(*args, capture=False, cwd=ROOT):
-    result = subprocess.run(list(map(str, args)), cwd=cwd, check=True,
+def run(*args, capture=False, cwd=ROOT, timeout=None):
+    command = list(map(str, args))
+    if timeout is not None:
+        # A cold compile spawns a unit compiler and native tools. A smoke-test
+        # deadline must stop that entire invocation before restoring its binary.
+        with subprocess.Popen(command, cwd=cwd, text=True, start_new_session=True,
+                              stdout=subprocess.PIPE if capture else None) as child:
+            try:
+                output, _ = child.communicate(timeout=timeout)
+            except BaseException:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.communicate()
+                raise
+            if child.returncode:
+                raise subprocess.CalledProcessError(child.returncode, command, output=output)
+        return output.strip() if capture else None
+    result = subprocess.run(command, cwd=cwd, check=True,
                             text=True, stdout=subprocess.PIPE if capture else None)
     return result.stdout.strip() if capture else None
 
@@ -84,12 +103,16 @@ def main():
             if compiler.exists():
                 shutil.copy2(compiler, previous)
             try:
-                run(seed, 'build', ROOT / 'sev_compiler', '--bin', 'sev_compiler')
+                # The interactive compiler must be optimized even though the
+                # launcher keeps its established installation path. Building
+                # the package's default dev profile makes cold runs take minutes.
+                run(seed, 'build', ROOT / 'sev_compiler', '--bin', 'sev_compiler',
+                    '--build-profile', 'release', '-o', compiler)
                 run(seed, '--version')
                 run(compiler, '--help')
                 smoke = Path(temporary) / 'smoke.sev'
                 smoke.write_text('assert(20 + 22 == 42)\n')
-                run(compiler, smoke, '--sysroot', ROOT)
+                run(compiler, smoke, '--sysroot', ROOT, timeout=90)
             except BaseException:
                 if previous.exists():
                     shutil.copy2(previous, compiler)
@@ -103,6 +126,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         print(f'Compiler update failed: {error}', file=sys.stderr)
         sys.exit(1)

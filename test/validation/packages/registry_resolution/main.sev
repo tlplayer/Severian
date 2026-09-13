@@ -1,0 +1,101 @@
+import package
+import environment
+import os
+
+def fixture_release(registry: string, name: string, version: string, value: int) -> string:
+    root = registry + "/" + name + "/" + version
+    manifest = "[package]\nname = " + package.toml_quote(name) + "\nversion = " + package.toml_quote(version) + "\n[lib]\npath = \"src/lib.sev\"\n"
+    source = "def answer() -> int:\n    return " + string(value) + "\n"
+    package.write_text(root + "/metadata/package.toml", manifest)
+    package.write_text(root + "/metadata/publication.toml", "fixture = true\n")
+    package.write_text(root + "/source/package.toml", manifest)
+    package.write_text(root + "/source/src/lib.sev", source)
+    archive = name + "-" + version + ".pkg"
+    entries: list[package.ArchiveEntry] = []
+    for location in package.files(root, true):
+        entries.append(package.ArchiveEntry(location[int(len(root)) + 1:], false, package.read_bytes(location)))
+    package.write_archive(root + "/" + archive, package.Archive(2, name, entries))
+    package.write_text(root + "/metadata/archive.sha256", package.digest(root + "/" + archive) + "\n")
+    package.write_text(root + "/metadata/content.sha256", package.publication_files(root, archive))
+    return root
+
+test "registry layout overrides and legacy release discovery":
+    root = package.temporary("/tmp", "sev-registry-")
+    previous_home = environment.get("SEVERIAN_HOME", "")
+    previous_registry = environment.get("SEVERIAN_REGISTRY", "")
+    assert(environment.set("SEVERIAN_HOME", root))
+    assert(environment.remove("SEVERIAN_REGISTRY"))
+    assert(package.registry_root() == root + "/packages/registry")
+    assert(package.registry_release("geometry", "1.2.0") == root + "/packages/registry/geometry/1.2.0")
+    registry = root + "/explicit"
+    assert(environment.set("SEVERIAN_REGISTRY", registry))
+    assert(package.registry_root() == registry)
+    assert(package.registry_root(root + "/override") == root + "/override")
+    package.mkdir(registry + "/geometry/1.2.0")
+    package.mkdir(registry + "/packages/geometry/1.2.0")
+    package.mkdir(registry + "/packages/geometry/1.3.0")
+    assert(len(package.versions("geometry")) == 2)
+    assert(package.registry_release("geometry", "1.2.0") == registry + "/geometry/1.2.0")
+    assert(package.registry_release("geometry", "1.3.0") == registry + "/packages/geometry/1.3.0")
+    assert(environment.set("SEVERIAN_HOME", previous_home))
+    assert(environment.set("SEVERIAN_REGISTRY", previous_registry))
+    package.remove_tree(root)
+
+test "published latest precedes sysroot and explicit paths precede publication":
+    root = package.temporary("/tmp", "sev-registry-source-")
+    previous = environment.get("SEVERIAN_REGISTRY", "")
+    registry = root + "/registry"
+    assert(environment.set("SEVERIAN_REGISTRY", registry))
+    older = fixture_release(registry, "geometry", "1.0.0", 41)
+    before = package.registry_discovery_state()
+    latest = fixture_release(registry, "geometry", "1.1.0", 42)
+    assert(package.registry_discovery_state() != before)
+    stable = package.registry_discovery_state()
+    package.write_text(root + "/consumer-output", "unrelated")
+    assert(package.registry_discovery_state() == stable)
+    package.write_text(root + "/workspace/package.toml", "[workspace]\nmembers = [\"geometry\"]\n")
+    package.write_text(root + "/workspace/geometry/package.toml", "[package]\nname = \"geometry\"\nversion = \"1.0.0\"\n[lib]\npath = \"lib.sev\"\n")
+    package.write_text(root + "/workspace/geometry/lib.sev", "def answer() -> int:\n    return 0\n")
+    package.write_text(root + "/elsewhere/main.sev", "import geometry\n")
+    assert(package.standalone_source(root + "/workspace", root + "/elsewhere/main.sev", "geometry") == latest + "/source/src/lib.sev")
+    package.write_text(root + "/elsewhere/package.toml", "[package]\nname = \"consumer\"\n[dependencies]\ngeometry = { path = \"../workspace/geometry\" }\n")
+    assert(package.standalone_source(root + "/workspace", root + "/elsewhere/main.sev", "geometry") == root + "/workspace/geometry/lib.sev")
+    package.write_text(root + "/elsewhere/package.toml", "[package]\nname = \"consumer\"\n[dependencies]\ngeometry = \"1\"\n")
+    package.write_text(root + "/elsewhere/sev.lock", "version = 1\n[[package]]\nname = \"geometry\"\nversion = \"1.0.0\"\nsource = \"registry:default\"\n")
+    assert(package.standalone_source(root + "/workspace", root + "/elsewhere/main.sev", "geometry") == older + "/source/src/lib.sev")
+    project = package.open(root + "/elsewhere")
+    resolved = package.resolve(project)
+    assert(resolved.packages[1].identity.version == "1.0.0")
+    package.write_text(root + "/elsewhere/package.lock", "version = 1\n[[package]]\nname = \"geometry\"\nversion = \"1.1.0\"\nsource = \"registry:default\"\n")
+    canonical_lock = package.resolve(package.open(root + "/elsewhere"))
+    assert(canonical_lock.packages[1].identity.version == "1.1.0")
+    # A corrupt selected publication is an error, never a sysroot fallback.
+    os.remove(root + "/elsewhere/package.toml")
+    package.write_text(latest + "/source/src/lib.sev", "broken\n")
+    rejected ?= package.standalone_source(root + "/workspace", root + "/elsewhere/main.sev", "geometry")
+    assert(rejected is Error)
+    assert(environment.set("SEVERIAN_REGISTRY", previous))
+    package.remove_tree(root)
+
+test "canonical lock snapshots and interrupted transaction recovery":
+    root = package.temporary("/tmp", "sev-package-lock-")
+    created = package.new(root + "/created", "created", true)
+    lock = created.root + "/package.lock"
+    assert(os.is_file(lock))
+    assert(not os.exists(created.root + "/sev.lock"))
+    checksum = package.source_checksum(created.root)
+    original = package.read_text(lock)
+    package.write_text(lock, original + "\n# formatting only\n")
+    assert(package.source_checksum(created.root) == checksum)
+    reopened = package.open(created.root)
+    assert(reopened.lock_text.contains("formatting only"))
+    stage = created.root + "/.sev-transaction"
+    package.write_text(stage + "/manifest.old", reopened.manifest_text)
+    package.write_text(stage + "/lock.old", reopened.lock_text)
+    package.write_text(stage + "/lock.name", "package.lock")
+    package.write_text(stage + "/ready", "rollback")
+    package.write_text(lock, "interrupted replacement")
+    recovered = package.open(created.root)
+    assert(recovered.lock_text == reopened.lock_text)
+    assert(not os.exists(stage))
+    package.remove_tree(root)

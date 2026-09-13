@@ -45,7 +45,8 @@ it on `PATH`. Set `SEV_CARGO_INSTALL_ROOT` to select another Cargo installation
 root. Building the compiler and installing a release remain separate workflows.
 
 For a checkout using the `bin/sev` launcher, `sev update` fetches and builds the
-latest upstream compiler. Use `sev update --local` to build uncommitted local
+latest upstream compiler with the release profile. A cold smoke test must finish
+within 90 seconds before the update is accepted. Use `sev update --local` to build uncommitted local
 work without fetching. The update prints the source compiler's version, UTC
 build date, source checkout path, and full Git commit hash. `sev --version`
 reports the same details later; local modifications are marked explicitly.
@@ -56,10 +57,26 @@ commit. Failed builds or smoke tests preserve the previous compiler.
 Local builds write generated files to `package.pkg/`. Cargo places the seed
 binary at `package.pkg/debug/sev`; Severian packages place binaries at
 `package.pkg/<platform>/<profile>/bin/`. Reusable compilation outputs and input
-fingerprints live in `package.pkg/build/units/`. Unchanged package builds and
-standalone `sev file.sev` runs restore these outputs before loading the prelude;
+fingerprints live in `package.pkg/build/units/`. Repeating the same compilation
+unit restores its output before loading the prelude;
 changing a run/test output path does not force compilation. `sev clean` removes
-package artifacts.
+package artifacts. This cache does **not** provide compiled dependency or prelude
+reuse across different programs: library builds still produce source bundles.
+
+Local source-compiler publications live at
+`~/.severian/packages/registry/<name>/<version>/`. `SEVERIAN_HOME` overrides
+`~/.severian`; `SEVERIAN_REGISTRY` overrides the registry directory directly.
+Explicit dependencies take precedence, locked dependencies retain their selected
+versions, and unpinned standalone imports prefer the latest published version
+over a sysroot source package. Registry discovery changes invalidate standalone
+compilation caches.
+
+Run `bash test/validation/packages/compiled_reuse.sh` to check the full compiled
+package contract. It currently rejects missing semantic interfaces and source
+recompilation. Build/publication is bounded to 90 seconds per invocation, fresh
+consumers to 5 seconds, tests to 15 seconds, and the entire check to 300 seconds.
+The command keeps evidence in a printed temporary directory and exits nonzero
+on failure. These are acceptance bounds, not measured compiler performance.
 
 ## Bootstrap compiler checkpoint
 

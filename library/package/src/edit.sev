@@ -50,20 +50,22 @@ class Edit:
             recover_edit(original.root)
             if read_text(original.root + "/package.toml") != original.manifest_text:
                 throw Error("package.toml changed while editing; reopen the project")
-            current_lock = read_text(original.root + "/sev.lock") if os.is_file(original.root + "/sev.lock") else ""
+            lock_path = project_lock_file(original.root)
+            current_lock = read_text(lock_path) if os.is_file(lock_path) else ""
             if current_lock != original.lock_text:
-                throw Error("sev.lock changed while editing; reopen the project")
+                throw Error("package lock changed while editing; reopen the project")
             stage = original.root + "/.sev-transaction"
             mkdir(stage)
             write_text(stage + "/manifest.old", original.manifest_text)
             write_text(stage + "/lock.old", current_lock)
+            write_text(stage + "/lock.name", path.basename(lock_path))
             write_text(stage + "/manifest.new", text)
             write_text(stage + "/lock.new", resolution.lock)
             require_command(["sync", "-f", stage])
             write_text(stage + "/ready", "rollback")
             require_command(["sync", "-f", stage])
             replace_file(stage + "/manifest.new", original.root + "/package.toml")
-            replace_file(stage + "/lock.new", original.root + "/sev.lock")
+            replace_file(stage + "/lock.new", lock_path)
             require_command(["sync", "-f", original.root])
             remove_tree(stage)
             file.unlock(lock)
@@ -124,6 +126,6 @@ def new(location: string, name: string = "", library: bool = false) -> Project |
     header += "name = " + toml_quote(selected) + "\npath = \"src/" + target + ".sev\"\n"
     write_text(stage + "/package.toml", header)
     write_text(stage + "/src/" + target + ".sev", "def answer() -> int:\n    return 42\n" if library else "def main():\n    print(\"hello, severian\")\n")
-    write_text(stage + "/sev.lock", resolve(open(stage)).lock)
+    write_text(stage + "/package.lock", resolve(open(stage)).lock)
     replace_file(stage, location)
     return open(location)

@@ -108,17 +108,28 @@ def write_bytes(location: string, contents: list[u8]) -> unit | Error:
     if file.write(location, contents) != 0:
         throw Error("could not write " + location)
 
+def project_lock_file(root: string) -> string:
+    if os.is_file(root + "/package.lock"):
+        return root + "/package.lock"
+    if os.is_file(root + "/sev.lock"):
+        return root + "/sev.lock"
+    return root + "/package.lock"
+
 def recover_edit(root: string) -> unit | Error:
     stage = root + "/.sev-transaction"
     if not os.is_file(stage + "/ready"):
         return
     copy_file(stage + "/manifest.old", root + "/package.toml")
     previous = read_text(stage + "/lock.old")
+    lock_name = read_text(stage + "/lock.name") if os.is_file(stage + "/lock.name") else "sev.lock"
+    if lock_name not in ["package.lock", "sev.lock"]:
+        throw Error("invalid package transaction lock name")
+    lock_path = root + "/" + lock_name
     if previous == "":
-        if os.is_file(root + "/sev.lock"):
-            os.remove(root + "/sev.lock")
+        if os.is_file(lock_path):
+            os.remove(lock_path)
     else:
-        write_text(root + "/sev.lock", previous)
+        write_text(lock_path, previous)
     remove_tree(stage)
 
 # Published project reads need no recovery lock or writable build directory.

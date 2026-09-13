@@ -1,0 +1,50 @@
+import universal
+
+
+# Declaration lists grow as generic instances and record methods are registered.
+# Index only their lookup keys, so unsuccessful lookups do not copy and retain
+# every field of every declaration. The selected declarations still use normal
+# storage ownership. An isolated declaration list must have its own index.
+class FunctionIndex:
+    names: list[string] = []
+    operators: list[string] = []
+
+
+def refresh(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration]):
+    while len(index.names) < len(functions):
+        function = functions[len(index.names)]
+        index.names.append(function.name)
+        syntax ?= function.operator_syntax
+        if syntax != None:
+            index.operators.append(syntax.symbol)
+        else:
+            index.operators.append("")
+
+
+def named(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], name: string, allow_prelude: bool = true) -> list[universal.FunctionDeclaration]:
+    refresh(index, functions)
+    result: list[universal.FunctionDeclaration] = []
+    position := 0
+    for candidate in index.names:
+        if candidate == name:
+            function = functions[position]
+            if allow_prelude or not function.prelude:
+                result.append(function)
+        position += 1
+    return result
+
+
+def matching_operators(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], symbol: string) -> list[universal.FunctionDeclaration]:
+    refresh(index, functions)
+    result: list[universal.FunctionDeclaration] = []
+    position := 0
+    for candidate in index.operators:
+        if candidate != "" and candidate == symbol:
+            result.append(functions[position])
+        position += 1
+    return result
+
+
+def has_operator(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], symbol: string) -> bool:
+    refresh(index, functions)
+    return symbol != "" and symbol in index.operators
