@@ -13,10 +13,12 @@
       "path": "../../library/system/profiling"
     },
     "source": {
-      "path": "../source"
+      "path": "../source",
+      "package": "sev-compiler-source"
     },
     "diagnostics": {
-      "path": "../diagnostics"
+      "path": "../diagnostics",
+      "package": "sev-compiler-diagnostics"
     }
   }
 }

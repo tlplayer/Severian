@@ -1,11 +1,14 @@
 import * from "../id/compiler.sev"
+import source
 import * from "../literal/value.sev"
 import * from "../operator/kind.sev"
 import * from "../source/assertion_origin.sev"
-import * from "../statement/statement.sev"
 
 
 enum Operation:
+    DebugOwnership(name: string, mode: string, span: source.Span)
+    DebugLocation(span: source.Span)
+    DebugValue(name: string, value: ValueId, span: source.Span, argument: int, ownership: string, address: bool, declared_type: TypeId)
     TypeLayout(subject: TypeId, alignment: bool, result: ValueId)
     Coverage(point: CoveragePoint)
     # Accepts a tagged aggregate or its decomposed integer tag.

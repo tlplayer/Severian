@@ -166,6 +166,8 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             reused = recorded == "check" if emit == "check" else os.is_file(cache + "/artifact") and digest(cache + "/artifact") == recorded
             if reused and emit == "library":
                 reused = sidecars_match(cache)
+            if reused and unit.include_tests and len(scoped.packages) > 0 and setting(scoped.packages[0].manifest.entries, "test", "coverage", "true") != "false":
+                reused = os.is_file(cache + "/artifact.coverage.json") and os.is_file(cache + "/coverage.digest") and digest(cache + "/artifact.coverage.json") == read_text(cache + "/coverage.digest")
         if not reused:
             process.write_error("compiling " + input + "\n")
             # Never let a failed compilation validate a previous artifact.
@@ -203,6 +205,9 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                     write_text(cache + "/artifact", paths.join("\n"))
                 else:
                     copy_file(stage + "/artifact", cache + "/artifact")
+                if os.is_file(stage + "/artifact.coverage.json"):
+                    copy_file(stage + "/artifact.coverage.json", cache + "/artifact.coverage.json")
+                    write_text(cache + "/coverage.digest", digest(cache + "/artifact.coverage.json"))
                 if emit == "library":
                     sidecars: list[string] = []
                     for suffix in [".o", ".mlir", ".interface.sev"]:
@@ -217,6 +222,8 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             if unit.output == "":
                 unit.output = result.path
         if emit != "check" and unit.output != "":
+            if unit.include_tests and os.is_file(cache + "/artifact.coverage.json"):
+                copy_file(cache + "/artifact.coverage.json", unit.output + ".coverage.json")
             if not reused or not os.is_file(unit.output) or digest(unit.output) != digest(cache + "/artifact"):
                 delivery = temporary(path.dirname(unit.output))
                 if emit == "sources":

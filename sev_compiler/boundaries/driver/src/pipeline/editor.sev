@@ -1,0 +1,196 @@
+import package
+import source
+import universal
+import * from "../../../../universal/type/scalar.sev" as scalar
+import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
+
+class EditorIndex:
+    definitions: list[string] = []
+    references: list[string] = []
+    files: list[source.SourceFile] = []
+    module: universal.Module = universal.Module([])
+    relationships: list[string] = []
+
+def editor_type(module: universal.Module, type_id: universal.TypeId) -> string:
+    if type_id.index == 64:
+        return "int"
+    if type_id.index == 164:
+        return "float"
+    known ?= scalar.scalar_type(type_id)
+    if known != None:
+        return known.name
+    for record in module.records:
+        if record.type_id.index == type_id.index:
+            return record.name
+    return "type[" + string(type_id.index) + "]"
+
+def editor_definition(index: EditorIndex, id: string, name: string, kind: string, span: source.Span, type_name: string, documentation: string = ""):
+    index.definitions.append("{\"id\":" + package.document_quote(id) + ",\"name\":" + package.document_quote(name) + ",\"kind\":" + package.document_quote(kind) + ",\"type\":" + package.document_quote(type_name) + ",\"documentation\":" + package.document_quote(documentation) + ",\"source\":" + agent_ir.span_json(span, index.files) + "}")
+
+def editor_reference(index: EditorIndex, id: string, caller: string, span: source.Span):
+    index.references.append("{\"symbol\":" + package.document_quote(id) + ",\"caller\":" + package.document_quote(caller) + ",\"source\":" + agent_ir.span_json(span, index.files) + "}")
+
+def editor_symbol(definition: universal.DefId) -> string:
+    return string(definition.package) + ":" + string(definition.module) + ":" + string(definition.declaration.value)
+
+def editor_relationship(index: EditorIndex, implementation: universal.DefId, contract: universal.DefId):
+    index.relationships.append("{\"from\":" + package.document_quote(editor_symbol(implementation)) + ",\"to\":" + package.document_quote(editor_symbol(contract)) + ",\"kind\":\"implements\"}")
+
+def editor_expression(state: EditorIndex, expression: universal.Expression, caller: string):
+    match expression.kind:
+        case BindingReference:
+            editor_reference(state, caller + ":local:" + string(binding.index), caller, expression.span)
+        case FunctionReference:
+            editor_reference(state, string(definition.package) + ":" + string(definition.module) + ":" + string(definition.declaration.value), caller, expression.span)
+        case ResolvedCall:
+            match callee:
+                case Direct:
+                    editor_reference(state, string(function.package) + ":" + string(function.module) + ":" + string(function.declaration.value), caller, expression.span)
+                case FunctionValue:
+                    editor_expression(state, expression, caller)
+                case _:
+                    pass
+            for argument in arguments:
+                editor_expression(state, argument.value, caller)
+        case Binary:
+            editor_expression(state, left, caller)
+            editor_expression(state, right, caller)
+        case Unary:
+            editor_expression(state, operand, caller)
+        case Convert:
+            editor_expression(state, operand, caller)
+        case Ownership:
+            editor_expression(state, value, caller)
+        case FieldReference:
+            editor_expression(state, object, caller)
+        case IndexReference:
+            editor_expression(state, object, caller)
+            editor_expression(state, index, caller)
+        case BlockValue:
+            editor_block(state, body, caller)
+            editor_expression(state, value, caller)
+        case Evaluate:
+            editor_expression(state, value, caller)
+            editor_expression(state, body, caller)
+        case Conditional:
+            editor_expression(state, condition, caller)
+            editor_expression(state, then_value, caller)
+            editor_expression(state, else_value, caller)
+        case RecordValue:
+            for field in fields:
+                editor_expression(state, field.value, caller)
+        case ListValue:
+            for element in elements:
+                editor_expression(state, element, caller)
+        case _:
+            pass
+
+def editor_block(index: EditorIndex, body: universal.Block, caller: string):
+    for statement in body.statements:
+        match statement:
+            case BindingStatement:
+                id = caller + ":local:" + string(binding.id.index)
+                if not binding.update:
+                    editor_definition(index, id, binding.name, "variable", binding.span, editor_type(index.module, binding.type_id))
+                else:
+                    editor_reference(index, id, caller, binding.span)
+                editor_expression(index, binding.value, caller)
+            case ExpressionStatement:
+                editor_expression(index, expression, caller)
+            case Assert:
+                editor_expression(index, condition, caller)
+            case GrammarApply:
+                for operand in operands:
+                    editor_expression(index, operand, caller)
+                for body in bodies:
+                    editor_block(index, body, caller)
+            case _:
+                pass
+
+def editor_documentation(files: list[source.SourceFile], declared: source.Span) -> string:
+    documentation := ""
+    for file in files:
+        if file.id.index == declared.source.index:
+            line := 0
+            for position in range(int(declared.start)):
+                if file.characters[position] == "\n":
+                    line += 1
+            lines = file.text.split("\n")
+            line -= 1
+            while line >= 0:
+                comment = lines[line].strip()
+                if not comment.starts_with("#") and comment != "":
+                    break
+                if comment.starts_with("#"):
+                    documentation = comment[1:].strip() + "\n" + documentation
+                line -= 1
+    return documentation
+
+def editor_index(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
+    index = EditorIndex([], [], files, module)
+    for trait in module.traits:
+        if not trait.grammar:
+            editor_definition(index, editor_symbol(trait.definition), trait.name, "class", trait.span, trait.name, editor_documentation(files, trait.span))
+    for record in module.records:
+        editor_definition(index, editor_symbol(record.definition), record.name, "class", record.span, record.name, editor_documentation(files, record.span))
+        for annotation in record.traits:
+            name ?= universal.simple_type_name(annotation)
+            if name != None:
+                for trait in module.traits:
+                    if trait.name == name or trait.name == record.lookup + name:
+                        editor_relationship(index, record.definition, trait.definition)
+                        for requirement in trait.methods:
+                            for function in module.functions:
+                                if function.owner_type.index == record.type_id.index and function.name.split(".")[-1] == requirement.name.split(".")[-1]:
+                                    editor_relationship(index, function.definition, requirement.definition)
+    for function in module.functions:
+        declared ?= function.span
+        if declared == None:
+            continue
+        if declared != None:
+            id = string(function.definition.package) + ":" + string(function.definition.module) + ":" + string(function.definition.declaration.value)
+            parameters: list[string] = []
+            for parameter in function.parameters:
+                type_name = editor_type(module, parameter.type_id)
+                parameters.append(parameter.name + ": " + type_name)
+                editor_definition(index, id + ":local:" + string(parameter.binding.index), parameter.name, "parameter", parameter.span, type_name)
+            documentation = editor_documentation(files, declared)
+            signature = function.name + "(" + parameters.join(", ") + ") -> " + editor_type(module, function.result_type)
+            editor_definition(index, id, function.name, "function", declared, signature, documentation)
+            body ?= function.body
+            if body != None:
+                editor_block(index, body, id)
+    documents: list[string] = []
+    for file in files:
+        documents.append("{\"path\":" + package.document_quote(file.path) + ",\"text\":" + package.document_quote(file.text) + "}")
+    diagnostics: list[string] = []
+    if len(resolution.packages) > 0:
+        for diagnostic in package.lint(package.open(resolution.packages[0].root)):
+            diagnostics.append(package.lint_json(diagnostic))
+    return "{\"schema_version\":1,\"definitions\":[" + index.definitions.join(",") + "],\"references\":[" + index.references.join(",") + "],\"sources\":[" + documents.join(",") + "],\"diagnostics\":[" + diagnostics.join(",") + "],\"relationships\":[" + index.relationships.join(",") + "]}"
+
+def editor_documented_source(files: list[source.SourceFile], span: source.Span, resolution: package.Resolution) -> bool:
+    if len(resolution.packages) == 0:
+        return true
+    for file in files:
+        if file.id.index == span.source.index:
+            return file.path.starts_with(resolution.packages[0].root + "/")
+    return false
+
+def editor_package_docs(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
+    sections: list[string] = ["# Package API"]
+    for record in module.records:
+        if not record.name.starts_with("_") and int(record.span.source.index) not in module.prelude_sources and editor_documented_source(files, record.span, resolution):
+            sections.append("## " + record.name + "\n\n" + editor_documentation(files, record.span))
+    for function in module.functions:
+        declared ?= function.span
+        if function.name.starts_with("_") or function.prelude:
+            continue
+        if declared != None:
+            if not editor_documented_source(files, declared, resolution):
+                continue
+            parameters: list[string] = []
+            for parameter in function.parameters:
+                parameters.append(parameter.name + ": " + editor_type(module, parameter.type_id))
+            sections.append("## " + function.name + "\n\n```sev\ndef " + function.name + "(" + parameters.join(", ") + ") -> " + editor_type(module, function.result_type) + "\n```\n\n" + editor_documentation(files, declared))
+    return sections.join("\n\n") + "\n"

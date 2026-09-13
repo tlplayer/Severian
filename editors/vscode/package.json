@@ -78,7 +78,7 @@
       },
       {
         "command": "severian.runWith",
-        "title": "Run With…",
+        "title": "Run With\u2026",
         "category": "Severian",
         "icon": "$(list-selection)"
       },
@@ -108,7 +108,7 @@
       },
       {
         "command": "severian.buildWith",
-        "title": "Build With…",
+        "title": "Build With\u2026",
         "category": "Severian",
         "icon": "$(settings-gear)"
       },
@@ -194,14 +194,53 @@
         "severian.coverage.target": {
           "type": "string",
           "default": "",
-          "description": "Source or project directory passed to `sev coverage`, relative to the workspace. When empty, the nearest `package.json` or workspace root is used."
+          "description": "Source or project directory passed to `sev test --coverage`, relative to the workspace. When empty, the nearest `package.json` or workspace root is used."
         },
         "severian.coverage.autoLoad": {
           "type": "boolean",
           "default": true,
           "description": "Automatically load existing Severian coverage reports and refresh gutters when they change."
+        },
+        "severian.debugger": {
+          "type": "string",
+          "default": "gdb",
+          "description": "GDB with its native DAP interpreter for source stepping, stack frames, variables, and watches."
         }
       }
-    }
+    },
+    "debuggers": [
+      {
+        "type": "severian",
+        "label": "Severian (GDB)",
+        "languages": [
+          "severian"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [],
+            "properties": {
+              "target": {
+                "type": "string"
+              },
+              "program": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "severian",
+            "request": "launch",
+            "name": "Debug Severian",
+            "target": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}"
+          }
+        ]
+      }
+    ]
   }
 }

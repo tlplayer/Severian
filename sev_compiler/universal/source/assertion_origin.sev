@@ -1,4 +1,5 @@
 import * from "assertion.sev"
+import * from "../id/compiler.sev"
 
 
 class AssertionOrigin:
@@ -20,3 +21,4 @@ class CoveragePoint:
     key: string | None
     file: string | None
     line: u32 | None
+    condition: ValueId | None = None

@@ -42,8 +42,9 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     # Both compilers consume the ownership library's standard MLIR pipeline.
     # Run it before lowering memrefs or aliases to opaque LLVM pointers.
     ownership_pipeline = package.read_text(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline").strip()
-    run_tool([opt, intermediate + ".mlir", "--verify-each", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
-    run_tool([opt, intermediate + ".owned.mlir", "--verify-each", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
+    run_tool([opt, intermediate + ".mlir", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
+    materialize_debug_values(intermediate + ".owned.mlir")
+    run_tool([opt, intermediate + ".owned.mlir", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
     run_tool([translate, "--mlir-to-llvmir", intermediate + ".llvm.mlir", "-o", intermediate + ".ll"])
     if library:
         # Native providers remain explicit link inputs. This object owns only
@@ -57,6 +58,9 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
         return
     arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
     arguments.append(sysroot + "/library/core/memory/native/memory.c")
+    if mlir.contains("__sev_quality_"):
+        arguments.append(sysroot + "/sev_compiler/runtime/native/quality.c")
+        arguments.append("-DSEV_QUALITY_TRACK_ALLOCATIONS")
     for argument in native_arguments:
         arguments.append(argument)
     if debug_symbols:
@@ -67,6 +71,26 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
         arguments.append("-flto")
         arguments.append("-fuse-ld=lld")
     run_tool(arguments)
+
+def materialize_debug_values(location: string):
+    lines: list[string] = []
+    for raw in package.read_text(location).split("\n"):
+        line := raw
+        # Omit only the default arithmetic property, never text in a source
+        # filename or string attribute. Non-default math flags remain intact.
+        parts = raw.split(" = ")
+        if len(parts) > 1 and parts[1].starts_with("\"arith."):
+            line = line.replace("fastmath = #arith.fastmath<none>, ", "").replace(" <{fastmath = #arith.fastmath<none>}>", "")
+        if line.contains("\"func.call\"") and (line.contains("sev.debug.variable") or line.contains("sev.debug.declaration")):
+            declaration = line.contains("sev.debug.declaration")
+            if not line.contains("@__sev_debug_") or not line.contains(" <{") or not line.contains("}>"):
+                throw Error("malformed debug metadata carrier")
+            prefix = line.split(" <{")[0]
+            suffix = line.split("}>")[1:].join("}>")
+            operation = "\"llvm.intr.dbg.declare\"" if declaration else "\"llvm.intr.dbg.value\""
+            line = prefix.replace("\"func.call\"", operation) + suffix.replace("sev.debug.declaration" if declaration else "sev.debug.variable", "varInfo")
+        lines.append(line)
+    package.write_text(location, lines.join("\n"))
 
 
 def execute_native(executable: string, arguments: list[string]) -> int:

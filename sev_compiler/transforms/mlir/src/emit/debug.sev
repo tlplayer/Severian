@@ -1,0 +1,110 @@
+import universal
+import source
+import * from "../ir/lib.sev"
+import * from "../../../../universal/type/scalar.sev" as scalar
+
+def debug_quote(text: string) -> string:
+    return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\0A") + "\""
+
+def debug_file(file: string) -> string:
+    parts = file.split("/")
+    return "#llvm.di_file<" + debug_quote(parts[-1]) + " in " + debug_quote(parts[:int(len(parts)) - 1].join("/")) + ">"
+
+def debug_location(files: borrow list[source.SourceFile], span: borrow source.Span, scope: string = "") -> MlirLocation | None:
+    for file in borrow files:
+        if file.id.index != span.source.index:
+            continue
+        line := 1
+        column := 1
+        for index in range(min(int(span.start), int(len(file.characters)))):
+            if file.characters[index] == "\n":
+                line += 1
+                column = 1
+            else:
+                column += 1
+        return MlirLocation(file.path, u32(line), u32(column), scope)
+    return None
+
+def debug_function(module: borrow universal.Module, function: borrow universal.FunctionDeclaration) -> MlirLocation | None:
+    if len(module.debug_files) == 0:
+        return None
+    span ?= function.span
+    if span != None:
+        location ?= debug_location(module.debug_files, span)
+        if location != None:
+            file = debug_file(location.file)
+            unit = "#llvm.di_compile_unit<id = distinct[0]<>, sourceLanguage = DW_LANG_C, file = " + debug_file(module.debug_files[0].path) + ", producer = \"Severian\", isOptimized = false, emissionKind = Full>"
+            scope = "#llvm.di_subprogram<id = distinct[" + string(int(function.id.value) + 1) + "]<>, compileUnit = " + unit + ", scope = " + file + ", name = " + debug_quote(function.name) + ", file = " + file + ", line = " + string(location.line) + ", scopeLine = " + string(location.line) + ", subprogramFlags = Definition, type = #llvm.di_subroutine_type<callingConvention = DW_CC_normal>>"
+            return MlirLocation(location.file, location.line, location.column, scope)
+    return None
+
+def debug_type(type_id: universal.TypeId) -> string:
+    known ?= scalar.scalar_type(type_id)
+    if known != None:
+        if known.representation == "pointer":
+            return "#llvm.di_derived_type<tag = DW_TAG_pointer_type, sizeInBits = 64>"
+        if known.bits > 0 and known.representation in ["integer", "float"]:
+            encoding = "DW_ATE_boolean" if known.boolean else "DW_ATE_float" if known.representation == "float" else "DW_ATE_signed" if known.signed else "DW_ATE_unsigned"
+            return "#llvm.di_basic_type<tag = DW_TAG_base_type, name = " + debug_quote(known.name) + ", sizeInBits = " + string(known.bits) + ", encoding = " + encoding + ">"
+    return ""
+
+def debug_value(builder: MlirOpBuilder, module: borrow universal.Module, name: string, value: MlirValue, type_id: universal.TypeId, span: source.Span, argument: int, scope: string, address: bool = false):
+    type_text = debug_type(type_id)
+    location ?= debug_location(module.debug_files, span, scope)
+    if type_text == "" or scope == "" or location == None:
+        return
+    if location != None:
+        variable := "#llvm.di_local_variable<scope = " + scope + ", name = " + debug_quote(name) + ", file = " + debug_file(location.file) + ", line = " + string(location.line) + ", arg = " + string(argument) + ", type = " + type_text + ">"
+        known := false
+        for binding in builder.debug_variables:
+            if binding.scope == scope and binding.name == name:
+                variable = binding.attribute
+                known = true
+        if not known:
+            builder.debug_variables.append(MlirDebugVariable(scope, name, variable))
+        attribute = MlirAttributeValue(DebugAttributeKind, variable, 0, false, index_type(), [])
+        symbol = ("__sev_debug_declare_" if address else "__sev_debug_value_") + string(value.id)
+        declared := false
+        for function in builder.program.functions:
+            declared = declared or function.name == symbol
+        if not declared:
+            parameter = builder_new_value(builder, value.type_id)
+            builder_create_function(builder, symbol, private_visibility(), [parameter], [], true)
+        # Buffer deallocation understands scalar call boundaries. The native
+        # boundary replaces this metadata carrier after ownership has finished.
+        builder_create_operation_at(builder, operation_name("func", "call"), [value], [], [MlirNamedAttribute("callee", symbol_attribute(symbol)), MlirNamedAttribute("sev.debug.declaration" if address else "sev.debug.variable", attribute)], [], false, location)
+
+def debug_annotate(builder: MlirOpBuilder, location: MlirLocation | None):
+    if location == None or len(builder.insertion) == 0:
+        return
+    selected = builder.insertion[0]
+    for region in builder.program.regions:
+        if region.id == selected.region:
+            for block in region.blocks:
+                if block.id == selected.block:
+                    cursor := int(len(block.operations)) - 1
+                    while cursor >= 0:
+                        operation = block.operations[cursor]
+                        if operation.location != None:
+                            break
+                        operation.location = location
+                        block.operations[cursor] = operation
+                        cursor -= 1
+
+# The debugger exposes the current compiler ownership state beside each binding.
+# 0 owned, 1 shared borrow, 2 view, 3 mirror, 4 moved, 5 exclusive borrow.
+def debug_ownership(builder: MlirOpBuilder, module: universal.Module, name: string, mode: string, span: source.Span, scope: string):
+    state := 0
+    if mode in ["borrow", "inferred read"]:
+        state = 1
+    elif mode == "view":
+        state = 2
+    elif mode == "mirror":
+        state = 3
+    elif mode == "moved":
+        state = 4
+    elif mode in ["borrow mut", "inferred write"]:
+        state = 5
+    value = builder_new_value(builder, integer_type(64))
+    builder_constant(builder, value, integer_attribute(state, value.type_id))
+    debug_value(builder, module, name + "__ownership", value, universal.TypeId(64), span, 0, scope)

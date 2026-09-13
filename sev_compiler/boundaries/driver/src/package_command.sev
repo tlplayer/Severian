@@ -1,7 +1,8 @@
 import package
 import process
+import environment
 
-def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool, force_lint: bool = false) -> int:
+def package_command(command: string, input: string, sysroot: string, binary: string, platform: string, profile: string, emit: string, output: string, arguments: list[string], locked: bool, library: bool, alias: string, development: bool, force_lint: bool = false, coverage: bool = false) -> int:
     compiler = package.Compiler(process.executable(), sysroot)
     location = input if input != "" else "."
     if command == "init":
@@ -27,8 +28,27 @@ def package_command(command: string, input: string, sysroot: string, binary: str
             package.update(project, input)
         return 0
     project = package.open("." if command == "publish" and input != "" and not package.exists(input) else location)
+    if coverage:
+        entries: list[package.Entry] = []
+        for entry in project.manifest.entries:
+            if entry.table != "test" or entry.key != "coverage":
+                entries.append(entry)
+        entries.append(package.Entry("test", "coverage", "true"))
+        manifest = project.manifest
+        manifest.entries = entries
+        project.manifest = manifest
     if command == "publish" and input != "" and not package.exists(input) and input != project.manifest.name:
         throw Error("publish name does not match package.json: " + input)
+    if command == "lint":
+        for diagnostic in package.lint(project, force_lint):
+            diagnostic.file = project.root + "/" + diagnostic.file
+            print(package.lint_json(diagnostic))
+        return 0
+    if command == "debug":
+        result = package.build(project, compiler, package.Build(binary, platform, "dev", "", output, locked, force_lint))
+        if len(result.artifacts) != 1:
+            throw Error("debug requires exactly one target; select --bin")
+        return process.run([environment.get("SEVERIAN_GDB", "gdb"), "--args", result.artifacts[0].path])
     if command == "build":
         request = package.Build(binary, platform, profile, "" if emit == "plan" else emit, output, locked, force_lint)
         if emit == "plan":

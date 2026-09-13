@@ -4,7 +4,10 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const vscode = require('vscode');
+const { registerSemantic } = require('./semantic');
+const { registerDebugger } = require('./debugger');
 const {
+  latestReports,
   buildFileCoverage,
   normalizeFilePath,
   parseCoverageMap,
@@ -14,6 +17,8 @@ const {
 const decoder = new TextDecoder('utf-8');
 
 function activate(context) {
+  registerSemantic(vscode, context);
+  registerDebugger(vscode, context);
   const output = vscode.window.createOutputChannel('Severian Coverage');
   const toolingOutput = vscode.window.createOutputChannel('Severian');
   const contractDiagnostics = vscode.languages.createDiagnosticCollection('severian-contracts');
@@ -98,16 +103,26 @@ function activate(context) {
   async function loadCoverage(showResult = false) {
     const serial = ++refreshSerial;
     const mapUris = await vscode.workspace.findFiles(
-      '**/package.pkg/coverage/coverage-map.json',
+      '**/package.pkg/{coverage,debug/coverage/run-*}/coverage-map.json',
       '**/{.git,node_modules}/**',
       200,
     );
+    const candidates = await Promise.all(mapUris.map(async uri => {
+      try {
+        // A run becomes available only after the summary is committed last.
+        if (uri.fsPath.includes(`${path.sep}debug${path.sep}coverage${path.sep}`)) {
+          await vscode.workspace.fs.stat(vscode.Uri.joinPath(uri, '..', 'summary.json'));
+        }
+        return { file: uri.fsPath, uri, mtime: (await vscode.workspace.fs.stat(uri)).mtime };
+      } catch { return undefined; }
+    }));
+    const latest = latestReports(candidates.filter(Boolean));
     const allRegions = [];
     const allHits = new Set();
     const failures = [];
 
     await Promise.all(
-      mapUris.map(async (mapUri) => {
+      latest.map(async ({ uri: mapUri }) => {
         try {
           const mapContents = decoder.decode(await vscode.workspace.fs.readFile(mapUri));
           allRegions.push(...parseCoverageMap(mapContents));
@@ -174,7 +189,7 @@ function activate(context) {
     const configuration = vscode.workspace.getConfiguration('severian.coverage', run.scope);
     const executable = configuration.get('executable', 'sev').trim() || 'sev';
     output.clear();
-    output.appendLine(`$ ${executable} coverage ${run.target}`);
+    output.appendLine(`$ ${executable} test ${run.target} --coverage`);
     output.show(true);
     running = true;
     try {
@@ -219,10 +234,10 @@ function activate(context) {
       .trim() || 'sev';
     contractDiagnostics.clear();
     toolingOutput.clear();
-    const arguments = [action, run.target, ...options];
-    toolingOutput.appendLine(`$ ${executable} ${arguments.join(' ')}`);
+    const toolArguments = [action, run.target, ...options];
+    toolingOutput.appendLine(`$ ${executable} ${toolArguments.join(' ')}`);
     toolingOutput.show(true);
-    const result = await spawnTool(executable, arguments, run.cwd, toolingOutput);
+    const result = await spawnTool(executable, toolArguments, run.cwd, toolingOutput);
     const failures = publishContractDiagnostics(result.stderr, contractDiagnostics);
     if (result.code === 0) {
       void vscode.window.showInformationMessage(`Severian ${action} completed.`);
@@ -273,13 +288,9 @@ function activate(context) {
       void vscode.window.showErrorMessage('Open a .sev file inside a workspace first.');
       return;
     }
-    const executable = vscode.workspace
-      .getConfiguration('severian', run.scope)
-      .get('executable', 'sev')
-      .trim() || 'sev';
-    const terminal = vscode.window.createTerminal({ name: 'Severian Debug', cwd: run.cwd });
-    terminal.show();
-    terminal.sendText(`${shellQuote(executable)} debug ${shellQuote(run.target)}`);
+    return vscode.debug.startDebugging(vscode.workspace.getWorkspaceFolder(run.scope), {
+      type: 'severian', request: 'launch', name: 'Debug Severian', target: run.target, cwd: run.cwd,
+    });
   }
 
   function scheduleRefresh() {
@@ -290,7 +301,7 @@ function activate(context) {
     refreshTimer = setTimeout(() => void loadCoverage(false), 250);
   }
 
-  const watcher = vscode.workspace.createFileSystemWatcher('**/package.pkg/coverage/{coverage-map.json,*.hits}');
+  const watcher = vscode.workspace.createFileSystemWatcher('**/package.pkg/{coverage,debug/coverage/run-*}/{coverage-map.json,*.hits}');
   watcher.onDidCreate(scheduleRefresh);
   watcher.onDidChange(scheduleRefresh);
   watcher.onDidDelete(scheduleRefresh);
@@ -426,7 +437,7 @@ function nearestPackageRoot(source, workspaceRoot) {
 function spawnCoverage(executable, target, cwd, token, output) {
   return new Promise((resolve, reject) => {
     let settled = false;
-    const child = childProcess.spawn(executable, ['coverage', target], {
+    const child = childProcess.spawn(executable, ['test', target, '--coverage'], {
       cwd,
       env: process.env,
       shell: false,
@@ -510,10 +521,4 @@ function publishContractDiagnostics(stderr, collection) {
   return failures;
 }
 
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-function deactivate() {}
-
-module.exports = { activate, deactivate };
+module.exports = { activate };

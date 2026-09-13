@@ -26,7 +26,15 @@ def default_catalog() -> list[Option]:
         Option("profile.release.debug-symbols", "bool", "false", []),
         Option("profile.release.strip", "bool", "true", []),
         Option("profile.release.lto", "bool", "true", []),
-        Option("test.coverage-min", "integer", "0", []),
+        Option("test.coverage", "bool", "true", []),
+        Option("test.coverage-min", "integer", "91", []),
+        Option("test.coverage-line-min", "integer", "91", []),
+        Option("test.coverage-branch-min", "integer", "91", []),
+        Option("test.coverage-function-min", "integer", "91", []),
+        Option("test.coverage-condition-min", "integer", "91", []),
+        Option("test.coverage-exclude", "paths", "[\"tests/\",\"test/\"]", []),
+        Option("test.allocations-max", "integer", "999999999", []),
+        Option("quality.revision-window", "integer", "0", []),
         Option("test.memory-max", "string", "4GB", []),
         Option("test.timeout-seconds", "integer", "60", []),
         Option("test.leaks", "enum", "deny", ["allow", "warn", "deny"]),
@@ -44,7 +52,7 @@ def validate_configuration(entries: list[Entry]) -> unit | Error:
                 throw Error("unknown prelude option: " + entry.key)
             if not entry.value.starts_with("[") or not entry.value.ends_with("]"):
                 throw Error("prelude.exclude requires an array of names")
-        if entry.table not in ["build", "language", "diagnostics", "test", "publish"] and not entry.table.starts_with("profile."):
+        if entry.table not in ["build", "language", "diagnostics", "test", "publish", "quality"] and not entry.table.starts_with("profile."):
             continue
         key = entry.table + "." + entry.key
         found := false
@@ -56,9 +64,20 @@ def validate_configuration(entries: list[Entry]) -> unit | Error:
             if option.kind == "bool" and value not in ["true", "false"]:
                 throw Error("configuration requires a boolean: " + key)
             if option.kind == "integer":
+                if value == "" or len(value) > 9:
+                    throw Error("configuration requires an integer between 0 and 999999999: " + key)
                 for digit in value.characters():
                     if not "0123456789".contains(string(digit)):
                         throw Error("configuration requires a nonnegative integer: " + key)
+                if entry.key.starts_with("coverage-") and entry.key.ends_with("min") and int(value) > 100:
+                    throw Error("coverage threshold must be between 0 and 100: " + key)
+            if option.kind == "paths":
+                nodes = document_nodes(value)
+                if nodes[0].kind != "array":
+                    throw Error("coverage exclusions require an array of relative paths")
+                for node in nodes[1:]:
+                    if node.parent != 0 or node.kind != "string" or node.value.starts_with("/") or node.value.contains("..") or node.value.contains("\\") or node.value == "":
+                        throw Error("unsafe coverage exclusion")
             if option.kind == "string" or option.kind == "enum":
                 if not value.starts_with("\"") or not value.ends_with("\""):
                     throw Error("configuration requires a string: " + key)

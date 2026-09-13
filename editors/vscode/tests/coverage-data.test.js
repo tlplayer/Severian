@@ -91,3 +91,12 @@ test('ignores malformed regions and hit lines without losing valid data', () => 
   assert.equal(regions.length, 1);
   assert.deepEqual([...parseHits('good\nnot-an-id\n7\n')], ['7']);
 });
+
+// Historical hits must never conceal a newly missed branch.
+{
+  const { latestReports } = require('../coverage-data');
+  const old = { file: '/app/package.pkg/debug/coverage/run-old/coverage-map.json', mtime: 1 };
+  const current = { file: '/app/package.pkg/debug/coverage/run-new/coverage-map.json', mtime: 2 };
+  const other = { file: '/other/package.pkg/coverage/coverage-map.json', mtime: 1 };
+  assert.deepStrictEqual(latestReports([current, old, other]), [current, other]);
+}

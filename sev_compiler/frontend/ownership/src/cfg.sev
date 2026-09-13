@@ -16,6 +16,11 @@ def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
 
 def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
+        case Coverage:
+            value ?= point.condition
+            if value != None:
+                return [value]
+            return []
         case IsVariant:
             return [value]
         case Load:
@@ -165,5 +170,3 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
                     inputs.append(argument)
             verify_ssa_inputs(inputs, definitions, parents, block.id, position, terminal.span)
     return true
-
-

@@ -16,6 +16,8 @@ import * from "../../../../frontend/modules/src/source.sev"
 import * from "timing.sev" as timing
 import * from "package_interface.sev" as package_interface
 import * from "../../../backend/src/native_mlir.sev" as native
+import * from "quality.sev" as quality
+import * from "editor.sev" as editor
 
 
 class PreludeSnapshot:
@@ -59,8 +61,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = []) -> string | Error:
-    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = []) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps)
     if result is string:
         return result
     if result is Diagnostic:
@@ -70,7 +72,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = []) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = []) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
@@ -191,6 +193,22 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 library_sources.append(int(file.id.index))
     timing.finish_stage(timings, "subject")
     typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace, files)
+    if emit == "docs":
+        return editor.editor_package_docs(typed, files, resolution)
+    if emit == "editor":
+        return editor.editor_index(typed, files, resolution)
+    debug_enabled := true
+    if len(resolution.packages) > 0:
+        entries = resolution.packages[0].manifest.entries
+        profile = package.text_setting(entries, "build", "profile", "dev")
+        debug_enabled = package.setting(entries, "profile." + profile, "debug-symbols", "false" if profile == "release" else "true") == "true"
+    if debug_enabled:
+        for file in files:
+            selected := file.path == subject_path
+            if len(resolution.packages) > 0:
+                selected = selected or file.path.starts_with(resolution.packages[0].root + "/")
+            if selected:
+                typed.debug_files.append(file)
     timing.finish_stage(timings, "semantic")
     export_names: list[string] = []
     export_symbols: list[string] = []
@@ -203,7 +221,11 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         else:
             for symbol in export_symbols:
                 interface.append(symbol)
+    if include_tests and emit != "agent-ir":
+        quality.prepare_quality(typed, files, resolution)
     lowered = mir.build_callables(typed, library_sources)
+    if include_tests and len(typed.quality_files) > 0:
+        quality_maps.append(quality.quality_map(lowered))
     timing.finish_stage(timings, "mir")
     if emit == "agent-ir":
         result = agent_ir.emit(lowered, files)

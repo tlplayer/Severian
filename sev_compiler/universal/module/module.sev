@@ -7,6 +7,7 @@ import * from "../statement/statement.sev"
 import * from "../cfg/cfg.sev"
 import * from "../value/lowered.sev"
 import * from "../grammar/grammar.sev"
+import * from "../source/quality.sev"
 
 
 enum Item:
@@ -48,6 +49,10 @@ class Module:
     reserved_functions: list[string] = []
     excluded_functions: list[string] = []
     prelude_sources: list[int] = []
+    quality_files: list[source.SourceFile] = []
+    quality_exclusions: list[source.Span] = []
+    quality_regions: list[QualityRegion] = []
+    debug_files: list[source.SourceFile] = []
 
 
 class Program:

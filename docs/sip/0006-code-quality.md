@@ -252,7 +252,7 @@ Coverage is defaulted on
   * Optional path coverage.
   * Optional mutation testing.
 
-* Function documentation:
+* Function documentation put in a ``` comment block:
 
   ```sev
    # Parses one source file into a syntax tree.
@@ -267,7 +267,12 @@ Coverage is defaulted on
    # - ParseError when source cannot satisfy the grammar.
   
    # Complexity:
-   # - O(n)
+   # - Runtime: O(n) Space: O(1/n) Cognitive Complexity
+
+   # Notes/Description:
+
+   # Example Usage:
+   # - parse("def ...")
   def parse(source: string) -> Tree | ParseError:
       ...
   ```

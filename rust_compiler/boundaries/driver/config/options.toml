@@ -120,7 +120,7 @@ description = "Enable link-time optimization for release builds."
 path = "test.coverage-min"
 group = "Testing"
 type = "integer"
-default = "0"
+default = "91"
 description = "Minimum accepted test coverage percentage."
 
 [[option]]
@@ -301,3 +301,155 @@ type = "enum"
 default = "hint"
 values = ["off", "info", "hint", "warning", "error"]
 description = "Severity of L0008: conditional-branches"
+
+[[option]]
+path = "lint.ineffective-test"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum tests without a production behavior check for L0009"
+
+[[option]]
+path = "lint.constant-callable"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum constant-return callables for L0010"
+
+[[option]]
+path = "lint.rules.L0009"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0009: ineffective-test"
+
+[[option]]
+path = "lint.rules.L0010"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0010: constant-callable"
+
+[[option]]
+path = "test.coverage"
+group = "Quality"
+type = "bool"
+default = "true"
+description = "Package quality policy: test.coverage."
+
+[[option]]
+path = "test.coverage-line-min"
+group = "Quality"
+type = "integer"
+default = "91"
+description = "Package quality policy: test.coverage-line-min."
+
+[[option]]
+path = "test.coverage-branch-min"
+group = "Quality"
+type = "integer"
+default = "91"
+description = "Package quality policy: test.coverage-branch-min."
+
+[[option]]
+path = "test.coverage-function-min"
+group = "Quality"
+type = "integer"
+default = "91"
+description = "Package quality policy: test.coverage-function-min."
+
+[[option]]
+path = "test.coverage-condition-min"
+group = "Quality"
+type = "integer"
+default = "91"
+description = "Package quality policy: test.coverage-condition-min."
+
+[[option]]
+path = "test.allocations-max"
+group = "Quality"
+type = "integer"
+default = "999999999"
+description = "Package quality policy: test.allocations-max."
+
+[[option]]
+path = "quality.revision-window"
+group = "Quality"
+type = "integer"
+default = "0"
+description = "Package quality policy: quality.revision-window."
+
+[[option]]
+path = "lint.function-documentation"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum function-documentation for L0011"
+
+[[option]]
+path = "lint.rules.L0011"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0011: function-documentation"
+
+[[option]]
+path = "lint.class-documentation"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum class-documentation for L0012"
+
+[[option]]
+path = "lint.rules.L0012"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0012: class-documentation"
+
+[[option]]
+path = "lint.duplicate-callable"
+group = "lint"
+type = "integer"
+default = "0"
+values = []
+description = "Maximum duplicate-callable for L0013"
+
+[[option]]
+path = "lint.rules.L0013"
+group = "lint rules"
+type = "enum"
+default = "hint"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0013: duplicate-callable"
+
+[[option]]
+path = "lint.churn-commits"
+group = "lint"
+type = "integer"
+default = "6"
+values = []
+description = "Maximum churn-commits for L0014"
+
+[[option]]
+path = "lint.rules.L0014"
+group = "lint rules"
+type = "enum"
+default = "hint"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0014: churn-commits"
+
+[[option]]
+path = "test.coverage-exclude"
+group = "Quality"
+type = "paths"
+default = "[\"tests/\",\"test/\"]"
+description = "Package-relative coverage exclusions."

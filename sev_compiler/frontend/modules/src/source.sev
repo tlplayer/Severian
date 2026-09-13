@@ -106,7 +106,9 @@ def read_known_source(path: string, files: list[source.SourceFile]) -> source.So
 def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> unit | diagnostics.Diagnostic:
     file = registered_source(input, files)
     if file.path in active:
-        return error(diagnostics.diagnostic("E000120", "cyclic source import: " + file.path))
+        # The outer visit registers this file's descriptors after visiting its
+        # dependencies. A declaration cycle does not require another scan.
+        return
     if file.path in registry.discovered:
         return
     if len(active) >= 64:
@@ -156,14 +158,21 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
     registry.discovered.append(file.path)
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> universal.Module | diagnostics.Diagnostic:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path in active:
+        for index in range(int(len(active))):
+            if active[index] == path and index < int(len(active_prefixes)) and active_prefixes[index] == prefix:
+                # Relative declaration cycles share one namespace. The outer
+                # visit contributes these declarations before semantic analysis.
+                return universal.empty_module()
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + path))
     if len(active) >= 64:
         return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
     stack = active[:]
     stack.append(path)
+    prefixes = active_prefixes[:]
+    prefixes.append(prefix)
     discover_source_syntax(input, [], files, registry, resolution, sysroot)
     lexer.resolve_operator_descriptors(registry)
     discover_lexical_rules(files, registry)
@@ -191,7 +200,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_path := normalized_path(parent_path(path) + "/" + locator)
                         if len(resolution.packages) > 0:
                             child_path = package_module(resolution, path, locator)
-                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
                         for child_item in child.items:
                             append_imported_item(result, child_item)
                     case Name:
@@ -207,7 +216,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_prefix := prefix + package_name + "."
                         if alias != None and source_name == None:
                             child_prefix = prefix + imported_name + "."
-                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
                         selected := source_name == None
                         module_key = child_path + ":" + child_prefix
                         for child_item in child.items:

@@ -128,7 +128,10 @@ def new(location: string, name: string = "", library: bool = false) -> Project |
     header += "\n[lib]\n" if library else "\n[[bin]]\n"
     header += "name = " + toml_quote(selected) + "\npath = \"src/" + target + ".sev\"\n"
     write_text(stage + "/package.json", options(parse_document(header)))
-    write_text(stage + "/src/" + target + ".sev", "def answer() -> int:\n    return 42\n" if library else "def main():\n    print(\"hello, severian\")\n")
+    example := "# Doubles a supplied integer.\n# Parameters:\n# - value [int]: Number to double.\n# Returns [int]:\n# - Twice the supplied number.\n# Errors [None]:\n# - None.\n# Complexity:\n# - Runtime: O(1). Space: O(1).\ndef doubled(value: int) -> int:\n    return value * 2\n\ntest \"doubles positive and negative values\":\n    assert(doubled(3) == 6)\n    assert(doubled(-2) == -4)\n"
+    if not library:
+        example += "\n# Displays the example result.\n# Returns [unit]:\n# - None.\n# Errors [None]:\n# - None.\n# Complexity:\n# - Runtime: O(1). Space: O(1).\ndef main():\n    print(doubled(3))\n"
+    write_text(stage + "/src/" + target + ".sev", example)
     write_text(stage + "/package.lock", resolve(open(stage)).lock)
     replace_file(stage, location)
     return open(location)

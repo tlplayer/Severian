@@ -159,7 +159,22 @@ function buildFileCoverage(regions, hits) {
   return files;
 }
 
+// Select one completed run per package, so old hits cannot hide regressions.
+function latestReports(reports) {
+  const selected = new Map();
+  for (const report of reports) {
+    const normalized = report.file.replace(/\\/g, '/');
+    const marker = normalized.lastIndexOf('/package.pkg/');
+    const root = marker >= 0 ? normalized.slice(0, marker) : path.dirname(normalized);
+    const previous = selected.get(root);
+    if (!previous || report.mtime > previous.mtime
+        || (report.mtime === previous.mtime && report.file > previous.file)) selected.set(root, report);
+  }
+  return [...selected.values()].sort((a, b) => a.file.localeCompare(b.file));
+}
+
 module.exports = {
+  latestReports,
   buildFileCoverage,
   normalizeFilePath,
   parseCoverageMap,

@@ -38,6 +38,10 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         if not previous.contains(toml_quote(build_id)):
             write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\npath = " + toml_quote(interface) + "\nabi = \"severian-scalar-c-1\"\nsource-fallback = true\n")
     retain_file(cache + "/artifact", root + "/" + output)
+    if unit.include_tests and os.is_file(cache + "/artifact.coverage.json"):
+        coverage = output + ".coverage.json"
+        retain_file(cache + "/artifact.coverage.json", root + "/" + coverage)
+        inventory.append(toml_quote(coverage) + " = " + toml_quote(digest(root + "/" + coverage)))
     if emit == "":
         require_command(["chmod", "755", "--", root + "/" + output])
     inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))

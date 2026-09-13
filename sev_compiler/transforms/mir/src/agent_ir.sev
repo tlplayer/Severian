@@ -54,6 +54,14 @@ def values_json(values: list[universal.ValueId]) -> string:
 
 def operation_kind(operation: universal.Operation) -> string:
     match operation:
+        case DebugOwnership:
+            return "DebugOwnership"
+        case DebugLocation:
+            return "DebugLocation"
+        case DebugValue:
+            return "DebugValue"
+        case Coverage:
+            return "Coverage"
         case TypeLayout:
             return "TypeLayout"
         case IsVariant:
@@ -165,6 +173,11 @@ def operation_json(operation: universal.Operation) -> string:
     operands: list[universal.ValueId] := []
     results: list[universal.ValueId] = []
     match operation:
+        case DebugOwnership:
+            fields = ",\"name\":" + quoted(name) + ",\"ownership\":" + quoted(mode)
+        case DebugValue:
+            operands.append(value)
+            fields = ",\"name\":" + quoted(name) + ",\"ownership\":" + quoted(ownership) + ",\"address\":" + string(address)
         case TypeLayout:
             fields = ",\"type\":" + string(subject.index) + ",\"alignment\":" + ("true" if alignment else "false")
             results.append(result)

@@ -2,6 +2,7 @@ import * from "model.sev"
 import * from "host.sev"
 import * from "manifest.sev"
 import * from "lint_policy.sev"
+import * from "resolve.sev"
 import lexer
 import source
 import process
@@ -32,6 +33,10 @@ class LintSuppression:
     rule: string
     line: int
 
+class LintTest:
+    start: int
+    end: int
+
 class LintSource:
     path: string
     text: string
@@ -41,6 +46,7 @@ class LintSource:
     depths: list[int]
     callables: list[LintCallable]
     suppressions: list[LintSuppression] = []
+    tests: list[LintTest] = []
 
 # Metrics consume classified lexer tokens: comments and string contents cannot
 # create declarations or uses. Offsets are Unicode character offsets, like Span.
@@ -95,6 +101,8 @@ def lint_block_end(input: LintSource, start: int) -> int:
 def lint_declarations(input: LintSource, library: bool, exports: list[string]):
     for index in range(int(len(input.tokens)) - 1):
         token = input.tokens[index]
+        if token.kind == lexer.TokenKind.Identifier and string(token) == "test" and (index == 0 or input.tokens[index - 1].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]):
+            input.tests.append(LintTest(index, lint_block_end(input, index)))
         if token.kind != lexer.TokenKind.Identifier or string(token) != "def":
             continue
         name = string(input.tokens[index + 1])
@@ -122,13 +130,16 @@ def lint_declarations(input: LintSource, library: bool, exports: list[string]):
             cursor += 1
         while cursor < int(len(input.tokens)) and input.tokens[cursor].kind != lexer.TokenKind.Newline:
             cursor += 1
-        method = input.depths[index] > 0
+        method := false
+        for parent in range(index):
+            if input.tokens[parent].kind == lexer.TokenKind.Identifier and string(input.tokens[parent]) in ["class", "trait"] and input.depths[parent] + 1 == input.depths[index] and lint_block_end(input, parent) > index:
+                method = true
         decorated := false
         previous = input.lines[index] - 2
         source_lines = input.text.split("\n")
         if previous >= 0:
             decorated = source_lines[previous].strip().starts_with("@")
-        root = name == "main" or name in exports or method or decorated or (library and not name.starts_with("_"))
+        root = method or decorated or (input.depths[index] == 0 and (name == "main" or name in exports or (library and not name.starts_with("_"))))
         input.callables.append(LintCallable(name, index, cursor, lint_block_end(input, index), parameters, root, method))
 
 # Suppressions are explicit file directives or next-line directives. They never
@@ -187,7 +198,8 @@ def lint_read(input: LintSource, index: int) -> bool:
         return false
     before = string(input.tokens[index - 1]) if index > 0 else ""
     after = string(input.tokens[index + 1]) if index + 1 < int(len(input.tokens)) else ""
-    return before not in [".", "def", "class", "trait", "enum"] and after not in ["=", ":=", "?=", ":"]
+    declaration = after == ":" and (index == 0 or input.tokens[index - 1].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent])
+    return before not in [".", "def", "class", "trait", "enum"] and after not in ["=", ":=", "?="] and not declaration
 
 def lint_unused(input: LintSource, callable: LintCallable, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
     bindings = callable.parameters[:]
@@ -257,17 +269,32 @@ def lint_metrics(input: LintSource, entries: list[Entry], output: list[LintDiagn
 
 # Name matching is intentionally conservative for overloads, callbacks and
 # dynamic dispatch: all candidates of a referenced name remain live.
-def lint_reachable(inputs: list[LintSource]) -> list[string]:
+def lint_test_file(input: LintSource) -> bool:
+    return input.path.starts_with("tests/") or input.path.starts_with("test/")
+
+def lint_in_test(input: LintSource, index: int) -> bool:
+    for test in input.tests:
+        if index >= test.start and index < test.end:
+            return true
+    return false
+
+def lint_reachable(inputs: list[LintSource], include_tests: bool = true) -> list[string]:
     live: list[string] = []
     for input in inputs:
+        if not include_tests and lint_test_file(input):
+            continue
         for callable in input.callables:
-            if callable.root and callable.name not in live:
+            if callable.root and callable.name not in live and (include_tests or not lint_in_test(input, callable.start)):
                 live.append(callable.name)
     changed := true
     while changed:
         changed = false
         for input in inputs:
+            if not include_tests and lint_test_file(input):
+                continue
             for index in range(int(len(input.tokens))):
+                if not include_tests and lint_in_test(input, index):
+                    continue
                 member = index > 0 and string(input.tokens[index - 1]) == "."
                 if not lint_read(input, index) and not (member and input.tokens[index].kind == lexer.TokenKind.Identifier):
                     continue
@@ -282,8 +309,87 @@ def lint_reachable(inputs: list[LintSource]) -> list[string]:
                         changed = true
     return live
 
-def lint(project: Project, force: bool = false) -> list[LintDiagnostic] | Error:
-    entries = project.manifest.entries
+# A literal-only return cannot exercise an operation. Keep this deliberately
+# narrower than constant folding: constructors, properties and expressions may
+# have effects even when their arguments are literals.
+def lint_constant(input: LintSource, callable: LintCallable) -> bool:
+    body: list[int] = []
+    for index in range(callable.body, callable.end):
+        if input.tokens[index].kind not in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent, lexer.TokenKind.Eof]:
+            body.append(index)
+    if len(body) == 1:
+        return string(input.tokens[body[0]]) in ["pass", "return", "..."]
+    if len(body) < 2 or len(body) > 3 or string(input.tokens[body[0]]) != "return":
+        return false
+    value = input.tokens[body[-1]]
+    if len(body) == 3:
+        return string(input.tokens[body[1]]) in ["+", "-"] and value.kind in [lexer.TokenKind.Integer, lexer.TokenKind.Float]
+    return value.kind in [lexer.TokenKind.Integer, lexer.TokenKind.Float, lexer.TokenKind.String, lexer.TokenKind.Character] or (value.kind == lexer.TokenKind.Identifier and string(value) in ["true", "false", "None"])
+
+# Follow helper calls so moving assert(true) into a helper cannot satisfy the
+# check. Imported operations count as external behavior; this source pass does
+# not claim to measure dynamic execution or resolve arbitrary dynamic dispatch.
+def lint_tests(input: LintSource, inputs: list[LintSource], entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    for test in input.tests:
+        sources: list[LintSource] = [input]
+        starts: list[int] = [test.start]
+        ends: list[int] = [test.end]
+        visited: list[string] = []
+        checked := false
+        behavior := false
+        cursor := 0
+        while cursor < int(len(sources)):
+            current = sources[cursor]
+            for index in range(starts[cursor], ends[cursor]):
+                token = current.tokens[index]
+                if token.kind != lexer.TokenKind.Identifier:
+                    continue
+                name = string(token)
+                if name == "assert" and index + 1 < ends[cursor] and string(current.tokens[index + 1]) == "(":
+                    depth := 1
+                    for argument in range(index + 2, ends[cursor]):
+                        value = string(current.tokens[argument])
+                        if value in ["(", "["]:
+                            depth += 1
+                        elif value in [")", "]"]:
+                            depth -= 1
+                        if depth == 0 or (depth == 1 and value == ","):
+                            break
+                        if current.tokens[argument].kind == lexer.TokenKind.Identifier and value not in ["true", "false", "None", "and", "or", "not", "is", "in"]:
+                            checked = true
+                if name in ["accept", "reject"] and index + 1 < ends[cursor] and string(current.tokens[index + 1]) == ":":
+                    checked = true
+                    behavior = true
+                if not lint_read(current, index):
+                    continue
+                for peer in inputs:
+                    for callable in peer.callables:
+                        if callable.name != name:
+                            continue
+                        if not lint_test_file(peer) and not lint_in_test(peer, callable.start) and not lint_constant(peer, callable):
+                            behavior = true
+                        identity = peer.path + ":" + string(callable.start)
+                        if identity not in visited:
+                            visited.append(identity)
+                            sources.append(peer)
+                            starts.append(callable.body)
+                            ends.append(callable.end)
+                # A namespace use must originate in a real import, never text
+                # in a string or an arbitrary object with the same spelling.
+                if index + 3 < ends[cursor] and string(current.tokens[index + 1]) == "." and string(current.tokens[index + 3]) == "(":
+                    for imported in range(int(len(current.tokens)) - 1):
+                        if string(current.tokens[imported]) == "import" and current.tokens[imported].kind == lexer.TokenKind.Identifier and string(current.tokens[imported + 1]) == name:
+                            behavior = true
+            cursor += 1
+        if not checked or not behavior:
+            lint_measure(input, test.start, 1, 8, entries, output)
+
+def lint_uncached(project: Project, force: bool = false, testing: bool = false) -> list[LintDiagnostic] | Error:
+    entries = project.manifest.entries[:]
+    if testing:
+        for id in ["L0004", "L0005", "L0009", "L0010"]:
+            if lint_entry(entries, "lint.rules", id, "") == "":
+                entries.append(Entry("lint.rules", id, "\"error\""))
     validate_lint(entries)
     output: list[LintDiagnostic] = []
     if not force and setting(entries, "lint", "enabled", "true") == "false":
@@ -311,11 +417,19 @@ def lint(project: Project, force: bool = false) -> list[LintDiagnostic] | Error:
         inputs.append(input)
     for input in inputs:
         lint_top_level(input, library, entries, output, inputs)
-    live = lint_reachable(inputs)
+    live = lint_reachable(inputs, false)
+    tested = lint_reachable(inputs)
+    lint_duplicates(inputs, entries, output)
+    lint_churn(project, inputs, entries, output)
     for input in inputs:
         for callable in input.callables:
-            if callable.name not in live:
+            reachable = tested if lint_test_file(input) or lint_in_test(input, callable.start) else live
+            if callable.name not in reachable:
                 lint_measure(input, callable.start, 1, 4, entries, output)
+            if lint_constant(input, callable):
+                lint_measure(input, callable.start, 1, 9, entries, output)
+        lint_tests(input, inputs, entries, output)
+        lint_documentation(input, entries, output)
     # Sort by numeric source position, then stable rule ID, independently of pass order.
     for i in range(int(len(output))):
         for j in range(i + 1, int(len(output))):
@@ -326,17 +440,57 @@ def lint(project: Project, force: bool = false) -> list[LintDiagnostic] | Error:
                 output[j] = a
     return output
 
+def lint(project: Project, force: bool = false, testing: bool = false) -> list[LintDiagnostic] | Error:
+    validate_lint(project.manifest.entries)
+    if published_project(project.root):
+        return lint_uncached(project, force, testing)
+    started = monotonic()
+    directory = project.root + "/package.pkg/cache/quality"
+    stage = temporary(directory, "run-")
+    revision := ""
+    if setting(project.manifest.entries, "quality", "revision-window", "0") != "0":
+        revision = capture(["git", "-C", project.root, "rev-parse", "HEAD"])
+    identity = "quality-1\n" + source_checksum(project.root) + "\n" + entries_json(project.manifest.entries) + "\n" + digest(process.executable()) + "\n" + revision + "\n" + string(force) + "\n" + string(testing)
+    write_text(stage + "/key", identity)
+    key = digest(stage + "/key").replace(":", "-")
+    cached = directory + "/" + key + ".jsonl"
+    try:
+        if exists(cached) and exists(cached + ".digest") and digest(cached) == read_text(cached + ".digest"):
+            output: list[LintDiagnostic] = []
+            for line in read_text(cached).split("\n"):
+                if line == "":
+                    continue
+                fields = parse_document(line)
+                output.append(LintDiagnostic(text_setting(fields, "", "rule"), text_setting(fields, "", "file"), int(setting(fields, "", "line")), int(setting(fields, "", "column")), int(setting(fields, "", "end_line")), int(setting(fields, "", "end_column")), text_setting(fields, "", "severity"), text_setting(fields, "", "message"), int(setting(fields, "", "measured")), int(setting(fields, "", "threshold")), text_setting(fields, "", "remediation")))
+            write_text(directory + "/analysis.json", "{\"cache_hit\":true,\"wall_seconds\":" + string(monotonic() - started) + "}")
+            remove_tree(stage)
+            return output
+    catch failure: Error:
+        # Incomplete or damaged generated state cannot waive package policy.
+        pass
+    output = lint_uncached(project, force, testing)
+    lines: list[string] = []
+    for diagnostic in output:
+        lines.append(lint_json(diagnostic))
+    write_text(stage + "/diagnostics", lines.join("\n") + "\n")
+    write_text(stage + "/digest", digest(stage + "/diagnostics"))
+    replace_file(stage + "/diagnostics", cached)
+    replace_file(stage + "/digest", cached + ".digest")
+    write_text(directory + "/analysis.json", "{\"cache_hit\":false,\"wall_seconds\":" + string(monotonic() - started) + "}")
+    remove_tree(stage)
+    return output
+
 def lint_json(diagnostic: LintDiagnostic) -> string:
     d = diagnostic
     return "{\"rule\":" + document_quote(d.rule) + ",\"file\":" + document_quote(d.file) + ",\"line\":" + string(d.line) + ",\"column\":" + string(d.column) + ",\"end_line\":" + string(d.end_line) + ",\"end_column\":" + string(d.end_column) + ",\"severity\":" + document_quote(d.level) + ",\"message\":" + document_quote(d.message) + ",\"measured\":" + string(d.measured) + ",\"threshold\":" + string(d.threshold) + ",\"remediation\":" + document_quote(d.remediation) + "}"
 
-def enforce_lint(project: Project, force: bool = false) -> unit | Error:
+def enforce_lint(project: Project, force: bool = false, testing: bool = false) -> unit | Error:
     failed := false
     json = text_setting(project.manifest.entries, "diagnostics", "message-format", "text") == "json"
-    for d in lint(project, force):
+    for d in lint(project, force, testing):
         message = lint_json(d) if json else d.file + ":" + string(d.line) + ":" + string(d.column) + ": " + d.level + "[" + d.rule + "]: " + d.message + " (" + string(d.measured) + " > " + string(d.threshold) + "). " + d.remediation
         process.write_error(message + "\n")
-        failed = failed or d.level == "error"
+        failed = failed or d.level == "error" or (testing and d.rule in ["L0004", "L0005", "L0009", "L0010"])
     if failed:
         throw Error("package lint policy failed")
 
@@ -400,3 +554,159 @@ def lint_unreachable(input: LintSource, callable: LintCallable, entries: list[En
             elif token.kind == lexer.TokenKind.Identifier and string(token) in ["return", "throw", "break", "continue"]:
                 dead_depth = input.depths[index]
             statement_start = false
+
+# Documentation stays attached to the current declaration by source position;
+# parameter names are compared on every pass, so signature edits invalidate it.
+def lint_doc(input: LintSource, index: int) -> string:
+    lines = input.text.split("\n")
+    cursor := input.lines[index] - 2
+    result := ""
+    while cursor >= 0:
+        text = lines[cursor].strip()
+        if text.starts_with("@"):
+            cursor -= 1
+            continue
+        if not text.starts_with("#") and text != "":
+            break
+        if text.starts_with("#"):
+            result = text[1:].strip() + "\n" + result
+        cursor -= 1
+    return result.strip()
+
+def lint_doc_section(document: string, heading: string) -> string:
+    active := false
+    lines: list[string] = []
+    for line in document.split("\n"):
+        if line.ends_with(":") and not line.starts_with("-"):
+            if active:
+                break
+            active = line == heading + ":" or (line.starts_with(heading + " [") and line.ends_with("]:"))
+        elif active and line != "":
+            lines.append(line)
+    return lines.join("\n")
+
+# Bracketed documentation types are compared to the classified signature.
+def lint_documented_type(label: string) -> string:
+    if " [" in label and "]" in label:
+        value = label.split(" [")[1:].join(" [")
+        if value.ends_with("]:"):
+            return value[:int(len(value)) - 2].replace(" ", "")
+        if value.ends_with("]"):
+            return value[:int(len(value)) - 1].replace(" ", "")
+    return ""
+
+def lint_signature_type(input: LintSource, start: int, end: int) -> string:
+    result := ""
+    depth := 0
+    for cursor in range(start, end):
+        token = string(input.tokens[cursor])
+        if depth == 0 and token in [",", "=", ")", ":"]:
+            break
+        if token in ["[", "("]:
+            depth += 1
+        elif token in ["]", ")"]:
+            depth -= 1
+        result += token
+    return result
+
+def lint_documentation(input: LintSource, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    for callable in input.callables:
+        if callable.name.starts_with("_") or lint_test_file(input) or lint_in_test(input, callable.start):
+            continue
+        document = lint_doc(input, callable.start)
+        complete := document != "" and not document.split("\n")[0].ends_with(":")
+        for heading in ["Returns", "Errors", "Complexity"]:
+            complete = complete and lint_doc_section(document, heading) != ""
+        complete = complete and lint_doc_section(document, "Complexity").contains("O(")
+        documented: list[string] = []
+        for line in lint_doc_section(document, "Parameters").split("\n"):
+            if line.starts_with("- ") and line.contains(":"):
+                label = line[2:].split(":")[0].strip()
+                name = label.split(" [")[0]
+                documented_type = lint_documented_type(label)
+                for parameter in callable.parameters:
+                    if string(input.tokens[parameter]) == name and documented_type != "":
+                        complete = complete and documented_type == lint_signature_type(input, parameter + 2, callable.body)
+                complete = complete and name not in documented and line.split(":")[1:].join(":").strip() != ""
+                documented.append(name)
+        expected: list[string] = []
+        for parameter in callable.parameters:
+            expected.append(string(input.tokens[parameter]))
+        for name in expected:
+            complete = complete and name in documented
+        for name in documented:
+            complete = complete and name in expected
+        result_type := "unit"
+        for cursor in range(callable.start, callable.body):
+            if string(input.tokens[cursor]) == "->":
+                result_type = lint_signature_type(input, cursor + 1, callable.body)
+        for line in document.split("\n"):
+            if line.starts_with("Returns ["):
+                complete = complete and lint_documented_type(line) == result_type
+            elif line.starts_with("Errors ["):
+                errors = lint_documented_type(line)
+                for error_type in errors.split("|"):
+                    complete = complete and (error_type == "None" or error_type in result_type.split("|"))
+            elif line.starts_with("- @ref "):
+                reference = line[7:].strip()
+                known := false
+                for token in input.tokens:
+                    known = known or (token.kind == lexer.TokenKind.Identifier and string(token) == reference)
+                complete = complete and known
+        if not complete:
+            lint_measure(input, callable.start, 1, 10, entries, output)
+    for index in range(int(len(input.tokens)) - 1):
+        if input.tokens[index].kind == lexer.TokenKind.Identifier and string(input.tokens[index]) == "class" and not string(input.tokens[index + 1]).starts_with("_") and not lint_test_file(input):
+            document = lint_doc(input, index)
+            if document == "" or lint_doc_section(document, "Responsibilities") == "" or lint_doc_section(document, "Invariants") == "":
+                lint_measure(input, index, 1, 11, entries, output)
+
+def lint_duplicates(inputs: list[LintSource], entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    implementations: list[string] = []
+    for input in inputs:
+        for callable in input.callables:
+            body: list[string] = []
+            for index in range(callable.body, callable.end):
+                token = input.tokens[index]
+                if token.kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent, lexer.TokenKind.Eof]:
+                    continue
+                spelling := string(token)
+                for parameter in range(int(len(callable.parameters))):
+                    if token.kind == lexer.TokenKind.Identifier and spelling == string(input.tokens[callable.parameters[parameter]]):
+                        spelling = "$parameter" + string(parameter)
+                kind = "identifier" if token.kind == lexer.TokenKind.Identifier else "string" if token.kind == lexer.TokenKind.String else "token"
+                body.append(kind + ":" + document_quote(spelling))
+            if len(body) < 12:
+                continue
+            key = body.join(" ")
+            low := 0
+            high := int(len(implementations))
+            while low < high:
+                middle = (low + high) / 2
+                if implementations[middle] < key:
+                    low = middle + 1
+                else:
+                    high = middle
+            if low < int(len(implementations)) and implementations[low] == key:
+                lint_measure(input, callable.start, 1, 12, entries, output)
+            else:
+                implementations.append(key)
+                cursor := int(len(implementations)) - 1
+                while cursor > low:
+                    implementations[cursor] = implementations[cursor - 1]
+                    cursor -= 1
+                implementations[low] = key
+
+def lint_churn(project: Project, inputs: list[LintSource], entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    window = int(setting(entries, "quality", "revision-window", "0"))
+    if window == 0:
+        return
+    if window > 10000:
+        throw Error("quality revision window must be at most 10000 commits")
+    history = capture(["git", "-C", project.root, "log", "-" + string(window), "--format=", "--name-only", "--relative", "--", "."])
+    for input in inputs:
+        count := 0
+        for location in history.split("\n"):
+            if location == input.path:
+                count += 1
+        lint_measure(input, 0, count, 13, entries, output)

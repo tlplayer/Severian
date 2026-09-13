@@ -83,6 +83,7 @@ class MlirLocation:
     file: string
     line: u32
     column: u32
+    scope: string = ""
 
 
 def file_line_column(file: string, line: u32, column: u32) -> MlirLocation:
@@ -115,6 +116,7 @@ def operation_name_text(name: MlirOperationName) -> string:
 
 
 enum MlirAttributeKind:
+    DebugAttributeKind
     UnitAttributeKind
     DenseIntegerAttributeKind
     DenseIntegerArrayAttributeKind
@@ -263,6 +265,8 @@ def affine_map_attribute(value: MlirAffineMap) -> MlirAttributeValue:
 
 def attribute_kind_name(kind: MlirAttributeKind) -> string:
     match kind:
+        case DebugAttributeKind:
+            return "debug"
         case UnitAttributeKind:
             return "unit"
         case DenseIntegerAttributeKind:
@@ -556,3 +560,9 @@ def struct_type(elements: list[MlirType]) -> MlirType:
 
 def array_type(size: int, element: MlirType) -> MlirType:
     return MlirType(ArrayType, MlirScalarType(IntegerScalar, 8, false, 0), [size], [element])
+
+# Reassignments and ownership transitions retain one debugger variable identity.
+class MlirDebugVariable:
+    scope: string
+    name: string
+    attribute: string

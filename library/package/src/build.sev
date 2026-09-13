@@ -1,4 +1,5 @@
 import * from "lint.sev"
+import * from "coverage.sev"
 import * from "compiler.sev"
 import * from "host.sev"
 import * from "model.sev"
@@ -91,7 +92,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
 
 # The compilation-unit protocol is the only compiler execution boundary.
 def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
-    enforce_lint(plan.project, plan.lint)
+    enforce_lint(plan.project, plan.lint, plan.mode == "test")
     artifacts: list[Artifact] = []
     for unit in plan.units:
         if unit.package_index != 0:
@@ -134,16 +135,30 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
     memory = process.memory_budget(text_setting(project.manifest.entries, "test", "memory-max", "4GB"))
     seconds = int(setting(project.manifest.entries, "test", "timeout-seconds", "60"))
     tests: list[TestResult] = []
+    coverage = CoverageRun()
+    covered = setting(project.manifest.entries, "test", "coverage", "true") != "false" and request.emit == ""
+    reports = temporary(project.root + "/package.pkg/debug/coverage", "run-")
     failed := 0
     for artifact in result.artifacts:
         if request.filter != "" and not artifact.target.name.contains(request.filter):
             continue
         if request.emit != "":
             continue
-        status = command(process.guarded_command([artifact.path], seconds, memory))
+        arguments := [artifact.path]
+        hits = reports + "/" + string(len(tests)) + ".records"
+        if covered:
+            arguments = ["env", "SEV_COVERAGE_FILE=" + hits, artifact.path]
+        status = command(process.guarded_command(arguments, seconds, memory))
+        if covered:
+            if not os.is_file(artifact.path + ".coverage.json"):
+                throw Error("compiler omitted the coverage map for " + artifact.target.name)
+            coverage_collect(coverage, read_text(artifact.path + ".coverage.json"), read_text(hits) if os.is_file(hits) else "")
         tests.append(TestResult(artifact.target.name, status))
         if status != 0:
             failed += 1
+    if covered:
+        failed += coverage_finish(project, coverage, reports)
+        process.write_error("quality report: " + reports + "/summary.json\n")
     return TestReport(tests, failed)
 
 def run(project: Project, compiler: Compiler, request: Run) -> int | Error:

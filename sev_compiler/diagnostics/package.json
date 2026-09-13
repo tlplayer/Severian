@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "source": {
-      "path": "../source"
+      "path": "../source",
+      "package": "sev-compiler-source"
     }
   }
 }

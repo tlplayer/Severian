@@ -1,0 +1,66 @@
+import universal
+import source
+import * from "cfg.sev" as cfg
+
+def debug_source(module: universal.Module, span: source.Span) -> bool:
+    for file in module.debug_files:
+        if file.id.index == span.source.index:
+            return true
+    return false
+
+# Region identities depend on source identity and position, not visitation order
+# or compilation-unit order. Reject a collision instead of merging measurements.
+def quality_region(module: universal.Module, span: source.Span, kind: string) -> int:
+    for excluded in module.quality_exclusions:
+        if excluded.source.index == span.source.index and span.start >= excluded.start and span.start < excluded.end:
+            return 0
+    for file in module.quality_files:
+        if file.id.index != span.source.index:
+            continue
+        identity = file.path + ":" + string(span.start) + ":" + string(span.end) + ":" + kind
+        id := 1
+        for byte in identity.bytes():
+            id = (id * 131 + int(byte)) % 9007199254740881
+        id = max(id, 1)
+        for region in module.quality_regions:
+            if region.id == id:
+                if region.file != file.path or region.span.start != span.start or region.span.end != span.end or region.kind != kind:
+                    throw Error("quality region identity collision")
+                return id
+        line := 1
+        column := 1
+        for index in range(int(span.start)):
+            if file.characters[index] == "\n":
+                line += 1
+                column = 1
+            else:
+                column += 1
+        module.quality_regions.append(universal.QualityRegion(id, kind, span, file.path, line, column))
+        return id
+    return 0
+
+def quality_hit(module: universal.Module, context: cfg.ExecutionContext, span: source.Span, kind: string):
+    id = quality_region(module, span, kind)
+    if id != 0:
+        cfg.append(context, universal.Operation.Coverage(universal.CoveragePoint(span.start, universal.CoverageKind.Line, 0, string(id), None, None)))
+
+def quality_decision(module: universal.Module, span: source.Span, kind: string, value: universal.ValueId) -> universal.Operation | None:
+    otherwise = quality_region(module, span, kind + "False")
+    if otherwise == 0:
+        return None
+    taken = quality_region(module, span, kind + "True")
+    key = string(otherwise) + "," + string(taken)
+    return universal.Operation.Coverage(universal.CoveragePoint(span.start, universal.CoverageKind.Branch, 0, key, None, None, value))
+
+def quality_branches(module: universal.Module):
+    for body in module.cfg_bodies:
+        for block in body.blocks:
+            terminal ?= block.terminator
+            if terminal != None:
+                match terminal.exit:
+                    case Conditional:
+                        measured ?= quality_decision(module, terminal.span, "Branch", condition)
+                        if measured != None:
+                            block.operations.append(measured)
+                    case _:
+                        pass

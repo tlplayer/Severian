@@ -70,7 +70,19 @@ impl Catalog {
             .ok_or_else(|| format!("unknown configuration option `{path}`"))?;
         let valid = match option.kind.as_str() {
             "bool" => matches!(value, "true" | "false"),
-            "integer" => value.parse::<u64>().is_ok(),
+            "integer" => value.parse::<u64>().is_ok_and(|number| {
+                number <= 999_999_999
+                    && (!(path.starts_with("test.coverage") && path.ends_with("-min"))
+                        || number <= 100)
+            }),
+            "paths" => document::parse(&format!("value = {value}"))
+                .ok()
+                .and_then(|document| document.get("value").and_then(toml::Value::as_array).cloned())
+                .is_some_and(|paths| paths.iter().all(|path| path.as_str().is_some_and(|path| {
+                    !path.is_empty() && !path.starts_with('/') && !path.contains('\\')
+                        && !path.contains(':') && !path.chars().any(char::is_control)
+                        && path.trim_end_matches('/').split('/').all(|part| !matches!(part, "" | "." | ".."))
+                }))),
             "enum" => option.values.iter().any(|candidate| candidate == value),
             "string" => !value.is_empty(),
             kind => return Err(format!("unknown catalog type `{kind}` for `{path}`")),
@@ -101,21 +113,26 @@ impl Catalog {
             "# Severian package manifest.\n# Generated from the compiler-owned configuration catalog.\n\n### PACKAGE ############################################################\n\n[package]\nname = {name}\nversion = \"0.1.0\"\nedition = \"2026\"\nlicense = \"Severian License\"\ndefault-run = {name}\n\n### TARGETS ############################################################\n\n[[bin]]\nname = {name}\npath = \"src/main.sev\"\n\n# [lib]\n# name = {name}\n# path = \"src/lib.sev\"\n\n### DEPENDENCIES #######################################################\n\n[dependencies]\n\n[dev-dependencies]\n",
             name = quote(package_name),
         );
-        let mut section = String::new();
+        let mut sections = BTreeSet::new();
         for option in &self.options {
-            let (table, key) = option
+            let (table, _) = option
                 .path
                 .rsplit_once('.')
                 .expect("catalog paths have tables");
-            if table != section {
-                section = table.to_owned();
-                output.push_str(&format!(
-                    "\n### {} {}\n\n[{table}]\n",
-                    option.group.to_uppercase(),
-                    "#".repeat(68usize.saturating_sub(option.group.len()))
-                ));
+            if !sections.insert(table) {
+                continue;
             }
-            output.push_str(&format!("{key} = {}\n", render(option, &option.default)));
+            output.push_str(&format!(
+                "\n### {} {}\n\n[{table}]\n",
+                option.group.to_uppercase(),
+                "#".repeat(68usize.saturating_sub(option.group.len()))
+            ));
+            for member in &self.options {
+                let (member_table, key) = member.path.rsplit_once('.').expect("catalog option table");
+                if member_table == table {
+                    output.push_str(&format!("{key} = {}\n", render(member, &member.default)));
+                }
+            }
         }
         output
     }
@@ -913,6 +930,9 @@ fn configuration_values(document: &toml::Value) -> BTreeMap<String, String> {
             toml::Value::Boolean(value) => {
                 output.insert(prefix.into(), value.to_string());
             }
+            toml::Value::Array(_) if prefix == "test.coverage-exclude" => {
+                output.insert(prefix.into(), value.to_string());
+            }
             _ => {}
         }
     }
@@ -1070,6 +1090,7 @@ fn is_configuration_table(path: &str) -> bool {
         "profile.",
         "test.",
         "publish.",
+        "quality.",
     ]
     .iter()
     .any(|prefix| path.starts_with(prefix))
@@ -1100,6 +1121,12 @@ mod tests {
         assert_eq!(document::parse(&template).unwrap()["test"]["timeout-seconds"].as_integer(), Some(60));
         assert_eq!(catalog.default("test.timeout-seconds").unwrap(), "60");
         assert!(catalog.validate("test.timeout-seconds", "-1").is_err());
+        assert_eq!(document::parse(&template).unwrap()["test"]["coverage-min"].as_integer(), Some(91));
+        assert_eq!(document::parse(&template).unwrap()["test"]["coverage-exclude"].as_array().unwrap().len(), 2);
+        assert!(catalog.validate("test.coverage-line-min", "100").is_ok());
+        assert!(catalog.validate("test.coverage-line-min", "101").is_err());
+        assert!(catalog.validate("test.coverage-exclude", "[\"generated/\"]").is_ok());
+        assert!(catalog.validate("test.coverage-exclude", "[\"../private\"]").is_err());
         assert!(!template.contains("backend ="));
     }
 

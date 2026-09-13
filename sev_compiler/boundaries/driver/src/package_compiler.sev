@@ -60,6 +60,8 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
             location = package.canonical(sysroot + "/library/core/memory/native/" + name)
             if location not in recorded:
                 records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
+        quality_runtime = package.canonical(sysroot + "/sev_compiler/runtime/native/quality.c")
+        records.append(package.toml_quote(quality_runtime) + " = " + package.toml_quote(package.digest(quality_runtime)))
         ownership_pipeline = package.canonical(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline")
         records.append(package.toml_quote(ownership_pipeline) + " = " + package.toml_quote(package.digest(ownership_pipeline)))
     package.write_text(destination + ".inputs", records.join("\n") + "\n")
@@ -76,7 +78,10 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
     emit = arguments[4]
     files: list[source.SourceFile] = []
     interface: list[string] = []
-    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface)
+    quality_maps: list[string] = []
+    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps)
+    if len(quality_maps) > 0:
+        package.write_text(arguments[3] + ".coverage.json", quality_maps[0])
     record_inputs(files, resolution, arguments[6], arguments[5], emit in ["", "library"])
     if emit == "check":
         return

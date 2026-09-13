@@ -26,11 +26,13 @@ class MlirOpBuilder:
     program: MlirProgram
     insertion: list[MlirBlockHandle]
     counters: list[int]
+    debug_variables: list[MlirDebugVariable]
 
     def MlirOpBuilder(first_generated_value: int = 0):
         program := empty_program(first_generated_value)
         insertion := []
         counters := [first_generated_value, 0, 0]
+        debug_variables := []
 
 
 # These source functions are the stable builder API. They keep state in the

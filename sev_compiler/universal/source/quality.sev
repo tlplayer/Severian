@@ -1,0 +1,10 @@
+import source
+
+class QualityRegion:
+    id: int
+    kind: string
+    span: source.Span
+    file: string
+    line: int
+    column: int
+

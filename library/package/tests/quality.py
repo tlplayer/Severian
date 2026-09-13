@@ -26,6 +26,7 @@ class QualityPipeline(unittest.TestCase):
         (self.root / 'main.sev').write_text('def helper(a: int, b: int):\n    print(a, b)\ndef main():\n    helper(1, 2)\n')
 
     def write_manifest(self):
+        self.manifest.setdefault('lint', {}).setdefault('rules', {}).update({'L0011': 'off', 'L0012': 'off'})
         (self.root / 'package.json').write_text('// package policy\n' + json.dumps(self.manifest))
 
     def run_sev(self, *arguments, ok=True):
@@ -43,7 +44,10 @@ class QualityPipeline(unittest.TestCase):
 
     def test_error_policy_is_deterministic_and_prevents_codegen(self):
         first = self.run_sev('build', ok=False)
+        cache = self.root / 'package.pkg/cache/quality/analysis.json'
+        self.assertFalse(json.loads(cache.read_text())['cache_hit'])
         second = self.run_sev('build', ok=False)
+        self.assertTrue(json.loads(cache.read_text())['cache_hit'])
         self.assertEqual(self.diagnostics(first), self.diagnostics(second))
         finding = next(d for d in self.diagnostics(first) if d['rule'] == 'L0003')
         self.assertEqual((finding['file'], finding['line'], finding['column']), ('main.sev', 1, 1))
@@ -107,6 +111,206 @@ class QualityPipeline(unittest.TestCase):
         self.manifest['lint'] = {'parameters': -1}
         self.write_manifest()
         self.assertIn('nonnegative integer', self.run_sev('build', ok=False).stderr)
+
+    def test_test_quality_golden_diagnostics_stop_before_compilation(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        (self.root / 'main.sev').write_text(
+            'def answer() -> int:\n    return 42\n'
+            'def main():\n    print("ready")\n'
+            'test "placeholder":\n    assert(answer() == 42)\n')
+        first = self.run_sev('test', ok=False)
+        second = self.run_sev('test', ok=False)
+        expected = [
+            ('L0005', 1, 1, 1, 4, 'code has no reachable use in this package',
+             'Check external uses before removing or exporting the callable.'),
+            ('L0010', 1, 1, 1, 4, 'callable only returns a constant',
+             'Implement the operation or use a named value; explicitly suppress intentional constant APIs.'),
+            ('L0009', 5, 1, 5, 5, 'test has no production behavior check',
+             'Assert an observable production result; replace placeholders and checks of constant stubs.'),
+        ]
+        self.assertEqual(self.diagnostics(first), [
+            dict(rule=rule, file='main.sev', line=line, column=column,
+                 end_line=end_line, end_column=end_column, severity='error',
+                 message=message, measured=1, threshold=0, remediation=remediation)
+            for rule, line, column, end_line, end_column, message, remediation in expected
+        ])
+        self.assertEqual(self.diagnostics(first), self.diagnostics(second))
+        self.assertNotIn('compiling ', first.stderr)
+
+    def test_real_production_behavior_passes_and_executes_assertions(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        source = self.root / 'main.sev'
+        text = ('def doubled(value: int) -> int:\n    return value * 2\n'
+                'def main():\n    print(doubled(3))\n'
+                'test "doubled":\n    assert(doubled(4) == 8)\n')
+        source.write_text(text)
+        self.assertEqual(self.diagnostics(self.run_sev('test')), [])
+        # A real implementation mutation must be caught by the same test.
+        source.write_text(text.replace('value * 2', 'value * 3'))
+        result = self.run_sev('test', ok=False)
+        self.assertNotIn('package lint policy failed', result.stderr)
+
+    def test_test_only_cycle_does_not_make_production_reachable(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        (self.root / 'main.sev').write_text(
+            'def left(value: int) -> int:\n    return right(value)\n'
+            'def right(value: int) -> int:\n    return left(value)\n'
+            'def main():\n    print("ready")\n'
+            'test "cycle":\n    assert(left(1) == 1)\n')
+        findings = self.diagnostics(self.run_sev('test', ok=False))
+        self.assertEqual([d['line'] for d in findings if d['rule'] == 'L0005'], [1, 3])
+
+    def test_coverage_golden_path_measures_both_outcomes(self):
+        self.manifest['lint'] = {}
+        self.manifest['lib'] = {'path': 'main.sev'}
+        self.manifest.pop('bin')
+        self.write_manifest()
+        (self.root / 'main.sev').write_text(
+            'def magnitude(value: int) -> int:\n'
+            '    if value < 0:\n        return -value\n    return value\n'
+            'test "both signs":\n'
+            '    assert(magnitude(-3) == 3)\n    assert(magnitude(2) == 2)\n')
+        result = self.run_sev('test', '--coverage')
+        report = Path(next(line.removeprefix('quality report: ') for line in result.stderr.splitlines() if line.startswith('quality report: ')))
+        summary = json.loads(report.read_text())
+        self.assertEqual(summary['tests'], 1)
+        self.assertEqual(summary['failures'], [])
+        self.assertEqual(summary['metrics']['function'], {'covered': 1, 'total': 1, 'threshold': 91})
+        for kind in ('line', 'branch', 'condition'):
+            metric = summary['metrics'][kind]
+            self.assertGreater(metric['total'], 0, kind)
+            self.assertEqual(metric['covered'], metric['total'], kind)
+        source = self.root / 'main.sev'
+        source.write_text(source.read_text().replace('    assert(magnitude(-3) == 3)\n', ''))
+        self.assertIn('branch coverage below', self.run_sev('test', '--coverage', ok=False).stderr)
+
+    def test_editor_snapshot_resolves_real_call_and_parameter(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        (self.root / 'main.sev').write_text(
+            '# Doubles the supplied value.\n'
+            'def doubled(value: int) -> int:\n    result = value * 2\n    return result\n'
+            'def main():\n    print(doubled(3))\n')
+        output = self.root / 'editor.json'
+        self.run_sev('check', '--emit', 'editor', '-o', str(output))
+        snapshot = json.loads(output.read_text())
+        declarations = [d for d in snapshot['definitions'] if d['source']['path'] == str(self.root / 'main.sev')]
+        doubled = next(d for d in declarations if d['name'] == 'doubled')
+        self.assertIn('Doubles the supplied value.', doubled['documentation'])
+        self.assertIn('value: int', doubled['type'])
+        self.assertTrue(any(r['symbol'] == doubled['id'] for r in snapshot['references']))
+        result = next(d for d in declarations if d['name'] == 'result')
+        self.assertEqual(result['type'], 'int')
+        self.assertTrue(any(r['symbol'] == result['id'] for r in snapshot['references']))
+
+    def test_native_debugger_reads_arguments_locals_and_watch_expression(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        source = self.root / 'main.sev'
+        source.write_text('def doubled(value: int) -> int:\n    result = value * 2\n    return result\ndef main():\n    print(doubled(3))\n')
+        executable = self.run_sev('build').stdout.strip().splitlines()[-1]
+        result = subprocess.run(['gdb', '-q', '-batch', executable,
+                                 '-ex', f'break {source}:3', '-ex', 'run',
+                                 '-ex', 'print value', '-ex', 'print result',
+                                 '-ex', 'print result + value', '-ex', 'print result__ownership', '-ex', 'backtrace',
+                                 '-ex', 'continue'], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('$1 = 3', result.stdout)
+        self.assertIn('$2 = 6', result.stdout)
+        self.assertIn('$3 = 9', result.stdout)
+        self.assertIn('$4 = 0', result.stdout)
+        self.assertIn('doubled', result.stdout)
+        self.assertIn('exited normally', result.stdout)
+
+    def test_native_debugger_observes_borrow_and_move_transitions(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        source = self.root / 'main.sev'
+        source.write_text('def shifted(value: int) -> int:\n    shared = view value\n'
+                          '    temporary = value + 1\n    transferred = move temporary\n'
+                          '    return transferred + shared\ndef main():\n    print(shifted(3))\n')
+        executable = self.run_sev('build').stdout.strip().splitlines()[-1]
+        result = subprocess.run(['gdb', '-q', '-batch', executable,
+                                 '-ex', f'break {source}:5', '-ex', 'run',
+                                 '-ex', 'print shared__ownership', '-ex', 'print temporary__ownership',
+                                 '-ex', 'print transferred__ownership', '-ex', 'print transferred + shared',
+                                 '-ex', 'continue'], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for expected in ('$1 = 1', '$2 = 4', '$3 = 0', '$4 = 7', 'exited normally'):
+            self.assertIn(expected, result.stdout)
+
+    def test_churn_uses_the_configured_revision_window(self):
+        self.manifest['lint'] = {'churn-commits': 1}
+        self.manifest['quality'] = {'revision-window': 2}
+        self.write_manifest()
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        for value in (1, 2):
+            (self.root / 'main.sev').write_text(f'def main():\n    print({value})\n')
+            subprocess.run(['git', '-C', str(self.root), 'add', 'main.sev'], check=True)
+            subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Quality Test',
+                            '-c', 'user.email=quality@example.invalid', 'commit', '-qm', str(value)], check=True)
+        result = self.run_sev('lint')
+        findings = [json.loads(line) for line in result.stdout.splitlines()]
+        churn = next(item for item in findings if item['rule'] == 'L0014')
+        self.assertEqual((churn['measured'], churn['threshold']), (2, 1))
+        self.assertEqual(result.stdout, self.run_sev('lint').stdout)
+
+    def test_generated_library_has_documented_behavior_and_executable_tests(self):
+        destination = self.root / 'example'
+        self.run_sev('new', str(destination), '--lib')
+        self.assertEqual(self.diagnostics(self.run_sev('test', str(destination))), [])
+        output = self.root / 'api.md'
+        self.run_sev('check', str(destination), '--emit', 'docs', '-o', str(output))
+        documentation = output.read_text()
+        self.assertIn('def doubled(value: int) -> int', documentation)
+        self.assertIn('Number to double.', documentation)
+
+    def test_runtime_records_real_allocations_release_and_retention(self):
+        driver = self.root / 'runtime.c'
+        driver.write_text('''#include <stdint.h>
+#include <stddef.h>
+void __sev_quality_test_begin(uint64_t);
+void __sev_quality_test_end(uint64_t);
+void __sev_quality_hit(uint64_t);
+void *__sev_memory_allocate(size_t);
+void __sev_memory_release(void *);
+int main(void) {
+    __sev_quality_test_begin(7);
+    void *released = __sev_memory_allocate(16);
+    __sev_quality_hit(123);
+    __sev_memory_release(released);
+    __sev_quality_test_end(7);
+    __sev_quality_test_begin(8);
+    void *retained = __sev_memory_allocate(32);
+    __sev_quality_hit(456);
+    __sev_quality_test_end(8);
+    __sev_memory_release(retained);
+    return 0;
+}
+''')
+        binary = self.root / 'runtime'
+        subprocess.run(['clang-21', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                        '-DSEV_QUALITY_TRACK_ALLOCATIONS', str(driver),
+                        str(ROOT / 'sev_compiler/runtime/native/quality.c'),
+                        str(ROOT / 'library/core/memory/native/memory.c'), '-o', str(binary)], check=True)
+        records = self.root / 'records'
+        subprocess.run([str(binary)], env={**os.environ, 'SEV_COVERAGE_FILE': str(records)}, check=True)
+        self.assertEqual(records.read_text().splitlines(), [
+            'B:7', 'H:123', 'A:1', 'M:16', 'L:0', 'E:7',
+            'B:8', 'H:456', 'A:1', 'M:32', 'L:32', 'E:8'])
+
+    def test_relative_declaration_cycle_keeps_both_implementations(self):
+        self.manifest['lint'] = {}
+        self.write_manifest()
+        (self.root / 'main.sev').write_text('import * from "even.sev"\ndef main():\n    print(even(4))\n')
+        (self.root / 'even.sev').write_text('import * from "odd.sev"\ndef even(value: int) -> bool:\n    if value == 0:\n        return true\n    return odd(value - 1)\n')
+        (self.root / 'odd.sev').write_text('import * from "even.sev"\ndef odd(value: int) -> bool:\n    if value == 0:\n        return false\n    return even(value - 1)\n')
+        executable = self.run_sev('build').stdout.strip().splitlines()[-1]
+        result = subprocess.run([executable], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, 'true\n')
 
 
 if __name__ == '__main__':

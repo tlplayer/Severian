@@ -144,3 +144,70 @@ test "next line suppression and string contents are distinct":
     catch failure: Error:
         failed = true
     assert(failed)
+
+test "documentation tracks current parameter names and required sections":
+    text = "# Computes a magnitude.\n# Parameters:\n# - value: Input integer.\n# Returns:\n# - Input without its sign.\n# Errors:\n# - None.\n# Complexity:\n# - Runtime O(1), space O(1).\ndef magnitude(value: int) -> int:\n    return abs(value)\n"
+    input = package.lint_source("api.sev", text)
+    package.lint_declarations(input, true, [])
+    findings: list[package.LintDiagnostic] = []
+    package.lint_documentation(input, [], findings)
+    assert(occurrences(findings, "L0011") == 0)
+    changed = package.lint_source("api.sev", text.replace("def magnitude(value:", "def magnitude(number:"))
+    package.lint_declarations(changed, true, [])
+    package.lint_documentation(changed, [], findings)
+    assert(occurrences(findings, "L0011") == 1)
+    assert(findings[0].line == 10)
+
+test "runtime records attribute actual regions to individual tests":
+    map = "{regions:{'123':{kind:'Statement',span:{file:'/tmp/main.sev',start:{line:2,column:5}}}},tests:{'7':'production result'}}"
+    run = package.CoverageRun()
+    package.coverage_collect(run, map, "B:7\nH:123\nA:2\nM:32\nL:0\nE:7\n")
+    assert(run.tests == 1)
+    assert(run.allocations == 2 and run.allocated_bytes == 32)
+    measured = package.coverage_metric(run, "Statement")
+    assert(measured.covered == 1 and measured.total == 1)
+    assert(len(run.failures) == 0)
+    empty = package.CoverageRun()
+    package.coverage_collect(empty, map, "B:7\nE:7\n")
+    assert(len(empty.failures) == 1)
+    assert(empty.failures[0].contains("no production coverage"))
+
+test "test bodies do not make production cycles reachable":
+    input = package.lint_source("main.sev", "def dead(value: int):\n    other(value)\ndef other(value: int):\n    dead(value)\ndef main():\n    print(1)\ntest \"cycle\":\n    dead(1)\n")
+    package.lint_declarations(input, false, [])
+    assert("dead" in package.lint_reachable([input]))
+    assert("dead" not in package.lint_reachable([input], false))
+    assert("other" not in package.lint_reachable([input], false))
+
+
+test "typed documentation invalidates stale contracts":
+    original = "# Doubles a number.\n# Parameters:\n# - value [int]: Number to double.\n# Returns [int]:\n# - Doubled number.\n# Errors [None]:\n# - None.\n# Complexity:\n# - Runtime O(1), space O(1).\ndef doubled(value: int) -> int:\n    return value * 2\n"
+    input = package.lint_source("lib.sev", original)
+    package.lint_declarations(input, true, [])
+    findings: list[package.LintDiagnostic] = []
+    package.lint_documentation(input, [], findings)
+    assert(len(findings) == 0)
+    stale = package.lint_source("lib.sev", original.replace("value: int", "value: float"))
+    package.lint_declarations(stale, true, [])
+    package.lint_documentation(stale, [], findings)
+    assert(len(findings) == 1)
+    assert(findings[0].rule == "L0011")
+
+
+test "duplicate callable index compares normalized production bodies":
+    input = package.lint_source("api.sev", "def doubled(value: int) -> int:\n    result = value + value + value + value\n    return result * 2\ndef repeated(number: int) -> int:\n    result = number + number + number + number\n    return result * 2\n")
+    package.lint_declarations(input, true, [])
+    findings: list[package.LintDiagnostic] = []
+    package.lint_duplicates([input], [], findings)
+    assert(len(findings) == 1)
+    assert(findings[0].rule == "L0013")
+    assert(findings[0].line == 4)
+
+
+test "a constant assertion cannot validate an exercised callable":
+    input = package.lint_source("api.sev", "def doubled(value: int) -> int:\n    return value * 2\ntest \"placeholder assertion\":\n    doubled(3)\n    assert(true)\n")
+    package.lint_declarations(input, true, [])
+    findings: list[package.LintDiagnostic] = []
+    package.lint_tests(input, [input], [], findings)
+    assert(len(findings) == 1)
+    assert(findings[0].rule == "L0009")

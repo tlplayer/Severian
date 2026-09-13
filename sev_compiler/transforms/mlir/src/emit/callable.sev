@@ -4,6 +4,7 @@ import * from "../../../../universal/type/storage.sev" as storage_types
 import * from "../../../../universal/type/scalar.sev" as scalar
 import * from "../ir/lib.sev"
 import * from "strings.sev"
+import * from "debug.sev" as debug
 import * from "../../../../universal/declaration/scalar.sev" as boundary
 
 
@@ -52,11 +53,38 @@ def callable_function_symbol(id: universal.FunctionId) -> string:
     return "__sev_scalar_" + string(id.value)
 
 
-def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module, block: borrow universal.BasicBlock):
+def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module, block: borrow universal.BasicBlock, location: MlirLocation | None = None):
     cursor := 0
     for operation in borrow block.operations:
         cursor += 1
         match operation:
+            case DebugOwnership:
+                current ?= location
+                if current != None:
+                    debug.debug_ownership(builder, module, name, mode, span, current.scope)
+            case DebugLocation:
+                current ?= location
+                if current != None:
+                    location = debug.debug_location(module.debug_files, span, current.scope)
+            case DebugValue:
+                current ?= location
+                if current != None:
+                    debug.debug_value(builder, module, name, callable_mlir_value(module, value), declared_type if declared_type.index != 0 else module.values[value.index].type_id, span, argument, current.scope, address)
+            case Coverage:
+                key ?= point.key
+                if key != None:
+                    values: list[MlirValue] = []
+                    for number in key.split(","):
+                        value = builder_new_value(builder, integer_type(64))
+                        builder_constant(builder, value, integer_attribute(int(number), value.type_id))
+                        values.append(value)
+                    if len(values) == 2:
+                        condition ?= point.condition
+                        if condition == None:
+                            throw Error("coverage decision requires a condition value")
+                        if condition != None:
+                            values.append(callable_mlir_value(module, condition))
+                    quality_call(builder, "__sev_quality_decision" if len(values) == 3 else "__sev_quality_hit", values)
             case TypeLayout:
                 # GEP offsets are evaluated by the selected LLVM target layout.
                 # {i8, T}'s second field offset is T's ABI alignment.
@@ -194,6 +222,7 @@ def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module,
                 builder_assert(builder, callable_mlir_value(module, condition), "assertion failed")
             case _:
                 throw Error("unsupported scalar MIR operation")
+        debug.debug_annotate(builder, location)
 
 
 def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[MlirValue], results: list[MlirType]) -> MlirFunctionHandle:
@@ -241,12 +270,12 @@ def lower_callables(module: borrow universal.Module, library: bool = false, expo
         if symbol != "":
             handles.append(callable_external(builder, symbol, parameters, callable_mlir_results(function.result_type, module.records)))
         else:
-            handles.append(builder_create_function(builder, callable_function_symbol(function.id), private_visibility(), parameters, callable_mlir_results(function.result_type, module.records)))
+            handles.append(builder_create_function_at(builder, callable_function_symbol(function.id), private_visibility(), parameters, callable_mlir_results(function.result_type, module.records), false, debug.debug_function(module, function)))
     index := 0
     for function in borrow module.functions:
         if function.cfg_index >= 0:
             ownership.authorize_lowering(module, module.cfg_bodies[function.cfg_index], function.values)
-            callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry)
+            callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry, builder.program.functions[handles[index].function].location)
         index += 1
     if library:
         export_index := 0
@@ -280,7 +309,15 @@ def lower_callables(module: borrow universal.Module, library: bool = false, expo
     for test in borrow module.tests:
         function ?= test.function
         if function != None:
+            if len(module.quality_files) > 0:
+                test_id = builder_new_value(builder, integer_type(64))
+                builder_constant(builder, test_id, integer_attribute(int(function.value), test_id.type_id))
+                quality_call(builder, "__sev_quality_test_begin", [test_id])
             builder_call(builder, callable_function_symbol(function), [], [])
+            if len(module.quality_files) > 0:
+                test_id = builder_new_value(builder, integer_type(64))
+                builder_constant(builder, test_id, integer_attribute(int(function.value), test_id.type_id))
+                quality_call(builder, "__sev_quality_test_end", [test_id])
     outputs: list[MlirValue] = []
     main ?= module.entry
     if main != None:
@@ -298,6 +335,15 @@ def lower_callables(module: borrow universal.Module, library: bool = false, expo
     builder_return(builder, outputs)
     validate(builder.program)
     return builder.program
+
+def quality_call(builder: MlirOpBuilder, symbol: string, values: list[MlirValue]):
+    parameters: list[MlirValue] = []
+    for value in values:
+        parameters.append(builder_new_value(builder, value.type_id))
+    callable_external(builder, symbol, parameters, [])
+    segments = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [integer_attribute(int(len(values)), integer_type(32)), integer_attribute(0, integer_type(32))])
+    bundles = MlirAttributeValue(DenseIntegerArrayAttributeKind, "", 0, false, integer_type(32), [], [])
+    builder_create_operation(builder, operation_name("llvm", "call"), values, [], [MlirNamedAttribute("callee", symbol_attribute(symbol)), MlirNamedAttribute("operandSegmentSizes", segments), MlirNamedAttribute("op_bundle_sizes", bundles)])
 
 
 def callable_storage_type(value: MlirType) -> MlirType:
@@ -335,7 +381,7 @@ def callable_load(builder: MlirOpBuilder, address: MlirValue, output: MlirValue)
 
 
 
-def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody, entry: MlirBlockHandle):
+def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody, entry: MlirBlockHandle, location: MlirLocation | None = None):
     handles = [entry]
     for block in body.blocks[1:]:
         parameters: list[MlirValue] = []
@@ -344,7 +390,7 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: 
         handles.append(builder_create_block(builder, entry.region, parameters))
     for block in borrow body.blocks:
         builder_set_insertion_point(builder, handles[block.id])
-        callable_mlir_block(builder, module, block)
+        callable_mlir_block(builder, module, block, location)
         terminal ?= block.terminator
         if terminal != None:
             match terminal.exit:
@@ -385,6 +431,9 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: 
                     builder_return(builder, outputs)
                 case Dead:
                     callable_unreachable(builder, module, body)
+            current ?= location
+            if current != None:
+                debug.debug_annotate(builder, debug.debug_location(module.debug_files, terminal.span, current.scope))
 
 
 # Preserve FunctionOpInterface exits until ownership has run. The assertion

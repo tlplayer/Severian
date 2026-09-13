@@ -30,6 +30,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     profile := ""
     alias := ""
     lint := false
+    coverage := false
     locked := false
     library := false
     development := false
@@ -37,7 +38,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     application: list[string] := []
     cursor := 1
     if len(arguments) > 1:
-        if arguments[1] in ["build", "run", "test", "check", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean", "options"]:
+        if arguments[1] in ["build", "run", "test", "check", "lint", "debug", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean", "options"]:
             command = arguments[1]
             cursor += 1
     while cursor < len(arguments):
@@ -47,7 +48,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
             print(package.compiler_build_info())
             return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit mlir|agent-ir|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit mlir|agent-ir|editor|docs|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run lint debug add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
             return 0
         if argument == "--":
             application = arguments[cursor + 1:]
@@ -57,6 +58,8 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
                 throw Error("--local requires publish")
         elif argument == "--lint":
             lint = true
+        elif argument == "--coverage":
+            coverage = true
         elif argument == "--locked":
             locked = true
         elif argument == "--lib":
@@ -90,21 +93,25 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         else:
             throw Error("unexpected argument " + argument)
         cursor += 1
-    if emit != "" and emit != "mlir" and emit != "agent-ir" and emit != "plan":
+    if emit != "" and emit != "mlir" and emit != "agent-ir" and emit != "plan" and emit != "editor" and emit != "docs":
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
     location = input if input != "" else "."
+    if coverage and command != "test":
+        throw Error("--coverage requires test")
+    if coverage and input.ends_with(".sev"):
+        throw Error("--coverage requires a package target")
     if command == "test" and os.is_dir(location) and not os.is_file(package.manifest_file(location)):
         return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):
-        if command in ["build", "check", "test", "run", "install"] and emit != "plan":
+        if command in ["build", "check", "test", "run", "debug", "install"] and emit != "plan":
             client = process.session_start()
             if client < 0:
                 throw Error("could not start package compilation session")
             if client > 0:
                 return serve_package_session(client)
-        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development, lint)
+        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development, lint, coverage)
         if status != 0:
             return status
         return 0
@@ -131,6 +138,8 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
     if command == "check":
         return 0
 
+    if command == "debug":
+        return process.run([environment.get("SEVERIAN_GDB", "gdb"), "--args", output])
     if command == "build":
         print("built " + output)
     else:

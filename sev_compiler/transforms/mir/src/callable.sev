@@ -6,6 +6,7 @@ import * from "ownership.sev" as ownership
 import * from "aggregate.sev" as aggregate
 import * from "../../../universal/type/storage.sev" as storage_types
 import * from "../../../universal/declaration/scalar.sev" as boundary
+import * from "quality.sev" as quality
 
 
 class CallableMirScope:
@@ -16,6 +17,7 @@ class CallableMirScope:
     inline_functions: list[int] = []
     aggregates: aggregate.AggregateStorage = aggregate.AggregateStorage()
     borrowed_records: list[int] = []
+    debug_names: list[string] = []
 
 
 def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
@@ -25,9 +27,29 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
+    value = mir_expression_value(module, context, scope, expression)
+    if len(module.quality_files) > 0 and expression.type_id.index == 1:
+        match expression.kind:
+            case LiteralValue:
+                pass
+            case _:
+                measured ?= quality.quality_decision(module, expression.span, "Condition", value)
+                if measured != None:
+                    cfg.append(context, measured)
+    return value
+
+def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
         case Ownership:
-            return mir_expression(module, context, scope, value)
+            result = mir_expression(module, context, scope, value)
+            if mode == "move" and quality.debug_source(module, expression.span):
+                match value.kind:
+                    case BindingReference:
+                        if int(binding.index) < len(scope.debug_names):
+                            cfg.append(context, universal.Operation.DebugOwnership(scope.debug_names[binding.index], "moved", expression.span))
+                    case _:
+                        pass
+            return result
         case AddressOf:
             return callable_mir_place(module, context, scope, value)
         case TypeLayout:
@@ -35,12 +57,12 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             cfg.append(context, universal.Operation.TypeLayout(subject, alignment, result))
             return result
         case BlockValue:
-            local = CallableMirScope(scope.bindings[:], scope.loops, scope.update_operands, scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+            local = CallableMirScope(scope.bindings[:], scope.loops, scope.update_operands, scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
             mir_block(module, context, body, local)
             return mir_expression(module, context, local, value)
         case Evaluate:
             evaluated = mir_expression(module, context, scope, value)
-            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records), body)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names), body)
         case UpdateOperand:
             return scope.update_operands[index]
         case ListValue:
@@ -55,20 +77,20 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
             else:
                 exemplar = mir_value(module, storage_types.buffer_element(expression.type_id, module.records))
                 cfg.append(context, universal.Operation.Constant(universal.NoneValue(), exemplar))
-            local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+            local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
             result = mir_expression(module, context, local, construction)
             position := 0
             for value in elements_values:
                 index = mir_value(module, universal.TypeId(64))
                 cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(position)), index))
-                local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+                local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
                 mir_expression(module, context, local, storage)
                 position += 1
             return result
         case IndexReference:
             receiver = mir_expression(module, context, scope, object)
             offset = mir_expression(module, context, scope, index)
-            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records), access)
+            return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names), access)
         case OutcomeValue:
             payload = mir_expression(module, context, scope, value)
             if storage_types.owned_record(expression.type_id, module.records):
@@ -315,6 +337,19 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
             return true
         match statement:
             case BindingStatement:
+                if quality.debug_source(module, binding.span):
+                    while len(scope.debug_names) <= int(binding.id.index):
+                        scope.debug_names.append("")
+                    scope.debug_names[binding.id.index] = binding.name
+                    cfg.append(context, universal.Operation.DebugLocation(binding.span))
+                    debug_mode := binding.value.loan_mode
+                    match binding.value.kind:
+                        case Ownership:
+                            debug_mode = mode
+                        case _:
+                            pass
+                    cfg.append(context, universal.Operation.DebugOwnership(binding.name, debug_mode, binding.span))
+                quality.quality_hit(module, context, binding.span, "Statement")
                 if binding.value.loan_mode == "borrow mut" and not binding.update:
                     scope.bindings.append(mir_expression(module, context, scope, binding.value))
                     continue
@@ -326,6 +361,8 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                     case _:
                         pass
                 value := mir_expression(module, context, scope, binding.value)
+                if quality.debug_source(module, binding.span):
+                    cfg.append(context, universal.Operation.DebugValue(binding.name, value, binding.span, 0, binding.value.loan_mode, false, binding.type_id))
                 if storage_types.owned_record(binding.type_id, module.records):
                     if binding.update:
                         if int(binding.id.index) in scope.borrowed_records:
@@ -349,13 +386,22 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                     cfg.append(context, universal.Operation.Allocate(stored_type, cell))
                     cfg.append(context, universal.Operation.Store(cell, value))
                     scope.bindings.append(cell)
+                if quality.debug_source(module, binding.span):
+                    cfg.append(context, universal.Operation.DebugValue(binding.name, scope.bindings[binding.id.index], binding.span, 0, binding.value.loan_mode, true, binding.type_id))
             case ExpressionStatement:
+                if quality.debug_source(module, expression.span):
+                    cfg.append(context, universal.Operation.DebugLocation(expression.span))
+                quality.quality_hit(module, context, expression.span, "Statement")
                 mir_expression(module, context, scope, expression)
             case Assert:
+                quality.quality_hit(module, context, span, "Statement")
                 value = mir_expression(module, context, scope, condition)
                 origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
                 cfg.append(context, universal.Operation.Assert(value, None, origin))
             case GrammarApply:
+                if quality.debug_source(module, span):
+                    cfg.append(context, universal.Operation.DebugLocation(span))
+                quality.quality_hit(module, context, span, "Statement")
                 execute_grammar(module, context, scope, syntax, operands, bodies, span)
             case _:
                 return error(diagnostics.Diagnostic("E000230", "semantic analysis admitted an unsupported statement", None))
@@ -425,6 +471,8 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
             continue
         local = CallableMirScope()
+        for parameter in function.parameters:
+            local.debug_names.append(parameter.name)
         context = cfg.ExecutionContext(universal.empty_cfg(function.result_type))
         for type_id in function.parameter_types:
             if storage_types.owned_record(type_id, module.records):
@@ -434,10 +482,22 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
             stored_type = universal.TypeId(5) if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
+            if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
+                parameter = function.parameters[len(function.values) - 1]
+                if quality.debug_source(module, parameter.span):
+                    mode := ""
+                    for modifier in parameter.modifiers:
+                        mode = modifier.name
+                    cfg.append(context, universal.Operation.DebugValue(parameter.name, parameter_value, parameter.span, int(len(function.values)), mode, false, stored_type))
+                    cfg.append(context, universal.Operation.DebugOwnership(parameter.name, mode, parameter.span))
             cell = mir_value(module, universal.TypeId(5))
             cfg.append(context, universal.Operation.Allocate(stored_type, cell))
             cfg.append(context, universal.Operation.Store(cell, parameter_value))
             local.bindings.append(cell)
+            if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
+                parameter = function.parameters[len(function.values) - 1]
+                if quality.debug_source(module, parameter.span):
+                    cfg.append(context, universal.Operation.DebugValue(parameter.name, cell, parameter.span, int(len(function.values)), "", true, stored_type))
         # Aggregate parameters were added as entry block values; interleave
         # leaves with scalar parameters in source parameter order.
         if aggregate.signature(function, module.records):
@@ -458,6 +518,9 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
                 parameter_cursor += 1
         body ?= function.body
         if body != None:
+            declared_span ?= function.span
+            if declared_span != None:
+                quality.quality_hit(module, context, declared_span, "Function")
             mir_block(module, context, body, local)
             span := source.Span(source.SourceId(0), 0, 0)
             declared ?= function.span
@@ -589,7 +652,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
             if name == "load" and len(inputs) == 1:
                 match inputs[0]:
                     case IndexedHandle:
-                        local = CallableMirScope(scope.bindings, scope.loops, [receiver, index], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+                        local = CallableMirScope(scope.bindings, scope.loops, [receiver, index], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
                         return RuntimeValue(mir_expression(module, frame.context, local, access))
                     case PlaceHandle:
                         return RuntimeValue(aggregate.load(module, frame.context, address, type_id))
@@ -601,7 +664,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     case IndexedHandle:
                         implementation ?= storage
                         if implementation != None:
-                            local = CallableMirScope(scope.bindings, scope.loops, [receiver, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+                            local = CallableMirScope(scope.bindings, scope.loops, [receiver, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
                             mir_expression(module, frame.context, local, implementation)
                             return Nothing
                         return error(diagnostics.Diagnostic("E000231", "indexed storage is not writable", expression.span))
@@ -619,7 +682,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     case SourceOperand:
                         match operand:
                             case ExpressionBody:
-                                local = CallableMirScope(scope.bindings, scope.loops, [previous, right], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records)
+                                local = CallableMirScope(scope.bindings, scope.loops, [previous, right], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names)
                                 return RuntimeValue(mir_expression(module, frame.context, local, expression))
                             case _:
                                 pass
@@ -739,7 +802,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                             case StatementBody:
                                 if not cfg.open(frame.context):
                                     return error(diagnostics.Diagnostic("E000230", "body lowering after CFG terminator", frame.origin.span))
-                                mir_block(module, frame.context, body, CallableMirScope(scope.bindings[:], scope.loops, return_target=scope.return_target, inline_functions=scope.inline_functions, aggregates=scope.aggregates, borrowed_records=scope.borrowed_records))
+                                mir_block(module, frame.context, body, CallableMirScope(scope.bindings[:], scope.loops, return_target=scope.return_target, inline_functions=scope.inline_functions, aggregates=scope.aggregates, borrowed_records=scope.borrowed_records, debug_names=scope.debug_names))
                                 return Nothing
                     case Nothing:
                         return Nothing

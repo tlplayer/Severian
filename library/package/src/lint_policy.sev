@@ -19,6 +19,12 @@ def lint_rules() -> list[LintRule]:
         LintRule("L0006", "class-methods", 20, "hint", "class has many methods", "Review the class responsibilities and split independent ones."),
         LintRule("L0007", "match-arms", 9, "hint", "match has many cases", "Consider a map lookup for data dispatch or a trait for behavioral dispatch."),
         LintRule("L0008", "conditional-branches", 9, "hint", "conditional dispatch has many branches", "Consider a map or a shared callable interface."),
+        LintRule("L0009", "ineffective-test", 0, "warning", "test has no production behavior check", "Assert an observable production result; replace placeholders and checks of constant stubs."),
+        LintRule("L0010", "constant-callable", 0, "warning", "callable only returns a constant", "Implement the operation or use a named value; explicitly suppress intentional constant APIs."),
+        LintRule("L0011", "function-documentation", 0, "warning", "public callable documentation is incomplete or stale", "Document purpose, each parameter, Returns, Errors, and Complexity with O(...) notation; remove stale parameter entries."),
+        LintRule("L0012", "class-documentation", 0, "warning", "public class documentation is incomplete", "Document purpose, Responsibilities, and Invariants immediately before the class."),
+        LintRule("L0013", "duplicate-callable", 0, "hint", "callable repeats an existing implementation", "Compare the implementations and extract their shared operation after preserving behavior."),
+        LintRule("L0014", "churn-commits", 6, "hint", "source changes repeatedly in the configured revision window", "Review the frequently changed module for independent responsibilities."),
     ]
 
 def lint_entry(entries: list[Entry], table: string, key: string, fallback: string) -> string:

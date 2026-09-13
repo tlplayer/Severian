@@ -39,5 +39,10 @@
   },
   "lib": {
     "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "os": {
+      "path": "../../system/os"
+    }
   }
 }
