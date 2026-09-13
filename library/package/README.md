@@ -68,9 +68,9 @@ package.pkg/
 | `build/` | Mutable incremental state for the working checkout; never published |
 | `cache/` | Disposable intermediate and temporary execution data |
 | `bin/` | Runnable package executables, with platform/profile subdivisions where needed |
-| `debug/` | Test, coverage, profile, symbol, source-map, and compiler-mapping information |
-| `container/` | Optional container realizations or construction metadata |
-| `source/` | Optional source for rebuilding, specialization, debugging, or inspection |
+| `debug/` | omitted from published: Test, coverage, profile, symbol, source-map, and compiler-mapping information |
+| `container/` | container realizations or construction metadata |
+| `source/` | source for rebuilding, specialization, debugging, or inspection |
 
 For example:
 

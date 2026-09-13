@@ -94,8 +94,7 @@ use `[test].memory-max` (4 GB) and `[test].timeout-seconds` (60) instead.
 Current limits are explicit: the source compiler emits host executables;
 backend-artifact loading, general `.pkgi` generation/consumption, remote registry
 transport/authentication, and container/network-policy execution are not
-implemented. The selector reports unsupported alternatives. Source-free
-libraries are rejected. Publication includes Severian source files and currently
+implemented. The selector reports unsupported alternatives.  Publication includes Severian source files and currently
 requires separately published versions for path dependencies. Hosted filesystem,
 hashing, Git and process primitives use the existing runtime and standard Unix
 tools. The source compiler's existing language subset still limits which
