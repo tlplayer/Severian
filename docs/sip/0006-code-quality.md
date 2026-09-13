@@ -12,7 +12,7 @@ Superseded by:
 
 Severian lacks code coverage, linting, build pipelining, enforcing a default standard in the package library. We should also 
 have go to definition, usages, and debugging functionality to inspect/review and watch variables while coding to catch bugs
-
+faster
 
 
 ## Appendix
@@ -427,6 +427,50 @@ N/A should not result in deprecations
 
 ## Milestones (max 5)
 
-1. sev build runs lint pipeline, according to package.toml 
+1. `sev build` runs the configured lint pipeline from package policy.
 
+   * LOC/file limits.
+   * Method/function size limits.
+   * Parameter-count limits.
+   * Dead code and unused symbols.
+   * Structural smells.
+   * Stable rule IDs and deterministic diagnostic ordering.
+   * Swap from toml to json for packages/locks etc. It's easier to manage and change allow comments in the json per json5 rules
 
+2. `sev test` produces enforceable quality metrics.
+
+   * Line coverage.
+   * Branch coverage.
+   * Function coverage.
+   * Condition coverage.
+   * Package-defined thresholds.
+   * Leak/allocation checks where enabled.
+
+3. Documentation becomes compiler-checked metadata.
+
+   * Public functions require parameter, return, error, and complexity docs.
+   * Public classes require purpose, responsibilities, and invariants.
+   * Signature changes invalidate stale documentation.
+   * Documentation is available to tooling and generated package docs.
+
+4. Editor tooling uses the same semantic data as the compiler.
+
+   * Go to definition.
+   * Find usages.
+   * Go to implementation.
+   * Hover docs.
+   * Inlay hints.
+   * Semantic highlighting.
+   * Dead/deprecated code highlighting.
+   * Coverage gutters.
+   * Inline lint diagnostics.
+
+5. Debugging and quality analysis form one deterministic feedback loop.
+
+   * Breakpoints and stepping.
+   * Variable/watch inspection.
+   * Stack inspection.
+   * Ownership/borrow/view/mirror inspection.
+   * Allocation and performance warnings.
+   * Churn and duplicate-code analysis.
+   * Incremental caching so unchanged packages are not reanalyzed.
