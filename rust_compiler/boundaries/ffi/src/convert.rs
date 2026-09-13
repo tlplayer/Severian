@@ -13,6 +13,7 @@ pub enum Conversion {
     Boolean,
     Utf8View,
     BytesView,
+    SequenceView,
     OpaquePointer,
     OutPointer,
 }
@@ -22,6 +23,8 @@ pub struct LoweredParameter {
     pub name: String,
     pub abi_type: AbiType,
     pub conversion: Conversion,
+    pub contract: ValueContract,
+    pub mode: ParameterMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +35,7 @@ pub struct BoundaryPlan {
     pub parameters: Vec<LoweredParameter>,
     pub result_type: AbiType,
     pub result_conversion: Conversion,
+    pub result_contract: ValueContract,
 }
 
 pub fn lower_function(
@@ -64,6 +68,7 @@ pub fn lower_function(
         parameters,
         result_type,
         result_conversion,
+        result_contract: function.result.clone(),
     })
 }
 
@@ -83,6 +88,8 @@ fn lower_parameter(
         name: parameter.name.clone(),
         abi_type,
         conversion,
+        contract: parameter.contract.clone(),
+        mode: parameter.mode,
     })
 }
 
@@ -111,6 +118,24 @@ fn lower_type_ref(
 ) -> Result<(AbiType, Conversion), FfiError> {
     match ty {
         ForeignTypeRef::Severian(id) => lower_semantic(*id, types, target, result),
+        ForeignTypeRef::Sequence { element } => {
+            if result
+                || !types.primitive(*element).is_some_and(|primitive| {
+                    matches!(
+                        primitive.representation,
+                        PrimitiveRepresentation::Integer {
+                            bits: IntegerWidth::Fixed(8),
+                            signed: false
+                        }
+                    )
+                })
+            {
+                return Err(FfiError::UnsupportedRepresentation(
+                    "XXI sequence views currently require a u8 input or inout buffer".into(),
+                ));
+            }
+            Ok((view_type("BytesView", target), Conversion::SequenceView))
+        }
         ForeignTypeRef::External(name) => module
             .type_declaration(name)
             .map(|declaration| (declaration.representation.clone(), Conversion::Direct))

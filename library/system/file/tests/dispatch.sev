@@ -41,7 +41,6 @@ test "text and format reads propagate IO errors":
             file.read(directory + "/missing" + extension)
         catch failure: Error:
             failed = true
-        print(extension, failed)
         assert(failed)
     assert(file.write(directory + "/empty.txt", "") == 0)
     assert(string(file.read(directory + "/empty.txt")) == "")
@@ -58,3 +57,12 @@ test "file owns metadata and permission changes":
     assert(file.set_permissions(location, 448) == 0)
     assert(file.permissions(location) == 448)
     os.remove_tree(directory)
+
+
+test "byte read failures cross the public file boundary":
+    failed := false
+    try:
+        file.read_bytes(-1, 1B)
+    catch failure: Error:
+        failed = true
+    assert(failed)

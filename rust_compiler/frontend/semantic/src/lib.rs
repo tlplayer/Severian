@@ -13119,35 +13119,6 @@ impl Analyzer<'_> {
                 span,
             }));
         }
-        if callable.as_deref().is_some_and(|name| name == "__io_read_chunk" || name.ends_with(".__io_read_chunk")) && arguments.len() == 2 && positional {
-            let integer = self.types.resolve_name("int").expect("bootstrap defines int");
-            let string = self.types.resolve_name("string").expect("bootstrap defines string");
-            let reader = self.expression(&arguments[0].value, Some(integer))?;
-            let count = self.expression(&arguments[1].value, Some(integer))?;
-            let storage = self.runtime_call(
-                "__sev_io_read_chunk", &[integer, integer], string, vec![reader, count], span,
-            );
-            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
-            let result = self.instantiate_list_type(byte);
-            return Ok(Some(Expression {
-                id: self.next_id(), type_id: result,
-                kind: ExpressionKind::Aggregate { class: result, fields: vec![storage] }, span,
-            }));
-        }
-        if callable.as_deref().is_some_and(|name| name == "__io_write_chunk" || name.ends_with(".__io_write_chunk")) && arguments.len() == 3 && positional {
-            let integer = self.types.resolve_name("int").expect("bootstrap defines int");
-            let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
-            let bytes_type = self.instantiate_list_type(byte);
-            let writer = self.expression(&arguments[0].value, Some(integer))?;
-            let bytes = self.expression(&arguments[1].value, Some(bytes_type))?;
-            let offset = self.expression(&arguments[2].value, Some(integer))?;
-            let storage = self.list_storage_expression(bytes, span);
-            let storage_type = storage.type_id;
-            return Ok(Some(self.runtime_call(
-                "__sev_io_write_chunk", &[integer, storage_type, integer], integer,
-                vec![writer, storage, offset], span,
-            )));
-        }
         let AstExpressionKind::Member { object, name } = &callee.kind else {
             return Ok(None);
         };

@@ -688,6 +688,7 @@ impl Compiler {
                 resolved,
                 module,
                 Some((&typed.index, source_module.id)),
+                &mut typed.types,
             )?;
         }
         severian_ownership::validate(&typed.hir).map_err(|diagnostic| {
@@ -806,10 +807,9 @@ impl Compiler {
         source: &Path,
         output: &Path,
     ) -> Result<Vec<String>, CompileError> {
-        let Some(providers) = NativeProviderSources::discover(source, Some(&self.standard_package_graph(source)?))?
-        else {
-            return Ok(Vec::new());
-        };
+        let providers =
+            NativeProviderSources::discover(source, Some(&self.standard_package_graph(source)?))?
+                .unwrap_or_default();
         let mut arguments = providers
             .c
             .iter()
@@ -827,6 +827,30 @@ impl Compiler {
                 .iter()
                 .map(|library| format!("-l{library}")),
         );
+
+        let mut plans = Vec::new();
+        for module in self.resolve_modules(source)?.modules {
+            let external = severian_xxi::resolve(
+                &module.ast,
+                &self.context.types,
+                &severian_abi::AbiTarget::derive(&self.target),
+            )
+            .map_err(|error| external_metadata_error(&error.to_string()))?;
+            plans.extend(external.plans);
+        }
+        let bridges = severian_xxi::render_bridges(&plans).map_err(CompileError::NativeLink)?;
+        if !bridges.is_empty() {
+            let path = output.with_extension("xxi.c");
+            std::fs::write(&path, format!("#include \"bytes.h\"\n{bridges}"))
+                .map_err(|error| CompileError::NativeLink(error.to_string()))?;
+            arguments.push(path.to_string_lossy().into_owned());
+            arguments.push(format!(
+                "-I{}",
+                crate::runtime_paths::library_root()
+                    .join("interop/xxi/extern/c")
+                    .display()
+            ));
+        }
 
         for (index, source) in providers.rust.iter().enumerate() {
             let archive = output.with_extension(format!("ffi-rust-{index}.a"));
@@ -996,6 +1020,7 @@ impl Compiler {
             ("driver", library.join("system/driver")),
             ("environment", library.join("system/environment")),
             ("ffi", library.join("interop/ffi")),
+            ("xxi", library.join("interop/xxi")),
             ("file", library.join("system/file")),
             ("io", library.join("system/io")),
             ("json", library.join("data/json")),
@@ -2670,8 +2695,14 @@ fn apply_external_calls_to_module(
     external: &severian_xxi::ResolvedExternalModule,
     module: &mut severian_hir::Module,
     identity: Option<(&severian_semantic::ProgramIndex, severian_modules::ModuleId)>,
+    types: &mut severian_universal::TypeContext,
 ) -> Result<(), CompileError> {
-    for declaration in &external.declarations {
+    if external.declarations.len() != external.plans.len() {
+        return Err(external_metadata_error(
+            "XXI declaration lost its boundary plan",
+        ));
+    }
+    for (declaration, plan) in external.declarations.iter().zip(&external.plans) {
         let ast_function = ast
             .items
             .iter()
@@ -2718,10 +2749,28 @@ fn apply_external_calls_to_module(
                 ast_function.name
             ))
         })?;
+        let bridge = severian_xxi::bridge_symbol(plan);
         let declaration = &declaration.function;
+        severian_xxi::register_ownership(declaration, hir_function.definition, types);
+        for (parameter, foreign) in hir_function
+            .parameters
+            .iter_mut()
+            .zip(&declaration.parameters)
+        {
+            parameter
+                .contract
+                .modifiers
+                .extend(foreign_modifiers(&foreign.contract, Some(foreign.mode)));
+        }
+        hir_function
+            .result
+            .modifiers
+            .extend(foreign_modifiers(&declaration.result, None));
         hir_function.call_type = severian_hir::CallType::External(severian_hir::ExternalCall {
             interface: severian_hir::InterfaceId("xxi".into()),
-            symbol: severian_hir::SymbolId(declaration.symbol.name.as_str().into()),
+            symbol: severian_hir::SymbolId(
+                bridge.unwrap_or_else(|| declaration.symbol.name.as_str().into()),
+            ),
             provider: declaration
                 .provider
                 .as_ref()
@@ -2731,6 +2780,44 @@ fn apply_external_calls_to_module(
         });
     }
     Ok(())
+}
+
+fn foreign_modifiers(
+    contract: &severian_ffi::ValueContract,
+    mode: Option<severian_ffi::ParameterMode>,
+) -> Vec<severian_hir::BoundaryModifier> {
+    use severian_ffi::{Lifetime, Ownership, ParameterMode};
+    let mut names = vec![match &contract.ownership {
+        Ownership::Copy => "xxi.copy".to_owned(),
+        Ownership::Owned => "xxi.owned".to_owned(),
+        Ownership::Transferred => "xxi.transferred".to_owned(),
+        Ownership::Borrowed(lifetime) => format!(
+            "xxi.borrowed.{}",
+            match lifetime {
+                Lifetime::Call => "call",
+                Lifetime::Return => "return",
+                Lifetime::Static => "static",
+                Lifetime::Named(name) => name.as_str(),
+            }
+        ),
+    }];
+    if let Some(mode) = mode {
+        names.push(
+            match mode {
+                ParameterMode::In => "xxi.in",
+                ParameterMode::Out => "xxi.out",
+                ParameterMode::InOut => "xxi.inout",
+            }
+            .into(),
+        );
+    }
+    if contract.nullable {
+        names.push("xxi.nullable".into());
+    }
+    names
+        .into_iter()
+        .map(|name| severian_hir::BoundaryModifier { name })
+        .collect()
 }
 
 fn external_metadata_error(message: &str) -> CompileError {
@@ -2765,6 +2852,48 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn xxi_contracts_reach_hir_and_the_ownership_type_context() {
+        let root = temporary_package();
+        let source = root.join("contracts.sev");
+        std::fs::write(&source, "@c(symbol = \"xxi_test_take\")\ndef take(value: transferred[string]) -> i32\n@c(symbol = \"xxi_test_peek\")\ndef peek() -> borrowed[string]\n").unwrap();
+        let compiler = Compiler::new(TargetSpec::host()).unwrap();
+        let (hir, _, types) = compiler
+            .check_file_to_hir(&source, CompileMode::Build)
+            .unwrap();
+        let find = |symbol: &str| {
+            hir.modules.iter().flat_map(|module| &module.functions).find(|function| {
+            matches!(&function.call_type, severian_hir::CallType::External(call) if call.symbol.0 == symbol)
+        }).unwrap()
+        };
+        let take = find("xxi_test_take");
+        assert!(types.transfers_argument(take.definition, 0));
+        assert!(take.parameters[0]
+            .contract
+            .modifiers
+            .iter()
+            .any(|modifier| modifier.name == "xxi.transferred"));
+        let peek = find("xxi_test_peek");
+        assert!(types.borrowed_result(peek.definition));
+        assert!(peek
+            .result
+            .modifiers
+            .iter()
+            .any(|modifier| modifier.name == "xxi.borrowed.return"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn xxi_transferred_arguments_cannot_be_used_after_the_foreign_call() {
+        let root = temporary_package();
+        let source = root.join("transfer.sev");
+        std::fs::write(&source, "@c(symbol = \"xxi_test_take\")\ndef take(value: transferred[string]) -> i32\nvalue = string(42)\ntake(value)\nprint(value)\n").unwrap();
+        let compiler = Compiler::new(TargetSpec::host()).unwrap();
+        let error = compiler.emit_file(&source, EmitStage::Mlir).unwrap_err();
+        assert!(error.to_string().contains("moved") || error.to_string().contains("E000303"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

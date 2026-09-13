@@ -24,6 +24,7 @@ enum ParameterMode:
 enum ForeignTypeRef:
     Severian(type_id: universal.TypeId)
     External(name: string)
+    Sequence(element: universal.TypeId)
     Pointer(pointee: ForeignTypeRef, mutable: bool)
 
 

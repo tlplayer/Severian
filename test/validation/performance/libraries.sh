@@ -14,17 +14,16 @@ mkdir -p "$bootstrap_home"
 ln -s "$root/library" "$bootstrap_home/library"
 ln -s "$root/sev_compiler" "$bootstrap_home/sev_compiler"
 compiler=${SEVERIAN_SOURCE_COMPILER:-"$root/bin/sev"}
-bootstrap=${SEVERIAN_BOOTSTRAP:-"$root/package.pkg/release/sev"}
+bootstrap=${SEVERIAN_BOOTSTRAP:-"$root/package.pkg/debug/sev"}
 cc=${CC:-clang-21}
-"$cc" -O2 -Wall -Wextra -Werror library/system/file/tests/native_io.c \
-    library/system/file/native/text.c library/core/memory/native/memory.c \
-    -o "$workspace/file"
-"$workspace/file"
-"$cc" -O2 -Wall -Wextra -Werror -DSEV_TEST_OWNERSHIP \
-    library/system/file/tests/native_io.c library/system/file/native/owned.c \
-    library/system/file/native/text.c library/core/memory/native/memory.c \
-    library/core/storage/native/storage.c -o "$workspace/file-owned"
-"$workspace/file-owned"
+"$cc" -O2 -Wall -Wextra -Werror library/system/io/tests/descriptor.c \
+    library/system/io/extern/posix/descriptor.c -o "$workspace/io"
+"$workspace/io" | tee "$evidence/io.log"
+"$cc" -O2 -Wall -Wextra -Werror library/interop/xxi/tests/loans.c \
+    rust_compiler/runtime/native/list.c rust_compiler/runtime/native/string.c \
+    rust_compiler/runtime/native/any.c library/core/storage/native/storage.c \
+    -lm -o "$workspace/xxi-loans"
+"$workspace/xxi-loans" | tee "$evidence/xxi-loans.json"
 for ownership in physical combined; do
     extra=()
     if [[ "$ownership" == combined ]]; then
@@ -40,17 +39,30 @@ done
     rust_compiler/runtime/native/string.c rust_compiler/runtime/native/any.c \
     library/core/storage/native/storage.c -lm -o "$workspace/json"
 "$workspace/json" | tee "$evidence/json.json"
+"$compiler" test library/system/file/tests/buffer.sev 2>&1 | tee "$evidence/file-buffer.log"
 "$compiler" test library/core/text/tests/format.sev 2>&1 | tee "$evidence/text.log"
 "$compiler" test library/core/text/tests/profile.sev 2>&1 | tee "$evidence/text-profile.log"
 # These entry points use namespace dispatch and Data, currently implemented by
 # the bootstrap frontend. Keep its validation separate and explicitly named.
 SEVERIAN_HOME="$bootstrap_home" "$bootstrap" test library/system/file/tests/dispatch.sev 2>&1 | tee "$evidence/bootstrap-file.log"
 SEVERIAN_HOME="$bootstrap_home" "$bootstrap" test library/data/json 2>&1 | tee "$evidence/bootstrap-json.log"
-awk -v json="$(cat "$evidence/json.json")" '
-    /^profile:/ { ++count; elapsed[count]=$2; calls[count]=$4; bytes[count]=$6 }
-    END {
-        if (count != 2) exit 1
-        printf "{\"schema_version\":1,\"integers\":{\"nanoseconds\":%s,\"allocations\":%s,\"allocated_bytes\":%s},\"floats\":{\"nanoseconds\":%s,\"allocations\":%s,\"allocated_bytes\":%s},\"json\":%s}\n", elapsed[1],calls[1],bytes[1],elapsed[2],calls[2],bytes[2],json
-    }
-' "$evidence/text-profile.log" > "$evidence/baseline.json"
+for case in library/system/file/tests/reading.sev library/system/file/tests/text.sev library/interop/xxi/tests/contracts.sev library/interop/xxi/tests/worker.sev library/interop/xxi/tests/bridge; do
+    name=$(basename "$case" .sev)
+    SEVERIAN_HOME="$bootstrap_home" "$bootstrap" test "$case" 2>&1 | tee "$evidence/$name.log"
+done
+python3 - "$evidence" <<'REPORT'
+import json
+import pathlib
+import re
+import sys
+root = pathlib.Path(sys.argv[1])
+pattern = r"profile: (\d+) ns; (\d+) allocations; (\d+) allocated bytes"
+def measurement(values):
+    return dict(zip(("nanoseconds", "allocations", "allocated_bytes"), map(int, values)))
+text = re.findall(pattern, (root / "text-profile.log").read_text())
+file = re.findall(pattern, (root / "file-buffer.log").read_text())
+assert len(text) == 2 and len(file) == 1
+report = {"schema_version": 2, "integers": measurement(text[0]), "floats": measurement(text[1]), "file_buffers": measurement(file[0]), "json": json.loads((root / "json.json").read_text()), "xxi": json.loads((root / "xxi-loans.json").read_text())}
+(root / "baseline.json").write_text(json.dumps(report, indent=2) + "\n")
+REPORT
 printf 'Library regression passed. Evidence: %s\n' "$evidence"

@@ -19,10 +19,13 @@ def stdout() -> int:
 def stderr() -> int:
     return 2
 
-# IO owns transfer algorithms for every descriptor, including files and pipes.
-# The compiler only adapts collection storage at these two primitive calls.
-def __io_read_chunk(reader: int, count: int) -> list[u8]
-def __io_write_chunk(writer: int, data: list[u8], offset: int) -> int
+# XXI handles storage loans, ABI views, conversions and transfer limits.
+import xxi
+
+@c(symbol = "__sev_io_read_view")
+def __read(reader: int, data: inout[list[u8]]) -> int
+@c(symbol = "__sev_io_write_view")
+def __write(writer: int, data: borrowed[list[u8]], offset: int) -> int
 
 @c(symbol = "__sev_io_error")
 def error() -> i32
@@ -30,30 +33,39 @@ def error() -> i32
 @c(symbol = "close")
 def close(handle: i32) -> i32
 
-def read(reader: int, count: data_size = 16KiB) -> list[u8]:
-    result = __io_read_chunk(reader, int(count))
-    code = error()
-    if code != 0:
-        throw IOError("could not read stream (OS error " + string(code) + ")")
-    return result
+def read(reader: int, count: data_size = 1KiB) -> list[u8] | Error:
+    requested = xxi.count(float(count), 67108864)
+    data: list[u8] = []
+    for index in range(requested):
+        data.append(0)
+    received = __read(reader, data)
+    xxi.status(int(error()))
+    used = xxi.transfer(received, requested)
+    return data[:used]
 
-def read_all(reader: int) -> list[u8]:
+def read_all(reader: int, max_bytes: int = 67108864, max_calls: int = 65536) -> list[u8] | Error:
     result: list[u8] = []
+    context := xxi.budget(max_calls, max_bytes)
     while true:
+        context = xxi.step(context, 0)
         chunk = read(reader)
+        context = xxi.account(context, int(len(chunk)))
         if len(chunk) == 0:
             return result
         for byte in chunk:
             result.append(byte)
     return result
 
-def write_all(writer: int, data: list[u8]) -> data_size:
+def write_all(writer: int, data: list[u8], max_calls: int = 65536) -> data_size | Error:
     offset := 0
+    context := xxi.budget(max_calls, int(len(data)))
     while offset < len(data):
-        count = __io_write_chunk(writer, data, offset)
-        if count <= 0:
-            throw IOError("could not write stream (OS error " + string(error()) + ")")
-        offset += count
+        context = xxi.step(context, 0)
+        count = __write(writer, data, offset)
+        xxi.status(int(error()))
+        written = xxi.transfer(count, int(len(data)) - offset, true)
+        context = xxi.account(context, written)
+        offset += written
     return data_size(offset)
 
 

@@ -1,0 +1,12 @@
+import process
+
+# A hard deadline requires an isolated provider worker: a hung foreign call
+# cannot run an in-process budget check. The process layer owns termination.
+def run(arguments: list[string], seconds: int = 5, memory_bytes: int = 268435456) -> int | Error:
+    guarded = process.guarded_command(arguments, seconds, memory_bytes)
+    result = process.run(guarded)
+    if result == 124 or result == 137:
+        throw Error("XXI provider exceeded its execution deadline")
+    if result != 0:
+        throw Error("XXI provider failed (exit status " + string(result) + ")")
+    return result

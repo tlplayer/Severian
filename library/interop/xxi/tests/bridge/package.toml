@@ -1,0 +1,11 @@
+[package]
+name = "xxi-bridge-test"
+version = "0.1.0"
+edition = "2026"
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["lib.sev"]
+[lib]
+path = "lib.sev"
+[xxi.c]
+sources = ["provider.c"]

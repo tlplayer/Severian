@@ -21,4 +21,5 @@ version = 1
 sources = ["extern/posix/descriptor.c"]
 
 [dependencies]
+xxi = { path = "../../interop/xxi", version = "0.1.0" }
 memory = { package = "core.memory", path = "../../core/memory", version = "0.1.0" }

@@ -1,0 +1,14 @@
+# Argument marshalling over a caller-owned byte buffer. The calling boundary
+# retains its typed view for the call; these helpers never allocate or adopt it.
+import * from "../../../core/memory/src/raw_intrinsics.sev" as memory
+
+def address(data: view buffer[u8], initialized: int, offset: int, count: int) -> native_ptr:
+    assert(initialized >= 0 and initialized <= len(data))
+    assert(offset >= 0 and count >= 0)
+    assert(offset <= initialized and count <= initialized - offset)
+    return memory.__raw_pointer(memory.__raw_index(memory.__raw_buffer_address(data)) + offset)
+
+def transferred(result: int, requested: int) -> int:
+    assert(requested >= 0)
+    assert(result >= -1 and result <= requested)
+    return result

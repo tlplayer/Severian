@@ -35,13 +35,12 @@ allocation paths, and the C tests check their combined totals and that retaining
 or releasing an owner does not count as another allocation.
 The negative-budget test proves resource predicates are enforced.
 
-The file fixture calls `library/system/file/src/text.sev`: `temporary`, `write`,
-`read_checked`, and `remove`. `read_checked` returns `ReadResult(contents, error)`;
-zero error distinguishes successful empty reads from failures. The library owns
-NUL marshalling, pointer conversion through core.memory, and release of successful
-provider reads. The fixture has no C or MLIR declarations. The older typed File
-dispatch API remains in `src/lib.sev`; this hosted source-string module does not
-change that API's error-union contract or the bootstrap's string representation.
+The source compiler runs `library/system/file/tests/buffer.sev`. File path
+operations open descriptors; `system.io` reads and writes caller-owned buffers;
+`interop.xxi` checks regions and transfer counts through `core.memory`.
+The fixture has no C or MLIR declarations. Public file dispatch and UTF-8 text
+conversion are tested through the Rust seed, using the generic XXI sequence
+bridge and the same descriptor provider.
 
 Set `SEVERIAN_PROFILE_ACTIVE=1` to print frontend, MIR, and backend wall times.
 Bootstrap MIR passes and external backend tools report their own durations.
@@ -58,11 +57,12 @@ reject owned buffer elements. The bootstrap MLIR suite instead stops at the
 existing unchecked optional `emitted.location.line` access. Those suites are not
 claimed as passing gates; use the runnable baselines above for measured results.
 
-The `libraries.sh` runner checks the C file provider in
-`library/system/file/tests/native_io.c`, ownership accounting in
-`library/core/storage/tests/statistics.c`, and the JSON provider in
-`library/data/json/tests/native_json.c`. The former ad hoc `native_io.c` under
-this directory has been removed after splitting these checks by their owners.
+The `libraries.sh` runner checks descriptor IO in
+`library/system/io/tests/descriptor.c`, generic storage loans in
+`library/interop/xxi/tests/loans.c`, ownership accounting in
+`library/core/storage/tests/statistics.c`, and JSON parsing in
+`library/data/json/tests/native_json.c`. The old whole-text C helpers and their
+ad hoc fixture have been replaced by these owning-library tests.
 
 Native text tests exercise `core.text` formatting, escaping, object conversion,
 and captured print output. The public `.txt`/`.sev`/`.json` `file.read` dispatch

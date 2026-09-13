@@ -28,6 +28,7 @@ pub enum ParameterMode {
 pub enum ForeignTypeRef {
     Severian(TypeId),
     External(String),
+    Sequence { element: TypeId },
     Pointer { pointee: Box<Self>, mutable: bool },
 }
 

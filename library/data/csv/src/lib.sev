@@ -107,14 +107,14 @@ def csv_rows_native(source: string) -> list[list[Any]]
 def decode(source: string) -> Csv:
     return Csv(source, Table(csv_columns_native(source), csv_rows_native(source)))
 
-def csv_decode_file(path: string) -> Csv:
+def csv_decode_file(path: string) -> Csv | Error:
     source: string = text.read(path)
     return decode(source)
 
 def encode(value: Csv) -> string:
     return value.text()
 
-def read(path: string) -> Csv:
+def read(path: string) -> Csv | Error:
     return csv_decode_file(path)
 
 test "CSV values implement Data directly":

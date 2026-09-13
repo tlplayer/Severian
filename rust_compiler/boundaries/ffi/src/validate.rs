@@ -42,7 +42,7 @@ pub fn validate_function(
 
 fn validate_type_ref(ty: &ForeignTypeRef, module: &ForeignModule) -> Result<(), FfiError> {
     match ty {
-        ForeignTypeRef::Severian(_) => Ok(()),
+        ForeignTypeRef::Severian(_) | ForeignTypeRef::Sequence { .. } => Ok(()),
         ForeignTypeRef::External(name) if module.type_declaration(name).is_some() => Ok(()),
         ForeignTypeRef::External(name) => Err(FfiError::UnknownExternalType(name.clone())),
         ForeignTypeRef::Pointer { pointee, .. } => validate_type_ref(pointee, module),

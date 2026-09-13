@@ -1,5 +1,5 @@
 # Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
-import * from "../../../core/memory/src/raw_intrinsics.sev" as memory
+import * from "../../../interop/xxi/src/buffer.sev" as xxi
 
 @c(symbol="__sev_io_read")
 def __read(handle: int, destination: native_ptr, count: int) -> int
@@ -10,18 +10,11 @@ def error() -> i32
 @c(symbol="close")
 def close(handle: i32) -> i32
 
-def __address(data: buffer[u8], offset: int) -> native_ptr:
-    return memory.__raw_pointer(memory.__raw_index(memory.__raw_buffer_address(data)) + offset)
-
 def read(handle: int, data: borrow buffer[u8], offset: int, count: int) -> int:
-    assert(offset >= 0 and count >= 0)
-    assert(offset <= len(data) and count <= len(data) - offset)
-    return __read(handle, __address(data, offset), count)
+    return xxi.transferred(__read(handle, xxi.address(data, len(data), offset, count), count), count)
 
 def write(handle: int, data: view buffer[u8], offset: int, count: int) -> int:
-    assert(offset >= 0 and count >= 0)
-    assert(offset <= len(data) and count <= len(data) - offset)
-    return __write(handle, __address(data, offset), count)
+    return xxi.transferred(__write(handle, xxi.address(data, len(data), offset, count), count), count)
 
 def write_all(handle: int, data: view buffer[u8], count: int) -> int:
     assert(count >= 0 and count <= len(data))

@@ -39,7 +39,6 @@ pub fn native_sources() -> Vec<PathBuf> {
     .map(|source| root.join(source))
     .chain(std::iter::once(root.join("../../../library/core/memory/native/memory.c")))
     .chain(std::iter::once(root.join("../../../library/data/json/native/json.c")))
-    .chain(std::iter::once(root.join("../../../library/system/io/extern/posix/stream.c")))
     .collect()
 }
 

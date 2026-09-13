@@ -1,0 +1,52 @@
+# Shared validation around foreign operations. Bounds use initialized elements,
+# not allocation capacity; zero progress is legal only when the caller allows it.
+class Budget:
+    calls: int
+    bytes: int
+
+def budget(calls: int = 4096, bytes: int = 67108864) -> Budget | Error:
+    if calls <= 0 or bytes < 0:
+        throw Error("XXI budget requires positive calls and nonnegative bytes")
+    return Budget(calls, bytes)
+
+def step(context: Budget, count: int) -> Budget | Error:
+    if context.calls <= 0:
+        throw Error("XXI call budget exhausted")
+    if count < 0 or count > context.bytes:
+        throw Error("XXI byte budget exhausted")
+    return Budget(context.calls - 1, context.bytes - count)
+
+def account(context: Budget, count: int) -> Budget | Error:
+    if count < 0 or count > context.bytes:
+        throw Error("XXI byte budget exhausted")
+    return Budget(context.calls, context.bytes - count)
+
+def region(initialized: int, offset: int, count: int) -> int | Error:
+    if initialized < 0 or offset < 0 or count < 0 or offset > initialized or count > initialized - offset:
+        throw Error("XXI buffer region exceeds initialized storage")
+    return count
+
+def transfer(result: int, requested: int, progress: bool = false) -> int | Error:
+    if requested < 0 or result < 0 or result > requested:
+        throw Error("XXI foreign transfer returned an invalid count")
+    if progress and requested > 0 and result == 0:
+        throw Error("XXI foreign transfer made no progress")
+    return result
+
+def status(code: int) -> int | Error:
+    if code != 0:
+        throw Error("XXI foreign operation failed (code " + string(code) + ")")
+    return code
+
+def count(value: float, limit: int) -> int | Error:
+    if limit < 0 or not (value >= 0.0 and value < 9223372036854775808.0 and value <= float(limit)):
+        throw Error("XXI count is outside its conversion bounds")
+    result = int(value)
+    if result > limit or float(result) != value:
+        throw Error("XXI count must be an exact number of elements")
+    return result
+
+def byte(value: int) -> u8 | Error:
+    if value < 0 or value > 255:
+        throw Error("XXI integer cannot be represented as u8")
+    return u8(value)

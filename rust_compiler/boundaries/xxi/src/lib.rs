@@ -10,8 +10,11 @@ use severian_ffi::{
     lower_function, AbiSelection, BoundaryPlan, ForeignFunction, ForeignModule, ForeignParameter,
     ForeignTypeDeclaration, ForeignTypeRef, Lifetime, Ownership, ParameterMode, ValueContract,
 };
-use severian_universal::TypeContext;
+use severian_universal::{DefId, TypeContext};
 use std::{collections::BTreeSet, fmt};
+
+mod bridge;
+pub use bridge::{bridge_symbol, render_bridges};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExternalLanguage {
@@ -145,6 +148,19 @@ pub fn resolve(
         plans,
         declarations,
     })
+}
+
+/// Share external ownership with the compiler's existing ownership authority.
+/// Symbol spellings never grant transfer or borrowed-result permissions.
+pub fn register_ownership(function: &ForeignFunction, definition: DefId, types: &mut TypeContext) {
+    for (index, parameter) in function.parameters.iter().enumerate() {
+        if parameter.contract.ownership == Ownership::Transferred {
+            types.register_transferred_argument(definition, index);
+        }
+    }
+    if matches!(function.result.ownership, Ownership::Borrowed(_)) {
+        types.register_borrowed_result(definition);
+    }
 }
 
 fn semantic_hook_decorators(module: &Module) -> BTreeSet<&str> {
@@ -328,6 +344,16 @@ fn resolve_contract(
         current = inner;
     }
     let ty = resolve_type_ref(current, foreign, types)?;
+    if matches!(ty, ForeignTypeRef::Sequence { .. })
+        && (result
+            || !matches!(
+                (&ownership, mode),
+                (Ownership::Borrowed(_), ParameterMode::In)
+                    | (Ownership::Owned, ParameterMode::InOut)
+            ))
+    {
+        return Err(XxiError::UnsupportedType("sequence boundaries require borrowed[list[u8]] or inout[list[u8]]; ownership cannot be inferred".into()));
+    }
     Ok((
         ValueContract {
             ty,
@@ -349,6 +375,15 @@ fn resolve_type_ref(
         ));
     };
     match (name.as_str(), arguments.as_slice()) {
+        ("list", [element]) => {
+            let ForeignTypeRef::Severian(element) = resolve_type_ref(element, foreign, types)?
+            else {
+                return Err(XxiError::UnsupportedType(
+                    "foreign sequence elements require a concrete primitive".into(),
+                ));
+            };
+            Ok(ForeignTypeRef::Sequence { element })
+        }
         ("ptr", [pointee]) => Ok(ForeignTypeRef::Pointer {
             pointee: Box::new(resolve_type_ref(pointee, foreign, types)?),
             mutable: false,
@@ -496,6 +531,75 @@ mod tests {
 
     fn target() -> AbiTarget {
         AbiTarget::derive(&TargetSpec::host())
+    }
+
+    #[test]
+    fn sequence_plans_preserve_contracts_and_generate_generic_loans() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("xxi.sev",
+            "@c(symbol = \"exchange\")\ndef exchange(input: borrowed[list[u8]], output: inout[list[u8]]) -> int\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let external = resolve(&module, &context.types, &target()).unwrap();
+        let plan = &external.plans[0];
+        assert_eq!(
+            plan.parameters[0].contract.ownership,
+            Ownership::Borrowed(Lifetime::Call)
+        );
+        assert_eq!(plan.parameters[1].mode, ParameterMode::InOut);
+        assert!(matches!(
+            plan.parameters[1].contract.ty,
+            ForeignTypeRef::Sequence { .. }
+        ));
+        assert_eq!(plan.result_contract, external.foreign.functions[0].result);
+        let bridge = render_bridges(&external.plans).unwrap();
+        assert!(bridge.contains("sev_xxi_bytes_acquire(a0, 0)"));
+        assert!(bridge.contains("sev_xxi_bytes_acquire(a1, 1)"));
+        assert!(bridge.contains("a1.storage == a0.storage"));
+        assert!(bridge.contains("exchange(loan0.view, &loan1.view)"));
+        assert!(
+            bridge.find("sev_xxi_bytes_release(&loan1)").unwrap()
+                < bridge.find("sev_xxi_bytes_release(&loan0)").unwrap()
+        );
+    }
+
+    #[test]
+    fn sequence_boundaries_reject_implicit_ownership_and_owned_returns() {
+        let context = severian_bootstrap::load().unwrap();
+        for declaration in [
+            "@c\ndef bad(data: list[u8]) -> int\n",
+            "@c\ndef bad() -> owned[list[u8]]\n",
+            "@c\ndef bad(data: borrowed[list[u16]]) -> int\n",
+        ] {
+            let source = SourceFile::virtual_source("xxi.sev", declaration);
+            let module = parse(&scan(&source).unwrap()).unwrap();
+            assert!(
+                resolve(&module, &context.types, &target()).is_err(),
+                "{declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn foreign_ownership_is_registered_by_resolved_definition() {
+        let mut context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "xxi.sev",
+            "@c\ndef exchange(value: transferred[string]) -> borrowed[string]\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let external = resolve(&module, &context.types, &target()).unwrap();
+        let definition = severian_universal::DefId {
+            declaration: severian_universal::DeclarationId(12345),
+            package: 1,
+            module: 2,
+        };
+        register_ownership(
+            &external.foreign.functions[0],
+            definition,
+            &mut context.types,
+        );
+        assert!(context.types.transfers_argument(definition, 0));
+        assert!(context.types.borrowed_result(definition));
     }
 
     #[test]

@@ -91,6 +91,16 @@ def resolve_contract(annotation: universal.TypeAnnotation, foreign: ffi.ForeignM
                 break
     match current.kind:
         case Named:
+            if name == "list" and len(arguments) == 1:
+                element = universal.simple_type_name(arguments[0])
+                if result or element != "u8" or (ownership == ffi.Copy or ownership == ffi.Transferred or mode == ffi.Out):
+                    return error(UnknownType("sequence boundary requires borrowed[list[u8]] or inout[list[u8]]"))
+                if mode != ffi.InOut and ownership == ffi.Owned:
+                    return error(UnknownType("sequence ownership cannot be inferred"))
+                element_type = types.resolve_name("u8")
+                if element_type == None:
+                    return error(UnknownType("u8"))
+                return (ffi.ValueContract(ffi.Sequence(element_type), ownership, nullable), mode)
             if len(arguments) != 0:
                 return error(UnknownType(name))
             semantic_type = types.resolve_name(name)

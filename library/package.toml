@@ -44,6 +44,7 @@ members = [
     "harness",
     "interop/abi",
     "interop/ffi",
+    "interop/xxi",
     "model",
     "model/examples/omnivoice",
     "network",

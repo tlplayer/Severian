@@ -1,0 +1,14 @@
+@c(symbol = "xxi_test_sum")
+def sum_bytes(data: borrowed[list[u8]]) -> int
+@c(symbol = "xxi_test_fill")
+def fill_bytes(data: inout[list[u8]], value: u8) -> int
+
+test "generic XXI view marshals caller storage":
+    data: list[u8] = [0, 127, 128, 255]
+    assert(sum_bytes(data) == 510)
+    assert(data == [0, 127, 128, 255])
+    assert(fill_bytes(data, 42) == 4)
+    assert(data == [42, 42, 42, 42])
+    empty: list[u8] = []
+    assert(sum_bytes(empty) == 0)
+    assert(fill_bytes(empty, 1) == 0)

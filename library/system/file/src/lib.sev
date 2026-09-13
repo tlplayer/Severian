@@ -12,27 +12,27 @@ class TextFile: File
     def read(path: string) -> string with { path[-4:] in [".txt", ".sev"] }:
         return text.read(path)
 
-def write(path: string, contents: string) -> i32:
+def write(path: string, contents: string) -> i32 | Error:
     return text.write(path, contents)
 
-def write(path: string, contents: list[u8]) -> i32:
+def write(path: string, contents: list[u8]) -> i32 | Error:
     return streams.write(path, contents)
 
 
 # Compatibility entry point; codecs use system.file.text directly.
-def raw(path: string) -> string:
+def raw(path: string) -> string | Error:
     return text.read(path)
 
 def open(path: string) -> int:
     return int(streams.open_read(path))
 
-def read(handle: int, count: data_size) -> list[u8]:
+def read(handle: int, count: data_size) -> list[u8] | Error:
     return io.read(handle, count)
 
-def read_bytes(handle: int, count: data_size) -> list[u8]:
+def read_bytes(handle: int, count: data_size) -> list[u8] | Error:
     return io.read(handle, count)
 
-def map(path: string) -> list[u8]:
+def map(path: string) -> list[u8] | Error:
     return streams.read(path)
 
 @c(symbol = "__sev_file_lock")

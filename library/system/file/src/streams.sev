@@ -10,10 +10,10 @@ def permissions(path: string) -> i32
 @c(symbol = "chmod")
 def set_permissions(path: string, mode: u32) -> i32
 
-def read(path: string) -> list[u8]:
+def read(path: string) -> list[u8] | Error:
     handle = open_read(path)
     if handle < 0:
-        throw io.IOError("could not open file for reading: " + path)
+        throw Error("could not open file for reading: " + path)
     result: list[u8] := []
     try:
         result = io.read_all(int(handle))
@@ -21,10 +21,10 @@ def read(path: string) -> list[u8]:
         io.close(handle)
         throw failure
     if io.close(handle) != 0:
-        throw io.IOError("could not close file: " + path)
+        throw Error("could not close file: " + path)
     return result
 
-def write(path: string, contents: list[u8]) -> i32:
+def write(path: string, contents: list[u8]) -> i32 | Error:
     handle = open_write(path)
     if handle < 0:
         return -1

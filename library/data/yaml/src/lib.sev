@@ -136,21 +136,21 @@ def decode(source: string) -> Yaml:
 def decode_stream(source: string) -> Yaml:
     return tabular(source, true)
 
-def yaml_decode_file(path: string) -> Yaml:
+def yaml_decode_file(path: string) -> Yaml | Error:
     source: string = text.read(path)
     return decode(source)
 
-def yaml_decode_stream_file(path: string) -> Yaml:
+def yaml_decode_stream_file(path: string) -> Yaml | Error:
     source: string = text.read(path)
     return decode_stream(source)
 
 def encode(value: Yaml) -> string:
     return value.text()
 
-def read(path: string) -> Yaml:
+def read(path: string) -> Yaml | Error:
     return yaml_decode_file(path)
 
-def read_stream(path: string) -> Yaml:
+def read_stream(path: string) -> Yaml | Error:
     return yaml_decode_stream_file(path)
 
 test "YAML values implement Data directly":

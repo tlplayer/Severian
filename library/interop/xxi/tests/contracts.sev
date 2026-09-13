@@ -1,0 +1,60 @@
+import xxi
+
+test "XXI bounds preserve initialized storage and checked conversions":
+    assert(xxi.region(8, 2, 6) == 6)
+    assert(xxi.region(0, 0, 0) == 0)
+    assert(xxi.transfer(0, 8) == 0)
+    assert(xxi.byte(255) == 255)
+    assert(xxi.count(8.0, 8) == 8)
+    context := xxi.step(xxi.budget(2, 8), 3)
+    assert(context.calls == 1 and context.bytes == 5)
+    context = xxi.account(context, 5)
+    assert(context.bytes == 0)
+
+test "XXI refuses nonprogress overflow and exhausted budgets":
+    caught := 0
+    try:
+        xxi.region(9223372036854775807, 9223372036854775807, 1)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.transfer(9, 8)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.transfer(0, 8, true)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.byte(256)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.byte(-1)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.step(xxi.step(xxi.budget(1, 8), 0), 0)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.account(xxi.budget(1, 8), 9)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.count(1.5, 8)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.count(9.0, 8)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.count(9223372036854775808.0, 9223372036854775807)
+    catch failure: Error:
+        caught += 1
+    try:
+        xxi.count(0.0 / 0.0, 8)
+    catch failure: Error:
+        caught += 1
+    assert(caught == 11)

@@ -1,7 +1,7 @@
 # Text is an encoding over file bytes. IO and ownership stay below this module.
 import * from "streams.sev" as streams
 
-def decode(data: list[u8]) -> string:
+def decode(data: list[u8]) -> string | Error:
     parts: list[string] = []
     offset := 0
     while offset < len(data):
@@ -38,8 +38,8 @@ def decode(data: list[u8]) -> string:
         offset += width
     return parts.join("")
 
-def read(path: string) -> string:
+def read(path: string) -> string | Error:
     return decode(streams.read(path))
 
-def write(path: string, contents: string) -> i32:
+def write(path: string, contents: string) -> i32 | Error:
     return streams.write(path, contents.bytes())

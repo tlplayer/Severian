@@ -8,6 +8,7 @@ enum Conversion:
     Boolean
     Utf8View
     BytesView
+    SequenceView
     OpaquePointer
     OutPointer
 
@@ -16,6 +17,8 @@ class LoweredParameter:
     name: string
     abi_type: abi.AbiType
     conversion: Conversion
+    contract: ValueContract
+    mode: ParameterMode
 
 
 class BoundaryPlan:
@@ -25,6 +28,12 @@ class BoundaryPlan:
     parameters: list[LoweredParameter]
     result_type: abi.AbiType
     result_conversion: Conversion
+    result_contract: ValueContract
+
+
+def view_type(name: string, target: abi.AbiTarget) -> abi.AbiType:
+    fields = [abi.Field("data", abi.pointer_to(abi.integer(8, false), false)), abi.Field("length", abi.integer(u16(target.data_layout.pointer.size * 8), false))]
+    return abi.Record(abi.RecordType(name, fields, abi.RecordRepresentation.C))
 
 
 def lower_semantic(type_id: universal.TypeId, types: universal.TypeContext, target: abi.AbiTarget, result: bool) -> tuple[abi.AbiType, Conversion] | FfiError:
@@ -56,9 +65,9 @@ def lower_semantic(type_id: universal.TypeId, types: universal.TypeContext, targ
                 case Character:
                     return (abi.integer(32, false), Direct)
                 case String:
-                    return (abi.pointer_to(abi.integer(8, false), false), Utf8View)
+                    return (view_type("StringView", target), Utf8View)
                 case Bytes:
-                    return (abi.pointer_to(abi.integer(8, false), false), BytesView)
+                    return (view_type("BytesView", target), BytesView)
                 case NoneValue:
                     if result:
                         return (abi.Void, Direct)
@@ -72,6 +81,13 @@ def lower_type_ref(type_ref: ForeignTypeRef, module: ForeignModule, types: unive
     match type_ref:
         case Severian:
             return lower_semantic(type_id, types, target, result)
+        case Sequence:
+            byte_type = types.resolve_name("u8")
+            if byte_type == None:
+                return error(UnsupportedRepresentation("XXI byte type is unavailable"))
+            if result or element != byte_type:
+                return error(UnsupportedRepresentation("XXI sequence views require a u8 input or inout buffer"))
+            return (view_type("BytesView", target), SequenceView)
         case External:
             declaration = module.type_declaration(name)
             if declaration == None:
@@ -93,8 +109,8 @@ def lower_function(function: ForeignFunction, module: ForeignModule, types: univ
         if parameter.mode == Out or parameter.mode == InOut:
             type_id = abi.pointer_to(type_id, true)
             conversion = OutPointer
-        parameters.append(LoweredParameter(parameter.name, type_id, conversion))
+        parameters.append(LoweredParameter(parameter.name, type_id, conversion, parameter.contract, parameter.mode))
         abi_parameters.append(type_id)
     result = lower_type_ref(function.result.type_ref, module, types, target, true)
     signature = abi.AbiSignature(convention(function.abi_selection), abi_parameters, result[0], function.variadic)
-    return BoundaryPlan(function.provider, function.symbol, signature, parameters, result[0], result[1])
+    return BoundaryPlan(function.provider, function.symbol, signature, parameters, result[0], result[1], function.result)

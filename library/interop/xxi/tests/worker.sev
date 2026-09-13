@@ -1,0 +1,10 @@
+import * from "../src/worker.sev" as worker
+
+test "XXI worker enforces a deadline on a noncooperating provider":
+    assert(worker.run(["/bin/sh", "-c", "exit 0"], 1, 67108864) == 0)
+    failed := false
+    try:
+        worker.run(["/bin/sh", "-c", "while :; do :; done"], 1, 67108864)
+    catch failure: Error:
+        failed = true
+    assert(failed)

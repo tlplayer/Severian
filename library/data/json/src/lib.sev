@@ -132,7 +132,7 @@ def is_null(value: Any) -> bool
 def encode(values: list[Any]) -> string:
     return string(values)
 
-def read(path: string) -> Json:
+def read(path: string) -> Json | Error:
     return decode(text.read(path))
 
 test "JSON values implement Data directly":
