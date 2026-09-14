@@ -82,6 +82,19 @@ class CallableAnalysis:
     mock_functions: list[universal.MockFunction] = []
 
 
+class PreludeAnalysis:
+    module: universal.Module
+    declarations: definitions.SemanticDefinitions
+    templates: list[universal.FunctionDeclaration]
+    generics: list[universal.FunctionDeclaration]
+    constants: list[universal.Binding]
+    names: list[string]
+    types: list[universal.TypeId]
+    mutables: list[bool]
+    next_id: list[int]
+    registered_methods: list[int]
+
+
 def callable_diagnostic(message: string, span: source.Span | None) -> diagnostics.Diagnostic:
     return diagnostics.Diagnostic("E000200", message, span)
 
@@ -416,7 +429,13 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
         case Binary:
             if grammar_scalar.comparison(state.declarations, operator.symbol):
                 return universal.TypeId(1)
-            return conversions.scalar_common_numeric(callable_hint(state, left), callable_hint(state, right))
+            left_type = callable_hint(state, left)
+            right_type = callable_hint(state, right)
+            # An overload can return a different type from either operand,
+            # for example Duration / Duration -> float.
+            if left_type.index >= 1000 or right_type.index >= 1000:
+                return callable_expression(state, expression, universal.TypeId(0)).type_id
+            return conversions.scalar_common_numeric(left_type, right_type)
         case LiteralValue:
             match value:
                 case FloatValue:
@@ -1253,9 +1272,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             registered ?= operator_lookup.function
             if registered != None:
                 return callable_resolved_operator(state, registered, [lhs, rhs], expression.span, expected)
+            operands = " (" + definitions.type_name(lhs.type_id, state.records) + ", " + definitions.type_name(rhs.type_id, state.records) + ")"
             if lhs.type_id.index >= 1000:
-                return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol, expression.span))
-            return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol, expression.span))
+                return error(callable_diagnostic("operator requires a registered implementation: " + operator.symbol + operands, expression.span))
+            return error(callable_diagnostic("unsupported scalar binary operator " + operator.symbol + operands, expression.span))
         case Call:
             application_name = callable_application_target(callee)
             selected_name = callable_path(callee) if application_name == "" else application_name
@@ -1824,9 +1844,16 @@ def callable_install_mock(state: CallableAnalysis, calls: list[universal.Express
         function.lookup = state.namespace
         function.mock_functions = state.mock_functions[:]
         body = universal.empty_block()
+        exhaustive := false
         rule := 0
         for target in originals:
             if target.name == original.name:
+                # There is only one invocation of a zero-argument function.
+                # Its first rule covers every call, so no fallback is reachable.
+                if len(original.parameters) == 0:
+                    body.statements.append(universal.Return(results[rule], span))
+                    exhaustive = true
+                    break
                 condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
                 for argument in bound_calls[rule]:
                     name ?= argument.name
@@ -1839,7 +1866,8 @@ def callable_install_mock(state: CallableAnalysis, calls: list[universal.Express
             rule += 1
         match fallback.kind:
             case ThrowValue:
-                body.statements.append(universal.Throw(value, span))
+                if not exhaustive:
+                    body.statements.append(universal.Throw(value, span))
             case _:
                 pass
         function.body = body
@@ -2817,14 +2845,44 @@ def semantic_stage(previous: float, name: string) -> float:
     return previous
 
 
-def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "", source_files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
+def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "", source_files: list[source.SourceFile] = [], prepared: list[PreludeAnalysis] = [], captured: list[PreludeAnalysis] = []) -> universal.Module | diagnostics.Diagnostic:
     measured := time.monotonic()
-    module = test_modes.expand(module, include_tests, initializer_namespace)
-    registered = definitions.register_declarations(module, environment)
+    policies = prepared[0].declarations.traits if len(prepared) > 0 else environment.traits
+    module = test_modes.expand(module, include_tests, initializer_namespace, policies, source_files)
+    registered = definitions.register_declarations(module, prepared[0].declarations if len(prepared) > 0 else environment, len(prepared) > 0)
     measured = semantic_stage(measured, "declarations")
     state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace, source_files=source_files, excluded_functions=module.excluded_functions, prelude_sources=module.prelude_sources)
+    existing_records := 0
+    existing_functions := int(len(visible))
+    existing_generics := 0
+    if len(prepared) > 0:
+        previous = prepared[0]
+        state.functions = previous.module.functions[:]
+        state.records = previous.module.records[:]
+        state.templates = previous.templates[:]
+        state.generics = previous.generics[:]
+        state.constants = previous.constants[:]
+        state.names = previous.names[:]
+        state.types = previous.types[:]
+        state.mutables = previous.mutables[:]
+        state.next_id = previous.next_id[:]
+        state.registered_methods = previous.registered_methods[:]
+        module.functions = previous.module.functions[:]
+        module.generic_functions = previous.module.generic_functions[:]
+        module.bindings = previous.module.bindings[:]
+        module.initializer = universal.Block(previous.module.initializer.statements[:])
+        existing_records = int(len(state.records))
+        existing_functions = int(len(state.functions))
+        existing_generics = int(len(state.generics))
     own_index := 0
     function_names: list[string] = []
+    if len(prepared) > 0:
+        for function in state.functions:
+            function_names.append(function.name)
+        for function in state.generics:
+            function_names.append(function.name)
+        for function in state.templates:
+            function_names.append(function.name)
     for item in module.items:
         match item:
             case Record:
@@ -2843,9 +2901,9 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 state.records.append(record_declaration)
             case _:
                 pass
-    tagged.layouts(state.records)
+    tagged.layouts(state.records, existing_records)
     callable_register_aliases(state)
-    for implementation in state.declarations.implementations:
+    for implementation in state.declarations.implementations[int(len(prepared[0].declarations.implementations)) if len(prepared) > 0 else 0:]:
         if not implementation.extension or len(implementation.methods) == 0 or len(implementation.type_parameters) != 0:
             continue
         owners = definitions.family_members(state.declarations, definitions.extension_annotation(implementation), state.records, implementation.lookup)
@@ -2864,7 +2922,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 record.methods = methods
                 state.records[definitions.record_position(state.records, record.type_id)] = record
     grammar_scalar.resolve(state.declarations, state.records)
-    for record in state.records:
+    for record in state.records[existing_records:]:
         if definitions.record_instance(state.declarations, record.type_id) != None:
             continue
         if record.name.starts_with("$outcome$") or record.name.starts_with("$union$") or record.storage_element.index != 0:
@@ -2920,7 +2978,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
         callable_record_layout(state.records, record.type_id, [])
     module.records = state.records
     measured = semantic_stage(measured, "records")
-    callable_register_operators(state, module)
+    callable_register_operators(state, module, 1000000 if len(prepared) > 0 else 0)
     measured = semantic_stage(measured, "operators")
     for item in module.items:
         match item:
@@ -3006,7 +3064,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     measured = semantic_stage(measured, "signatures")
     # Immutable literal globals are safe to materialize in each function. Other
     # globals keep initializer order and cannot be captured by this slice yet.
-    global_names: list[string] = []
+    global_names: list[string] = state.names[:] if len(prepared) > 0 else []
     for item in module.items:
         match item:
             case BindingItem:
@@ -3025,7 +3083,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     global_names.append(binding.name)
             case _:
                 pass
-    callable_validate_generics(state, module)
+    callable_validate_generics(state, module, existing_generics)
     measured = semantic_stage(measured, "generic contracts")
     for item in module.items:
         match item:
@@ -3053,21 +3111,25 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                 pass
             case Test:
                 if include_tests:
+                    runtime_test := declaration
                     if len(declaration.source_modes) == 1 and declaration.source_modes[0] == "compiler":
                         for compiler_case in declaration.compiler_cases:
                             isolated_definitions = definitions.SemanticDefinitions(state.declarations.aliases[:], state.declarations.traits, state.declarations.implementations, record_templates=state.declarations.record_templates, record_instances=state.declarations.record_instances[:])
                             isolated = CallableAnalysis(functions=state.functions[:], constants=state.constants[:], templates=state.templates[:], namespace=declaration.lookup, records=state.records[:], declarations=isolated_definitions, generics=state.generics, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources)
                             rejected := compiler_case.parse_error != ""
+                            reason := compiler_case.parse_error
                             if not rejected:
                                 if len(compiler_case.declarations) != 0:
                                     subject = compiler_cases.module(module, compiler_case, declaration.lookup)
                                     module_result ?= analyze_registered_callables(subject, false, visible, [], [], environment, initializer_namespace, source_files)
                                     if module_result is Diagnostic:
                                         rejected = true
+                                        reason = module_result.message
                                 else:
                                     checked ?= callable_check_compiler_case(isolated, compiler_case.body)
                                     if checked is Diagnostic:
                                         rejected = true
+                                        reason = checked.message
                             expect_rejection := false
                             match compiler_case.expectation:
                                 case Reject:
@@ -3075,22 +3137,25 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                                 case Accept:
                                     pass
                             if expect_rejection != rejected:
-                                return error(callable_diagnostic("compiler test expectation failed", compiler_case.span))
-                        continue
-                    if len(declaration.source_modes) != 0 or len(declaration.compiler_cases) != 0:
+                                detail = "expected rejection, but compilation succeeded" if expect_rejection else "expected acceptance, but compilation failed: " + reason
+                                return error(callable_diagnostic("compiler test expectation failed in " + test_modes.label(declaration, source_files) + ": " + detail, compiler_case.span))
+                        runtime_test.body = universal.Block([test_modes.report("  ok " + test_modes.label(declaration, source_files), declaration.span)])
+                        runtime_test.source_modes = []
+                        runtime_test.compiler_cases = []
+                    if len(runtime_test.source_modes) != 0 or len(runtime_test.compiler_cases) != 0:
                         return error(callable_diagnostic("only ordinary tests are supported by scalar test emission", declaration.span))
-                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=declaration.body, result_type=universal.TypeId(2), lookup=declaration.lookup)
+                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=runtime_test.body, result_type=universal.TypeId(2), lookup=declaration.lookup, span=declaration.span)
                     ordinal = int(len(state.functions)) + 1
                     test_function.id = test_ids[len(module.tests)] if len(module.tests) < len(test_ids) else universal.FunctionId(u128(ordinal))
                     test_function.definition = universal.DefId(0, 0, universal.DeclarationId(test_function.id.value))
                     state.functions.append(test_function)
-                    resolved_test := declaration
+                    resolved_test := runtime_test
                     resolved_test.function = test_function.id
                     module.tests.append(resolved_test)
             case _:
                 return error(callable_diagnostic("declaration is outside the scalar bootstrap subset", None))
-    index := int(len(visible))
-    record_index := 0
+    index := existing_functions
+    record_index := existing_records
     # Conformance can discover provider methods and their specializations.
     # Process those bodies before finalizing the module as well.
     while index < len(state.functions) or record_index < len(state.records):
@@ -3114,6 +3179,8 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             # aggregate layouts after the initial declaration pass.
     module.records = state.records
     measured = semantic_stage(measured, "bodies")
+    if len(captured) == 0 and len(prepared) == 0:
+        captured.append(PreludeAnalysis(module, state.declarations, state.templates, state.generics, state.constants, state.names, state.types, state.mutables, state.next_id, state.registered_methods))
     return module
 
 
@@ -3388,8 +3455,8 @@ def callable_same_types(left: list[universal.TypeId], right: list[universal.Type
     return true
 
 
-def callable_register_operators(state: CallableAnalysis, module: universal.Module) -> unit | diagnostics.Diagnostic:
-    ordinal := 0
+def callable_register_operators(state: CallableAnalysis, module: universal.Module, first: int = 0) -> unit | diagnostics.Diagnostic:
+    ordinal := first
     for item in module.items:
         match item:
             case OperatorItem:
@@ -3827,8 +3894,8 @@ def callable_generic_environment(state: CallableAnalysis, function: universal.Fu
     return local
 
 
-def callable_validate_generics(state: CallableAnalysis, module: universal.Module) -> unit | diagnostics.Diagnostic:
-    for function in state.generics:
+def callable_validate_generics(state: CallableAnalysis, module: universal.Module, first: int = 0) -> unit | diagnostics.Diagnostic:
+    for function in state.generics[first:]:
         arguments: list[universal.TypeId] = []
         index := 0
         for name in function.type_parameters:

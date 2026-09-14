@@ -28,6 +28,29 @@ def source(text):
     return textwrap.dedent(text).strip() + "\n"
 
 
+def materialize_debug_values(path):
+    """Apply the native backend's metadata-carrier step after ownership lowering."""
+    lines = []
+    for raw in path.read_text().splitlines():
+        line = raw
+        parts = raw.split(' = ')
+        if len(parts) > 1 and parts[1].startswith('"arith.'):
+            line = line.replace('fastmath = #arith.fastmath<none>, ', '').replace(
+                ' <{fastmath = #arith.fastmath<none>}>', '')
+        if '"func.call"' in line and ('sev.debug.variable' in line or
+                                      'sev.debug.declaration' in line):
+            declaration = 'sev.debug.declaration' in line
+            if '@__sev_debug_' not in line or ' <{' not in line or '}>' not in line:
+                raise AssertionError('malformed debug metadata carrier: ' + line)
+            prefix = line.split(' <{')[0]
+            suffix = '}>'.join(line.split('}>')[1:])
+            operation = '"llvm.intr.dbg.declare"' if declaration else '"llvm.intr.dbg.value"'
+            line = prefix.replace('"func.call"', operation) + suffix.replace(
+                'sev.debug.declaration' if declaration else 'sev.debug.variable', 'varInfo')
+        lines.append(line)
+    path.write_text('\n'.join(lines) + '\n')
+
+
 def contract(name="Fuse", symbol="<~>", precedence=7, associativity="Left",
              body="return left * 10 + right", parent="G", extra=""):
     """An ordinary source G implementation, not a host-side operator registry."""
@@ -99,9 +122,11 @@ class MigrationCase(unittest.TestCase):
         emitted.write_text(mlir)
         pipeline = (ROOT / "sev_compiler/frontend/ownership/mlir.pipeline").read_text().strip()
         self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), emitted,
-                        "--verify-each", "--pass-pipeline=" + pipeline, "-o", owned])
+                        "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic",
+                        "--pass-pipeline=" + pipeline, "-o", owned])
+        materialize_debug_values(owned)
         self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), owned,
-                        "--verify-each", "--convert-scf-to-cf",
+                        "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf",
                         "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm",
                         "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm",
                         "--reconcile-unrealized-casts", "-o", lowered])

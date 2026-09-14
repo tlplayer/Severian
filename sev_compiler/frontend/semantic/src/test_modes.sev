@@ -160,14 +160,34 @@ def project(expression: universal.Expression, names: list[string], getters: list
     return universal.Expression(kind, expression.span, grammar=expression.grammar)
 
 
-def project_block(block: universal.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[universal.Statement], ordinal: list[int]) -> universal.Block:
+def project_block(block: universal.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[universal.Statement], ordinal: list[int], assert_calls: bool = true) -> universal.Block:
     result = universal.empty_block()
     for statement in block.statements:
+        projected := statement
+        # Parenthesized assert is parsed as an ordinary call so prelude
+        # exclusions can replace it. Both assertion spellings need cleanup.
         match statement:
+            case ExpressionStatement:
+                match expression.kind:
+                    case Call:
+                        if assert_calls and path(callee) == "assert" and len(arguments) in [1, 2]:
+                            positional := true
+                            for argument in arguments:
+                                positional = positional and argument.name == None and not argument.spread
+                            if positional:
+                                message: universal.Expression | None := None
+                                if len(arguments) == 2:
+                                    message = arguments[1].value
+                                projected = universal.Assert(arguments[0].value, message, expression.span, arguments[0].value.span)
+                    case _:
+                        pass
+            case _:
+                pass
+        match projected:
             case Defer:
                 result.statements.append(universal.Defer(project(value, names, getters, contexts, bound), span))
             case Unsafe:
-                result.statements.append(universal.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal), span))
+                result.statements.append(universal.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case BindingStatement:
                 value = project(binding.value, names, getters, contexts, bound)
                 result.statements.append(universal.BindingStatement(universal.Binding(binding.name, binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
@@ -188,13 +208,13 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
                 result.statements.append(universal.If(name(checked, span), universal.empty_block(), universal.Block(failures[:]), span))
                 result.statements.append(universal.Assert(name(checked, span), optional(message, names, getters, contexts, bound), span, condition_span))
             case If:
-                result.statements.append(universal.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal), span))
+                result.statements.append(universal.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case While:
-                result.statements.append(universal.While(project(condition, names, getters, contexts, bound), project_block(body, names, getters, contexts, bound[:], failures, ordinal), span))
+                result.statements.append(universal.While(project(condition, names, getters, contexts, bound), project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case ForEach:
                 local = bound[:]
                 local.append(name)
-                result.statements.append(universal.ForEach(name, project(iterable, names, getters, contexts, bound), project_block(body, names, getters, contexts, local, failures, ordinal), span))
+                result.statements.append(universal.ForEach(name, project(iterable, names, getters, contexts, bound), project_block(body, names, getters, contexts, local, failures, ordinal, assert_calls), span))
             case FieldSet:
                 result.statements.append(universal.FieldSet(project(target, names, getters, contexts, bound), project(value, names, getters, contexts, bound), span, update))
             case GrammarApply:
@@ -203,7 +223,7 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
                 for operand in operands:
                     rewritten.append(project(operand, names, getters, contexts, bound))
                 for body in bodies:
-                    blocks.append(project_block(body, names, getters, contexts, bound[:], failures, ordinal))
+                    blocks.append(project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls))
                 result.statements.append(universal.GrammarApply(syntax, rewritten, blocks, span, exits))
             case Match:
                 rewritten: list[universal.MatchArm] = []
@@ -212,7 +232,7 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
                     binding ?= arm.binding_name
                     if binding != None:
                         local.append(binding)
-                    rewritten.append(universal.MatchArm(project_block(arm.body, names, getters, contexts, local, failures, ordinal), arm.binding_name, arm.annotation, arm.span, pattern=optional(arm.pattern, names, getters, contexts, bound)))
+                    rewritten.append(universal.MatchArm(project_block(arm.body, names, getters, contexts, local, failures, ordinal, assert_calls), arm.binding_name, arm.annotation, arm.span, pattern=optional(arm.pattern, names, getters, contexts, bound)))
                 result.statements.append(universal.Match(project(subject, names, getters, contexts, bound), rewritten, span))
             case _:
                 result.statements.append(statement)
@@ -270,7 +290,70 @@ def runner_block(declaration: universal.TestDeclaration, body: universal.Block, 
     return result
 
 
-def expand(module: universal.Module, enabled: bool, namespace: string) -> universal.Module | diagnostics.Diagnostic:
+def label(declaration: universal.TestDeclaration, files: list[source.SourceFile]) -> string:
+    title := "unnamed test"
+    supplied ?= declaration.name
+    if supplied != None:
+        if supplied != "":
+            title = supplied
+    if len(declaration.source_modes) > 0:
+        title += " [" + declaration.source_modes.join(", ") + "]"
+    for file in files:
+        if file.id.index == declaration.span.source.index:
+            line := 1
+            for character in file.characters[:int(declaration.span.start)]:
+                if character == "\n":
+                    line += 1
+            return title + " (" + file.path + ":" + string(line) + ")"
+    return title
+
+
+def report(message: string, span: source.Span) -> universal.Statement:
+    # Use the same unbuffered hosted boundary as assertion diagnostics. Reports
+    # must not change program stdout or disappear when stdout is redirected.
+    text = message + "\n"
+    literal = universal.Expression(universal.LiteralValue(universal.StringValue(text)), span)
+    storage = universal.Expression(universal.Member(literal, "storage"), span)
+    data = universal.Expression(universal.Member(storage, "data"), span)
+    address = call("__assert_pointer", [call("__assert_index", [call("__assert_address", [data], span)], span)], span)
+    descriptor = universal.Expression(universal.LiteralValue(universal.IntegerValue("2")), span)
+    size = universal.Expression(universal.LiteralValue(universal.IntegerValue(string(len(text.bytes())))), span)
+    return universal.ExpressionStatement(call("__assert_write", [descriptor, address, size], span))
+
+
+def reported_tests(module: universal.Module, files: list[source.SourceFile]) -> universal.Module:
+    items: list[universal.Item] = []
+    ordinal := 0
+    for item in module.items:
+        match item:
+            case Test:
+                if len(declaration.source_modes) == 0:
+                    function_name = "$case$report$" + string(ordinal)
+                    ordinal += 1
+                    items.append(universal.Function(universal.FunctionDeclaration(name=function_name, body=declaration.body, span=declaration.span, lookup=declaration.lookup)))
+                    title = label(declaration, files)
+                    reported := declaration
+                    reported.body = universal.Block([
+                        report("  RUN " + title, declaration.span),
+                        universal.ExpressionStatement(call(function_name, [], declaration.span)),
+                        report("  ok " + title, declaration.span),
+                    ])
+                    items.append(universal.Test(reported))
+                else:
+                    items.append(item)
+            case _:
+                items.append(item)
+    module.items = items
+    return module
+
+
+def summary(count: int, span: source.Span, namespace: string) -> universal.Item:
+    message = "Tests: " + string(count) + " passed" if count > 0 else "Tests: 0 (no test declarations)"
+    body = universal.Block([report(message, span)])
+    return universal.Test(universal.TestDeclaration("$test_summary$", [], body, [], span, lookup=namespace))
+
+
+def expand(module: universal.Module, enabled: bool, namespace: string, inherited: list[universal.TraitDeclaration] = [], files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
     if not enabled:
         return module
     expanded: list[universal.Item] = []
@@ -302,11 +385,14 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
             expanded.append(item)
     module.items = expanded
     wanted: list[string] = []
+    wanted_spans: list[source.Span] = []
     runner := false
+    test_count := 0
     suite_span := source.Span(source.SourceId(0), 0, 0)
     for item in module.items:
         match item:
             case Test:
+                test_count += 1
                 suite_span = declaration.span
                 for mode in declaration.source_modes:
                     if mode in ["repeat", "timeout", "parallel", "bench"]:
@@ -314,31 +400,39 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                         continue
                     if mode != "compiler" and mode not in wanted:
                         wanted.append(mode)
+                        wanted_spans.append(declaration.span)
             case _:
                 pass
     if len(wanted) == 0 and not runner:
+        module = reported_tests(module, files)
+        module.items.append(summary(test_count, suite_span, namespace))
         return module
     policies: list[Policy] = []
+    declarations = inherited[:]
     for item in module.items:
         match item:
             case Trait:
-                for base in declaration.bases:
-                    if universal.simple_type_name(base) == "TestMode":
-                        selected = policy(declaration)
-                        if selected.name in wanted:
-                            for previous in policies:
-                                if previous.name == selected.name:
-                                    return error(diagnostics.diagnostic_at("E000215", "duplicate test policy " + selected.name, declaration.span))
-                            policies.append(selected)
+                declarations.append(declaration)
             case _:
                 pass
+    for declaration in declarations:
+        for base in declaration.bases:
+            if universal.simple_type_name(base) == "TestMode":
+                selected = policy(declaration)
+                if selected.name in wanted:
+                    for previous in policies:
+                        if previous.name == selected.name:
+                            return error(diagnostics.diagnostic_at("E000215", "duplicate test policy " + selected.name, declaration.span))
+                    policies.append(selected)
+    mode_index := 0
     for mode in wanted:
         found := false
         for selected in policies:
             if selected.name == mode:
                 found = true
         if not found:
-            return error(diagnostics.diagnostic("E000215", "no source test policy for " + mode))
+            return error(diagnostics.diagnostic_at("E000215", "no source test policy for " + mode + "; load a trait implementing TestMode with this name", wanted_spans[mode_index]))
+        mode_index += 1
     suite = universal.empty_block()
     for selected in policies:
         context = "$mode$" + selected.name
@@ -417,7 +511,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                             index += 1
                 function_name = "$case$" + string(case_index)
                 case_index += 1
-                body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0])
+                body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0], "assert" not in module.excluded_functions)
                 function = universal.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
                 items.append(universal.Function(function))
                 execution = universal.Block(prepare)
@@ -430,12 +524,16 @@ def expand(module: universal.Module, enabled: bool, namespace: string) -> univer
                     execution.statements.append(universal.Assert(condition, None, contract.span, contract.span))
                 for statement in cleanup[::-1]:
                     execution.statements.append(statement)
+                title = label(declaration, files)
+                suite.statements.append(report("  RUN " + title, declaration.span))
                 for statement in runner_block(declaration, execution, case_index).statements:
                     suite.statements.append(statement)
+                suite.statements.append(report("  ok " + title, declaration.span))
             case _:
                 pass
     for selected in policies[::-1]:
         suite.statements.append(universal.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
     items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))
+    items.append(summary(test_count, suite_span, namespace))
     module.items = items
     return module

@@ -10,9 +10,9 @@ class VariantSelection:
 
 # Tagged types use the same tagged aggregate storage as declared outcomes. Their
 # nominal type stays distinct, so success propagation does not unwrap them.
-def layouts(records: list[universal.RecordDeclaration]) -> unit | diagnostics.Diagnostic:
+def layouts(records: list[universal.RecordDeclaration], first: int = 0) -> unit | diagnostics.Diagnostic:
     count = len(records)
-    cursor := 0
+    cursor := first
     while cursor < count:
         record := records[cursor]
         if record.representation == "TaggedAggregate":

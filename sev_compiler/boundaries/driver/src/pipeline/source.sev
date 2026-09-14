@@ -18,6 +18,8 @@ import * from "package_interface.sev" as package_interface
 import * from "../../../backend/src/native_mlir.sev" as native
 import * from "quality.sev" as quality
 import * from "editor.sev" as editor
+import * from "prelude_package.sev" as prelude_package
+import * from "../../../../frontend/semantic/src/definitions.sev" as definitions
 
 
 class PreludeSnapshot:
@@ -26,6 +28,7 @@ class PreludeSnapshot:
     module: universal.Module
     registry: lexer.SyntaxRegistry
     files: list[source.SourceFile]
+    prepared: list[semantic.PreludeAnalysis] = []
 
 
 PreludeSnapshots: list[PreludeSnapshot] = []
@@ -72,7 +75,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = []) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "") -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
@@ -84,26 +87,38 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     initializer_namespace := ""
     parsed := universal.empty_module()
     reused := false
+    prepared: list[semantic.PreludeAnalysis] := []
+    provider_items := 0
+    source_provider := false
+    if subject_path.starts_with(root + "/sev_compiler/") or subject_path.starts_with(root + "/library/"):
+        original_prelude = read_source(root + "/sev_compiler/universal/prelude.sev")
+        for provider in prelude_providers(original_prelude):
+            match provider.subject:
+                case Locator:
+                    source_provider = source_provider or normalized_path(parent_path(original_prelude.path) + "/" + locator) == subject_path
+                case _:
+                    pass
     if not prepare_only and len(files) == 0:
         for snapshot in PreludeSnapshots:
-            eligible := snapshot.root == root and snapshot.owner != process.id()
+            eligible := snapshot.root == root and snapshot.owner != process.id() and not source_provider
             for file in snapshot.files:
                 if file.path == subject_path:
                     eligible = false
             if eligible:
                 parsed = snapshot.module
                 registry = snapshot.registry
+                prepared = snapshot.prepared
                 try:
                     excluded = package.prelude_exclusions(resolution, subject_path)
-                    for name in excluded:
-                        if name not in parsed.reserved_functions:
-                            return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
+                    prelude_package.validate_names(excluded, parsed.reserved_functions)
                     allowed: list[string] = []
                     for name in parsed.reserved_functions:
                         if name not in excluded:
                             allowed.append(name)
                     parsed.reserved_functions = allowed
                     parsed.excluded_functions = excluded
+                    if len(excluded) > 0 or emit in ["agent-ir", "editor", "docs"]:
+                        prepared = []
                 catch failure: Error:
                     return error(diagnostics.diagnostic("E000120", failure.message))
                 for file in snapshot.files:
@@ -112,9 +127,32 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 break
         # Each child consumes one snapshot; the parent is untouched by fork.
         PreludeSnapshots.clear()
+    if not reused and prelude_entry == "" and len(files) == 0 and not source_provider:
+        try:
+            loaded_prelude = prelude_package.read(root)
+            published ?= loaded_prelude.value
+            if published != None:
+                parsed = published.module
+                registry = published.registry
+                prepared = published.prepared
+                for file in published.files:
+                    files.append(file)
+                reused = true
+                excluded = package.prelude_exclusions(resolution, subject_path)
+                allowed: list[string] = []
+                prelude_package.validate_names(excluded, parsed.reserved_functions)
+                for name in parsed.reserved_functions:
+                    if name not in excluded:
+                        allowed.append(name)
+                parsed.reserved_functions = allowed
+                parsed.excluded_functions = excluded
+                if len(excluded) > 0 or emit in ["agent-ir", "editor", "docs"]:
+                    prepared = []
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
     if not reused:
-        prelude = registered_source(read_source(root + "/sev_compiler/universal/prelude.sev"), files)
-        policy = registered_source(read_source(root + "/sev_compiler/universal/prelude.toml"), files)
+        prelude = registered_source(read_source(prelude_entry if prelude_entry != "" else root + "/sev_compiler/universal/prelude.sev"), files)
+        policy = registered_source(read_source(parent_path(prelude_entry) + "/prelude.toml" if prelude_entry != "" else root + "/sev_compiler/universal/prelude.toml"), files)
         policy_entries = package.parse_document(policy.text)
         reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
         excluded: list[string] := []
@@ -138,11 +176,11 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             supplied ?= provider_import.alias
             if supplied != None:
                 namespace = supplied + "."
-            provider_path = normalized_path(parent_path(prelude.path) + "/" + provider_locator)
+            provider_path = import_source(resolution if prelude_entry != "" else package.Resolution([], [], ""), prelude.path, provider_locator, root)
             is_subject = provider_path == subject_path
             if is_subject:
                 initializer_namespace = namespace
-            library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, sysroot=root)
+            library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, resolution if prelude_entry != "" else package.Resolution([], [], ""), sysroot=root)
             for item in library.items:
                 match item:
                     case Function:
@@ -161,12 +199,25 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
         for file in files:
             parsed.prelude_sources.append(int(file.id.index))
+    for file in files:
+        if file.path.ends_with("/prelude.toml"):
+            policy_entries = package.parse_document(file.text)
+            intrinsics = package.string_array(package.setting(policy_entries, "prelude", "intrinsics", "[]"))
+            for name in parsed.excluded_functions:
+                if name in intrinsics:
+                    return error(diagnostics.diagnostic("E000120", "excluding " + name + " requires extracting compiler intrinsic"))
+    if archive_output != "":
+        try:
+            prelude_package.write(archive_output, parsed, registry, files, resolution, root)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
     if prepare_only:
         PreludeSnapshots.clear()
-        PreludeSnapshots.append(PreludeSnapshot(root, process.id(), parsed, registry, files))
+        PreludeSnapshots.append(PreludeSnapshot(root, process.id(), parsed, registry, files, prepared))
         timing.finish_stage(timings, "prelude-snapshot")
         return ""
     timing.finish_stage(timings, "prelude-reused" if reused else "prelude")
+    provider_items = int(len(parsed.items))
     library_paths: list[string] = []
     if emit != "agent-ir":
         for file in files:
@@ -192,7 +243,28 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             if canonical in library_paths:
                 library_sources.append(int(file.id.index))
     timing.finish_stage(timings, "subject")
-    typed = semantic.analyze_callables(parsed, include_tests, initializer_namespace, files)
+    captured: list[semantic.PreludeAnalysis] = []
+    if len(prepared) > 0:
+        # Open-world extensions and compile-time test modules require joint
+        # declaration validation. Ordinary consumers extend the prepared state.
+        for item in parsed.items[provider_items:]:
+            match item:
+                case Record:
+                    if declaration.extension:
+                        prepared = []
+                case Test:
+                    if "compiler" in declaration.source_modes:
+                        prepared = []
+                case _:
+                    pass
+    if len(prepared) > 0:
+        parsed.items = parsed.items[provider_items:]
+    typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
+    if archive_output != "":
+        try:
+            prelude_package.finish(archive_output, captured)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
     if emit == "docs":
         return editor.editor_package_docs(typed, files, resolution)
     if emit == "editor":

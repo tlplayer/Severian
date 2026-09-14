@@ -4,6 +4,23 @@ import os
 import path
 import * from "pipeline/source.sev" as pipeline
 import * from "../../backend/src/native_mlir.sev" as backend
+import * from "pipeline/frontend_archive.sev" as frontend_archive
+import diagnostics
+from diagnostics import Diagnostic
+
+
+def compile_prelude_package(arguments: list[string]) -> unit | Error:
+    if len(arguments) != 5:
+        throw Error("invalid prelude compilation protocol arguments")
+    project = package.open(arguments[2])
+    resolution = package.resolve(project, package.Resolve("build", true, ""))
+    entry = package.inside(project.root, package.library_target(project.manifest).path)
+    files: list[source.SourceFile] = []
+    subject = source.SourceFile(source.SourceId(0), project.root + "/__prelude_validation__.sev", "")
+    output = arguments[3] + "/" + frontend_archive.schema() + "/frontend.txt"
+    result ?= pipeline.compile_source(subject, false, arguments[4], files, resolution=resolution, prelude_entry=entry, archive_output=output)
+    if result is Diagnostic:
+        throw Error(diagnostics.render(result, files))
 
 # Record the exact text read by the frontend and the native provider assets.
 # Missing manifests/locks are recorded too, so adding one invalidates a build.

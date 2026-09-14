@@ -31,6 +31,13 @@ default = "true"
 description = "Reuse compatible work from earlier builds."
 
 [[option]]
+path = "build.generators"
+group = "Build"
+type = "paths"
+default = "[]"
+description = "Package-relative Python recipes run before compilation and cache checks; recipes own their generated outputs under package.pkg/build."
+
+[[option]]
 path = "diagnostics.mode"
 group = "Diagnostics"
 type = "enum"

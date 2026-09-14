@@ -29,6 +29,40 @@ def native_build_info(root: string, symbol: string) -> string | Error:
     write_text(output, "const char *" + symbol + "(void) { return \"" + literal + "\"; }\n")
     return output
 
+# Identical native providers can arrive through a published prelude and a local
+# library dependency. Include quoted headers in their identity before sharing
+# one link input; equal C text alone does not establish equal implementations.
+def native_provider_identity(location: string, visited: list[string]) -> string | Error:
+    location = canonical(location)
+    if location in visited:
+        return ""
+    visited.append(location)
+    identity := digest(location)
+    for line in read_text(location).split("\n"):
+        parts = line.split("\"")
+        directive = parts[0].replace(" ", "").replace("\t", "")
+        if directive == "#include" and len(parts) >= 3:
+            header = path.dirname(location) + "/" + parts[1]
+            if not os.is_file(header):
+                return identity + "\n" + location
+            identity += "\n" + parts[1] + "\n" + native_provider_identity(header, visited)
+        elif directive.starts_with("#include") and not directive.starts_with("#include<"):
+            # Macro-selected headers need the compiler's include environment.
+            return identity + "\n" + location
+    return identity
+
+
+def append_native_provider(arguments: list[string], location: string) -> unit | Error:
+    if location in arguments:
+        return
+    identity = native_provider_identity(location, [])
+    for previous in arguments:
+        if previous.ends_with(".c") and os.is_file(previous):
+            if native_provider_identity(previous, []) == identity:
+                return
+    arguments.append(location)
+
+
 # Native providers are package assets. Backends consume these arguments and
 # do not own a second catalog of system-library implementations.
 def native_package(root: string, seen: list[string], arguments: list[string], follow_paths: bool) -> unit | Error:
@@ -53,8 +87,7 @@ def native_package(root: string, seen: list[string], arguments: list[string], fo
         if entry.table == "xxi.c" and entry.key == "sources":
             for value in string_array(entry.value):
                 location = inside(root, value)
-                if location not in arguments:
-                    arguments.append(location)
+                append_native_provider(arguments, location)
     if follow_paths:
         for dependency in manifest.dependencies:
             if not dependency.development and dependency.reference.source == "path":

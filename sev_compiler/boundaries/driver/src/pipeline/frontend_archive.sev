@@ -1,0 +1,2 @@
+# The package build generates the concrete codec before source discovery.
+import * from "../../../../package.pkg/build/frontend_archive.sev"

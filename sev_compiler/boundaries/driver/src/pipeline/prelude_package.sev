@@ -1,0 +1,80 @@
+import package
+import universal
+import lexer
+import source
+import os
+import path
+import * from "frontend_archive.sev" as archive
+import * from "../../../../frontend/semantic/src/callable.sev" as semantic
+
+
+class Prelude:
+    module: universal.Module
+    registry: lexer.SyntaxRegistry
+    files: list[source.SourceFile]
+    prepared: list[semantic.PreludeAnalysis]
+
+
+class PreludeResult:
+    value: Prelude | None
+
+
+def validate_names(excluded: list[string], available: list[string]) -> unit | Error:
+    for name in excluded:
+        if name not in available:
+            throw Error("unknown prelude exclusion: " + name)
+
+
+def write(destination: string, module: universal.Module, registry: lexer.SyntaxRegistry, files: list[source.SourceFile], resolution: package.Resolution, sysroot: string) -> unit | Error:
+    root = resolution.packages[0].root
+    portable: list[source.SourceFile] = []
+    for file in files:
+        portable.append(source.SourceFile(file.id, package.portable_path(file.path, resolution, root, sysroot), file.text))
+    discovered: list[string] = []
+    for location in registry.discovered:
+        discovered.append(package.portable_path(location, resolution, root, sysroot))
+    lexical: list[string] = []
+    for location in registry.lexical_discovered:
+        lexical.append(package.portable_path(location, resolution, root, sysroot))
+    syntax = lexer.SyntaxRegistry(registry.operators, registry.descriptors, discovered, registry.rules, lexical)
+    output = [archive.schema()]
+    archive.put_universal_Module(output, module)
+    archive.put_lexer_SyntaxRegistry(output, syntax)
+    archive.put_list_source_SourceFile(output, portable)
+    package.write_text(destination, output.join("\n") + "\n")
+
+
+def finish(destination: string, prepared: list[semantic.PreludeAnalysis]) -> unit | Error:
+    output: list[string] = []
+    archive.put_list_semantic_PreludeAnalysis(output, prepared)
+    package.write_text(destination, package.read_text(destination) + output.join("\n") + "\n")
+
+
+def read(sysroot: string) -> PreludeResult | Error:
+    # The toolchain requests latest on every invocation. Unit cache keys include
+    # registry discovery, while release manifests pin transitive dependencies.
+    if len(package.versions("sev-prelude")) == 0:
+        return PreludeResult(None)
+    project = package.open(package.fetch(package.reference("sev-prelude@latest")))
+    location = path.dirname(project.root) + "/package.pkgi/prelude/" + archive.schema() + "/frontend.txt"
+    if not os.is_file(location):
+        throw Error("latest sev-prelude has no compatible frontend artifact; republish it with this compiler")
+    resolution = package.resolve(project, package.Resolve("build", true, ""))
+    input = archive.ArchiveInput(package.read_text(location).split("\n"))
+    if archive.take(input) != archive.schema():
+        throw Error("incompatible prelude frontend archive")
+    module = archive.get_universal_Module(input)
+    registry = archive.get_lexer_SyntaxRegistry(input)
+    files = archive.get_list_source_SourceFile(input)
+    prepared = archive.get_list_semantic_PreludeAnalysis(input)
+    if input.cursor != int(len(input.lines)) - 1 or input.lines[-1] != "":
+        throw Error("trailing frontend archive data")
+    for index in range(int(len(files))):
+        file = files[index]
+        file.path = package.relocated_path(file.path, resolution, project.root, sysroot)
+        files[index] = file
+    for index in range(int(len(registry.discovered))):
+        registry.discovered[index] = package.relocated_path(registry.discovered[index], resolution, project.root, sysroot)
+    for index in range(int(len(registry.lexical_discovered))):
+        registry.lexical_discovered[index] = package.relocated_path(registry.lexical_discovered[index], resolution, project.root, sysroot)
+    return PreludeResult(Prelude(module, registry, files, prepared))

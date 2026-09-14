@@ -54,6 +54,22 @@ def dependency_source(resolution: package.Resolution, importer: string, name: st
     return standard_source(sysroot, name, importer)
 
 
+def import_source(resolution: package.Resolution, importer: string, locator: string, sysroot: string) -> string | diagnostics.Diagnostic:
+    if locator.starts_with("package:"):
+        pieces = locator[8:].split("/")
+        entry = dependency_source(resolution, importer, pieces[0], sysroot)
+        if len(pieces) == 1:
+            return entry
+        try:
+            owner = package.open(parent_path(entry))
+            return package.inside(owner.root, pieces[1:].join("/"))
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
+    if len(resolution.packages) > 0:
+        return package_module(resolution, importer, locator)
+    return normalized_path(parent_path(importer) + "/" + locator)
+
+
 def normalized_path(path: string) -> string:
     components: list[string] = []
     for component in path.split("/"):
@@ -142,9 +158,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                 return error(diagnostics.diagnostic("E000120", "file imports require explicit `import * from` followed by a locator string"))
             match tokens[subject].kind:
                 case String:
-                    child := normalized_path(parent_path(file.path) + "/" + string(tokens[subject]))
-                    if len(resolution.packages) > 0:
-                        child = package_module(resolution, file.path, string(tokens[subject]))
+                    child = import_source(resolution, file.path, string(tokens[subject]), sysroot)
                     discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
                 case _:
                     name := lexer.token_word(tokens[subject])
@@ -197,9 +211,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                 return error(diagnostics.diagnostic("E000120", "duplicate import alias: " + alias))
                             aliases.append(alias)
                             child_prefix += alias + "."
-                        child_path := normalized_path(parent_path(path) + "/" + locator)
-                        if len(resolution.packages) > 0:
-                            child_path = package_module(resolution, path, locator)
+                        child_path = import_source(resolution, path, locator, sysroot)
                         child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
                         for child_item in child.items:
                             append_imported_item(result, child_item)

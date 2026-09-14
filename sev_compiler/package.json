@@ -78,6 +78,7 @@
     "type-safe": true
   },
   "build": {
+    "generators": ["build/frontend_codec.py"],
     "profile": "dev",
     "target": "host",
     "incremental": true

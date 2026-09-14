@@ -72,8 +72,6 @@ test "frequency":
 
 # Unit values work naturally in contracts.
 def process(data: string):
-    #Number of bytes an object uses
-    print(bytes(data))
     #Number of elements
     print(size(data))
 

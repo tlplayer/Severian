@@ -1,0 +1,11 @@
+import * from "host.sev"
+import * from "manifest.sev"
+import * from "model.sev"
+
+# Recipes are package-owned Python sources. They run before cache validation
+# and must preserve unchanged output and keep generated files in package.pkg.
+def prepare_generators(resolution: Resolution) -> unit | Error:
+    for resolved in resolution.packages:
+        for recipe in string_array(setting(resolved.manifest.entries, "build", "generators", "[]")):
+            location = inside(resolved.root, recipe)
+            require_command(["python3", location])

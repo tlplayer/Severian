@@ -446,10 +446,18 @@ def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: 
     return declaration
 
 
-def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions()) -> SemanticDefinitions | diagnostics.Diagnostic:
-    definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:])
+def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions(), incremental: bool = false) -> SemanticDefinitions | diagnostics.Diagnostic:
+    definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:], environment.implementations[:] if incremental else [], environment.symbol_descriptors[:] if incremental else [], environment.record_templates[:] if incremental else [], environment.record_instances[:] if incremental else [], environment.expression_functions[:] if incremental else [])
     names: list[string] = []
-    ordinal := 0
+    ordinal := 1000000 if incremental else 0
+    if incremental:
+        for alias in environment.aliases:
+            names.append(alias.name)
+        for trait in environment.traits:
+            names.append(trait.name)
+        for record in environment.implementations:
+            if not record.extension and record.name not in names:
+                names.append(record.name)
     for item in module.items:
         match item:
             case Function:

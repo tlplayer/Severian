@@ -116,8 +116,14 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
             write_text(distribution + "/metadata/package.lock", source_resolution.lock)
         # Build the exact frozen source shipped to clients. Its content identity
         # and relative inputs then match a client on any checkout path.
-        result = build(open(distribution + "/source"), compiler, Build("", request.platform, request.profile, "", "", true))
-        for artifact in result.artifacts:
+        artifacts: list[Artifact] := []
+        prelude_role = text_setting(project.manifest.entries, "package.metadata.prelude", "role", "")
+        if prelude_role == "root":
+            require_command([compiler.executable, "__precompile-prelude", distribution + "/source", distribution + "/package.pkgi/prelude", compiler.sysroot])
+        elif prelude_role != "provider":
+            result = build(open(distribution + "/source"), compiler, Build("", request.platform, request.profile, "", "", true))
+            artifacts = result.artifacts
+        for artifact in artifacts:
             for directory in ["package.pkgi", "metadata/realizations", "artifacts", "bin", "container"]:
                 selected = artifact.package_root + "/" + directory
                 if os.is_dir(selected):

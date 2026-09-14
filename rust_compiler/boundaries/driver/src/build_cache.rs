@@ -112,7 +112,14 @@ pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &
     }
     // Discover new import/provider roots only on a miss. Warm checks do no
     // parsing, semantic analysis, lowering or native code generation.
-    for module in compiler.resolved_module_paths(source).map_err(|e| e.to_string())? { roots.insert(package_root(&module)); }
+    for module in compiler.resolved_module_paths(source).map_err(|e| e.to_string())? {
+        roots.insert(package_root(&module));
+        // Directory inventories exclude build output, but generated source
+        // actually read by the compiler is an input and needs its own digest.
+        if module.components().any(|part| part.as_os_str() == "package.pkg") {
+            roots.insert(module);
+        }
+    }
     let before = snapshot(&configuration, &roots, &output)?;
     let staging = parent.join(format!(".sev-build-{}-{key:016x}", std::process::id()));
     if let Err(error) = compiler.compile_file(source, &staging) {

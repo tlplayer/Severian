@@ -1,5 +1,6 @@
 mod api;
 mod build_cache;
+mod generators;
 mod example_validation;
 mod mutation;
 mod profiling;
@@ -1118,6 +1119,9 @@ fn compiler(
     manifest: Option<&Manifest>,
     include_root_dev: bool,
 ) -> Result<Compiler, String> {
+    if let Some(manifest) = manifest {
+        generators::prepare(manifest)?;
+    }
     let target = if config.target == "host" {
         TargetSpec::host()
     } else if config.target == "gpu" {

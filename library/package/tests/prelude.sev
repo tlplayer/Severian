@@ -1,6 +1,15 @@
 import * from "../src/lib.sev" as package
 
 
+test "latest selects the highest numeric registered version":
+    assert(package.reference("sev-prelude@latest").selector == "latest")
+    assert(package.version_matches("0.1.0", "latest"))
+    assert(package.version_matches("12.0.0", "latest"))
+    assert(package.newer("1.10.0", "1.9.9"))
+    assert(not package.newer("1.9.9", "1.10.0"))
+    assert(not package.version_matches("2.0.0", "1.0.0"))
+
+
 test "prelude policy follows the compilation unit owner":
     parent = package.parse_manifest("[package]\nname = \"parent\"\n[prelude]\nexclude = [\"max\"]\n")
     child = package.parse_manifest("[package]\nname = \"child\"\n[prelude]\nexclude = [\"min\"]\n")

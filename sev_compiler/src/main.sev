@@ -18,6 +18,9 @@ def exit_status(status: i32)
 
 
 def execute_native_arguments(arguments: list[string]) -> int | Error:
+    if len(arguments) > 1 and arguments[1] == "__precompile-prelude":
+        compile_prelude_package(arguments)
+        return 0
     if len(arguments) > 1 and arguments[1] == "__compile-unit":
         compile_package_unit(arguments)
         return 0

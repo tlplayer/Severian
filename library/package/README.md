@@ -45,6 +45,24 @@ itself. The `geometry` examples describe a consumer package.
 
 ## Canonical generated layout
 
+### Generated source inputs
+
+Declare package-owned Python recipes in `build.generators`, for example
+`"build": { "generators": ["build/frontend_codec.py"] }`. Both compiler CLIs run
+these recipes with `python3` before package compilation and cache validation.
+Paths are relative to the owning package; recipes locate their inputs relative
+to `__file__`, independently of the invocation directory. A failed recipe stops
+the build, including when a previous compiled artifact exists.
+
+Recipes keep generated output under `package.pkg/build/`, preserve unchanged
+files, and synchronize concurrent writes. The frontend codec uses a digest of
+its recipe and IR inputs for its staging directory and publishes its import
+entry after all output is ready. Recipes and their source inputs are part of
+the package's source inventory; generated files read by the compiler are also
+tracked as compilation inputs.
+
+### Realization directories
+
 The SIP's summary and local-publication contract define these top-level roles:
 
 ```text

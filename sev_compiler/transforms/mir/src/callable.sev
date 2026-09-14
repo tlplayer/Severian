@@ -170,6 +170,10 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
             # Keep expression composition typed after this terminating edge.
             # CFG reachability removes this continuation before emission.
             cfg.at(context, cfg.block(context))
+            if storage_types.owned_record(expression.type_id, module.records):
+                result = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
+                aggregate.initialize(module, context, scope.aggregates, result, expression.type_id)
+                return result
             result = mir_value(module, expression.type_id)
             cfg.append(context, universal.Operation.Constant(universal.NoneValue(), result))
             return result
@@ -486,6 +490,15 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
     functions: list[universal.FunctionDeclaration] = []
     required: list[universal.FunctionId] = []
     required_calls(context.body, required)
+    # Runtime entry points are roots even when a generated test has no user
+    # source span (for example the summary of a file with no test declarations).
+    entry ?= module.entry
+    if entry != None:
+        require_function(required, entry)
+    for test in module.tests:
+        function ?= test.function
+        if function != None:
+            require_function(required, function)
     # All application declarations remain roots, including library exports and
     # unused functions that still need lowering diagnostics. Only prelude bodies
     # are demand driven. Scan lowered calls so inlined ownership operations,
@@ -518,6 +531,9 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
             if function.body == None:
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
             continue
+        # Specializations and test mocks copy declarations. Allocate each
+        # lowered signature independently instead of appending to a shared list.
+        function.values = []
         local = CallableMirScope()
         for parameter in function.parameters:
             local.debug_names.append(parameter.name)

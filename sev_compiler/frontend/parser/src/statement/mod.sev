@@ -645,15 +645,22 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
             parser_expect(parser, Indent, "expected compiler case body")
             tokens: list[lexer.Token] = []
             depth := 1
-            while depth > 0:
+            delimiters := 0
+            # A dedented closing delimiter still belongs to this case. An
+            # unclosed expression must not swallow the following test case.
+            while depth > 0 or (delimiters > 0 and (parser_at_simple(parser, Newline) or parser_at_symbol(parser, ")") or parser_at_symbol(parser, "]") or parser_at_symbol(parser, "}"))):
                 token = parser_next(parser)
                 if token.kind == Eof:
                     return error(parser_fail(parser, "unterminated compiler case"))
+                if lexer.token_is_symbol(token, "(") or lexer.token_is_symbol(token, "[") or lexer.token_is_symbol(token, "{"):
+                    delimiters += 1
+                elif lexer.token_is_symbol(token, ")") or lexer.token_is_symbol(token, "]") or lexer.token_is_symbol(token, "}"):
+                    delimiters -= 1
                 if token.kind == Indent:
                     depth += 1
                 elif token.kind == Dedent:
                     depth -= 1
-                if depth > 0:
+                if depth > 0 or delimiters > 0 or token.kind != Dedent:
                     tokens.append(token)
             end = parser_peek(parser).span
             tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", source.Span(end.source, end.start, end.start))))
@@ -1235,7 +1242,11 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
         else:
             break
     if continuation:
-        parser_take(parser, Dedent)
+        cursor := parser.cursor[0]
+        while cursor < len(parser.tokens) and parser.tokens[cursor].kind == Newline:
+            cursor += 1
+        if cursor < len(parser.tokens) and parser.tokens[cursor].kind == Dedent:
+            parser.cursor[0] = cursor + 1
     return value
 
 
@@ -1316,20 +1327,15 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     if lexer.token_is_symbol(token, "{"):
         keys: list[universal.Expression] = []
         values: list[universal.Expression] = []
-        multiline = parser_take(parser, Newline) != None
-        if multiline:
-            parser_expect(parser, Indent, "expected indented map entries")
-        parser_separators(parser)
-        while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, Dedent):
+        parser_delimited_layout(parser)
+        while not parser_at_symbol(parser, "}"):
             keys.append(parse_expression(parser, 0))
             parser_expect_symbol(parser, ":", "expected colon after map key")
             values.append(parse_expression(parser, 0))
+            parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
                 break
-            parser_separators(parser)
-        parser_separators(parser)
-        if multiline:
-            parser_expect(parser, Dedent, "expected end of map entries")
+            parser_delimited_layout(parser)
         end = parser_expect_symbol(parser, "}", "expected closing map brace").span.end
         return universal.Expression(universal.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "("):

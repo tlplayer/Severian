@@ -1,0 +1,72 @@
+{
+  "version": "0.1.0",
+  "packages": {
+    "grammar": [
+      {
+        "source": "sev_compiler/universal/grammar/contracts.sev"
+      }
+    ],
+    "runtime": [
+      {
+        "source": "sev_compiler/universal/primitive/error.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/string/storage.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/tuple.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/enum.sev"
+      },
+      {
+        "source": "library/system/io/src/text.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/numeric/conversion.sev",
+        "alias": "numeric"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/numeric/operators.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/numeric/power.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/units.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/collections.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/string_lists.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/pointer.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/box.sev"
+      },
+      {
+        "source": "library/core/memory/src/raw_intrinsics.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/assertion.sev"
+      },
+      {
+        "source": "sev_compiler/universal/primitive/string/methods.sev",
+        "alias": "string_methods"
+      }
+    ],
+    "testing": [
+      {
+        "source": "library/testing/src/lib.sev"
+      }
+    ],
+    "math": [
+      {
+        "source": "library/core/math/src/lib.sev"
+      }
+    ]
+  }
+}
