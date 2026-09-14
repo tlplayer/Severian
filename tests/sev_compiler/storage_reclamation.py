@@ -11,7 +11,7 @@ COMPILER = os.environ.get('SEVERIAN_NATIVE_RUST_COMPILER', str(ROOT / 'package.p
 
 
 class StorageReclamation(unittest.TestCase):
-    def native(self, body):
+    def native(self, body, *, expected_error=None):
         with tempfile.TemporaryDirectory(prefix='sev-storage-') as temporary:
             source = Path(temporary) / 'main.sev'
             binary = Path(temporary) / 'main'
@@ -31,7 +31,11 @@ def main():
             result = subprocess.run([COMPILER, 'build', str(source), '-o', str(binary)], cwd=ROOT, capture_output=True, text=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            if expected_error is None:
+                self.assertEqual(result.returncode, 0, result.stderr)
+            else:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
 
     def test_shared_strings_records_and_lists(self):
         self.native('''
@@ -56,6 +60,68 @@ def work():
     items.clear()
     assert(item.text == "42")
 ''')
+
+    def test_aggregate_pop_transfers_fields_and_releases_boxes(self):
+        self.native('''
+def work():
+    items: list[Item] = [Item(string(41)), Item(string(42))]
+    shared = items[:]
+    last = items.pop()
+    assert(len(items) == 1)
+    assert(last.text == "42")
+    items.clear()
+    shared.clear()
+    assert(last.text == "42")
+    items.append(Item(string(43)))
+    items.pop()
+    assert(len(items) == 0)
+''')
+
+    def test_aggregate_pop_preserves_tagged_payload(self):
+        self.native('''
+enum Wrapped:
+    Present(item: Item)
+    Empty
+def work():
+    values = [Wrapped.Empty, Wrapped.Present(Item(string(42)))]
+    selected = values.pop()
+    values.clear()
+    match selected:
+        case Present:
+            assert(item.text == "42")
+        case _:
+            assert(false)
+''')
+
+    def test_aggregate_pop_lifo_and_affine_destruction(self):
+        self.native('''
+class Point:
+    x: int
+    y: int
+class Resource:
+    text: string
+    def drop():
+        assert(text == "44")
+def work():
+    points = [Point(1, 2), Point(3, 4)]
+    shared = points[:]
+    point = points.pop()
+    assert(point.x == 3 and point.y == 4)
+    assert(points.pop().x == 1)
+    assert(len(points) == 0)
+    assert(shared[1].y == 4)
+    resources = [Resource(string(44))]
+    resource = resources.pop()
+    resources.clear()
+    assert(resource.text == "44")
+''')
+
+    def test_empty_aggregate_pop_reports_failure(self):
+        self.native('''
+def work():
+    items: list[Item] = []
+    items.pop()
+''', expected_error="cannot pop an empty list")
 
     def test_shared_sum_payload_has_one_owner_for_mutable_contents(self):
         self.native('''

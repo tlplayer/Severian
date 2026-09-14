@@ -9,6 +9,27 @@ from bootstrap_mlir import tool
 
 
 class RawMemory(MigrationCase):
+    def test_generic_type_layout_in_member_and_arithmetic_inference(self):
+        self.native('''
+            def width[T](value: T) -> int:
+                return int(bytes(T).amount / 8.0)
+            test:
+                assert(width(i32(1)) == 4)
+                assert(width(i64(1)) == 8)
+                assert(width(u8(1)) == 1)
+        ''')
+
+    def test_value_byte_size_uses_its_source_method(self):
+        self.native('''
+            class Sized:
+                count: int
+                def bytes() -> DataSize:
+                    return data_size(count)
+            test:
+                assert(bytes(Sized(23)) == 23B)
+                assert(bytes(Sized(0)) == 0B)
+        ''')
+
     def test_documented_allocation_and_pointer_examples(self):
         paths = [ROOT / 'docs/examples/01-types/04-memory/01-allocation.sev']
         paths.extend(sorted((ROOT / 'docs/examples/01-types/04-pointers').glob('*.sev')))

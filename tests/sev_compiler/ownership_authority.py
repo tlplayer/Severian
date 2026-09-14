@@ -8,6 +8,22 @@ from migration import COMPILER, MigrationCase, ROOT
 
 
 class OwnershipAuthority(MigrationCase):
+    def test_view_method_effects_include_nested_generic_storage(self):
+        self.native('''
+            def count(value: view string) -> int:
+                return value.length()
+            def duplicate(value: view string) -> string:
+                return clone value
+            test:
+                assert(count("hello") == 5)
+                assert(count("aλ") == 2)
+                assert(duplicate("aλ") == "aλ")
+        ''')
+        self.rejects('''
+            def change(value: view string):
+                value.append("x")
+        ''', 'cannot mutate through a view')
+
     def test_check_does_not_require_hosted_c_provider_files(self):
         sysroot = self.directory / 'sysroot'
         (sysroot / 'sev_compiler').mkdir(parents=True)

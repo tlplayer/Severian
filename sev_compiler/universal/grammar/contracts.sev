@@ -483,9 +483,9 @@ trait Outcome: G:
 trait Throws: G:
     control_flow: ControlFlow = Error
 
-    def semantic(value: Ex, failure: B):
+    def semantic(value: Ex, expected: Ex, failure: B):
         caught = cfg.block()
-        cfg.catch(caught)
+        cfg.catch(caught, expected)
         lower(value)
         cfg.end_catch()
         lower(failure)

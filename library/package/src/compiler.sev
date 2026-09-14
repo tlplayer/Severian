@@ -195,7 +195,10 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                     arguments = process.guarded_command(arguments, seconds, memory)
                 status = command(arguments)
             if status != 0:
-                throw Error("compiler failed for " + unit.target.name + " with status " + string(status))
+                diagnostic = stage + "/artifact.diagnostic"
+                if os.is_file(diagnostic):
+                    throw Error("compilation failed for " + unit.target.name + ":\n" + read_text(diagnostic).strip())
+                throw Error("compiler process failed for " + unit.target.name + " (exit status " + string(status) + "); no source diagnostic was produced. Check the compiler/tool output above for a crash, resource limit, or native tool failure.")
             if emit != "check":
                 if emit == "sources":
                     paths: list[string] = []

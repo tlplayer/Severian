@@ -31,6 +31,7 @@ enum ResolvedCallee:
 
 
 enum ExpressionKind:
+    MockValue(calls: list[Expression], results: list[Expression], fallback: Expression)
     Lambda(parameters: list[string], body: Expression)
     Ownership(mode: string, value: Expression)
     AddressOf(value: Expression)
@@ -48,6 +49,7 @@ enum ExpressionKind:
     Evaluate(value: Expression, body: Expression)
     Fallback(value: Expression, alternative: Expression)
     ThrowValue(value: Expression)
+    ErrorExpectation(value: Expression | None, comparison: Expression | None)
     MapLiteral(keys: list[Expression], values: list[Expression])
     Subscript(object: Expression, index: Expression)
     Slice(object: Expression, start: Expression | None, stop: Expression | None, step: Expression | None)
@@ -63,6 +65,7 @@ enum ExpressionKind:
     Convert(operand: Expression, conversion: ExpressionConversion)
     Unary(operator: OperatorSyntax, operand: Expression)
     Binary(operator: OperatorSyntax, left: Expression, right: Expression)
+    ComparisonChain(operands: list[Expression], operators: list[OperatorSyntax])
     Conditional(condition: Expression, then_value: Expression, else_value: Expression)
     Stringify(value: Expression)
     TypeName(value: Expression, name: string)

@@ -156,11 +156,20 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
             called := effect_callable_path(callee)
             shift := 0
             match callee.kind:
+                case Name:
+                    if "self" in aliases and len(active) > 0:
+                        caller = active[-1].split(":")[0]
+                        for current in borrow functions:
+                            if current.name != caller or current.owner_type.index == 0:
+                                continue
+                            for target in borrow functions:
+                                if target.owner_type.index == current.owner_type.index and target.name.ends_with("." + name):
+                                    result = max(result, parameter(target, 0, functions, active, cache, visited))
                 case Member:
+                    called = name
+                    shift = 1
                     if root(object) in aliases:
-                        called = name
                         result = max(result, call(called, 0, functions, active, cache, visited, true))
-                        shift = 1
                 case _:
                     pass
             index := shift
@@ -171,6 +180,9 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
                 index += 1
         case Binary:
             result = max(expression_effect(left, aliases, functions, active, cache, visited), expression_effect(right, aliases, functions, active, cache, visited))
+        case ComparisonChain:
+            for operand in borrow operands:
+                result = max(result, expression_effect(operand, aliases, functions, active, cache, visited))
         case Unary:
             result = expression_effect(operand, aliases, functions, active, cache, visited)
         case Stringify:

@@ -66,6 +66,14 @@ def rename_optional_expression(expression: universal.Expression | None, names: l
 def rename_expression(expression: universal.Expression, names: list[string], replacements: list[string]) -> universal.Expression:
     kind := expression.kind
     match expression.kind:
+        case MockValue:
+            renamed_calls: list[universal.Expression] = []
+            renamed_results: list[universal.Expression] = []
+            for call in calls:
+                renamed_calls.append(rename_expression(call, names, replacements))
+            for result in results:
+                renamed_results.append(rename_expression(result, names, replacements))
+            kind = universal.MockValue(renamed_calls, renamed_results, rename_expression(fallback, names, replacements))
         case Ownership:
             kind = universal.Ownership(mode, rename_expression(value, names, replacements))
         case AddressOf:
@@ -78,6 +86,11 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
             kind = universal.Fallback(rename_expression(value, names, replacements), rename_expression(alternative, names, replacements))
         case ThrowValue:
             kind = universal.ThrowValue(rename_expression(value, names, replacements))
+        case ComparisonChain:
+            values: list[universal.Expression] = []
+            for operand in operands:
+                values.append(rename_expression(operand, names, replacements))
+            kind = universal.ComparisonChain(values, operators)
         case ListLiteral:
             renamed_elements: list[universal.Expression] = []
             for element in elements:

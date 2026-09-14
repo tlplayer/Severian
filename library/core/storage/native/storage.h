@@ -7,6 +7,7 @@ typedef void (*sev_storage_destructor)(void *);
 void *__sev_storage_new(uint64_t bytes, sev_storage_destructor destroy);
 void __sev_storage_retain(const void *value);
 void __sev_storage_release(const void *value);
+void __sev_storage_release_moved(const void *value);
 void __sev_storage_owner_retain_aggregate(void *owner);
 void __sev_storage_owner_release_aggregate(void *owner);
 void __sev_storage_set_destructor(void *value, sev_storage_destructor destroy);

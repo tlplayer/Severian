@@ -22,6 +22,16 @@ class BoundaryModifier:
     name: string
 
 
+class FieldConstraint:
+    condition: Expression
+    failure: Expression | None = None
+
+
+class MockFunction:
+    original: string
+    replacement: string
+
+
 class FunctionParameter:
     name: string
     annotation: TypeAnnotation
@@ -33,6 +43,7 @@ class FunctionParameter:
     variadic: bool = false
     keyword_only: bool = false
     pack: string = ""
+    field_constraints: list[FieldConstraint] = []
 
 
 class ExternalCall:
@@ -92,6 +103,7 @@ class FunctionDeclaration:
     result_origin: int = -1
     prelude: bool = false
     type_defaults: list[TypeAnnotation] = []
+    mock_functions: list[MockFunction] = []
 
 
 def resolved_function(

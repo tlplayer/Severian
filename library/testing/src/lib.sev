@@ -2,3 +2,11 @@
 import * from "approximate.sev"
 import * from "modes.sev"
 import * from "runner.sev"
+
+
+def runtime_int(value: int) -> int:
+    return value
+
+
+def runtime_string(value: string) -> string:
+    return clone value

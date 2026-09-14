@@ -157,6 +157,10 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                             path.append(alias.name)
                             return type_annotation(definitions, substituted, records, alias.lookup, path)
             template ?= record_template(definitions, name, namespace)
+            if name == "Error" and template == None:
+                for record in records:
+                    if record.name == "MessageError":
+                        return record.type_id
             if template != None:
                 return instantiate_record(definitions, template, arguments, records, namespace, annotation.span)
             for record in records:

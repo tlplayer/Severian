@@ -4,3 +4,11 @@ class MessageError: Error
 
 def Error(message: string) -> MessageError:
     return MessageError(message)
+
+
+class FieldError: Error
+    message: string
+
+
+class ConstraintError: Error
+    message: string

@@ -699,6 +699,27 @@ const char *__sev_list_pop_ptr(void *storage) {
     return (const char *)list->values[--list->length];
 }
 
+void *__sev_list_pop_aggregate(void *storage) {
+    sev_list *list = storage;
+    if (list->length == 0) {
+        fputs("cannot pop an empty list\n", stderr);
+        abort();
+    }
+    /* Transfer the list's reference to the box to the caller. */
+    return (void *)list->values[--list->length];
+}
+
+void __sev_aggregate_take(void *box, sev_storage_destructor retain) {
+    /* The caller has loaded the value. Shared contents need their own
+     * reference; affine contents move out without running their destructor. */
+    if (retain) {
+        retain(box);
+        __sev_storage_release(box);
+    } else {
+        __sev_storage_release_moved(box);
+    }
+}
+
 _Bool __sev_list_pop_bool(void *storage) {
     sev_list *list = storage;
     if (list->length == 0) return 0;

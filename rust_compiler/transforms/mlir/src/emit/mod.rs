@@ -188,6 +188,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     });
     if uses_aggregate_runtime {
         output.push_str("  func.func private @__sev_aggregate_box_owned(!llvm.ptr, i64, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n");
+        output.push_str("  func.func private @__sev_aggregate_take(!llvm.ptr, !llvm.ptr)\n");
         if !runtime_signatures.contains_key("__sev_storage_release") {
             output.push_str("  func.func private @__sev_storage_release(!llvm.ptr)\n");
             declared_external_symbols.insert("__sev_storage_release".to_owned());
@@ -493,6 +494,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     });
     if uses_aggregate_runtime {
         output.push_str("  func.func private @__sev_aggregate_box_owned(!llvm.ptr, i64, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n");
+        output.push_str("  func.func private @__sev_aggregate_take(!llvm.ptr, !llvm.ptr)\n");
         if !runtime_signatures.contains_key("__sev_storage_release") {
             output.push_str("  func.func private @__sev_storage_release(!llvm.ptr)\n");
             declared_external_symbols.insert("__sev_storage_release".to_owned());
@@ -2611,6 +2613,20 @@ fn render_runtime_call(
                 "{indentation}%v{} = llvm.load %runtime_box_result_{} : !llvm.ptr -> {spelling}\n",
                 result.0, result.0
             ));
+            if symbol == "__sev_list_pop_aggregate" {
+                let LoweredType::Aggregate(class_id) = result_ty else { unreachable!() };
+                let retain = module.classes.iter().find(|class| class.id == class_id)
+                    .and_then(|class| class.retain);
+                let callback = if retain.is_some() {
+                    format!("llvm.mlir.addressof @__sev_box_retain_{class_id} : !llvm.ptr")
+                } else {
+                    "llvm.mlir.zero : !llvm.ptr".into()
+                };
+                output.push_str(&format!(
+                    "{indentation}%runtime_take_retain_{} = {callback}\n{indentation}func.call @__sev_aggregate_take(%runtime_box_result_{}, %runtime_take_retain_{}) : (!llvm.ptr, !llvm.ptr) -> ()\n",
+                    result.0, result.0, result.0
+                ));
+            }
             output.push_str(&release_boxes);
             return Ok(());
         }

@@ -922,6 +922,17 @@ def parser_simple_statement(parser: Parser) -> universal.Statement | diagnostics
         parser_next(parser)
         rhs = parser_expression(parser, 0)
         return universal.FieldSet(value, rhs, value.span, update)
+    if parser_take_symbol(parser, ":") != None:
+        parser_expect(parser, Newline, "expected newline after call block")
+        statements: list[universal.Statement] = [universal.ExpressionStatement(value)]
+        if parser_take(parser, Indent) != None:
+            parser_separators(parser)
+            while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+                statements.append(parser_block_statement(parser))
+                parser_separators(parser)
+            parser_expect(parser, Dedent, "expected end of call block")
+        condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), value.span)
+        return universal.If(condition, universal.Block(statements), universal.empty_block(), value.span)
     return universal.ExpressionStatement(value)
 
 def parser_looks_like_binding(parser: Parser) -> bool:
@@ -1008,6 +1019,19 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
         if operator.associativity != universal.Associativity.Right:
             next_minimum += 1
         right = parse_expression(parser, next_minimum)
+        if operator.symbol in ["<", "<=", ">", ">=", "==", "!="]:
+            operands = [left, right]
+            operators = [operator]
+            while is_binary_operator(parser_peek(parser)):
+                following = binary_operator(parser_peek(parser))
+                if following.symbol not in ["<", "<=", ">", ">=", "==", "!="] or precedence(following) != operator_precedence:
+                    break
+                parser_next(parser)
+                operands.append(parse_expression(parser, operator_precedence + 1))
+                operators.append(following)
+            if len(operators) > 1:
+                left = universal.Expression(universal.ComparisonChain(operands, operators), source.Span(token.span.source, left.span.start, operands[-1].span.end))
+                continue
         left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
     if minimum == 0 and parser_at_identifier(parser, "if"):
         parser_next(parser)
@@ -1068,8 +1092,43 @@ def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic
 
 def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
     value := parser_primary(parser)
+    continuation := false
     while true:
+        if parser_at_simple(parser, Newline):
+            cursor := parser.cursor[0] + 1
+            if cursor < len(parser.tokens) and parser.tokens[cursor].kind == Indent:
+                cursor += 1
+            if cursor < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[cursor], "."):
+                continuation = continuation or cursor > parser.cursor[0] + 1
+                parser.cursor[0] = cursor
         if parser_take_symbol(parser, "(") != None:
+            throws_call := false
+            mock_call := false
+            match value.kind:
+                case Name:
+                    throws_call = name == "throws"
+                    mock_call = name == "mock"
+                case _:
+                    pass
+            if mock_call:
+                calls: list[universal.Expression] = []
+                results: list[universal.Expression] = []
+                parser_delimited_layout(parser)
+                while not parser_at_identifier(parser, "else"):
+                    if parser_at_symbol(parser, ")"):
+                        return error(parser_fail(parser, "mock requires an else fallback"))
+                    calls.append(parse_expression(parser, 0))
+                    parser_expect_symbol(parser, "->", "expected -> after mocked invocation")
+                    results.append(parse_expression(parser, 0))
+                    parser_delimited_layout(parser)
+                    parser_take_symbol(parser, ",")
+                    parser_delimited_layout(parser)
+                parser_next(parser)
+                fallback = parse_expression(parser, 0)
+                parser_delimited_layout(parser)
+                end = parser_expect_symbol(parser, ")", "expected ) after mock rules").span.end
+                value = universal.Expression(universal.MockValue(calls, results, fallback), source.Span(value.span.source, value.span.start, end))
+                continue
             arguments: list[universal.CallArgument] = []
             parser_delimited_layout(parser)
             while not parser_at_symbol(parser, ")"):
@@ -1082,6 +1141,10 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 argument = parse_expression(parser, 0)
                 arguments.append(universal.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end), spread=spread))
                 parser_delimited_layout(parser)
+                if throws_call and parser_take_symbol(parser, "->") != None:
+                    expected = parse_expression(parser, 0)
+                    arguments.append(universal.CallArgument("$error", expected, expected.span))
+                    parser_delimited_layout(parser)
                 if parser_take_symbol(parser, ",") == None:
                     break
                 parser_delimited_layout(parser)
@@ -1123,6 +1186,8 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
         else:
             break
+    if continuation:
+        parser_take(parser, Dedent)
     return value
 
 
@@ -1399,6 +1464,32 @@ def parser_named_field(parser: Parser, field: tuple[string, source.Span]) -> uni
     return universal.FunctionParameter(field[0], annotation, default, field[1])
 
 
+def parser_field_constraints(parser: Parser) -> list[universal.FieldConstraint] | diagnostics.Diagnostic:
+    constraints: list[universal.FieldConstraint] = []
+    saved = parser.cursor[0]
+    while parser_at_simple(parser, Newline):
+        parser_next(parser)
+    if parser_take_symbol(parser, "{") == None:
+        parser.cursor[0] = saved
+        return constraints
+    parser_delimited_layout(parser)
+    while not parser_at_symbol(parser, "}"):
+        if parser_at_simple(parser, Eof):
+            return error(parser_fail(parser, "expected } to close field constraints"))
+        condition = parser_expression(parser, 0)
+        parser_delimited_layout(parser)
+        failure: universal.Expression | None := None
+        if parser_take_symbol(parser, "->") != None:
+            failure = parser_expression(parser, 0)
+        constraints.append(universal.FieldConstraint(condition, failure))
+        parser_delimited_layout(parser)
+        if parser_take_symbol(parser, ",") == None and not parser_at_symbol(parser, "}"):
+            return error(parser_fail(parser, "expected , or } after field constraint"))
+        parser_delimited_layout(parser)
+    parser_expect_symbol(parser, "}", "expected } after field constraints")
+    return constraints
+
+
 def parser_record_declaration(parser: Parser, extension: bool = false) -> universal.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a class name")[0]
@@ -1437,10 +1528,11 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
                 parser_expect_symbol(parser, ":", "expected field annotation")
                 packed = parser_take_symbol(parser, "...") != None
                 annotation = parser_type_annotation(parser)
+                constraints = parser_field_constraints(parser)
                 default: universal.Expression | None := None
                 if parser_take_symbol(parser, "=") != None:
                     default = parser_expression(parser, 0)
-                fields.append(universal.FunctionParameter(field[0], annotation, default, field[1], variadic=packed))
+                fields.append(universal.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of class")
     return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=generic_parts[0], constraints=generic_parts[1], extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults)

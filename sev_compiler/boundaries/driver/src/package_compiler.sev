@@ -70,6 +70,15 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
 # This private entry consumes the package library's immutable resolved graph.
 # It performs one compilation unit and never discovers or resolves packages.
 def compile_package_unit(arguments: list[string]) -> unit | Error:
+    try:
+        compile_package_unit_checked(arguments)
+    catch failure: Error:
+        if len(arguments) == 10:
+            package.write_text(arguments[3] + ".diagnostic", failure.message)
+        throw failure
+
+
+def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
     if len(arguments) != 10:
         throw Error("invalid compilation-unit protocol arguments")
     if arguments[8] != "host":

@@ -126,6 +126,18 @@ void __sev_storage_set_destructor(void *value, sev_storage_destructor destroy) {
     unlock();
 }
 
+void __sev_storage_release_moved(const void *value) {
+    if (!value) return;
+    lock();
+    allocation *entry = find(value);
+    /* Moving affine contents requires exclusive ownership of their box.
+     * Plain byte records have no destructor and may still share a box. */
+    if (!entry || (entry->value.destroy && entry->value.references != 1)) abort();
+    entry->value.destroy = NULL;
+    unlock();
+    __sev_storage_release(value);
+}
+
 uint64_t __sev_storage_live_bytes(void) { return atomic_load(&live_bytes); }
 uint64_t __sev_storage_allocations(void) { return atomic_load(&allocation_calls); }
 uint64_t __sev_storage_allocated_bytes(void) { return atomic_load(&allocated_bytes); }

@@ -10,6 +10,9 @@ extern void *__sev_list_copy_ptr(void *);
 extern void __sev_list_set_ptr(void *, int64_t, const char *);
 extern void __sev_list_extend(void *, void *);
 extern const char *__sev_list_pop_ptr(void *);
+extern void __sev_list_push_aggregate(void *, const void *);
+extern void *__sev_list_pop_aggregate(void *);
+extern void __sev_aggregate_take(void *, sev_storage_destructor);
 extern void *__sev_aggregate_box_owned(const void *, int64_t, sev_storage_destructor, sev_storage_destructor);
 extern const char *__sev_string_from_int(int64_t);
 extern void *__sev_string_characters(const char *);
@@ -59,5 +62,42 @@ int main(void) {
     __sev_storage_release(list);
     assert(strcmp(taken, "abc") == 0);
     __sev_storage_release(taken);
+    assert(__sev_storage_live_bytes() == 0);
+
+    /* A popped aggregate keeps its owned fields alive after the list and
+     * shared box are released, and consumes the box reference exactly once. */
+    for (int shared = 0; shared < 2; ++shared) {
+        unsigned before = destroyed;
+        void *child = __sev_storage_new(17, counted);
+        void *box = __sev_aggregate_box_owned(&child, sizeof(child), retain_field, drop_field);
+        __sev_storage_release(child);
+        list = __sev_list_create();
+        __sev_list_push_aggregate(list, box);
+        __sev_storage_release(box);
+        void *copy = shared ? __sev_list_copy_ptr(list) : NULL;
+        box = __sev_list_pop_aggregate(list);
+        void *result = *(void **)box;
+        __sev_aggregate_take(box, retain_field);
+        __sev_storage_release(list);
+        __sev_storage_release(copy);
+        assert(destroyed == before);
+        __sev_storage_release(result);
+        assert(destroyed == before + 1);
+        assert(__sev_storage_live_bytes() == 0);
+    }
+    /* Without a retain callback, ownership moves out of an affine box. */
+    unsigned before = destroyed;
+    void *child = __sev_storage_new(17, counted);
+    void *box = __sev_aggregate_box_owned(&child, sizeof(child), NULL, drop_field);
+    list = __sev_list_create();
+    __sev_list_push_aggregate(list, box);
+    __sev_storage_release(box);
+    box = __sev_list_pop_aggregate(list);
+    void *result = *(void **)box;
+    __sev_aggregate_take(box, NULL);
+    __sev_storage_release(list);
+    assert(destroyed == before);
+    __sev_storage_release(result);
+    assert(destroyed == before + 1);
     assert(__sev_storage_live_bytes() == 0);
 }
