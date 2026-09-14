@@ -126,16 +126,20 @@ publishable. Internal storage packages are dependencies, not public exports.
 | Order | Package work | Actual compiler dependency being removed |
 | --- | --- | --- |
 | 1 | Shared initialized-slot storage, then list and array | Active buffer-list construction, access, copying and growth in `universal/primitive/collections.sev` |
-| 2 | Map contracts, hash table and insertion-ordered dict; B-tree provider and set | `universal/collections/{map,dict,btree,set}.sev` algorithms and runtime set selector |
-| 3 | Deque, queue, stack, heap and count | Remaining compiler-hosted algorithms; adapters reuse list/deque |
+| 2 | Map contracts, hash table and insertion-ordered dict; B-tree provider and set | Root `{map,dict,btree,set}.sev` algorithms and runtime set selector |
+| 3 | Deque, queue, stack, heap and count | Root source algorithms; adapters reuse list/deque |
 | 4 | Fixed-lane vector | Numeric vector behavior, independent of ordinary collection storage |
 | 5 | Bitset, arena and interning for demonstrated consumers | Compiler-local storage; preserve scope, symbol, node and scheduling semantics |
 | 6 | Re-exporting facade and published external consumers | Relative compiler-source imports and obsolete bootstrap adapters |
 
 The current inventory has three different sources: package classes, the
-algorithm implementations in `universal/collections`, and the active
+algorithm implementations in this directory's root `.sev` files, and the active
 `type list[T] = buffer[T]` provider. A file move alone does not reconcile their
 APIs or establish that they execute through the source compiler.
+
+The source algorithms and their inline tests now live here. Their detailed
+[source plan](SOURCE_IMPLEMENTATION_PLAN.md) and [capability inventory](CAPABILITIES.md)
+remain inputs to provider consolidation.
 
 Storage tracks live slots explicitly. A contiguous list, wrapped deque and
 sparse table have different live layouts. Spare capacity never constructs

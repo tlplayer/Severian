@@ -1,9 +1,0 @@
-import universal
-
-
-def compiled_region_id(index: u32) -> universal.CompiledRegionId:
-    return universal.CompiledRegionId(index)
-
-
-def artifact_for_region(region: universal.CompiledRegionId) -> universal.ArtifactId:
-    return universal.ArtifactId(region.index)

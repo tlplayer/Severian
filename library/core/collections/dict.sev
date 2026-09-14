@@ -1,4 +1,4 @@
-import * from "../primitive/primitive.sev"
+import * from "../../../sev_compiler/universal/primitive/primitive.sev"
 import * from "list.sev"
 import * from "map.sev"
 

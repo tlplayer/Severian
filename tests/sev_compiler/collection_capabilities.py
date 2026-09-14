@@ -10,6 +10,8 @@ from pathlib import Path
 
 from primitives import COMPILER, ROOT, SEED, STAGES, digest, invoke, measure
 
+COLLECTIONS = ROOT / 'library/core/collections'
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -21,7 +23,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     before = {str(path): digest(path) for path in (SEED, COMPILER)}
     rows = []
-    subjects = sorted((ROOT / 'sev_compiler/universal/collections').glob('*.sev'))
+    subjects = sorted(COLLECTIONS.glob('*.sev'))
     subjects += sorted((ROOT / 'tests/sev_compiler/fixtures/collections').glob('*.sev'))
     stages = ('seed_parse', 'seed_check', 'seed_tests', *STAGES[2:])
     for subject in subjects:
@@ -32,7 +34,7 @@ def main():
         if declarations.exists():
             data = json.loads(declarations.read_text())
             for declaration in data:
-                if subject.parent.name == 'collections' and 'universal' in subject.parts:
+                if subject.parent == COLLECTIONS:
                     declaration['role'] = ('test' if declaration['in_test'] or declaration['kind'] in ('TestDeclaration', 'CompilerTestCase')
                                            else 'private' if declaration['private'] else 'api')
             declarations.write_text(json.dumps(data, indent=2) + '\n')

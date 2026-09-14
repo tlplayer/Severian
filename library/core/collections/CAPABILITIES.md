@@ -2,7 +2,7 @@
 
 The source algorithms now cover all nine original modules. This is the
 `Copy + Default` bootstrap implementation, **not completion of C0–C9** in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Owned elements, compiler
+[SOURCE_IMPLEMENTATION_PLAN.md](SOURCE_IMPLEMENTATION_PLAN.md). Owned elements, compiler
 consumer migration and native collection acceptance remain open.
 
 ## Implemented behavior

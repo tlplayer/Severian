@@ -1,5 +1,25 @@
 # Source compiler collection and prelude validation
 
+## Source module relocation (2026-09-14)
+
+The ten root collection source modules and their three supporting documents
+were moved into this directory. Source bodies and inline tests were preserved
+exactly; relative imports, test consumers and documentation links were updated.
+Existing provider packages retain their APIs.
+
+All 12 tests in `tests/sev_compiler/collection_algorithms.py` pass against the
+relocated files. Relative imports and documentation links resolve, updated
+Python files parse, and `git diff --check` passes.
+
+The capability inventory discovers all ten relocated modules, but compiler
+stages fail with the current binaries. Storage seed testing and source checking
+produce the same diagnostics before and after relocation: the seed cannot
+resolve `library/interop/abi/package.json5`, and the source compiler rejects
+`sev_compiler/universal/primitive/string/storage.sev:7`. Native validation remains
+blocked. This move does not change the active primitive buffer/list provider.
+
+## Earlier provider validation
+
 Validated on 2026-09-11 using the rebuilt `sev_compiler`. Rust was used to
 build the source compiler; the new generic and prelude gates compile their
 subjects with `sev_compiler` and execute the resulting native code.

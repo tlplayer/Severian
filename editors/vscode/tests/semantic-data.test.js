@@ -11,8 +11,8 @@ test('resolved identity distinguishes shadowed bindings and handles Unicode span
   const source = { path: '/tmp/example.sev', start, end: use - 1 };
   const index = new SemanticIndex({ schema_version: 1,
     sources: [{ path: source.path, text }], diagnostics: [],
-    definitions: [{ id: 'fn:1', name: 'doubled', source },
-      { id: 'fn:2', name: 'doubled', source: { ...source, path: '/tmp/other.sev' } }],
+    definitions: [{ id: 'fn:1', name: 'doubled', kind: 'function', source },
+      { id: 'fn:2', name: 'doubled', kind: 'function', source: { ...source, path: '/tmp/other.sev' } }],
     references: [{ symbol: 'fn:1', caller: 'fn:2', source: { path: source.path, start: use, end: use + 10 } }],
     relationships: [{ from: 'fn:1', to: 'fn:2', kind: 'implements' }],
   });

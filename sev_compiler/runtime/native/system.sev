@@ -1,9 +1,0 @@
-from process import run as process_run
-from process import spawn as process_spawn
-from process import kill as process_kill
-from process import wait as process_wait
-from environment import get as environment_get
-from environment import set as environment_set
-
-@c(symbol = "__sev_pow_f64_i64")
-def pow_f64_i64(base: f64, exponent: i64) -> f64

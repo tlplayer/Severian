@@ -1,4 +1,4 @@
-import * from "../operator/trait/ordered.sev"
+import * from "../../../sev_compiler/universal/operator/trait/ordered.sev"
 import * from "list.sev"
 import * from "map.sev"
 

@@ -1,6 +1,6 @@
-import * from "../primitive/primitive.sev"
-import * from "../primitive/array.sev"
-import * from "../primitive/slice.sev"
+import * from "../../../sev_compiler/universal/primitive/primitive.sev"
+import * from "../../../sev_compiler/universal/primitive/array.sev"
+import * from "../../../sev_compiler/universal/primitive/slice.sev"
 import * from "storage.sev"
 
 

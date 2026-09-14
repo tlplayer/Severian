@@ -40,7 +40,7 @@ def main():
         run([executable], cwd=directory)
         print("PASS: constructor dimension inference (seed native)", flush=True)
         collection = directory / "scalar_list.sev"
-        collection.write_text(f'import * from "{ROOT / "sev_compiler/universal/collections/list.sev"}"\n' + """def main():
+        collection.write_text(f'import * from "{ROOT / "library/core/collections/list.sev"}"\n' + """def main():
     values := list[i32]()
     values.append(42)
     values.append(7)

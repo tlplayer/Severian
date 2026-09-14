@@ -1,8 +1,0 @@
-def native_sources() -> list[string]:
-    root = file.join(file.module_directory(), "native")
-    return [
-        file.join(root, "coverage.c"),
-        file.join(root, "string.c"),
-        file.join(root, "io.c"),
-    ]
-

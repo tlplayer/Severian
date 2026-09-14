@@ -5,8 +5,20 @@ re-exporting `collections` package with static provider arguments such as
 `set[T:int,C:BTree](values...)`. The inventory below describes the current
 packages, whose APIs have not yet completed that migration.
 
-This directory is an organizational namespace, not one aggregate package.
-Every public collection has its own manifest and can evolve independently.
+The root package provides the collection facade. Individual providers have
+their own manifests and can evolve independently.
+
+The root `.sev` files contain the collection contracts and algorithms relocated
+from the compiler: list, fixed-lane vector, deque, heap, map, dict, B-tree, set,
+count, and shared size/growth helpers. They are imported directly by source path
+and retain their existing APIs and inline tests. Their primitive and operator
+contracts still come from `sev_compiler/universal`.
+
+These source modules and the provider packages below have different APIs;
+reconciling them remains part of the [implementation plan](IMPLEMENTATION_PLAN.md).
+The [source algorithm plan](SOURCE_IMPLEMENTATION_PLAN.md),
+[capability inventory](CAPABILITIES.md), and [measurements](MEASUREMENTS.md)
+record their current implementation and compiler support.
 
 ```text
 core.memory

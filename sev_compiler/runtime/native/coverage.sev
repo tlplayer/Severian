@@ -1,3 +1,0 @@
-@c(symbol = "__sev_coverage_hit")
-def coverage_hit(key: borrowed[string])
-

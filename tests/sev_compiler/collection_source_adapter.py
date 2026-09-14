@@ -11,7 +11,7 @@ import copy
 from pathlib import Path
 import re
 
-DIRECTORY = Path(__file__).resolve().parents[2] / 'sev_compiler/universal/collections'
+DIRECTORY = Path(__file__).resolve().parents[2] / 'library/core/collections'
 
 
 class Scalar(int):

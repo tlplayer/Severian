@@ -1,5 +1,5 @@
-import * from "../operator/trait/ordered.sev"
-import * from "../primitive/primitive.sev"
+import * from "../../../sev_compiler/universal/operator/trait/ordered.sev"
+import * from "../../../sev_compiler/universal/primitive/primitive.sev"
 import * from "list.sev"
 
 
