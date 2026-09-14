@@ -23,14 +23,14 @@ def read_manifest(path):
     ))
 
 
-def main():
+def main(fixture_path=None):
     compiler = Path(os.environ.get(
         "SEVERIAN_RUST_COMPILER", ROOT / "package.pkg/release/sev"
     ))
     with tempfile.TemporaryDirectory(prefix="sev-parser-alias-check-") as temporary:
         project = Path(temporary)
         (project / "src").mkdir()
-        fixture = Path(__file__).with_suffix(".sev").read_text()
+        fixture = (fixture_path or Path(__file__).with_suffix(".sev")).read_text()
         fixture = fixture.replace("../../sev_compiler/", str(ROOT / "sev_compiler") + "/")
         (project / "src/check.sev").write_text(fixture)
         dependencies = {}

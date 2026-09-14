@@ -1,0 +1,49 @@
+import parser
+import lexer
+import source
+import diagnostics
+from diagnostics import Diagnostic
+import universal
+
+
+def parse_function(text: string) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    input = source.SourceFile(source.SourceId(0), "receiver.sev", text)
+    return parser.parser_function_declaration(parser.Parser(lexer.scan(input)), [])
+
+
+test "bare self leaves receiver type and ownership inference to semantics":
+    function = parse_function("def len(self) -> int:\n    return used\n")
+    assert(len(function.parameters) == 0)
+    result ?= function.result
+    if result != None:
+        assert(universal.simple_type_name(result) == "int")
+    else:
+        assert(false)
+    assert(function.body != None)
+
+
+test "bare self preserves following parameters and delimited layout":
+    function = parse_function("def append(\n    self,\n    value: int,\n) -> unit:\n    pass\n")
+    assert(len(function.parameters) == 1)
+    assert(function.parameters[0].name == "value")
+    assert(universal.simple_type_name(function.parameters[0].annotation) == "int")
+    trailing = parse_function("def clear(self,):\n    pass\n")
+    assert(len(trailing.parameters) == 0)
+
+
+test "explicit receiver ownership annotations are retained":
+    for mode in ["view", "borrow", "move"]:
+        function = parse_function("def method(self: " + mode + " Self, value: int):\n    pass\n")
+        assert(len(function.parameters) == 2)
+        assert(function.parameters[0].name == "self")
+        assert(universal.simple_type_name(function.parameters[0].annotation) == "Self")
+        expected = "borrow" if mode == "view" else "borrow mut" if mode == "borrow" else "move"
+        assert(function.parameters[0].modifiers[0].name == expected)
+
+
+test "ordinary untyped parameters still require annotations":
+    result ?= parse_function("def method(value):\n    pass\n")
+    if result is Diagnostic:
+        assert(result.message == "expected colon after parameter")
+    else:
+        assert(false)

@@ -341,6 +341,14 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
                 return error(parser_fail(parser, "only one variadic parameter is supported"))
             keyword_only = true
         parameter = parser_identifier(parser, "expected a parameter name")
+        # Bare self uses the same inferred receiver as an omitted receiver.
+        # Semantic analysis supplies its type and ownership contract.
+        if parameter[0] == "self" and not variadic and not parser_at_symbol(parser, ":"):
+            parser_delimited_layout(parser)
+            if parser_take_symbol(parser, ",") != None:
+                parser_delimited_layout(parser)
+                continue
+            break
         parser_expect_symbol(parser, ":", "expected colon after parameter")
         modifiers: list[universal.BoundaryModifier] = []
         mode = parser_ownership_mode(parser)

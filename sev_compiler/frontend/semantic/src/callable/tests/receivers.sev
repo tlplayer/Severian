@@ -9,8 +9,38 @@ class Counter:
         value += 10
         return left * 10 + right
 
+    def read(self) -> int:
+        return self.value
+
+    def advance(self, step: int):
+        self.value += step
+
 class Holder:
     counter: Counter
+
+
+test "bare receivers infer shared reads and exclusive mutation":
+    counter = Counter(2)
+    assert(counter.read() == 2)
+    counter.advance(3)
+    assert(counter.read() == 5)
+
+
+class ReceiverBox[T]:
+    value: T
+
+    def get(self) -> T:
+        return self.value
+
+    def set(self, replacement: T):
+        self.value = replacement
+
+
+test "generic methods infer bare receiver contracts":
+    box = ReceiverBox[int](2)
+    assert(box.get() == 2)
+    box.set(5)
+    assert(box.get() == 5)
 
 
 def choose(counter: Counter, replace: bool):
