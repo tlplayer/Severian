@@ -15,7 +15,7 @@ class Collection[T, C:Readable[T]]:
     def get() -> T:
         return storage.get()
 
-type Stored[Element, Backend] = Collection[T:Element, C:Backend]
+Collection[T:Element, C:Backend] as Stored[Element, Backend]
 
 def main():
     number = Collection[T:int, C:Slot](42)

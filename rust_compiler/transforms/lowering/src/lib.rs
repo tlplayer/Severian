@@ -819,6 +819,9 @@ impl CfgLowering<'_> {
                         severian_mir::CallType::External(call)
                             if call.interface.0 == "native-runtime"
                                 && (call.symbol.0.contains("_aggregate")
+                                    || call.symbol.0.starts_with("__sev_pointer_index_value_")
+                                    || call.symbol.0.starts_with("__sev_pointer_take_value_")
+                                    || call.symbol.0.starts_with("__sev_pointer_set_value_")
                                     || integer_collection_runtime(&call.symbol.0)) =>
                         {
                             Some((call.symbol.0.clone(), candidate.result))

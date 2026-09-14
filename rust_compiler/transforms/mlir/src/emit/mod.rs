@@ -2526,6 +2526,25 @@ fn render_runtime_call(
     indent: usize,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
+    // These operations keep T concrete through MIR and access its LLVM layout
+    // directly, including records. They are not calls through a scalar C ABI.
+    if symbol.starts_with("__sev_pointer_index_value_") || symbol.starts_with("__sev_pointer_take_value_") || symbol.starts_with("__sev_pointer_set_value_") {
+        let load = !symbol.starts_with("__sev_pointer_set_value_");
+        let value = if load { result } else { arguments.get(2).copied() }
+            .ok_or_else(|| MlirError::UnsupportedOperation("typed pointer operation is missing its value".into()))?;
+        let ty = mlir_type(&value_type(module, value)?)?;
+        let [pointer, index, ..] = arguments else {
+            return Err(MlirError::UnsupportedOperation("typed pointer operation is missing its address".into()));
+        };
+        let address = format!("%pointer_slot_{}_{}", pointer.0, value.0);
+        output.push_str(&format!("{indentation}{address} = llvm.getelementptr %v{}[%v{}] : (!llvm.ptr, i64) -> !llvm.ptr, {ty}\n", pointer.0, index.0));
+        if load {
+            output.push_str(&format!("{indentation}%v{} = llvm.load {address} : !llvm.ptr -> {ty}\n", value.0));
+        } else {
+            output.push_str(&format!("{indentation}llvm.store %v{}, {address} : {ty}, !llvm.ptr\n", value.0));
+        }
+        return Ok(());
+    }
     let aggregate_abi = symbol.contains("_aggregate");
     let tag = result
         .or_else(|| arguments.first().copied())

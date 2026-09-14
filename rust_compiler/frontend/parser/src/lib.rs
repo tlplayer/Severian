@@ -10,6 +10,59 @@ mod tests {
     use severian_source::SourceFile;
 
     #[test]
+    fn parses_alias_declarations_with_as() {
+        let source = SourceFile::virtual_source(
+            "aliases.sev",
+            "list[string] as StringList\nPair[T, R] as Both[T, R]\nint | Error as Result\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let declarations = module.items.iter().map(|item| {
+            let severian_ast::Item::Type(declaration) = item else {
+                panic!("expected an alias declaration");
+            };
+            assert!(declaration.definition.is_some());
+            declaration
+        }).collect::<Vec<_>>();
+        assert_eq!(declarations[0].name, "StringList");
+        assert_eq!(declarations[1].name, "Both");
+        assert_eq!(declarations[1].type_parameters, ["T", "R"]);
+        assert_eq!(declarations[2].name, "Result");
+    }
+
+    #[test]
+    fn alias_syntax_preserves_expression_casts_and_rejects_equals_aliases() {
+        let source = SourceFile::virtual_source(
+            "casts.sev",
+            "int as Count\nflag = 0 as bool\ndef converted() -> bool:\n    return 0 as bool\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert!(matches!(module.items[0], severian_ast::Item::Type(_)));
+        let severian_ast::Item::Binding(binding) = &module.items[1] else {
+            panic!("expected a value binding");
+        };
+        assert!(matches!(binding.value.kind, severian_ast::ExpressionKind::Call { .. }));
+        let old = SourceFile::virtual_source("old-alias.sev", "type Count = int\n");
+        let error = parse(&scan(&old).unwrap()).unwrap_err();
+        assert!(error.message.contains("B as X"));
+    }
+
+    #[test]
+    fn applied_extension_retains_its_concrete_target() {
+        let source = SourceFile::virtual_source(
+            "extension.sev",
+            "extend list[string]:\n    def count() -> int:\n        return 0\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Extension(extension) = &module.items[0] else {
+            panic!("expected an extension");
+        };
+        assert!(extension.type_parameters.is_empty());
+        let (name, arguments) = extension.target.named_parts().unwrap();
+        assert_eq!(name, "list");
+        assert_eq!(arguments[0].simple_name(), Some("string"));
+    }
+
+    #[test]
     fn parses_two_bindings() {
         let source = SourceFile::virtual_source("test.sev", "b = 2, a = 1 + b");
         let module = parse(&scan(&source).unwrap()).unwrap();

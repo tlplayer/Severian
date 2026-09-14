@@ -56,9 +56,8 @@ operator ==(left: list[string], right: list[string]) -> bool:
 operator if[G:If](self: list[string]) -> bool:
     return len(self.ends) != 0
 
-type StringList = list[string]
 
-extend StringList:
+extend list[string]:
     def length() -> usize:
         return usize(len(self.ends))
 

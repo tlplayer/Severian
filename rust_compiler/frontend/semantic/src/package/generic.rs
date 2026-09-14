@@ -2230,6 +2230,7 @@ fn validate_explicit_type(
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } => {
             if types.resolve_name(name).is_none()
+                && !(name.starts_with("source.") && types.definitions().any(|definition| definition.path == *name))
                 && !names.contains_key(&format!("$type:{name}"))
                 && !names.contains_key(&format!("$dimension:{name}"))
                 && !resolve_path(module, name, index).iter().any(|id| {
@@ -3292,6 +3293,39 @@ fn specialize_comprehension_clauses(
     }
 }
 
+fn applied_type_spelling(name: &str, span: severian_source::Span) -> TypeAnnotationKind {
+    // Substitutions retain canonical spellings, but an applied type must stay
+    // structural in the AST (e.g. T = box[Resource]), not become one identifier.
+    if let Some((constructor, tail)) = name.split_once('[') {
+        if let Some(arguments) = tail.strip_suffix(']') {
+            if !constructor.is_empty() && constructor.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.')) {
+                let mut depth = 0;
+                let mut start = 0;
+                let mut items = Vec::new();
+                for (offset, character) in arguments.char_indices() {
+                    match character {
+                        '[' | '(' => depth += 1,
+                        ']' | ')' => depth -= 1,
+                        ',' if depth == 0 => {
+                            items.push(&arguments[start..offset]);
+                            start = offset + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                items.push(&arguments[start..]);
+                return TypeAnnotationKind::Named {
+                    name: constructor.to_owned(),
+                    arguments: items.into_iter().map(|item| TypeAnnotation {
+                        kind: applied_type_spelling(item.trim(), span), span,
+                    }).collect(),
+                };
+            }
+        }
+    }
+    TypeAnnotationKind::Named { name: name.to_owned(), arguments: Vec::new() }
+}
+
 fn specialize_annotation(
     annotation: &TypeAnnotation,
     substitution: &Substitution,
@@ -3302,10 +3336,7 @@ fn specialize_annotation(
                 if let Some(dimension) = substitution.dimension(name) {
                     dim_expr_annotation(dimension)
                 } else if let Some(replacement) = substitution.get(name) {
-                    TypeAnnotationKind::Named {
-                        name: replacement.clone(),
-                        arguments: Vec::new(),
-                    }
+                    applied_type_spelling(replacement, annotation.span)
                 } else {
                     TypeAnnotationKind::Named {
                         name: name.clone(),

@@ -4,12 +4,12 @@ import * from "../slicing.sev" as slicing
 
 
 @mlir("memref.extract_aligned_pointer_as_index")
-def __float_end_address(value: buffer[int]) -> index
+def __float_end_address(value: array[int]) -> index
 
 @mlir("llvm.ptrtoint")
 def __float_pointer_value(value: native_ptr) -> int
 
-def __parse_float_buffer(value: string, end: borrow buffer[int]) -> float:
+def __parse_float_buffer(value: string, end: borrow array[int]) -> float:
     return format.__parse(format.__address(value), format.__pointer(text.__size(__float_end_address(end))))
 
 operator float(value: string) -> float:

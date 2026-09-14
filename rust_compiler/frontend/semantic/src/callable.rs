@@ -544,6 +544,18 @@ impl Analyzer<'_> {
                 break;
             }
         }
+        // Moving into an argument temporary does not itself transfer that
+        // temporary into the callee. Publish the completed consuming contract
+        // to MIR so caller cleanup cannot destroy a value the callee now owns.
+        for function in &module.functions {
+            if let Some(effects) = self.parameter_effects.get(&function.id) {
+                for (index, effect) in effects.iter().enumerate() {
+                    if *effect == ParameterEffect::Move {
+                        self.types.register_transferred_argument(function.definition, index);
+                    }
+                }
+            }
+        }
         let mut refresh = |expression: &mut Expression| {
             let ExpressionKind::Call {
                 callee:

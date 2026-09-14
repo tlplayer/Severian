@@ -20,7 +20,7 @@ The class cleanup hook has a consuming receiver and a non-throwing unit result:
 ```sev
 class Connection:
     handle: Handle
-    pending: buffer[Message]
+    pending: array[Message]
 
     operator drop(move self) -> unit:
         disconnect(handle)

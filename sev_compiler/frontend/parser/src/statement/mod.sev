@@ -192,6 +192,8 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
             result.items.append(universal.Type(parser_family_declaration(parser)))
         elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
             result.items.append(universal.Type(parser_type_declaration(parser, [])))
+        elif parser_at_type_alias(parser):
+            result.items.append(universal.Type(parser_type_alias(parser, [])))
         elif parser_at_identifier(parser, "test"):
             result.items.append(universal.Test(parser_test_declaration(parser)))
         elif parser_at_identifier(parser, "return") or parser_at_identifier(parser, "break") or parser_at_identifier(parser, "continue"):
@@ -386,6 +388,42 @@ def parser_ownership_mode(parser: Parser) -> string:
     return ""
 
 
+def parser_at_type_alias(parser: Parser) -> bool:
+    if parser_at_simple(parser, Integer):
+        return false
+    cursor := parser.cursor[0]
+    depth := 0
+    while cursor < len(parser.tokens):
+        token = parser.tokens[cursor]
+        if depth == 0:
+            if token.kind == Newline or token.kind == Dedent or token.kind == Eof:
+                return false
+            if lexer.token_is_symbol(token, "=") or lexer.token_is_symbol(token, ":=") or lexer.token_is_symbol(token, ":") or lexer.token_is_symbol(token, ";"):
+                return false
+            if token.kind == Identifier and string(token) == "as":
+                return true
+        if lexer.token_is_symbol(token, "[") or lexer.token_is_symbol(token, "(") or lexer.token_is_symbol(token, "{"):
+            depth += 1
+        elif lexer.token_is_symbol(token, "]") or lexer.token_is_symbol(token, ")") or lexer.token_is_symbol(token, "}"):
+            depth -= 1
+        cursor += 1
+    return false
+
+
+def parser_type_alias(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
+    definition = parser_type_annotation(parser)
+    if not parser_at_identifier(parser, "as"):
+        return error(parser_fail(parser, "expected as before alias name"))
+    parser_next(parser)
+    name = parser_identifier(parser, "expected an alias name")[0]
+    defaults: list[universal.TypeAnnotation] = []
+    generic_parts = parser_type_parameters(parser, defaults=defaults)
+    constraints := generic_parts[1]
+    for constraint in parser_declaration_constraints(parser):
+        constraints.append(constraint)
+    return universal.TypeDeclaration(decorators, name, generic_parts[0], constraints, definition, source.Span(definition.span.source, definition.span.start, parser_peek(parser).span.start), type_defaults=defaults)
+
+
 def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a type name")[0]
@@ -394,8 +432,8 @@ def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator
     parameters = generic_parts[0]
     constraints := generic_parts[1]
     definition: universal.TypeAnnotation | None := None
-    if parser_take_symbol(parser, "=") != None:
-        definition = parser_type_annotation(parser)
+    if parser_at_symbol(parser, "="):
+        return error(parser_fail(parser, "type aliases use B as X, not type X = B"))
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
     return universal.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start), type_defaults=defaults)
@@ -741,6 +779,8 @@ def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectat
             declarations.append(universal.Type(parser_family_declaration(parser)))
         elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
             declarations.append(universal.Type(parser_type_declaration(parser, [])))
+        elif parser_at_type_alias(parser):
+            declarations.append(universal.Type(parser_type_alias(parser, [])))
         else:
             statements.append(parser_block_statement(parser))
         parser_separators(parser)
@@ -1492,10 +1532,30 @@ def parser_field_constraints(parser: Parser) -> list[universal.FieldConstraint] 
 
 def parser_record_declaration(parser: Parser, extension: bool = false) -> universal.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
-    name = parser_identifier(parser, "expected a class name")[0]
+    record_name := ""
     pack: list[string] = []
     defaults: list[universal.TypeAnnotation] = []
-    generic_parts = parser_type_parameters(parser, pack, defaults)
+    parameters: list[string] := []
+    generic_constraints: list[universal.GenericConstraint] := []
+    extension_target: universal.TypeAnnotation | None := None
+    if extension:
+        generic_parts = parser_type_parameters(parser, pack, defaults)
+        parameters = generic_parts[0]
+        generic_constraints = generic_parts[1]
+        for constraint in parser_declaration_constraints(parser):
+            generic_constraints.append(constraint)
+        target = parser_type_annotation(parser)
+        extension_target = target
+        match target.kind:
+            case Named:
+                record_name = name
+            case _:
+                return error(parser_fail(parser, "expected a named extension target"))
+    else:
+        record_name = parser_identifier(parser, "expected a class name")[0]
+        generic_parts = parser_type_parameters(parser, pack, defaults)
+        parameters = generic_parts[0]
+        generic_constraints = generic_parts[1]
     parser_expect_symbol(parser, ":", "expected colon after class name")
     traits: list[universal.TypeAnnotation] = []
     if not parser_at_simple(parser, Newline):
@@ -1535,7 +1595,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
                 fields.append(universal.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of class")
-    return universal.RecordDeclaration(name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=generic_parts[0], constraints=generic_parts[1], extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults)
+    return universal.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target)
 
 
 def parser_family_declaration(parser: Parser) -> universal.TypeDeclaration | diagnostics.Diagnostic:

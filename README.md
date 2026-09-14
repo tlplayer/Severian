@@ -6,37 +6,20 @@ Rust-like safety, Go-style concurrency, and MLIR/XLA-backed execution.
 ## Install
 
 ```sh
-curl -LsSf https://severian.dev/install.sh | sh
 sev --version
 sev init hello
 cd hello
 sev run
 ```
 
-Pin an exact release with:
-
-```sh
-curl -LsSf https://severian.dev/install.sh | SEV_VERSION=0.1.0 sh
-```
-
-The installer downloads a prebuilt archive from the canonical
-[GitHub Releases](https://github.com/tlplayer/Severian/releases) page, verifies
-its SHA-256 checksum, and installs it under `~/.local`. It never invokes Cargo
-or builds Severian from source. Set `SEV_ATTESTATION=required` to additionally
-require GitHub Sigstore provenance verification through `gh`.
-
-Currently tested release targets are `x86_64-unknown-linux-gnu` and
-`aarch64-unknown-linux-gnu`. Optional accelerator stacks are not required for
-installation; inspect them separately with `sev doctor`.
-
 Contributors building Severian itself should use Cargo as described in
 [CONTRIBUTING.md](CONTRIBUTING.md). To build this checkout and replace an older
 Cargo-installed `sev` command with it, run:
 
 ```sh
-./install.sh --source
-hash -r
-sev --help | grep agent-ir
+sev --help
+sev --version
+sev update #Updates the compiler
 ```
 
 The source installer uses `${CARGO_HOME:-$HOME/.cargo}` by default, so the new

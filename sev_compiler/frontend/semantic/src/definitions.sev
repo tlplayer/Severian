@@ -105,7 +105,7 @@ def bind_type_arguments(parameters: list[string], arguments: list[universal.Type
 def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
-            if name == "buffer" and len(arguments) == 1:
+            if name == "array" and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
                 if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
                     return universal.TypeId(200 + element.index)
@@ -118,7 +118,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     records.append(universal.RecordDeclaration("$buffer$string", fields, [], annotation.span, type_id=id, storage_element=element, representation="OwnedBuffer"))
                     return id
                 if not storage_types.copy_storage(element, records):
-                    return error(diagnostics.diagnostic_at("E000205", "buffer elements require copyable storage; owned elements require destruction lowering", annotation.span))
+                    return error(diagnostics.diagnostic_at("E000205", "array elements require copyable storage; owned elements require destruction lowering", annotation.span))
                 for record in records:
                     if record.storage_element.index == element.index:
                         return record.type_id
@@ -392,6 +392,54 @@ def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: universal.
     return syntax
 
 
+def extension_annotation(declaration: universal.RecordDeclaration) -> universal.TypeAnnotation:
+    target ?= declaration.extension_target
+    if target != None:
+        return target
+    arguments: list[universal.TypeAnnotation] = []
+    for parameter in declaration.type_parameters:
+        arguments.append(universal.named_type(parameter, [], declaration.span))
+    return universal.named_type(declaration.name, arguments, declaration.span)
+
+
+def infer_extension_parameters(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string, parameters: list[string]):
+    match annotation.kind:
+        case Named:
+            if len(arguments) != 0:
+                for argument in arguments:
+                    infer_extension_parameters(definitions, argument, namespace, parameters)
+                return
+            if name in parameters or "." in name or name in ["Error", "Self"]:
+                return
+            if scalar.scalar_type_name(name) != None or alias_named(definitions, name, namespace) != None:
+                return
+            for declaration in definitions.implementations:
+                if not declaration.extension and (declaration.name == name or declaration.name == namespace + name):
+                    return
+            # Constant shape arguments are values, not free type parameters.
+            if len(name) != 0 and name[0] in "0123456789":
+                return
+            parameters.append(name)
+        case Union:
+            for member in members:
+                infer_extension_parameters(definitions, member, namespace, parameters)
+
+
+def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: universal.RecordDeclaration) -> universal.RecordDeclaration:
+    if not declaration.extension:
+        return declaration
+    target = extension_annotation(declaration)
+    parameters = declaration.type_parameters[:]
+    match target.kind:
+        case Named:
+            for argument in arguments:
+                infer_extension_parameters(definitions, argument, declaration.lookup, parameters)
+        case _:
+            pass
+    declaration.type_parameters = parameters
+    return declaration
+
+
 def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions()) -> SemanticDefinitions | diagnostics.Diagnostic:
     definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:])
     names: list[string] = []
@@ -473,6 +521,20 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 ordinal += 1
             case _:
                 pass
+    # Resolve free extension parameters only after every concrete type and alias
+    # is registered. list[string] is concrete; list[T] may bind an unknown T.
+    implementation_index := 0
+    for declaration in definitions.implementations:
+        definitions.implementations[implementation_index] = resolve_extension_parameters(definitions, declaration)
+        implementation_index += 1
+    item_index := 0
+    for item in module.items:
+        match item:
+            case Record:
+                module.items[item_index] = universal.Record(resolve_extension_parameters(definitions, declaration))
+            case _:
+                pass
+        item_index += 1
     trait_index := 0
     for declaration in definitions.traits:
         inherited_traits(definitions, declaration)

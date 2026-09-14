@@ -1,7 +1,7 @@
 # The typed-buffer allocation boundary uses the existing MLIR memory lowering.
 # core.storage supplies validation and ownership-facing operations above it.
 @mlir("memref.alloc", operand_segments="1,0")
-def allocate_buffer[T](count: index) -> buffer[T]
+def allocate_buffer[T](count: index) -> array[T]
 
 @mlir("arith.index_cast")
 def buffer_index(count: int) -> index
@@ -9,4 +9,4 @@ def buffer_index(count: int) -> index
 # Both descriptors remain visible until the ownership pipeline has accounted
 # for their aliases. This operation transfers contents, not release authority.
 @mlir("memref.copy")
-def copy_buffer[T](source: view buffer[T], destination: borrow buffer[T])
+def copy_buffer[T](source: view array[T], destination: borrow array[T])

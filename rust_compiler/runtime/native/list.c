@@ -941,6 +941,13 @@ void *__sev_allocate(int64_t count) {
     return allocation;
 }
 
+void *__sev_allocate_sized(int64_t count, int64_t width) {
+    if (count < 0 || width <= 0 || (uint64_t)count > SIZE_MAX / (uint64_t)width) abort();
+    void *allocation = sev_memory_zeroed(count ? (size_t)count : 1, (size_t)width);
+    if (allocation == NULL) abort();
+    return allocation;
+}
+
 void __sev_free(void *pointer) {
     sev_memory_release(pointer);
 }

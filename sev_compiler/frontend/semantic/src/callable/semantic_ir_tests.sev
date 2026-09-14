@@ -208,7 +208,7 @@ import * from "../lib.sev" as package_analysis
 
 
 test "package and executable entries share type and member registration":
-    input = source.SourceFile(source.SourceId(0), "package.sev", "type Count = int\nclass Box:\n    amount: Count\n    def get() -> Count:\n        return amount\n\ndef read(value: Box) -> Count:\n    return value.get()\n\ntest:\n    assert(read(Box(42)) == 42)\n")
+    input = source.SourceFile(source.SourceId(0), "package.sev", "int as Count\nclass Box:\n    amount: Count\n    def get() -> Count:\n        return amount\n\ndef read(value: Box) -> Count:\n    return value.get()\n\ntest:\n    assert(read(Box(42)) == 42)\n")
     ast = parser.parser_module(parser.Parser(callable_fixture_tokens(input)))
     program = package_analysis.analyze_tests(callable_fixture_environment(ast))
     assert(len(program.modules) == 1)

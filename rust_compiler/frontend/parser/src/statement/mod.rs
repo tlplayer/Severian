@@ -180,6 +180,8 @@ impl Parser<'_> {
                     return Err(self.error("decorators may only precede declarations"));
                 }
                 module.items.push(Item::Import(self.import_declaration()?));
+            } else if self.looks_like_type_alias() {
+                module.items.push(Item::Type(self.type_alias(decorators)?));
             } else {
                 if !decorators.is_empty() {
                     return Err(self.error("expected a declaration after decorator"));
@@ -955,6 +957,8 @@ impl Parser<'_> {
                 items.push(Item::Extension(self.extension_declaration(decorators)?));
             } else if self.at_identifier("enum") && decorators.is_empty() {
                 items.push(Item::Enum(self.enum_declaration()?));
+            } else if self.looks_like_type_alias() {
+                items.push(Item::Type(self.type_alias(decorators)?));
             } else if !decorators.is_empty() {
                 return Err(self.error("expected `def` after compiler-case decorator"));
             } else {
@@ -1714,6 +1718,60 @@ impl Parser<'_> {
         })
     }
 
+    fn looks_like_type_alias(&self) -> bool {
+        if matches!(self.peek().kind, TokenKind::Integer(_)) {
+            return false;
+        }
+        // Avoid speculative type parsing and cloning the syntax table for the
+        // ordinary bindings and expressions that contain no declaration alias.
+        let mut depth = 0;
+        let mut has_alias = false;
+        for token in &self.tokens[self.cursor..] {
+            match &token.kind {
+                TokenKind::Identifier(name) if depth == 0 && name == "as" => {
+                    has_alias = true;
+                    break;
+                }
+                TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof
+                | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::Colon if depth == 0 => break,
+                TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => depth += 1,
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => depth -= 1,
+                _ => {}
+            }
+        }
+        if !has_alias {
+            return false;
+        }
+        let mut trial = Parser {
+            tokens: self.tokens,
+            cursor: self.cursor,
+            continuation_indents: self.continuation_indents,
+            context_alias: self.context_alias,
+            operators: self.operators.clone(),
+        };
+        trial.type_annotation().is_ok() && trial.at_identifier("as")
+    }
+
+    fn type_alias(&mut self, decorators: Vec<Decorator>) -> Result<TypeDeclaration, Diagnostic> {
+        let definition = self.type_annotation()?;
+        let start = definition.span;
+        if !self.at_identifier("as") {
+            return Err(self.error("expected `as` before alias name"));
+        }
+        self.next();
+        let (name, name_span) = self.identifier("expected an alias name")?;
+        let (type_parameters, mut constraints, _) = self.type_parameters()?;
+        constraints.extend(self.declaration_constraints()?);
+        Ok(TypeDeclaration {
+            decorators,
+            name,
+            type_parameters,
+            constraints,
+            definition: Some(definition),
+            span: Span::new(start.source, start.start, self.tokens[self.cursor - 1].span.end.max(name_span.end)),
+        })
+    }
+
     fn type_declaration(
         &mut self,
         decorators: Vec<Decorator>,
@@ -1721,22 +1779,17 @@ impl Parser<'_> {
         let start = self.next().span;
         let (name, name_span) = self.identifier("expected a type name")?;
         let (type_parameters, mut constraints, _) = self.type_parameters()?;
-        let definition = if self.take(&TokenKind::Equal).is_some() {
-            Some(self.type_annotation()?)
-        } else {
-            None
-        };
+        if self.at(&TokenKind::Equal) {
+            return Err(self.error("type aliases use `B as X`, not `type X = B`"));
+        }
         constraints.extend(self.declaration_constraints()?);
-        let end = definition
-            .as_ref()
-            .map_or(name_span.end, |definition| definition.span.end);
         Ok(TypeDeclaration {
             decorators,
             name,
             type_parameters,
             constraints,
-            definition,
-            span: Span::new(start.source, start.start, end),
+            definition: None,
+            span: Span::new(start.source, start.start, name_span.end),
         })
     }
 

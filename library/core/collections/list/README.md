@@ -4,17 +4,18 @@
 semantics—construction, growth requests, indexing, insertion, removal,
 iteration, and algorithms—but owns no pointers or allocator calls.
 
-The dependency boundary is:
+The required dependency boundary is:
 
 ```text
-list[T]   array[T]   deque[T]
-    \         |         /
-     core.collections.internal.contiguous_storage[T]
-                         |
-                    core.memory
-                         |
-              allocator/runtime/platform
+list[T]
+   |
+vector[T]
+   |
+array[T]
+   |
+core.memory
 ```
 
-Concrete collections do not depend on one another. The internal storage
-package is private and contains no list-specific API.
+These are distinct collection types. `list[T]` must not alias `array[T]`.
+The current list package still delegates to `ContiguousStorage[T]`; migrating
+its operations and ownership behavior to `vector[T]` remains unfinished.

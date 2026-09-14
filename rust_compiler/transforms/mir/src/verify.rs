@@ -206,6 +206,7 @@ mod tests {
                 mutable: true,
                 argument: false,
                 borrowed: false,
+                owned_argument: false,
                 span: None,
             }],
             ..CfgBody::default()

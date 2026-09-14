@@ -10,13 +10,13 @@ def error() -> i32
 @c(symbol="close")
 def close(handle: i32) -> i32
 
-def read(handle: int, data: borrow buffer[u8], offset: int, count: int) -> int:
+def read(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
     return xxi.transferred(__read(handle, xxi.address(data, len(data), offset, count), count), count)
 
-def write(handle: int, data: view buffer[u8], offset: int, count: int) -> int:
+def write(handle: int, data: view array[u8], offset: int, count: int) -> int:
     return xxi.transferred(__write(handle, xxi.address(data, len(data), offset, count), count), count)
 
-def write_all(handle: int, data: view buffer[u8], count: int) -> int:
+def write_all(handle: int, data: view array[u8], count: int) -> int:
     assert(count >= 0 and count <= len(data))
     offset := 0
     while offset < count:

@@ -225,7 +225,7 @@ class AggregateBuffers(MigrationCase):
         ''', "unknown name self")
 
     def test_alias_arguments_keep_the_callers_scope(self):
-        self.write('type Sequence[T] = list[T]\n', "container.sev")
+        self.write('list[T] as Sequence[T]\n', "container.sev")
         self.native('''
             import * from "container.sev" as container
             class Local:

@@ -4,14 +4,14 @@ import * from "../../../storage/src/lib.sev" as storage
 # chooses growth and core.storage checks allocations through core.memory. Replacing or
 # dropping the buffer releases its allocation through ordinary ownership.
 class vector[T, N = 256]:
-    data: buffer[T]
+    data: array[T]
     used: int
 
     def vector():
         width = int(bytes(T).amount / 8.0)
         assert(N >= 0 and width > 0)
         assert(N <= 9223372036854775807 / width)
-        data: buffer[T] = storage.allocate(N)
+        data: array[T] = storage.allocate(N)
         used = 0
 
     def len() -> int:
@@ -61,7 +61,7 @@ class vector[T, N = 256]:
 
 
 # Keep the vector's growth loop in one function across append call sites.
-def __vector_grow[T](data: view buffer[T], used: int, required: int, initial: int) -> buffer[T]:
+def __vector_grow[T](data: view array[T], used: int, required: int, initial: int) -> array[T]:
     assert(required >= 0)
     current = len(data)
     capacity := current if current > initial else initial
@@ -75,11 +75,11 @@ def __vector_grow[T](data: view buffer[T], used: int, required: int, initial: in
     return __vector_resize(data, used, capacity)
 
 
-def __vector_resize[T](data: view buffer[T], used: int, capacity: int) -> buffer[T]:
+def __vector_resize[T](data: view array[T], used: int, capacity: int) -> array[T]:
     width = int(bytes(T).amount / 8.0)
     assert(width > 0)
     assert(capacity <= 9223372036854775807 / width)
-    replacement: buffer[T] = storage.allocate(capacity)
+    replacement: array[T] = storage.allocate(capacity)
     position := 0
     while position < used:
         replacement[position] = data[position]

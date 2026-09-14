@@ -15,7 +15,7 @@ class Boxes: Addable:
     operator +(right: Boxes) -> Boxes:
         return Self(amount + right.amount)
 
-type Alias = First
+First as Alias
 
 def twice[T: Addable](value: T) -> T:
     return value + value

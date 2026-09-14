@@ -404,7 +404,7 @@ fn rebound_storage_arguments(body: &CfgBody, types: &TypeContext) -> BTreeSet<Lo
 
 fn class_borrowed_locals(body: &CfgBody, types: &TypeContext) -> BTreeSet<LocalId> {
     let rebound = rebound_storage_arguments(body, types);
-    let mut borrowed = body.locals.iter().filter(|local| !rebound.contains(&local.id) && (local.borrowed || (local.argument && types.retention(local.ty).is_some()))).map(|local| local.id).collect::<BTreeSet<_>>();
+    let mut borrowed = body.locals.iter().filter(|local| !rebound.contains(&local.id) && (local.borrowed || (local.argument && !local.owned_argument && types.retention(local.ty).is_some()))).map(|local| local.id).collect::<BTreeSet<_>>();
     for block in &body.blocks {
         if let Terminator::Call { callee: crate::Callee::Direct { function, .. }, destination: Some(place), .. } = &block.terminator {
             if types.borrowed_result(*function) {
@@ -1359,6 +1359,7 @@ mod tests {
             mutable: true,
             argument,
             borrowed: false,
+            owned_argument: false,
             span: None,
         }
     }
@@ -1679,6 +1680,7 @@ mod temporary_string_tests {
                     mutable: false,
                     argument: false,
                     borrowed: false,
+                    owned_argument: false,
                     span: None,
                 })
                 .collect(),

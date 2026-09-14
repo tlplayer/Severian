@@ -32,6 +32,8 @@ pub struct LocalDecl {
     pub argument: bool,
     /// This argument aliases the caller's storage instead of owning a value slot.
     pub borrowed: bool,
+    /// The caller transferred this argument, including retained storage values.
+    pub owned_argument: bool,
     pub span: Option<Span>,
 }
 
@@ -339,6 +341,8 @@ pub(crate) fn lower_program(
             builder.owned_types = owned_types.clone();
             for (index, parameter) in function.parameters.iter().enumerate() {
                 let local = builder.local(parameter.contract.ty, true, true);
+                builder.body.locals[local.0 as usize].owned_argument = parameter.contract.modifiers
+                    .iter().any(|modifier| modifier.name == "move");
                 builder.body.locals[local.0 as usize].borrowed = reference_parameters
                     .get(&function.id)
                     .and_then(|parameters| parameters.get(index))
@@ -499,6 +503,7 @@ impl BodyBuilder {
             mutable,
             argument,
             borrowed: false,
+            owned_argument: false,
             span: self.current_span,
         });
         id
@@ -650,6 +655,23 @@ impl BodyBuilder {
                     .iter()
                     .find(|binding| binding.id == *id)
                     .expect("typed HIR binding exists");
+                // A constructor reserves its receiver before initializing its
+                // fields. Reserve that storage directly: transferring an empty
+                // affine temporary would read an uninitialized value.
+                if let severian_hir::ExpressionKind::Aggregate { class, fields } = &binding.value.kind {
+                    if fields.is_empty() && !self.variables.contains_key(&binding.variable) {
+                        let local = self.local(binding.type_id, binding.mutable, false);
+                        let place = Place::local(local);
+                        self.push(Statement::StorageLive(local));
+                        self.push(Statement::Assign(place.clone(), Rvalue::Aggregate {
+                            type_id: *class,
+                            fields: Vec::new(),
+                        }));
+                        self.variables.insert(binding.variable, place.clone());
+                        self.bindings.insert(*id, place);
+                        return;
+                    }
+                }
                 let value = self.expression(&binding.value);
                 let place = if let Some(place) = self.variables.get(&binding.variable) {
                     place.clone()
@@ -1059,7 +1081,9 @@ impl BodyBuilder {
                 ));
             }
             severian_hir::ExpressionKind::Field { object, index } => {
-                let mut field = self.expression(object);
+                // Project from the original place. Materializing an affine
+                // receiver here would move the entire owner just to read a field.
+                let mut field = self.expression_place(object);
                 field.projection.push(Projection::Field(*index));
                 self.push(Statement::Assign(
                     result.clone(),

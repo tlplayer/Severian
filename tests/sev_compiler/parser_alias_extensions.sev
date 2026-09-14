@@ -1,0 +1,76 @@
+import parser
+import lexer
+import * from "../../sev_compiler/frontend/semantic/src/definitions.sev" as definitions
+import source
+import diagnostics
+from diagnostics import Diagnostic
+import universal
+
+
+def parse_fixture(text: string) -> universal.Module | diagnostics.Diagnostic:
+    input = source.SourceFile(source.SourceId(0), "fixture.sev", text)
+    return parser.parse(lexer.scan(input))
+
+
+test "as aliases retain their target and generic defaults":
+    module = parse_fixture("list[string] as StringList\nPair[T, R] as Both[T, R=T]\n")
+    assert(len(module.items) == 2)
+    match module.items[0]:
+        case Type:
+            assert(declaration.name == "StringList")
+            assert(len(declaration.type_parameters) == 0)
+            assert(declaration.definition != None)
+        case _:
+            assert(false)
+    match module.items[1]:
+        case Type:
+            assert(declaration.name == "Both")
+            assert(declaration.type_parameters == ["T", "R"])
+            assert(declaration.type_defaults[0].binding == "R")
+        case _:
+            assert(false)
+
+
+test "concrete extension arguments do not declare type parameters":
+    module = parse_fixture("extend list[string]:\n    pass\n")
+    registered = definitions.register_declarations(module, definitions.SemanticDefinitions())
+    assert(len(registered.implementations) == 1)
+    extension = registered.implementations[0]
+    assert(extension.name == "list")
+    assert(len(extension.type_parameters) == 0)
+    target = definitions.extension_annotation(extension)
+    match target.kind:
+        case Named:
+            assert(name == "list")
+            assert(universal.simple_type_name(arguments[0]) == "string")
+        case _:
+            assert(false)
+
+
+test "extension parameters are inferred against declared type identities":
+    module = parse_fixture("class Payload:\n    value: int\nextend Box[Payload]:\n    pass\nextend Box[T]:\n    pass\n")
+    registered = definitions.register_declarations(module, definitions.SemanticDefinitions())
+    assert(len(registered.implementations[1].type_parameters) == 0)
+    assert(registered.implementations[2].type_parameters == ["T"])
+
+
+test "equals aliases are rejected":
+    result ?= parse_fixture("type Count = int\n")
+    if result is Diagnostic:
+        assert(result.message == "type aliases use B as X, not type X = B")
+    else:
+        assert(false)
+
+
+test "array is the prelude storage type":
+    span = source.Span(source.SourceId(0), 0, 0)
+    element = universal.named_type("int", [], span)
+    records: list[universal.RecordDeclaration] = []
+    environment = definitions.SemanticDefinitions()
+    actual = definitions.type_annotation(environment, universal.named_type("array", [element], span), records, "")
+    assert(actual.index == 264)
+    rejected ?= definitions.type_annotation(environment, universal.named_type("buffer", [element], span), records, "")
+    if rejected is Diagnostic:
+        assert(rejected.message == "unknown type buffer")
+    else:
+        assert(false)

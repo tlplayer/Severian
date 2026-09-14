@@ -38,7 +38,7 @@ class ContainerConstruction(MigrationCase):
             class Pair[T, R=T]:
                 first: T
                 second: R
-            type Both[T, R=T] = Pair[T, R]
+            Pair[T, R] as Both[T, R=T]
             test:
                 assert(Pair[int](7, 42).second == 42)
                 assert(Both[string]("first", "second").second == "second")

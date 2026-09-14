@@ -139,7 +139,7 @@ def string(value: char) -> string:
 # search for the first significant-digit precision that round-trips are .sev.
 # The current hosted target is glibc in its default C numeric locale.
 @mlir("memref.extract_aligned_pointer_as_index")
-def __buffer_base(value: buffer[u8]) -> index
+def __buffer_base(value: array[u8]) -> index
 
 
 def __base(value: string) -> index:

@@ -133,9 +133,11 @@ publishable. Internal storage packages are dependencies, not public exports.
 | 6 | Re-exporting facade and published external consumers | Relative compiler-source imports and obsolete bootstrap adapters |
 
 The current inventory has three different sources: package classes, the
-algorithm implementations in this directory's root `.sev` files, and the active
-`type list[T] = buffer[T]` provider. A file move alone does not reconcile their
-APIs or establish that they execute through the source compiler.
+algorithm implementations in this directory's root `.sev` files, and the
+prelude collection operations. The required hierarchy is `list[T]` over
+`vector[T]` over `array[T]`; an alias from list to array does not implement it.
+A file move alone does not reconcile their APIs or establish that they execute
+through the source compiler.
 
 The source algorithms and their inline tests now live here. Their detailed
 [source plan](SOURCE_IMPLEMENTATION_PLAN.md) and [capability inventory](CAPABILITIES.md)

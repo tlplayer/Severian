@@ -22,7 +22,7 @@ def __raw_load[T](value: native_ptr) -> T
 def __raw_store[T](value: T, destination: native_ptr)
 
 @mlir("memref.extract_aligned_pointer_as_index")
-def __raw_buffer_address[T](value: buffer[T]) -> index
+def __raw_buffer_address[T](value: array[T]) -> index
 
 @mlir("arith.index_cast")
 def __raw_index(value: index) -> int

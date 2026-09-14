@@ -2673,6 +2673,14 @@ fn with_core_prelude(
     let tokens = severian_lexer::scan(&prelude).map_err(CompileError::Diagnostic)?;
     let prelude = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     module.items.extend(prelude.items);
+    let mut boxed = SourceFile::virtual_source(
+        "universal/primitive/box.sev",
+        include_str!("../../../../../sev_compiler/universal/primitive/box.sev"),
+    );
+    boxed.id = SourceId(u32::MAX - 4);
+    let tokens = severian_lexer::scan(&boxed).map_err(CompileError::Diagnostic)?;
+    let boxed = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    module.items.extend(boxed.items);
     module.items.extend(ast.items.iter().cloned());
     Ok(module)
 }

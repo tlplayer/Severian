@@ -13,7 +13,7 @@ class CollectionGenerics(MigrationCase):
                 right: Right
             class Box[T]:
                 value: T
-            type Mixed = Pair[Right:string, Left:int]
+            Pair[Right:string, Left:int] as Mixed
             def first(value: Mixed) -> int:
                 return value.left
             test:
@@ -39,7 +39,7 @@ class CollectionGenerics(MigrationCase):
             ('Left:int', 'missing type argument'),
         ):
             with self.subTest(arguments=arguments):
-                self.rejects(declaration + f'type Invalid = Pair[{arguments}]\n', diagnostic)
+                self.rejects(declaration + f'Pair[{arguments}] as Invalid\n', diagnostic)
 
     def test_container_constructor_is_a_compile_time_argument(self):
         self.native('''
@@ -59,7 +59,7 @@ class CollectionGenerics(MigrationCase):
                     storage = C[T](value)
                 def get() -> T:
                     return storage.get()
-            type Adapted[Element, Backend] = Collection[T:Element, C:Backend]
+            Collection[T:Element, C:Backend] as Adapted[Element, Backend]
             test:
                 first = Collection[T:int, C:Box](42)
                 second = Collection[C:Alternative, T:string]("owned")

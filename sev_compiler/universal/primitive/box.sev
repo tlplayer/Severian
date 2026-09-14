@@ -1,0 +1,42 @@
+# A single heap-owned value. A box is affine: transfer it with move; clone
+# explicitly when T supports cloning. The storage pointer is an implementation
+# detail and is never returned by the safe API.
+class box[T]:
+    __storage: pointer[T]
+    __owns: bool
+
+    def box(value: move T):
+        unsafe:
+            address = allocate[T](1)
+            address[0] = move value
+            __storage = address
+        __owns = true
+        return move self
+
+    def clone() -> box[T]:
+        unsafe:
+            return box[T](__storage[0].clone())
+
+    # Move T out and release the allocation. Consuming self prevents reuse.
+    def take() -> T:
+        address = __storage
+        __owns = false
+        owner = move self
+        unsafe:
+            value = move address[0]
+            free(address)
+        return move value
+
+    # Transfer the old value to the caller and install the new one in place.
+    def replace(value: move T) -> T:
+        unsafe:
+            previous = move __storage[0]
+            __storage[0] = move value
+        return move previous
+
+    operator drop(move self) -> unit:
+        if __owns:
+            unsafe:
+                value = move __storage[0]
+                drop(value)
+                free(__storage)

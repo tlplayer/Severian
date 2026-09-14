@@ -298,7 +298,7 @@ def callable_type_operand(state: CallableAnalysis, expression: universal.Express
             return false
     if callable_implicit_field(state, root, expression.span) != None:
         return false
-    if scalar.scalar_type_name(name) != None or name == "buffer":
+    if scalar.scalar_type_name(name) != None or name == "array":
         return true
     if definitions.alias_named(state.declarations, name, state.namespace) != None:
         return true
@@ -2843,7 +2843,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     for implementation in state.declarations.implementations:
         if not implementation.extension or len(implementation.methods) == 0 or len(implementation.type_parameters) != 0:
             continue
-        owners = definitions.family_members(state.declarations, universal.named_type(implementation.name, [], implementation.span), state.records, implementation.lookup)
+        owners = definitions.family_members(state.declarations, definitions.extension_annotation(implementation), state.records, implementation.lookup)
         for owner in owners:
             for record in state.records:
                 if record.type_id.index != owner.index:
@@ -3419,10 +3419,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                 if declaration.extension and len(declaration.type_parameters) != 0:
                     if len(declaration.fields) != 0 or len(declaration.operators) != 0 or len(declaration.traits) != 0:
                         return error(callable_diagnostic("generic extensions currently declare methods", declaration.span))
-                    type_arguments: list[universal.TypeAnnotation] = []
-                    for parameter in declaration.type_parameters:
-                        type_arguments.append(universal.named_type(parameter, [], declaration.span))
-                    receiver = universal.named_type(declaration.name, type_arguments, declaration.span)
+                    receiver = definitions.extension_annotation(declaration)
                     for method in declaration.methods:
                         function := callable_replace_signature(method, ["Self"], [receiver])
                         function.name = declaration.lookup + "$extension$" + string(ordinal) + "." + method.name
@@ -3446,7 +3443,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                     continue
                 owners: list[universal.TypeId] := []
                 if declaration.extension or definitions.alias_named(state.declarations, declaration.name, declaration.lookup) != None:
-                    owners = definitions.family_members(state.declarations, universal.named_type(declaration.name, [], declaration.span), state.records, declaration.lookup)
+                    owners = definitions.family_members(state.declarations, definitions.extension_annotation(declaration), state.records, declaration.lookup)
                     if len(declaration.fields) != 0:
                         return error(diagnostics.diagnostic_at("E000212", "extensions cannot add stored fields", declaration.span))
                 else:
@@ -3764,7 +3761,7 @@ def callable_validate_implementations(state: CallableAnalysis) -> unit | diagnos
             continue
         owners: list[universal.TypeId] := []
         if declaration.extension or definitions.alias_named(state.declarations, declaration.name, declaration.lookup) != None:
-            owners = definitions.family_members(state.declarations, universal.named_type(declaration.name, [], declaration.span), state.records, declaration.lookup)
+            owners = definitions.family_members(state.declarations, definitions.extension_annotation(declaration), state.records, declaration.lookup)
         else:
             for record in state.records:
                 if record.name == declaration.name:
@@ -4337,7 +4334,7 @@ def callable_infer_annotation(state: CallableAnalysis, annotation: universal.Typ
                     expanded = definitions.replace_annotation(target, alias.type_parameters, arguments)
                     callable_infer_annotation(state, expanded, actual, parameters, actuals, alias.lookup)
                     return
-            if name == "buffer" and len(arguments) == 1:
+            if name == "array" and len(arguments) == 1:
                 element = storage_types.buffer_element(actual, state.records)
                 if element.index == 0:
                     return error(callable_diagnostic("generic argument has the wrong storage type", annotation.span))

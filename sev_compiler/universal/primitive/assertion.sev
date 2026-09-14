@@ -4,7 +4,7 @@
 def __assert_write(descriptor: i32, data: native_ptr, size: int) -> int
 
 @mlir("memref.extract_aligned_pointer_as_index")
-def __assert_address(value: buffer[u8]) -> index
+def __assert_address(value: array[u8]) -> index
 
 @mlir("arith.index_cast")
 def __assert_index(value: index) -> int

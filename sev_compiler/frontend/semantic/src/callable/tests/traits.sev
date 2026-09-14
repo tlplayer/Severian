@@ -1,5 +1,5 @@
-type Amount = int
-type Later = Amount
+int as Amount
+Amount as Later
 
 trait Addable:
     operator +(other: Self) -> Self

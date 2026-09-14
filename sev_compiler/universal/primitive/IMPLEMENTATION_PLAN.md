@@ -26,12 +26,13 @@ Documentation examples and test fixtures are not additional public types. The co
 | `char.sev` | `char_storage`, `Character`, `char[u8]`, default `char[u32]` | P4 |
 | `char/encoding.sev`, `char/utf8.sev` | Scalar validation, UTF-8 widths/decoding, literal codepoint bridge | P4 |
 | `pointer.sev` | `AddressSpace` (`generic`, `host`, `device`, `global`, `shared`, `local`), `pointer[T]`, `*[T]` alias, unsafe operations | P5 |
+| `box.sev` | `box[T]`: construction, cloning, replacement, extraction and destruction; checked payload loans remain pending; see [API and coverage](box.md) | P5 |
 | `array.sev` | `FixedContainer[T,N]`, `Array[T,N]`, `array[T,N]` | P6 |
 | `slice.sev` | `Slice[T]`, `slice[T]`, array slicing extension | P6 |
 | `string.sev` | `String`, `string`, UTF-8 construction, operators, parsing and formatting conversions | P7, then C3/P8 |
 | `string/core.sev`, `string/format.sev` | Existing byte storage and scalar formatting support; migration adapters | P7–P8 |
 | `numeric/conversion.sev`, `numeric/operators.sev` | Generated numeric bridges, `NativeInteger`, `NativeSignedInteger`; reconcile with canonical families | P2–P3, P9 |
-| `collections.sev` | Temporary `list[T] = buffer[T]`, generated list operations, `Range` and `range` | P6, C1, P9 |
+| `collections.sev` | Prelude list operations, `Range` and `range`; list → vector → array integration remains unfinished | P6, C1, P9 |
 
 ## P0 — Establish the capability and dependency ledger
 

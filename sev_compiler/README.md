@@ -1,5 +1,17 @@
 # Severian compiler
 
+Standalone aliases use the existing type followed by its new name:
+
+```sev
+list[string] as StringList
+Pair[T, R] as Both[T, R]
+```
+
+An alias preserves type identity. Extensions can name an applied type directly,
+such as `extend list[string]:`; `string` is a concrete argument, not a generic
+parameter. In the Rust seed, `as` inside an expression remains an explicit cast,
+as in `flag = 0 as bool`.
+
 File imports explicitly select every exported declaration:
 
 ```sev

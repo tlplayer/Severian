@@ -1,2 +1,2 @@
-type First = Second
-type Second = First
+Second as First
+First as Second

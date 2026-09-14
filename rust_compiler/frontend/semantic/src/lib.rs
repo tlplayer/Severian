@@ -960,6 +960,9 @@ pub(crate) fn analyze_with_package_functions(
                 .and_then(|effects| effects.get(index))
                 .copied()
                 .unwrap_or(ParameterEffect::Shared);
+            if effect == ParameterEffect::Move {
+                parameter.contract.modifiers.push(severian_hir::BoundaryModifier { name: "move".into() });
+            }
             if (analyzer
                 .class_instances_by_type
                 .contains_key(&parameter.contract.ty) || analyzer.types.destruction(parameter.contract.ty).is_some())
@@ -2245,6 +2248,11 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let Some(name) = annotation.simple_name().filter(|name| name.starts_with("source.")) {
+            if let Some(definition) = self.types.definitions().find(|definition| definition.path == name) {
+                return Ok(definition.id);
+            }
+        }
         if let Some(ty) = annotation
             .simple_name()
             .and_then(|name| self.active_type_aliases.get(name))
@@ -4027,6 +4035,18 @@ impl Analyzer<'_> {
                             self.declarations.remove(receiver);
                             return Ok(Statement::Destroy(Expression { id: self.next_id(), type_id: ty,
                                 kind: ExpressionKind::Binding(binding), span: expression.span }));
+                        }
+                        if !self.slice_elements.contains_key(&ty)
+                            && !self.class_instances_by_type.get(&ty).is_some_and(|class|
+                                class.methods.iter().any(|method| method.name == "drop")) {
+                            // Trivially destructible values can also be dropped
+                            // by generic ownership code; consume the binding.
+                            self.names.remove(receiver);
+                            self.declarations.remove(receiver);
+                            let value = Expression { id: self.next_id(), type_id: ty,
+                                kind: ExpressionKind::Binding(binding), span: expression.span };
+                            return Ok(Statement::Expression(Expression { id: self.next_id(), type_id: ty,
+                                kind: ExpressionKind::Move(Box::new(value)), span: expression.span }));
                         }
                     }
                 }
@@ -5818,6 +5838,7 @@ impl Analyzer<'_> {
             let symbol = &signature.symbol;
             definition == function
                 && (symbol == "__sev_list_clear"
+                    || symbol.starts_with("__sev_pointer_set_")
                     || symbol.contains("_push_")
                     || symbol.contains("_pop_")
                     || symbol.contains("_append_")
@@ -7406,11 +7427,16 @@ impl Analyzer<'_> {
                                 .resolve_name("usize")
                                 .expect("bootstrap defines usize");
                             let count = self.expression(&count.value, Some(usize_type))?;
+                            let (width, _) = self.type_layout(element, ast.span)?;
+                            // Existing scalar pointer helpers use machine-sized
+                            // slots for narrow integers; records need their full
+                            // layout instead of the old unconditional eight bytes.
+                            let width = self.integer_expression(&width.max(8).to_string(), usize_type, ast.span);
                             return Ok(self.runtime_call(
-                                "__sev_allocate",
-                                &[usize_type],
+                                "__sev_allocate_sized",
+                                &[usize_type, usize_type],
                                 pointer,
-                                vec![count],
+                                vec![count, width],
                                 ast.span,
                             ));
                         }
@@ -8764,6 +8790,14 @@ impl Analyzer<'_> {
                 }
                 if *operator == AstUnaryOperator::Copy {
                     let operand = self.expression(operand, expected)?;
+                    if let Some(owner) = self.class_instances_by_type.get(&operand.type_id).cloned() {
+                        if let Some(method) = owner.methods.iter().find(|method| method.name == "clone") {
+                            return self.lower_method_callable(&owner, method, operand, &[], expected, ast.span);
+                        }
+                        if self.class_is_affine(operand.type_id, &mut BTreeSet::new()) {
+                            return Err(Diagnostic::new("E000211", "an owning type must declare an explicit clone method", Some(ast.span)));
+                        }
+                    }
                     let Some(element) = self.list_elements.get(&operand.type_id).copied() else {
                         return Ok(operand);
                     };
@@ -8789,7 +8823,16 @@ impl Analyzer<'_> {
                     });
                 }
                 if *operator == AstUnaryOperator::Move {
-                    let operand = self.expression(operand, expected)?;
+                    let mut operand = self.expression(operand, expected)?;
+                    if let ExpressionKind::Call { callee: severian_hir::Callee::Direct { function, .. }, arguments, .. } = &operand.kind {
+                        let symbol = self.runtime_functions.iter().find(|candidate| candidate.definition == *function)
+                            .and_then(|candidate| candidate.name.strip_prefix("__sev_pointer_index_value_"))
+                            .map(|suffix| format!("__sev_pointer_take_value_{suffix}"));
+                        if let Some(symbol) = symbol {
+                            let parameters = arguments.iter().map(|value| value.type_id).collect::<Vec<_>>();
+                            operand = self.runtime_call(&symbol, &parameters, operand.type_id, arguments.clone(), ast.span);
+                        }
+                    }
                     return Ok(Expression {
                         id: self.next_id(),
                         type_id: operand.type_id,
@@ -10849,6 +10892,42 @@ impl Analyzer<'_> {
                 Some(span),
             )
         })?;
+        if !declaration.constructors.is_empty() {
+            let parameters = declaration.type_parameters.iter().map(String::as_str).collect::<BTreeSet<_>>();
+            let mut candidates = BTreeSet::new();
+            for constructor in &declaration.constructors {
+                let mut inferred = BTreeMap::new();
+                let mut compatible = true;
+                for (index, parameter) in constructor.parameters.iter().enumerate() {
+                    let argument = arguments.iter().find(|argument| argument.name.as_deref() == Some(&parameter.name))
+                        .or_else(|| arguments.get(index).filter(|argument| argument.name.is_none()));
+                    let Some(value) = argument.map(|argument| &argument.value).or(parameter.default.as_ref()) else {
+                        compatible = false;
+                        break;
+                    };
+                    let value = self.expression(value, None)?;
+                    if self.infer_class_type_arguments(&parameter.annotation, value.type_id, &parameters, &mut inferred).is_err() {
+                        compatible = false;
+                        break;
+                    }
+                }
+                if compatible {
+                    if let Some(concrete) = declaration.type_parameters.iter()
+                        .map(|parameter| inferred.get(parameter).copied()).collect::<Option<Vec<_>>>() {
+                        candidates.insert(concrete);
+                    }
+                }
+            }
+            if candidates.len() != 1 {
+                return Err(Diagnostic::new("E000206", format!("cannot infer a unique type for constructor `{class}`"), Some(span)));
+            }
+            let concrete = candidates.pop_first().expect("one inferred constructor type");
+            let instance = self.instantiate_class_types(class, &concrete, span)?;
+            if expected.is_some_and(|expected| !self.accepts_expression_type(instance.ty, expected)) {
+                return Err(semantic_error("constructed class does not satisfy the expected type".into(), span));
+            }
+            return self.lower_constructor_call(&instance, arguments, span);
+        }
         if arguments.len() != declaration.fields.len() {
             return Err(Diagnostic::new(
                 "E000221",
@@ -13505,16 +13584,19 @@ impl Analyzer<'_> {
         &self,
         element: TypeId,
         span: severian_source::Span,
-    ) -> Result<&'static str, Diagnostic> {
+    ) -> Result<String, Diagnostic> {
         let name = self
             .types
             .definition(element)
             .map(|definition| definition.name.as_str());
         match name {
             Some("int") | Some("i8") | Some("i16") | Some("i32") | Some("i64") | Some("isize")
-            | Some("u16") | Some("u64") | Some("usize") => Ok("i64"),
-            Some("u32") => Ok("u32"),
-            Some("u8") => Ok("u8"),
+            | Some("u16") | Some("u64") | Some("usize") => Ok("i64".into()),
+            Some("u32") => Ok("u32".into()),
+            Some("u8") => Ok("u8".into()),
+            _ if self.class_instances_by_type.contains_key(&element)
+                || self.types.primitive(element).is_some()
+                || self.pointer_elements.contains_key(&element) => Ok(format!("value_{}", element.0)),
             _ => Err(Diagnostic::new(
                 "E000211",
                 "raw pointer operations do not yet support this element representation",
@@ -13528,10 +13610,10 @@ impl Analyzer<'_> {
         pointer: &Expression,
         element: TypeId,
         span: severian_source::Span,
-    ) -> Result<&'static str, Diagnostic> {
+    ) -> Result<String, Diagnostic> {
         let suffix = self.pointer_runtime_suffix(element, span)?;
         if suffix == "u8" && self.pointer_uses_list_slots(pointer, &mut BTreeSet::new()) {
-            Ok("slot_u8")
+            Ok("slot_u8".into())
         } else {
             Ok(suffix)
         }
@@ -16342,6 +16424,12 @@ impl Analyzer<'_> {
             result_type.0
         );
         let definition = synthetic_runtime_definition(&identity);
+        if symbol.starts_with("__sev_pointer_set_value_") {
+            self.types.register_transferred_argument(definition, 2);
+        }
+        if symbol.starts_with("__sev_pointer_index_value_") {
+            self.types.register_borrowed_result(definition);
+        }
         if symbol.contains("_aggregate") && severian_universal::native_container_stores_values(symbol) {
             for (index, ty) in parameter_types.iter().enumerate() {
                 if self.class_is_affine(*ty, &mut BTreeSet::new()) { self.types.register_transferred_argument(definition, index); }
@@ -17297,7 +17385,12 @@ impl Analyzer<'_> {
                 }
             }
         }
-        if name == "clone" && arguments.is_empty() {
+        if name == "clone" && arguments.is_empty()
+            && !self.class_instances_by_type.get(&object.type_id)
+                .is_some_and(|class| class.methods.iter().any(|method| method.name == "clone")) {
+            if self.class_is_affine(object.type_id, &mut BTreeSet::new()) {
+                return Err(Diagnostic::new("E000211", "an owning type must declare an explicit clone method", Some(span)));
+            }
             if expected.is_some_and(|expected| !self.types.assignable(object.type_id, expected)) {
                 return Err(semantic_error(
                     "cloned value does not satisfy the expected type".into(),

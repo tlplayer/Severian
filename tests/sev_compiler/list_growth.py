@@ -158,8 +158,8 @@ class ListGrowth(MigrationCase):
 
     def test_general_receiver_replacement_and_returns(self):
         self.native('''
-            type Sequence[T] = buffer[T]
-            type Integers = list[int]
+            array[T] as Sequence[T]
+            list[int] as Integers
             extend Integers:
                 def reset():
                     self = []
@@ -212,7 +212,7 @@ class ListGrowth(MigrationCase):
             extend Box[T]:
                 def item_value() -> T:
                     return self.item
-            type Sequence[T] = buffer[T]
+            array[T] as Sequence[T]
             extend Sequence[T]:
                 def item_value() -> T:
                     return self[0]
@@ -237,7 +237,7 @@ class ListGrowth(MigrationCase):
                 value.append(2)
         ''', r"unknown callable")
         self.rejects('''
-            type Sequence[T] = buffer[T]
+            array[T] as Sequence[T]
             extend Sequence[T]:
                 def collide() -> int:
                     return 1

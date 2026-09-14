@@ -11,12 +11,12 @@ test with profile "file bytes use caller owned IO buffers" with
     path = file.temporary_path()
     handle = file.temporary(path)
     assert(handle >= 0)
-    contents: buffer[u8] = storage.allocate(4097)
+    contents: array[u8] = storage.allocate(4097)
     for offset in range(4097):
         contents[offset] = u8(offset % 256)
     assert(io.write_all(int(handle), contents, 4097) == 4097)
     assert(io.close(handle) == 0)
-    destination: buffer[u8] = storage.allocate(8192)
+    destination: array[u8] = storage.allocate(8192)
     for iteration in range(128):
         reader = file.open_read(path)
         assert(reader >= 0)

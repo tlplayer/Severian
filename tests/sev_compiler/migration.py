@@ -165,7 +165,7 @@ class Gate1Baseline(MigrationCase):
 
     def test_03_import_alias_and_member(self):
         self.write('''
-            type Amount = int
+            int as Amount
             class Box:
                 value: Amount
                 def get() -> Amount:

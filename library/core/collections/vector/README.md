@@ -1,6 +1,6 @@
 # Vector
 
-`vector[T, N = 256]` owns a typed allocation directly. `N` is the initial
+`vector[T, N = 256]` owns an `array[T]`. `N` is the initial
 capacity; the vector starts empty and grows geometrically when needed.
 
 `append`, `reserve`, `get`, `len`, `capacity`, `clear` and `copy` are implemented

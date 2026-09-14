@@ -20,7 +20,7 @@ views, transfers, and destructor callbacks belong to the
 
 ## Source MLIR operations
 
-`zeroed_bytes(count)` returns a zero-initialized `buffer[u8]`.
+`zeroed_bytes(count)` returns a zero-initialized `array[u8]`.
 `resized_bytes(view, count)` returns an independent buffer, preserves the common
 prefix and initializes new bytes to zero. `allocate_buffer` and `copy_buffer`
 use `memref.alloc` and `memref.copy`. Their descriptors remain visible to the

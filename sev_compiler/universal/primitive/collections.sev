@@ -1,9 +1,8 @@
 import * from "../../../library/core/memory/src/buffer_intrinsics.sev" as memory
 # Source list construction, access, mutation, truth and iteration protocols.
-# buffer[T] is the typed rank-one MLIR storage boundary.
+# array[T] is the typed rank-one MLIR storage boundary.
 import * from "slicing.sev" as slicing
 
-type list[T] = buffer[T]
 
 union ListElement:
     i8

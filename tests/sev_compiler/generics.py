@@ -76,7 +76,7 @@ pair[int, int]()
     def same() -> Self:
         return self
 
-type IntBox = Box[int]
+Box[int] as IntBox
 box = Box[int](42)
 other: IntBox = IntBox(7)
 assert(box.get() == 42)
@@ -90,7 +90,7 @@ assert(Box[Widget](Widget(9)).get().number == 9)
     left: Left
     right: Right
 
-type Mixed = Pair[int, float]
+Pair[int, float] as Mixed
 
 def first[L, R](value: Pair[L, R]) -> L:
     return value.left
