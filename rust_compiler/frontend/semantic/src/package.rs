@@ -348,6 +348,13 @@ pub fn analyze_package_with_context(
             );
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
+        let local_callables = visible
+            .iter()
+            .map(|binding| binding.lookup.clone())
+            .chain(own_instances.iter().map(|(definition, _)| {
+                index.definitions[definition].name.clone()
+            }))
+            .collect::<BTreeSet<_>>();
         // Class methods retain the lexical module in which they were declared,
         // even when a downstream package is the first caller that makes the
         // method body reachable. Install those origin-module callables before
@@ -356,7 +363,14 @@ pub fn analyze_package_with_context(
         let lexical_class_modules = class_lexical_modules(source_module.id, &package_classes);
         for origin in &lexical_class_modules {
             if *origin != source_module.id {
-                visible.extend(module_function_bindings(*origin, &index, &specializations));
+                // Origin helpers supplement the caller's scope; they must not
+                // turn an existing local or imported callable into an overload
+                // of an unrelated declaration from another module.
+                visible.extend(
+                    module_function_bindings(*origin, &index, &specializations)
+                        .into_iter()
+                        .filter(|binding| !local_callables.contains(&binding.lookup)),
+                );
             }
         }
         visible.extend(registry_function_bindings(

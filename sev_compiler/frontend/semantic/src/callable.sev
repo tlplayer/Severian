@@ -298,7 +298,7 @@ def callable_type_operand(state: CallableAnalysis, expression: universal.Express
             return false
     if callable_implicit_field(state, root, expression.span) != None:
         return false
-    if scalar.scalar_type_name(name) != None or name == "array":
+    if scalar.scalar_type_name(name) != None or definitions.bootstrap_storage_type(state.declarations, name, state.namespace):
         return true
     if definitions.alias_named(state.declarations, name, state.namespace) != None:
         return true
@@ -1577,6 +1577,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if record.type_id.index == state.owner.index:
                         for method in record.methods:
                             if method.name == name and name != record.name.split(".")[-1]:
+                                supplied := len(arguments)
+                                if len(method.parameters) != 0 and method.parameters[0].name == "self":
+                                    supplied += 1
+                                if not callable_accepts_arity(method, supplied):
+                                    continue
                                 receiver = universal.Expression(universal.Name("self"), callee.span)
                                 member = universal.Expression(universal.Member(receiver, name), callee.span)
                                 return callable_expression(state, universal.Expression(universal.Call(member, arguments), expression.span), expected)
@@ -4161,21 +4166,21 @@ def callable_constructor_type(state: CallableAnalysis, callee: universal.Express
                     return record.type_id
         case Subscript:
             name = callable_path(object)
-            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+            if definitions.bootstrap_storage_type(state.declarations, name, state.namespace) or definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
                 annotation = callable_type_expression(callee)
                 resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 callable_record_layout(state.records, resolved, [])
                 return resolved
         case TypeApplication:
             name = callable_path(target)
-            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+            if definitions.bootstrap_storage_type(state.declarations, name, state.namespace) or definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
                 annotation = callable_type_expression(callee)
                 resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 callable_record_layout(state.records, resolved, [])
                 return resolved
         case Slice:
             name = callable_path(object)
-            if definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
+            if definitions.bootstrap_storage_type(state.declarations, name, state.namespace) or definitions.record_template(state.declarations, name, state.namespace) != None or definitions.alias_named(state.declarations, name, state.namespace) != None:
                 annotation = callable_type_expression(callee)
                 resolved = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 callable_record_layout(state.records, resolved, [])
@@ -4334,7 +4339,7 @@ def callable_infer_annotation(state: CallableAnalysis, annotation: universal.Typ
                     expanded = definitions.replace_annotation(target, alias.type_parameters, arguments)
                     callable_infer_annotation(state, expanded, actual, parameters, actuals, alias.lookup)
                     return
-            if name == "array" and len(arguments) == 1:
+            if definitions.bootstrap_storage_type(state.declarations, name, namespace) and len(arguments) == 1:
                 element = storage_types.buffer_element(actual, state.records)
                 if element.index == 0:
                     return error(callable_diagnostic("generic argument has the wrong storage type", annotation.span))

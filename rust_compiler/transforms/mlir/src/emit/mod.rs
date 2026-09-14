@@ -1471,17 +1471,26 @@ fn render_cfg_operation(
                     return Ok(());
                 }
             }
-            if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
-                let object_type = cfg_place_base_type(module, body, place)?;
+            if let Some((severian_lir::Projection::Field(field), parents)) =
+                place.projection.split_last()
+            {
+                let (address, object_type) = render_cfg_field_address(
+                    output,
+                    module,
+                    place_address.clone().unwrap_or_else(|| cfg_place_base_address(place)),
+                    cfg_place_base_type(module, body, place)?,
+                    parents,
+                    &format!("load_parent_b{}_o{}", block.0, operation_index),
+                    indent,
+                )?;
                 let base_type = mlir_type(&object_type)?;
-                let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
+                let stored_type =
+                    aggregate_declaration_field_type(module, &object_type, *field as usize)?;
                 output.push_str(&format!(
                     "{indentation}%load_base_b{}_o{} = llvm.load {} : !llvm.ptr -> {base_type}\n",
                     block.0,
                     operation_index,
-                    place_address
-                        .clone()
-                        .unwrap_or_else(|| cfg_place_base_address(place))
+                    address
                 ));
                 if tensor_aggregate_abi_type(&stored_type).is_some() {
                     render_field_extract(
@@ -1537,64 +1546,19 @@ fn render_cfg_operation(
             }
         }
         Operation::AddressOf { place, result } => {
-            let mut address = place_address
+            let address = place_address
                 .clone()
                 .unwrap_or_else(|| cfg_place_base_address(place));
-            let mut ty = cfg_place_base_type(module, body, place)?;
-            for (depth, projection) in place.projection.iter().enumerate() {
-                let severian_lir::Projection::Field(field) = projection else {
-                    return Err(MlirError::UnsupportedOperation(format!(
-                        "address projection {projection:?}"
-                    )));
-                };
-                let LoweredType::Aggregate(class) = &ty else {
-                    return Err(MlirError::UnsupportedOperation(
-                        "reference field requires a record".into(),
-                    ));
-                };
-                let next = module
-                    .classes
-                    .iter()
-                    .find(|known| known.id == *class)
-                    .and_then(|class| class.fields.get(*field as usize))
-                    .ok_or_else(|| {
-                        MlirError::UnsupportedOperation("invalid reference field".into())
-                    })?
-                    .ty
-                    .clone();
-                let name = format!("%reference{}_field{depth}", result.0);
-                let declaration = module
-                    .classes
-                    .iter()
-                    .find(|known| known.id == *class)
-                    .expect("field type was resolved above");
-                if !declaration.variants.is_empty() && *field != 0 {
-                    let (variant, index) = declaration
-                        .variants
-                        .iter()
-                        .enumerate()
-                        .find_map(|(variant, fields)| {
-                            fields
-                                .iter()
-                                .position(|logical| logical == field)
-                                .map(|index| (variant, index))
-                        })
-                        .ok_or_else(|| {
-                            MlirError::UnsupportedOperation(
-                                "invalid sum reference projection".into(),
-                            )
-                        })?;
-                    let header_type = mlir_type(&ty)?;
-                    let payload_type = sum_payload_type(declaration, variant as u32)?;
-                    output.push_str(&format!("{indentation}{name}_header = llvm.load {address} : !llvm.ptr -> {header_type}\n"));
-                    output.push_str(&format!("{indentation}{name}_payload = llvm.extractvalue {name}_header[1] : {header_type}\n"));
-                    output.push_str(&format!("{indentation}{name} = llvm.getelementptr {name}_payload[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
-                } else {
-                    output.push_str(&format!("{indentation}{name} = llvm.getelementptr {address}[0, {field}] : (!llvm.ptr) -> !llvm.ptr, {}\n", mlir_type(&ty)?));
-                }
-                address = name;
-                ty = next;
-            }
+            let ty = cfg_place_base_type(module, body, place)?;
+            let (address, _) = render_cfg_field_address(
+                output,
+                module,
+                address,
+                ty,
+                &place.projection,
+                &format!("reference{}", result.0),
+                indent,
+            )?;
             output.push_str(&format!("{indentation}%v{} = builtin.unrealized_conversion_cast {address} : !llvm.ptr to !llvm.ptr\n", result.0));
         }
         Operation::Store { place, value } => {
@@ -1661,14 +1625,22 @@ fn render_cfg_operation(
                     return Ok(());
                 }
             }
-            if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
-                let object_type = cfg_place_base_type(module, body, place)?;
+            if let Some((severian_lir::Projection::Field(field), parents)) =
+                place.projection.split_last()
+            {
+                let (address, object_type) = render_cfg_field_address(
+                    output,
+                    module,
+                    place_address.clone().unwrap_or_else(|| cfg_place_base_address(place)),
+                    cfg_place_base_type(module, body, place)?,
+                    parents,
+                    &format!("store_parent_b{}_o{}", block.0, operation_index),
+                    indent,
+                )?;
                 verify_record_update(module, &object_type)?;
                 let base_type = mlir_type(&object_type)?;
-                let address = place_address
-                    .clone()
-                    .unwrap_or_else(|| cfg_place_base_address(place));
-                let stored_type = cfg_aggregate_field_type(module, body, place, *field)?;
+                let stored_type =
+                    aggregate_declaration_field_type(module, &object_type, *field as usize)?;
                 output.push_str(&format!(
                     "{indentation}%store_base_b{}_o{} = llvm.load {address} : !llvm.ptr -> {base_type}\n",
                     block.0, operation_index
@@ -2262,6 +2234,76 @@ fn render_cfg_terminator(
         }
     }
     Ok(())
+}
+
+// Walk record and sum payload storage one field at a time. The same path
+// calculation serves references and nested loads/stores, including borrowed bases.
+#[allow(clippy::too_many_arguments)]
+fn render_cfg_field_address(
+    output: &mut String,
+    module: &Module,
+    mut address: String,
+    mut ty: LoweredType,
+    projections: &[severian_lir::Projection],
+    tag: &str,
+    indent: usize,
+) -> Result<(String, LoweredType), MlirError> {
+    let indentation = " ".repeat(indent);
+    for (depth, projection) in projections.iter().enumerate() {
+        let severian_lir::Projection::Field(field) = projection else {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "address projection {projection:?}"
+            )));
+        };
+        let LoweredType::Aggregate(class) = &ty else {
+            return Err(MlirError::UnsupportedOperation(
+                "reference field requires a record".into(),
+            ));
+        };
+        let next = module
+            .classes
+            .iter()
+            .find(|known| known.id == *class)
+            .and_then(|class| class.fields.get(*field as usize))
+            .ok_or_else(|| {
+                MlirError::UnsupportedOperation("invalid reference field".into())
+            })?
+            .ty
+            .clone();
+        let name = format!("%{tag}_field{depth}");
+        let declaration = module
+            .classes
+            .iter()
+            .find(|known| known.id == *class)
+            .expect("field type was resolved above");
+        if !declaration.variants.is_empty() && *field != 0 {
+            let (variant, index) = declaration
+                .variants
+                .iter()
+                .enumerate()
+                .find_map(|(variant, fields)| {
+                    fields
+                        .iter()
+                        .position(|logical| logical == field)
+                        .map(|index| (variant, index))
+                })
+                .ok_or_else(|| {
+                    MlirError::UnsupportedOperation(
+                        "invalid sum reference projection".into(),
+                    )
+                })?;
+            let header_type = mlir_type(&ty)?;
+            let payload_type = sum_payload_type(declaration, variant as u32)?;
+            output.push_str(&format!("{indentation}{name}_header = llvm.load {address} : !llvm.ptr -> {header_type}\n"));
+            output.push_str(&format!("{indentation}{name}_payload = llvm.extractvalue {name}_header[1] : {header_type}\n"));
+            output.push_str(&format!("{indentation}{name} = llvm.getelementptr {name}_payload[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {payload_type}\n"));
+        } else {
+            output.push_str(&format!("{indentation}{name} = llvm.getelementptr {address}[0, {field}] : (!llvm.ptr) -> !llvm.ptr, {}\n", mlir_type(&ty)?));
+        }
+        address = name;
+        ty = next;
+    }
+    Ok((address, ty))
 }
 
 fn cfg_place_address(place: &severian_lir::Place) -> Result<String, MlirError> {
@@ -3864,15 +3906,7 @@ fn aggregate_declaration_field_type<'a>(
         })
 }
 
-fn cfg_aggregate_field_type<'a>(
-    module: &'a Module,
-    body: &severian_lir::CfgBody,
-    place: &severian_lir::Place,
-    field: u32,
-) -> Result<&'a LoweredType, MlirError> {
-    let base = cfg_place_base_type(module, body, place)?;
-    aggregate_declaration_field_type(module, &base, field as usize)
-}
+
 
 fn mlir_tensor_element(element: LoweredTensorElement) -> Result<String, MlirError> {
     mlir_type(&match element {

@@ -3060,6 +3060,25 @@ mod tests {
     }
 
     #[test]
+    fn nested_record_places_preserve_reads_and_borrowed_updates() {
+        let root = temporary_package();
+        let source = root.join("nested-record.sev");
+        std::fs::write(
+            &source,
+            "class Inner:\n    value: int\n    def set(next: int):\n        value = next\nclass Outer:\n    inner: Inner\n    untouched: int\ndef update(value: borrow Outer):\n    value.inner.set(42)\ndef main():\n    value := Outer(Inner(7), 99)\n    assert(value.inner.value == 7)\n    update(value)\n    assert(value.inner.value == 42)\n    assert(value.untouched == 99)\n",
+        )
+        .unwrap();
+        let program = root.join("program");
+        Compiler::new(TargetSpec::host())
+            .unwrap()
+            .compile_file(&source, &program)
+            .unwrap();
+        let output = std::process::Command::new(&program).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn stored_async_tasks_survive_cfg_verification_and_codegen() {
         let root = temporary_package();
         let source = root.join("async.sev");

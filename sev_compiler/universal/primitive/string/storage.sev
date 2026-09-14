@@ -56,7 +56,7 @@ class string[T: u8 | u32 = u8, N = 64]:
         return string[T, N](storage.copy())
 
     operator string(self) -> string:
-        result = string[u8, 256]()
+        result = string()
         position := 0
         while position < storage.used:
             codepoint = __decode(position)

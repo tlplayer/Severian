@@ -47,6 +47,64 @@ fn temporary() -> PathBuf {
 }
 
 #[test]
+fn class_origin_helpers_do_not_compete_with_local_or_imported_callables() {
+    let root = temporary();
+    std::fs::write(
+        root.join("provider.sev"),
+        "def error() -> i32:\n    return 99\nclass Provider:\n    def value() -> i32:\n        return 7\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("local.sev"),
+        "def error() -> i32:\n    return 0\n",
+    )
+    .unwrap();
+    for declaration in [
+        "def error() -> i32:\n    return 0\n",
+        "import * from \"local.sev\"\n",
+    ] {
+        let source = root.join("entry.sev");
+        std::fs::write(
+            &source,
+            format!("import * from \"provider.sev\" as provider\n{declaration}def selected() -> i32:\n    return error()\n"),
+        )
+        .unwrap();
+        let universal = severian_bootstrap::load().unwrap();
+        let graph = severian_modules::resolve(&source).unwrap();
+        let typed = analyze_package(&graph, &universal).unwrap();
+        let selected = typed
+            .hir
+            .modules
+            .iter()
+            .flat_map(|module| &module.functions)
+            .find(|function| function.name == "selected")
+            .unwrap();
+        let severian_hir::Statement::Return(Some(call)) = &selected.body.as_ref().unwrap().statements[0] else {
+            panic!("selected must return a call")
+        };
+        let severian_hir::ExpressionKind::Call {
+            callee: severian_hir::Callee::Direct { function, .. },
+            ..
+        } = &call.kind else {
+            panic!("error must resolve to a direct declaration")
+        };
+        let definition = &typed.index.definitions[function];
+        let origin = graph
+            .modules
+            .iter()
+            .find(|module| module.id == definition.module)
+            .unwrap();
+        let expected = if declaration.starts_with("def") {
+            &source
+        } else {
+            &root.join("local.sev")
+        };
+        assert_eq!(&origin.path, expected);
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn primitive_class_collapses_to_the_universal_identity_and_installs_operators() {
     let source = severian_source::SourceFile::virtual_source(
         "bool.sev",

@@ -102,10 +102,16 @@ def bind_type_arguments(parameters: list[string], arguments: list[universal.Type
     return ordered
 
 
+def bootstrap_storage_type(definitions: SemanticDefinitions, name: string, namespace: string) -> bool:
+    # The source prelude's list protocols use the rank-one storage boundary too.
+    # Explicit list declarations and aliases retain their concrete contracts.
+    return name == "array" or (name == "list" and alias_named(definitions, name, namespace) == None and record_template(definitions, name, namespace) == None)
+
+
 def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
-            if name == "array" and len(arguments) == 1:
+            if bootstrap_storage_type(definitions, name, namespace) and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
                 if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
                     return universal.TypeId(200 + element.index)
@@ -700,8 +706,10 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
     if template.name == "string" and len(actuals) == 1 and len(values) == 1:
         if int(actuals[0].type_id.index) in [108, 532]:
             representation = "String"
-            if actuals[0].type_id.index == 108 and universal.simple_type_name(values[0]) == "256":
-                id = universal.TypeId(3)
+            if actuals[0].type_id.index == 108:
+                for default in template.type_defaults:
+                    if default.binding == values[0].binding and universal.simple_type_name(default) == universal.simple_type_name(values[0]):
+                        id = universal.TypeId(3)
     position = len(records)
     record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation)
     records.append(record)

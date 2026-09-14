@@ -17,6 +17,9 @@ class vector[T, N = 256]:
     def len() -> int:
         return used
 
+    # Alias so len([1]) gives the same as size([1]) so functions don't desync.
+    len() as size()
+
     def capacity() -> int:
         return len(data)
 
@@ -49,7 +52,7 @@ class vector[T, N = 256]:
     operator copy(self) -> Self:
         return self.copy()
 
-    def copy() -> Self:
+    def copy(self: view Self) -> Self:
         result = vector[T, N]()
         result.reserve(used)
         position := 0
