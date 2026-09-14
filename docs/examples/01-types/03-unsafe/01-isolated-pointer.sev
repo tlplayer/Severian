@@ -1,8 +1,8 @@
 def byte_at(byte_list: list[u8], index: int) -> u8 :
     unsafe:
         p: pointer[u8] = &byte_list[0]
-        #Print the address of byte_list similar to &(*p)
-        print(&p[])
+        # Take the first byte's address, which is also stored in p.
+        print("Pointer:", p, "->", "address:", &byte_list[0], "value:", p[0])
         # Raw access is always indexed; Severian has no unary `*pointer` form.
         return p[index]
 
@@ -10,6 +10,17 @@ test "Base case":
     
     byte_value ?= byte_at([65, 66, 67], 1)
     assert(byte_value == 66)
+
+test with integ "pointer addresses print without dereferencing":
+    byte_list: list[u8] = [65, 66, 67]
+    unsafe:
+        p: pointer[u8] = &byte_list[0]
+        address = string(p)
+        assert(address[:2] == "0x")
+        assert(address != "0x0")
+        assert(address == string(&byte_list[0]))
+        print(p, &byte_list[0], p[0])
+        assert(stdout == address + " " + address + " 65\n")
 
 def main():
     result = byte_at([65, 66, 67], 1)

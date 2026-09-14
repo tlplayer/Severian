@@ -103,6 +103,26 @@ def string(value: u64) -> string:
     return result
 
 
+def pointer_text(value: u64) -> string:
+    # Format the address without loading the pointed-to storage.
+    remaining := value
+    count := 1
+    while remaining >= 16:
+        remaining = __unsigned_divide(remaining, 16)
+        count += 1
+    result = text.__allocate(text.__index(count + 2))
+    __store_byte(result, 0, 48)
+    __store_byte(result, 1, 120)
+    position := count + 2
+    remaining = value
+    while position > 2:
+        position -= 1
+        digit = __unsigned_digit(__unsigned_remainder(remaining, 16))
+        __store_byte(result, position, 48 + digit if digit < 10 else 87 + digit)
+        remaining = __unsigned_divide(remaining, 16)
+    return result
+
+
 def string(value: bool) -> string:
     return "true" if value else "false"
 

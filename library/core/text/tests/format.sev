@@ -1,5 +1,12 @@
 import * from "../src/format.sev" as format
 
+test "pointer formatting covers null, hexadecimal digits, and all address bits":
+    assert(format.pointer_text(0) == "0x0")
+    assert(format.pointer_text(15) == "0xf")
+    assert(format.pointer_text(16) == "0x10")
+    assert(format.pointer_text(81985529216486895) == "0x123456789abcdef")
+    assert(format.pointer_text(18446744073709551615) == "0xffffffffffffffff")
+
 test "decimal conversion covers zero and signed and unsigned limits":
     assert(format.string(0) == "0")
     assert(format.string(-9223372036854775808) == "-9223372036854775808")

@@ -1,0 +1,7 @@
+# Storage quantities are separate from the number of elements in a container.
+trait ByteSized:
+    def bytes() -> byte
+
+trait Container: ByteSized
+    def len() -> int
+    def size() -> int

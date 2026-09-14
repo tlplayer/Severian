@@ -61,6 +61,15 @@ extend list[string]:
     def length() -> usize:
         return usize(len(self.ends))
 
+    def len(self: view Self) -> int:
+        return len(self.ends)
+
+    def size(self: view Self) -> int:
+        return len(self.ends)
+
+    def bytes(self: view Self) -> byte:
+        return bytes(self.data) + bytes(self.ends)
+
     def clear(self: borrow Self):
         self.data = ""
         self.ends = []

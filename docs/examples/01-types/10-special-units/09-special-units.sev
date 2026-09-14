@@ -1,5 +1,9 @@
 # Data
 test "data units":
+    empty: byte = 0B
+    width: byte = 1B
+    assert(empty == 0b)
+    assert(width == 8b)
     assert(1B == 8b)
 
     assert(1KB == 1000B)

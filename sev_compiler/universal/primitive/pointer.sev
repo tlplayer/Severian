@@ -1,5 +1,12 @@
 # The hosted pointer representation retains T in source types. Allocation is
 # explicit: these pointers never participate in managed buffer deallocation.
+import * from "../../../library/core/text/src/format.sev" as format
+
+@mlir("llvm.ptrtoint")
+def __pointer_bits(value: native_ptr) -> u64
+
 class pointer[T]:
     __address: native_ptr
 
+    operator string(self) -> string:
+        return format.pointer_text(__pointer_bits(__address))

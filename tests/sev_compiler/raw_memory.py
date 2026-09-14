@@ -9,6 +9,108 @@ from bootstrap_mlir import tool
 
 
 class RawMemory(MigrationCase):
+    def test_byte_literals_and_allocation_keep_element_counts_separate(self):
+        self.native('''
+            test:
+                empty: byte = 0B
+                width: byte = 1B
+                assert(empty == 0b)
+                assert(width == 8b)
+                assert(1KB == 1000B)
+                assert(1KiB == 1024B)
+                unsafe:
+                    raw = allocate(7B)
+                    raw[0B] = u8(65)
+                    raw[6B] = u8(90)
+                    assert(raw[0] == u8(65))
+                    assert(raw[6] == u8(90))
+                    free(raw)
+                    zero = allocate(0B)
+                    free(zero)
+                    typed = allocate[u32](2)
+                    typed[0] = u32(23)
+                    typed[4B] = u32(45)
+                    assert(typed[0B] == u32(23))
+                    assert(typed[1] == u32(45))
+                    free(typed)
+        ''')
+
+    def test_container_requires_counts_and_byte_storage(self):
+        self.native('''
+            class Buffer: Container:
+                def len() -> int:
+                    return 3
+                def size() -> int:
+                    return 3
+                def bytes() -> byte:
+                    return 12B
+            def storage[C: Container](value: C) -> byte:
+                assert(value.len() == 3)
+                assert(value.size() == 3)
+                return bytes(value)
+            test:
+                assert(storage(Buffer()) == 12B)
+                values: list[u32] = [1, 2, 3]
+                assert(storage(values) == 12B)
+        ''')
+        for missing in ['len', 'size', 'bytes']:
+            methods = {
+                'len': 'def len() -> int:\n        return 3',
+                'size': 'def size() -> int:\n        return 3',
+                'bytes': 'def bytes() -> byte:\n        return 12B',
+            }
+            text = 'class Incomplete: Container:\n    ' + '\n    '.join(
+                body for name, body in methods.items() if name != missing)
+            with self.subTest(missing=missing):
+                self.rejects(text, 'does not satisfy|does not implement|missing')
+
+    def test_pointer_string_conversion_preserves_address_identity(self):
+        self.native('''
+            test:
+                values: list[u8] = [65, 66, 67]
+                unsafe:
+                    p = &values[0]
+                    address = string(p)
+                    assert(address[:2] == "0x")
+                    assert(address != "0x0")
+                    assert(address == string(&values[0]))
+                    assert(address != string(&values[1]))
+                    assert(p[0] == u8(65))
+        ''')
+
+    def test_vector_reports_owned_bytes_separately_from_element_count(self):
+        self.native(f'''
+            import * from "{os.path.relpath(ROOT / 'library/core/collections/vector/src/vector.sev', self.directory)}" as vectors
+            test:
+                values = vectors.vector[u32, 2]()
+                assert(len(values) == 0)
+                assert(size(values) == 0)
+                assert(bytes(values) == 8B)
+                values.append(u32(1))
+                values.append(u32(2))
+                assert(len(values) == 2)
+                assert(bytes(values) == 8B)
+                values.append(u32(3))
+                assert(size(values) == 3)
+                assert(bytes(values) == 16B)
+                values.clear()
+                assert(len(values) == 0)
+                assert(bytes(values) == 16B)
+        ''')
+
+    def test_byte_allocation_rejects_integer_sizes_and_safe_calls(self):
+        self.rejects('def use():\n    memory = allocate(7B)', 'requires an unsafe scope')
+        self.rejects('''
+            def use():
+                unsafe:
+                    memory = allocate(7)
+        ''', 'no overload|does not match|argument')
+        self.rejects('''
+            def use():
+                unsafe:
+                    memory = allocate[u32](7B)
+        ''', 'does not match|expected|argument')
+
     def test_generic_type_layout_in_member_and_arithmetic_inference(self):
         self.native('''
             def width[T](value: T) -> int:
@@ -23,7 +125,7 @@ class RawMemory(MigrationCase):
         self.native('''
             class Sized:
                 count: int
-                def bytes() -> DataSize:
+                def bytes() -> byte:
                     return data_size(count)
             test:
                 assert(bytes(Sized(23)) == 23B)

@@ -408,12 +408,17 @@ Ordinary tests can contain isolated `accept:` and `reject:` blocks; those blocks
 are checked without executing their statements.
 
 `bytes[T]()` and `alignment[T]()` query the hosted LLVM storage layout and return
-the source `DataSize` quantity. Layout queries obtain Clang's target layout
+the source `byte` quantity. Layout queries obtain Clang's target layout
 through `SEVERIAN_CLANG`, including when emitting MLIR, and preserve it on the
 module. Run `python3 tests/sev_compiler/memory_ownership.py -v` for unchanged
 layout/lifetime examples, native behavior, lifetime rejections and allocation
-checks. Raw `allocate[T]`/`free`, typed pointer access and casts require an
-`unsafe` scope. Explicit borrow/move/clone support is covered by
+checks. `allocate[T](count)` takes an integer element count; `allocate(7B)`
+allocates exactly seven bytes and returns `pointer[u8]`. Both allocation forms,
+`free`, typed pointer access and casts require an `unsafe` scope. Pointer indices
+use integers for element offsets and `byte` quantities for byte offsets.
+`bytes(container)` returns owned storage as a `byte` quantity. The `Container`
+trait requires `bytes()`, `len()`, and `size()`; the latter two return integer
+element counts. Explicit borrow/move/clone support is covered by
 `tests/sev_compiler/raw_memory.py` and `tests/sev_compiler/explicit_ownership.py`.
 Owned collection elements, partial moves, inferred ownership transfers and the
 broader ownership examples remain unfinished.

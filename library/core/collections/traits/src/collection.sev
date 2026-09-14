@@ -1,8 +1,8 @@
 import * from "iterator.sev"
+import * from "container.sev"
 
 
-trait Collection[T]: Iterable[T]
-    def len() -> usize
+trait Collection[T]: Iterable[T] + Container
 
     def empty() -> bool:
         return len() == 0

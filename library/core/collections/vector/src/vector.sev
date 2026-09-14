@@ -3,7 +3,7 @@ import * from "../../../storage/src/lib.sev" as storage
 # The vector owns its buffer directly. N is the initial capacity; reserve
 # chooses growth and core.storage checks allocations through core.memory. Replacing or
 # dropping the buffer releases its allocation through ordinary ownership.
-class vector[T, N = 256]:
+class vector[T, N = 256]: Container:
     data: array[T]
     used: int
 
@@ -14,10 +14,13 @@ class vector[T, N = 256]:
         data: array[T] = storage.allocate(N)
         used = 0
 
-    def len() -> int:
+    def len(self: view Self) -> int:
         return used
 
-    def bytes() -> bytes:
+    def size(self: view Self) -> int:
+        return used
+
+    def bytes(self: view Self) -> byte:
         return bytes(data)
 
     # TODO: Alias so len([1]) gives the same as size([1]) so functions don't desync.

@@ -1,4 +1,5 @@
 import * from "../../../library/core/memory/src/buffer_intrinsics.sev" as memory
+import * from "../../../library/core/collections/traits/src/container.sev"
 # Source list construction, access, mutation, truth and iteration protocols.
 # array[T] is the typed rank-one MLIR storage boundary.
 import * from "slicing.sev" as slicing
@@ -143,6 +144,15 @@ extend list[T]:
     def length() -> usize:
         return usize(__list_size(__buffer_dimension(self, 0)))
 
+    def len(self: view Self) -> int:
+        return __list_size(__buffer_dimension(self, 0))
+
+    def size(self: view Self) -> int:
+        return __list_size(__buffer_dimension(self, 0))
+
+    def bytes(self: view Self) -> byte:
+        return byte(float(__list_size(__buffer_dimension(self, 0))) * bytes(T).amount)
+
     def clear(self: borrow Self):
         self = __buffer_allocate(__list_index(0))
 
@@ -224,17 +234,14 @@ def __string_dimension(value: string, axis: index) -> index:
     assert(__list_size(axis) == 0)
     return __list_index(value.storage.used)
 
-def len(value: string) -> int:
-    return value.length()
-
-trait ByteSized:
-    def bytes() -> DataSize
-
-def bytes[T: ByteSized](value: T) -> DataSize:
+def bytes[T: ByteSized](value: T) -> byte:
     return value.bytes()
 
-def size(value: string) -> int:
-    return __list_size(__string_dimension(value, 0))
+def len[C: Container](value: C) -> int:
+    return value.len()
+
+def size[C: Container](value: C) -> int:
+    return value.size()
 
 operator if[G:If](self: string) -> bool:
     return __list_size(__string_dimension(self, 0)) != 0

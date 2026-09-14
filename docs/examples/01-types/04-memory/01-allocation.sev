@@ -25,3 +25,16 @@ test "raw memory allocation":
 test with compiler "compiler rejects raw allocation from safe code":
     reject:
         memory := allocate[int](4)
+
+test "raw allocation by byte quantity":
+    unsafe:
+        memory = allocate(7B)
+        memory[0B] = u8(65)
+        memory[6B] = u8(90)
+        assert(memory[0] == u8(65))
+        assert(memory[6] == u8(90))
+        free(memory)
+
+test with compiler "byte allocation also requires unsafe":
+    reject:
+        memory = allocate(7B)

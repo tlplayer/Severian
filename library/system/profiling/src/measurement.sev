@@ -23,5 +23,5 @@ def time(context: Measurement) -> Duration:
 def allocations(context: Measurement) -> int:
     return int(storage.allocation_count() - context.allocation_start)
 
-def memory(context: Measurement) -> DataSize:
-    return DataSize(float(storage.allocated_bytes() - context.bytes_start) * 8.0)
+def memory(context: Measurement) -> byte:
+    return byte(float(storage.allocated_bytes() - context.bytes_start) * 8.0)

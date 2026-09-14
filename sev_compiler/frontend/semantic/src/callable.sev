@@ -257,11 +257,11 @@ def callable_pointer_index(state: CallableAnalysis, receiver: universal.Expressi
     position := callable_expression(state, index, universal.TypeId(0))
     bytes := false
     for record in state.records:
-        if record.type_id.index == position.type_id.index and record.name == "DataSize":
+        if record.type_id.index == position.type_id.index and record.name == "byte":
             position = callable_raw_call(state, "__raw_byte_offset", [position], span, universal.TypeId(64))
             bytes = true
     if position.type_id.index != 64:
-        return error(callable_diagnostic("pointer index requires int or a whole-byte DataSize", span))
+        return error(callable_diagnostic("pointer index requires an int element offset or a byte offset", span))
     container = universal.Expression(universal.UpdateOperand(0), span, type_id=receiver.type_id)
     offset = universal.Expression(universal.UpdateOperand(1), span, type_id=position.type_id)
     base = universal.Expression(universal.FieldReference(container, 0), span, type_id=universal.TypeId(5))
@@ -3221,6 +3221,10 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
             implicit = true
         case _:
             pass
+    return callable_owner_method(state, owner, member, argument_count, implicit, callee.span)
+
+
+def callable_owner_method(state: CallableAnalysis, owner: universal.TypeId, member: string, argument_count: int, implicit: bool, span: source.Span) -> CallableOptionalFunction | diagnostics.Diagnostic:
     callable_register_record_methods(state, owner)
     if owner.index >= 100000:
         required = callable_required_member(state, owner, member)
@@ -3238,6 +3242,8 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
     for template in state.generics:
         if not template.extension or template.name.split(".")[-1] != member or owner.index == 0:
             continue
+        if implicit and not callable_accepts_arity(template, argument_count + 1):
+            continue
         actuals: list[universal.TypeId] = []
         for parameter in template.type_parameters:
             actuals.append(universal.TypeId(0))
@@ -3252,7 +3258,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
         if candidate.parameter_types[0].index != owner.index:
             continue
         if selected != None:
-            return error(callable_diagnostic("ambiguous extension method " + member, callee.span))
+            return error(callable_diagnostic("ambiguous extension method " + member, span))
         selected = candidate
     return CallableOptionalFunction(selected)
 
@@ -3810,6 +3816,13 @@ def callable_satisfies(state: CallableAnalysis, type_id: universal.TypeId, trait
                 if function.owner_type.index == type_id.index and function.name.split(".")[-1] == method.name:
                     if callable_same_types(function.parameter_types, signature.parameter_types) and function.result_type.index == signature.result_type.index:
                         found = true
+            if not found:
+                # Generic extension methods satisfy the same contract as
+                # methods declared directly on a record.
+                lookup = callable_owner_method(state, type_id, method.name, len(signature.parameters) - 1, false, required.span)
+                implementation ?= lookup.function
+                if implementation != None:
+                    found = callable_same_types(implementation.parameter_types, signature.parameter_types) and implementation.result_type.index == signature.result_type.index
             if not found:
                 return false
         for property in required.properties:
@@ -4900,6 +4913,8 @@ def callable_regular_call(state: CallableAnalysis, expression: universal.Express
     if selected != None:
         selected_functions.append(selected.function)
     for function in selected_functions:
+        if function.prelude and function.name == "allocate":
+            callable_require_unsafe(state, expression.span)
         target = callable_mock_target(state, function, expression.span)
         if target != function.name:
             return callable_regular_call(state, expression, target, arguments, expected, allow_prelude)

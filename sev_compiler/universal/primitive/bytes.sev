@@ -1,8 +1,24 @@
-'''
-The byte type represents the storage used by an object in bytes
+# Storage quantities use bits internally: 1B is eight bits; 0B is zero storage.
+# This is a dimensioned size, independent of integer values and element counts.
 
-a pointer to 20 bytes of memory on heap will return 20 bytes
-bytes(pointer) -> 20B
+class byte:
+    amount: float
 
-Bytes have a literal of 20B and also can have KB, MB etc. 
-'''
+    operator string() -> string:
+        return string(self.amount / 8.0) + "B"
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return byte(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount

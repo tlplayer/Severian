@@ -4,7 +4,7 @@ import * from "../char/utf8.sev" as encoding
 
 # Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
 # N is the initial vector capacity and does not limit the string's length.
-class string[T: u8 | u32 = u8, N = 64]:
+class string[T: u8 | u32 = u8, N = 64]: Container:
     storage: vectors.vector[T, N]
 
     def string():
@@ -16,7 +16,13 @@ class string[T: u8 | u32 = u8, N = 64]:
     def capacity() -> int:
         return storage.capacity()
 
-    def bytes() -> u32:
+    def len(self: view Self) -> int:
+        return length()
+
+    def size(self: view Self) -> int:
+        return storage.len()
+
+    def bytes(self: view Self) -> byte:
         return storage.bytes()
 
     # Capacity is in encoding units; growth thresholds are always in bytes.

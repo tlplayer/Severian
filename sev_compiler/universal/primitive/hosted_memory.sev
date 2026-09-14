@@ -39,7 +39,7 @@ def __raw_allocate(count: int, width: int) -> native_ptr:
 def __raw_offset(base: native_ptr, offset: int) -> native_ptr:
     return __raw_pointer(__raw_integer(base) + offset)
 
-def __raw_byte_offset(size: DataSize) -> int:
+def __raw_byte_offset(size: byte) -> int:
     bytes = size.amount / 8.0
     assert(bytes >= 0.0)
     assert(bytes < 9223372036854775808.0)

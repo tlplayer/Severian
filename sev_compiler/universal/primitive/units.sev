@@ -2,27 +2,7 @@
 # Canonical amounts use bits, nanoseconds, Celsius, hertz, volts, and watts.
 
 
-class DataSize:
-    amount: float
-
-    operator string() -> string:
-        return string(self.amount / 8.0) + "B"
-
-
-    operator ==[G:Equal](other: Self) -> bool:
-        return self.amount == other.amount
-
-
-    operator <[G:Less](other: Self) -> bool:
-        return self.amount < other.amount
-
-
-    operator +[G:Add](other: Self) -> Self:
-        return DataSize(self.amount + other.amount)
-
-
-    operator /[G:Divide](other: Self) -> float:
-        return self.amount / other.amount
+import * from "bytes.sev"
 
 
 class Duration:
@@ -145,7 +125,7 @@ class DataRate:
         return self.amount / other.amount
 
 
-operator /[G:Divide](self: DataSize, other: Duration) -> DataRate:
+operator /[G:Divide](self: byte, other: Duration) -> DataRate:
     return DataRate(self.amount / other.amount)
 
 
@@ -153,44 +133,44 @@ operator /[G:Divide](self: int, other: Duration) -> Frequency:
     return Frequency(float(self) * 1000000000.0 / other.amount)
 
 
-def literal_b(value: float) -> DataSize:
-    return DataSize(value * 1.0)
+def literal_b(value: float) -> byte:
+    return byte(value * 1.0)
 
 
-def literal_B(value: float) -> DataSize:
-    return DataSize(value * 8.0)
+def literal_B(value: float) -> byte:
+    return byte(value * 8.0)
 
 
-def literal_KB(value: float) -> DataSize:
-    return DataSize(value * 8000.0)
+def literal_KB(value: float) -> byte:
+    return byte(value * 8000.0)
 
 
-def literal_MB(value: float) -> DataSize:
-    return DataSize(value * 8000000.0)
+def literal_MB(value: float) -> byte:
+    return byte(value * 8000000.0)
 
 
-def literal_GB(value: float) -> DataSize:
-    return DataSize(value * 8000000000.0)
+def literal_GB(value: float) -> byte:
+    return byte(value * 8000000000.0)
 
 
-def literal_TB(value: float) -> DataSize:
-    return DataSize(value * 8000000000000.0)
+def literal_TB(value: float) -> byte:
+    return byte(value * 8000000000000.0)
 
 
-def literal_KiB(value: float) -> DataSize:
-    return DataSize(value * 8192.0)
+def literal_KiB(value: float) -> byte:
+    return byte(value * 8192.0)
 
 
-def literal_MiB(value: float) -> DataSize:
-    return DataSize(value * 8388608.0)
+def literal_MiB(value: float) -> byte:
+    return byte(value * 8388608.0)
 
 
-def literal_GiB(value: float) -> DataSize:
-    return DataSize(value * 8589934592.0)
+def literal_GiB(value: float) -> byte:
+    return byte(value * 8589934592.0)
 
 
-def literal_TiB(value: float) -> DataSize:
-    return DataSize(value * 8796093022208.0)
+def literal_TiB(value: float) -> byte:
+    return byte(value * 8796093022208.0)
 
 
 def literal_ns(value: float) -> Duration:
@@ -265,5 +245,5 @@ def literal_pct(value: float) -> float:
     return value / 100.0
 
 
-def data_size(bytes: int) -> DataSize:
-    return DataSize(float(bytes) * 8.0)
+def data_size(bytes: int) -> byte:
+    return byte(float(bytes) * 8.0)

@@ -3,6 +3,7 @@
     "name": "systems-unsafe-examples",
     "version": "0.1.0",
     "edition": "2026",
+    "default-run": "isolated-pointer",
     "unsafe": {
       "capabilities": [
         "pointers"
