@@ -42,7 +42,7 @@ def registry_release(name: string, version: string, registry: string = "") -> st
     return legacy if not os.exists(release) and os.is_dir(legacy) else release
 
 def version_matches(version: string, selector: string) -> bool:
-    return selector == "*" or version == selector or version.starts_with(selector + ".")
+    return selector in ["*", "latest"] or version == selector or version.starts_with(selector + ".")
 
 def newer(left: string, right: string) -> bool:
     if right == "":

@@ -141,7 +141,7 @@ def reference(value: string) -> Reference | Error:
         throw Error("invalid package reference: " + value)
     name = safe_name(parts[0])
     selector = parts[1] if int(len(parts)) == 2 else "*"
-    if selector != "*":
+    if selector not in ["*", "latest"]:
         for component in selector.split("."):
             if component == "":
                 throw Error("invalid version selector: " + selector)

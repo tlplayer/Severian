@@ -16,6 +16,9 @@ class string[T: u8 | u32 = u8, N = 64]:
     def capacity() -> int:
         return storage.capacity()
 
+    def bytes() -> u32:
+        return storage.bytes()
+
     # Capacity is in encoding units; growth thresholds are always in bytes.
     # Double small allocations, then grow in 1024-byte steps.
     def reserve(self: borrow Self, required: int):

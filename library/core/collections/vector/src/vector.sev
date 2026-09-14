@@ -17,6 +17,9 @@ class vector[T, N = 256]:
     def len() -> int:
         return used
 
+    def bytes() -> bytes:
+        return bytes(data)
+
     # TODO: Alias so len([1]) gives the same as size([1]) so functions don't desync.
     #len() as size()
 

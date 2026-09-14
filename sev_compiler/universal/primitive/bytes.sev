@@ -1,0 +1,8 @@
+'''
+The byte type represents the storage used by an object in bytes
+
+a pointer to 20 bytes of memory on heap will return 20 bytes
+bytes(pointer) -> 20B
+
+Bytes have a literal of 20B and also can have KB, MB etc. 
+'''
