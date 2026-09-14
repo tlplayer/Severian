@@ -228,7 +228,10 @@ def __string_dimension(value: string, axis: index) -> index:
 def len(value: string) -> int:
     return value.length()
 
-def bytes[T](value: T) -> units.DataSize:
+trait ByteSized:
+    def bytes() -> DataSize
+
+def bytes[T: ByteSized](value: T) -> DataSize:
     return value.bytes()
 
 def size(value: string) -> int:
