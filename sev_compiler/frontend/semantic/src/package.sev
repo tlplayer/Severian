@@ -50,11 +50,6 @@ class TypedProgram:
     index: ProgramIndex
     hir_program: universal.Program
 
-
-class PackageAnalysisContext:
-    test_package: universal.PackageId | None
-
-
 def definition_id(package: universal.PackageId, module: universal.ModuleId, name: string, ordinal: int) -> universal.DefId:
     declaration: u128 = module.value ^ u128(ordinal + 1)
     for character in name.characters():
