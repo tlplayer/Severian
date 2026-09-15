@@ -20,7 +20,7 @@ def interface_type(type_id: universal.TypeId) -> string:
         return "f64"
     return ""
 
-def scalar_interface(module: borrow universal.Module, resolution: package.Resolution, names: list[string], symbols: list[string]) -> string:
+def scalar_interface(module: borrow universal.Module, resolution: package.Resolution, names: list[string], symbols: list[string], libraries: list[string] = []) -> string:
     if len(resolution.packages) == 0:
         return ""
     for item in borrow module.items:
@@ -56,7 +56,8 @@ def scalar_interface(module: borrow universal.Module, resolution: package.Resolu
             symbol = "__sev_pkg_" + owner.checksum.replace("sha256:", "") + "_" + name
             names.append(name)
             symbols.append(symbol)
-            lines.append("@c(symbol=" + package.toml_quote(symbol) + ")\ndef " + name + "(" + parameters.join(", ") + ") -> " + result)
+            dependencies = ", libraries=" + package.toml_quote(libraries.join(",")) if len(libraries) > 0 else ""
+            lines.append("@c(symbol=" + package.toml_quote(symbol) + dependencies + ")\ndef " + name + "(" + parameters.join(", ") + ") -> " + result)
         if found != 1:
             return ""
     return lines.join("\n\n")

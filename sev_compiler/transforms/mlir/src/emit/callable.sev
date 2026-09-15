@@ -53,6 +53,27 @@ def callable_function_symbol(id: universal.FunctionId) -> string:
     return "__sev_scalar_" + string(id.value)
 
 
+def callable_operation_attributes(function: borrow universal.FunctionDeclaration) -> list[MlirNamedAttribute]:
+    attributes: list[MlirNamedAttribute] = []
+    for decorator in borrow function.decorators:
+        if decorator.name != "mlir":
+            continue
+        for argument in borrow decorator.arguments:
+            name ?= argument.name
+            if name == None or name == "" or name == "operand_segments" or name == "lowering" or name == "libraries":
+                continue
+            if name != None:
+                match argument.value:
+                    case String:
+                        attribute := string_attribute_value(value)
+                        if value.starts_with("#"):
+                            attribute = MlirAttributeValue(DialectAttributeKind, value, 0, false, index_type(), [])
+                        attributes.append(MlirNamedAttribute(name, attribute))
+                    case _:
+                        throw Error("MLIR operation attributes require string literals")
+    return attributes
+
+
 def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module, block: borrow universal.BasicBlock, location: MlirLocation | None = None):
     cursor := 0
     for operation in borrow block.operations:
@@ -199,7 +220,7 @@ def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module,
                         symbol = boundary.scalar_boundary(callable_source, "c")
                         if native_operation != "":
                             parts = native_operation.split(".")
-                            attributes: list[MlirNamedAttribute] = []
+                            attributes = callable_operation_attributes(callable_source)
                             segments = boundary.scalar_operand_segments(callable_source)
                             if len(segments) != 0:
                                 sizes: list[MlirAttributeValue] = []
@@ -255,6 +276,36 @@ def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[M
     return handle
 
 
+def validate_external_contracts(module: borrow universal.Module):
+    # Check declarations even when they have no live calls. Validation must
+    # not make an otherwise unused provider an emitted dependency.
+    declarations: list[universal.FunctionDeclaration] = []
+    for function in borrow module.functions:
+        symbol = boundary.scalar_boundary(function, "c")
+        if symbol == "":
+            continue
+        for previous in borrow declarations:
+            if boundary.scalar_boundary(previous, "c") != symbol:
+                continue
+            if len(previous.parameter_types) != len(function.parameter_types):
+                throw Error("conflicting external declaration: " + symbol)
+            index := 0
+            for parameter in function.parameter_types:
+                if not same_type(callable_mlir_type(parameter, module.records), callable_mlir_type(previous.parameter_types[index], module.records)):
+                    throw Error("conflicting external parameter: " + symbol)
+                index += 1
+            results = callable_mlir_results(function.result_type, module.records)
+            expected = callable_mlir_results(previous.result_type, module.records)
+            if len(results) != len(expected):
+                throw Error("conflicting external declaration: " + symbol)
+            index = 0
+            for result in results:
+                if not same_type(result, expected[index]):
+                    throw Error("conflicting external result: " + symbol)
+                index += 1
+        declarations.append(function)
+
+
 def lower_callables(module: borrow universal.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = []) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
@@ -299,7 +350,7 @@ def lower_callables(module: borrow universal.Module, library: bool = false, expo
         return builder.program
     entry = builder_create_function(builder, "main", public_visibility(), [], [integer_type(32)])
     builder_set_insertion_point(builder, entry.entry)
-    if len(module.cfg_bodies) != 0:
+    if len(module.cfg_bodies) != 0 and (len(module.cfg_bodies[0].blocks) != 1 or len(module.cfg_bodies[0].blocks[0].operations) != 0):
         ownership.authorize_lowering(module, module.cfg_bodies[0], [])
         # The package initializer is an ordinary CFG function too.
         init = builder_create_function(builder, "__sev_initializer", private_visibility(), [], [])

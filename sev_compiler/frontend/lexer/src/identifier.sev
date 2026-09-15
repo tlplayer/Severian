@@ -3,6 +3,7 @@ import * from "token/mod.sev"
 import * from "rule.sev"
 
 
+#TODO: Move these to the string library
 def is_digit(character: string) -> bool:
     return character >= "0" and character <= "9"
 

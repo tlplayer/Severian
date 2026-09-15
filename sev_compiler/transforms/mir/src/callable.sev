@@ -479,7 +479,7 @@ def required_calls(body: borrow universal.CfgBody, required: list[universal.Func
                     pass
 
 
-def build_callables(module: universal.Module, library_sources: list[int] = []) -> universal.Module | diagnostics.Diagnostic:
+def build_callables(module: universal.Module, library_sources: list[int] = [], export_names: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
     scope = CallableMirScope()
     context := cfg.ExecutionContext(universal.empty_cfg(universal.TypeId(2)))
     mir_block(module, context, module.initializer, scope)
@@ -500,12 +500,13 @@ def build_callables(module: universal.Module, library_sources: list[int] = []) -
         if function != None:
             require_function(required, function)
     # All application declarations remain roots, including library exports and
-    # unused functions that still need lowering diagnostics. Only prelude bodies
+    # unused functions that still need lowering diagnostics. Imported bodies
     # are demand driven. Scan lowered calls so inlined ownership operations,
     # recursive calls and source grammar-generated calls use the same graph.
     for function in borrow module.functions:
-        # Keep external ABI contracts even when no call is live.
-        if boundary.scalar_boundary(function, "c") != "":
+        # An external declaration is a dependency of a live call, not a root.
+        # Its signature was already checked during semantic analysis.
+        if function.name in export_names:
             require_function(required, function.id)
         origin ?= function.span
         if origin != None:

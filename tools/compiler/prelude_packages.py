@@ -14,7 +14,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 RECIPES = ROOT / 'library/prelude'
-IMPORT = re.compile(r'(?m)^(import \* from )"([^"]+)"')
+IMPORT = re.compile(r'(?m)^(import (?:\*|[A-Za-z_][A-Za-z_0-9]*) from )"([^"]+)"')
 
 
 def stage(destination):
@@ -75,8 +75,8 @@ def stage(destination):
             if parent == ROOT: break
     for group, entries in groups.items():
         (destination/group/'lib.sev').write_text(''.join(
-            'import * from ' + json.dumps(entry['source']) + (' as '+entry['alias'] if entry.get('alias') else '')+'\n'
-            for entry in entries))
+            'import ' + name + ' from ' + json.dumps(entry['source']) + (' as '+entry['alias'] if entry.get('alias') else '')+'\n'
+            for entry in entries for name in entry.get('names', ['*'])))
     facade = destination/'prelude'
     facade.mkdir(parents=True, exist_ok=True)
     (facade/'lib.sev').write_text(''.join('import * from "package:'+g+'"\n' for g in groups))

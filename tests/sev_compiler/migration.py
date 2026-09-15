@@ -15,7 +15,7 @@ import tempfile
 import textwrap
 import unittest
 
-from bootstrap_mlir import ROOT, tool
+from bootstrap_mlir import declared_native_requirements, ROOT, tool
 from resource_guard import run as guarded_run
 
 
@@ -120,6 +120,7 @@ class MigrationCase(unittest.TestCase):
         llvm = emitted.with_suffix(".ll")
         executable = emitted.with_suffix(".exe")
         emitted.write_text(mlir)
+        passes, libraries = declared_native_requirements(mlir)
         pipeline = (ROOT / "sev_compiler/frontend/ownership/mlir.pipeline").read_text().strip()
         self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), emitted,
                         "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic",
@@ -127,13 +128,13 @@ class MigrationCase(unittest.TestCase):
         materialize_debug_values(owned)
         self.succeeds([tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"), owned,
                         "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf",
-                        "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm",
+                        *passes, "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm",
                         "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm",
                         "--reconcile-unrealized-casts", "-o", lowered])
         output = self.succeeds([tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"),
                                "--mlir-to-llvmir", lowered])
         llvm.write_text(output)
-        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, ROOT / "library/core/memory/native/memory.c", "-o", executable, "-lm"])
+        self.succeeds([tool("SEVERIAN_CLANG", "clang-21"), llvm, ROOT / "library/core/memory/native/memory.c", "-o", executable, "-lm", *libraries])
         self.assertEqual(self.succeeds([executable]), expected)
         return mlir
 

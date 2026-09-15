@@ -36,6 +36,9 @@ class PreludePackages(unittest.TestCase):
             runtime = Path(temporary)/'runtime'
             self.assertTrue((runtime/'library/core/storage/native/statistics.c').is_file())
             self.assertTrue((runtime/'library/core/memory/native/memory.h').is_file())
+            self.assertIn('import print from ', (runtime/'lib.sev').read_text())
+            self.assertEqual((Path(temporary)/'math/lib.sev').read_text(),
+                             'import round from "library/core/math/src/lib.sev"\n')
 
 
 if __name__ == '__main__': unittest.main()

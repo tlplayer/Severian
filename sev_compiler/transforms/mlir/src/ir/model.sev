@@ -116,6 +116,7 @@ def operation_name_text(name: MlirOperationName) -> string:
 
 
 enum MlirAttributeKind:
+    DialectAttributeKind
     DebugAttributeKind
     UnitAttributeKind
     DenseIntegerAttributeKind
@@ -265,6 +266,8 @@ def affine_map_attribute(value: MlirAffineMap) -> MlirAttributeValue:
 
 def attribute_kind_name(kind: MlirAttributeKind) -> string:
     match kind:
+        case DialectAttributeKind:
+            return "dialect"
         case DebugAttributeKind:
             return "debug"
         case UnitAttributeKind:

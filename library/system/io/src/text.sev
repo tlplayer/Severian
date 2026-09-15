@@ -1,6 +1,21 @@
 import * from "../../../../sev_compiler/universal/primitive/string/core.sev" as text
 import * from "../../../../sev_compiler/universal/primitive/string/format.sev" as format
 
+# A scalar print is one standard MLIR operation. Keep the variadic source
+# implementation below for separators, endings and value conversions.
+@mlir("vector.print", lowering="convert-vector-to-llvm", libraries="mlir_c_runner_utils")
+def print(value: int)
+
+@mlir("vector.print", lowering="convert-vector-to-llvm", libraries="mlir_c_runner_utils", punctuation="#vector.punctuation<no_punctuation>")
+def __write_object(value: int)
+
+def __write_object(*values: V):
+    for value in values:
+        __write(format.string(value), 0)
+
+@mlir("cf.assert", msg="output failed")
+def __output_check(condition: bool)
+
 # Only a byte leaves the source-owned implementation at this hosted boundary.
 # putchar belongs to the platform C library; no Severian C helper is linked.
 @c(symbol="putchar")
@@ -11,12 +26,19 @@ def __output_byte(value: int) -> i32
 
 
 def __write(value: string, offset: int):
+    __output_check(offset >= 0)
     position := offset
-    count = text.byte_count(value)
+    count = value.storage.used
     while position < count:
-        result = __putchar(__output_byte(text.byte_at(value, position)))
-        assert(result >= 0)
+        # The loop bounds are the initialized byte range of the string.
+        result = __putchar(__output_byte(text.__byte_value(text.__load(value, text.__index(position)))))
+        __output_check(result >= 0)
         position += 1
+
+
+def print(value: string):
+    __write(value, 0)
+    __output_check(__putchar(10) >= 0)
 
 
 def __separator(value: string) -> view string:
@@ -48,12 +70,12 @@ def print(*objects: V, sep: V = None, end: V = None, file: None = None, flush: b
     first := true
     for object in objects:
         __write("" if first else separator, 0)
-        __write(string(object), 0)
+        __write_object(object)
         first = false
     __write(ending, 0)
     if flush:
         result = __flush(format.__pointer(0))
-        assert(result == 0)
+        __output_check(result == 0)
 
 
 test "print handles empty calls, mixed values, and keyword options":

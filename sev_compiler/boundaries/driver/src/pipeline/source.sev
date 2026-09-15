@@ -1,3 +1,4 @@
+import * from "../../../../universal/declaration/scalar.sev" as boundary
 import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
 import source
 from source import SourceFile
@@ -64,8 +65,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = []) -> string | Error:
-    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements)
     if result is string:
         return result
     if result is Diagnostic:
@@ -75,7 +76,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "") -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
@@ -177,10 +178,21 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             if supplied != None:
                 namespace = supplied + "."
             provider_path = import_source(resolution if prelude_entry != "" else package.Resolution([], [], ""), prelude.path, provider_locator, root)
+            selected_name ?= provider_import.source_name
+            if selected_name != None:
+                namespace = "__prelude_" + string(registered_source(read_known_source(provider_path, files), files).id.index) + "."
             is_subject = provider_path == subject_path
             if is_subject:
                 initializer_namespace = namespace
             library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, resolution if prelude_entry != "" else package.Resolution([], [], ""), sysroot=root)
+            if selected_name != None:
+                aliases = universal.empty_module()
+                exposed := selected_name
+                if supplied != None:
+                    exposed = supplied
+                append_selected_import(aliases, library, namespace, selected_name, exposed)
+                for item in aliases.items:
+                    library.items.append(item)
             for item in library.items:
                 match item:
                     case Function:
@@ -218,12 +230,6 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         return ""
     timing.finish_stage(timings, "prelude-reused" if reused else "prelude")
     provider_items = int(len(parsed.items))
-    library_paths: list[string] = []
-    if emit != "agent-ir":
-        for file in files:
-            canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
-            if canonical != subject_path:
-                library_paths.append(canonical)
     # A test subject may itself be a prelude module. Give its declarations a
     # local scope so tests can exercise them without colliding with the prelude.
     # A direct provider keeps its original namespace and declaration identity.
@@ -234,13 +240,13 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution, root)
         for item in application.items:
             parsed.items.append(item)
-    # Relative imports may register another source ID for a prelude file.
-    # Classify by its resolved path, while retaining diagnostic source spelling.
+    # Imported declarations remain available to semantic analysis, but only
+    # the subject, explicit exports and their dependencies are codegen roots.
     library_sources: list[int] = []
     if emit != "agent-ir":
         for file in files:
             canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
-            if canonical in library_paths:
+            if canonical != subject_path:
                 library_sources.append(int(file.id.index))
     timing.finish_stage(timings, "subject")
     captured: list[semantic.PreludeAnalysis] = []
@@ -295,7 +301,11 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 interface.append(symbol)
     if include_tests and emit != "agent-ir":
         quality.prepare_quality(typed, files, resolution)
-    lowered = mir.build_callables(typed, library_sources)
+    try:
+        mlir.validate_external_contracts(typed)
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000230", failure.message))
+    lowered = mir.build_callables(typed, library_sources, export_names)
     if include_tests and len(typed.quality_files) > 0:
         quality_maps.append(quality.quality_map(lowered))
     timing.finish_stage(timings, "mir")
@@ -303,7 +313,16 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         result = agent_ir.emit(lowered, files)
         timing.finish_stage(timings, "agent-ir")
         return result
+    for function in borrow lowered.functions:
+        boundary.scalar_requirements(function, requirements)
+    requirements.quality = len(lowered.quality_files) > 0
+    if emit == "library" and len(export_names) > 0:
+        interface[0] = package_interface.scalar_interface(typed, resolution, [], [], requirements.libraries)
     program = mlir.lower_callables(lowered, emit == "library", export_names, export_symbols)
+    if len(requirements.passes) > 0:
+        program.attributes.append(mlir.MlirNamedAttribute("sev.lowering.passes", mlir.string_array_attribute(requirements.passes)))
+    if len(requirements.libraries) > 0:
+        program.attributes.append(mlir.MlirNamedAttribute("sev.link.libraries", mlir.string_array_attribute(requirements.libraries)))
     timing.finish_stage(timings, "mlir")
     layout_query := false
     for body in lowered.cfg_bodies:

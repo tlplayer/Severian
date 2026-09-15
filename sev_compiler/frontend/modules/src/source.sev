@@ -156,6 +156,8 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                         return error(diagnostics.diagnostic("E000120", "expected a locator string after `import * from`"))
             elif tokens[subject].kind == lexer.TokenKind.String:
                 return error(diagnostics.diagnostic("E000120", "file imports require explicit `import * from` followed by a locator string"))
+            elif subject + 2 < len(tokens) and lexer.token_word(tokens[subject + 1]) == "from" and tokens[subject + 2].kind == lexer.TokenKind.String:
+                subject += 2
             match tokens[subject].kind:
                 case String:
                     child = import_source(resolution, file.path, string(tokens[subject]), sysroot)
@@ -202,11 +204,12 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                     case Locator:
                         if locator.starts_with("/"):
                             return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
-                        if declaration.source_name != None:
-                            return error(diagnostics.diagnostic("E000120", "selective imports are not supported by bootstrap source loading"))
                         alias ?= declaration.alias
+                        selected_name ?= declaration.source_name
                         child_prefix := prefix
-                        if alias != None:
+                        if selected_name != None:
+                            child_prefix += "__import_" + string(registered_source(read_known_source(import_source(resolution, path, locator, sysroot), files), files).id.index) + "."
+                        elif alias != None:
                             if alias in aliases:
                                 return error(diagnostics.diagnostic("E000120", "duplicate import alias: " + alias))
                             aliases.append(alias)
@@ -215,6 +218,11 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
                         for child_item in child.items:
                             append_imported_item(result, child_item)
+                        if selected_name != None:
+                            exposed := selected_name
+                            if alias != None:
+                                exposed = alias
+                            append_selected_import(result, child, child_prefix, selected_name, prefix + exposed)
                     case Name:
                         source_name ?= declaration.source_name
                         package_name := name
@@ -341,6 +349,27 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
 
 # Diamond imports share declarations; distinct source declarations still reach
 # semantic duplicate checking, even if their visible names are identical.
+def append_selected_import(result: universal.Module, child: universal.Module, namespace: string, name: string, exposed: string) -> unit | diagnostics.Diagnostic:
+    selected := false
+    for item in child.items:
+        match item:
+            case Function:
+                if declaration.name == namespace + name:
+                    imported = universal.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:])
+                    append_imported_item(result, universal.Function(imported))
+                    selected = true
+            case BindingItem:
+                if binding.name == namespace + name:
+                    imported := binding
+                    imported.name = exposed
+                    append_imported_item(result, universal.BindingItem(imported))
+                    selected = true
+            case _:
+                pass
+    if not selected:
+        return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
+
+
 def imported_item_key(item: universal.Item) -> string:
     match item:
         case Record:

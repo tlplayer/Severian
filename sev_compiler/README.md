@@ -141,6 +141,13 @@ the executable. Collection operations share an enumerative macro over the
 source-declared `ListElement` family. Native checks for these mechanisms and the
 testing utilities run with `python3 tests/sev_compiler/library_coverage.py`.
 
+Callable source imports can select a name, for example
+`import print from "../../library/system/io/src/text.sev"`. Its overloads are
+exposed under that name while provider helpers keep their own namespace.
+Imported bodies and external declarations enter MIR only when referenced by
+the subject or an explicit library export. Prelude literal constants are
+materialized at their uses and do not create runtime initializers.
+
 The executable loads syntax from `universal/grammar/contracts.sev` and discovers
 imported `trait Name: G` declarations before parsing dependent bodies. Source
 symbols, precedence, associativity and inherited syntax can extend the language
@@ -260,7 +267,8 @@ The compiler reads and compiles these `.sev` sources along with each input:
   supplies shared Unicode scalar arithmetic. Character literals use the same
   decoding functions; `char/utf8.sev` exposes character-to-codepoint conversion.
 - [`library/system/io/src/text.sev`](../library/system/io/src/text.sev)
-  implements variadic `print` in source. Byte output uses the platform C
+  binds integer output directly to `vector.print` through `@mlir`, including
+  integer arguments within variadic calls. String output uses the platform C
   library's `putchar(i32)`; explicit flushing uses `fflush(NULL)`.
 - [`universal/primitive/string/format.sev`](universal/primitive/string/format.sev)
   provides overloaded string conversions shared by `print`, `string(value)`,
@@ -296,6 +304,24 @@ Bindings for operations with operand groups can provide
 `operand_segments="1,0"`; these sizes are checked against the signature and
 emitted as a typed `operandSegmentSizes` attribute. This supplies the dynamic
 size and symbol groups for `memref.alloc` without an allocator-name special case.
+Other named string arguments become operation attributes; strings beginning
+with `#` describe dialect attributes, such as
+`punctuation="#vector.punctuation<no_punctuation>"`. Upstream MLIR verifies them.
+Boundary declarations carry optional `lowering="pass-name,..."` and
+`libraries="library-name,..."` requirements. The driver collects and deduplicates
+these from reachable declarations; MLIR receives `sev.lowering.passes` and
+`sev.link.libraries` module attributes for external consumers. Compiled package
+interfaces retain libraries on exported `@c` declarations. The native backend
+consumes these lists without inspecting operation names or archive MLIR.
+For example, `vector.print` declares `convert-vector-to-llvm` and
+`mlir_c_runner_utils`. Additional lowering passes run after SCF conversion and
+before the core LLVM conversions; this is an ordered extension point, not a
+pass scheduler. `SEVERIAN_NATIVE_LIBRARY_PATH` supplies colon-separated native
+library search paths; the default is the selected MLIR toolchain's library
+directory.
+
+Run `python3 tests/sev_compiler/compact_print.py` for compact emission,
+selective dependency and native output regressions against checkout providers.
 
 Literals become constant `memref.global` byte arrays and values use
 `memref<?xi8>` views. Returning a literal or passing a view through a function

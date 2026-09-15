@@ -90,7 +90,7 @@ def escaped(value: string) -> string:
 @record_calls
 def attribute_value_text(value: MlirAttributeValue) -> string:
     kind = attribute_kind_name(value.kind)
-    if kind == "debug":
+    if kind == "debug" or kind == "dialect":
         return value.text
     if kind == "unit":
         return "unit"

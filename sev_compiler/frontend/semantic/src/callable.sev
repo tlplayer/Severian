@@ -594,20 +594,19 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
     lookup := state.namespace + name
     local = len(callable_index.named(state.generic_index, state.generics, lookup, allow_prelude)) > 0 or len(callable_index.named(state.template_index, state.templates, lookup, allow_prelude)) > 0 or len(callable_index.named(state.function_index, state.functions, lookup, allow_prelude)) > 0
     if not local:
-        lookup = "format.string" if name == "string" and allow_prelude else name
-    for template in callable_index.named(state.template_index, state.templates, lookup, allow_prelude):
-        return CallableOptionalSelection(callable_select_pack(state, template, arguments))
+        lookup = name
+        if name == "string" and allow_prelude and len(callable_index.named(state.function_index, state.functions, name, allow_prelude)) == 0:
+            lookup = "format.string"
+    templates = callable_index.named(state.template_index, state.templates, lookup, allow_prelude)
+    generics = callable_index.named(state.generic_index, state.generics, lookup, allow_prelude)
     candidates = callable_index.named(state.function_index, state.functions, lookup, allow_prelude)
-    if len(candidates) == 0:
-        generic = callable_select_generic(state, lookup, arguments, expected, allow_prelude)
-        return generic
     message := "no overload accepts these arguments for " + name
     for function in candidates:
         bound = packs.bind_arguments(function, arguments)
         if bound.message != "":
             message = bound.message
             continue
-        if len(candidates) == 1:
+        if len(candidates) == 1 and len(templates) == 0 and len(generics) == 0:
             return CallableOptionalSelection(CallableSelection(callable_contract_signature(state, function), bound.arguments))
         compatible := true
         for argument in bound.arguments:
@@ -620,6 +619,13 @@ def callable_select_function(state: CallableAnalysis, name: string, arguments: l
                 index += 1
         if compatible:
             return CallableOptionalSelection(CallableSelection(callable_contract_signature(state, function), bound.arguments))
+    # Exact fixed signatures take precedence over a generic or variadic
+    # fallback. Selecting a fallback must not evaluate an argument twice.
+    for template in templates:
+        return CallableOptionalSelection(callable_select_pack(state, template, arguments))
+    generic = callable_select_generic(state, lookup, arguments, expected, allow_prelude)
+    if generic.selection != None or len(candidates) == 0:
+        return generic
     return error(callable_diagnostic(message, arguments[0].span if len(arguments) != 0 else None))
 
 
@@ -2736,10 +2742,15 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
             return error(callable_diagnostic("unsupported scalar boundary annotation", declaration.span))
         if declaration.body != None:
             return error(callable_diagnostic("boundary declarations cannot have source bodies", declaration.span))
-        if symbol != "" and len(declaration.decorators[0].arguments) != 1:
-            return error(callable_diagnostic("C boundary requires exactly one symbol", declaration.span))
         if operation != "" and len(operation.split(".")) != 2:
             return error(callable_diagnostic("MLIR operation must have a dialect and mnemonic", declaration.span))
+        if symbol != "":
+            symbols := 0
+            for argument in declaration.decorators[0].arguments:
+                if argument.name == "" or argument.name == "symbol" or argument.name == None:
+                    symbols += 1
+            if symbols != 1:
+                return error(callable_diagnostic("C boundary requires exactly one symbol", declaration.span))
         argument_names: list[string] = []
         for argument in declaration.decorators[0].arguments:
             argument_name ?= argument.name
@@ -2747,8 +2758,18 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
                 if argument_name in argument_names:
                     return error(callable_diagnostic("duplicate boundary argument", declaration.span))
                 argument_names.append(argument_name)
-                if argument_name != "" and not (operation != "" and argument_name == "operand_segments") and not (symbol != "" and argument_name == "symbol"):
+                if argument_name != "" and operation == "" and not (symbol != "" and argument_name in ["symbol", "libraries"]):
                     return error(callable_diagnostic("unsupported boundary argument", declaration.span))
+                if operation != "" and argument_name != "":
+                    match argument.value:
+                        case String:
+                            pass
+                        case _:
+                            return error(callable_diagnostic("MLIR operation attributes require string literals", declaration.span))
+        try:
+            boundary.scalar_requirements(declaration, boundary.LoweringRequirements())
+        catch failure: Error:
+            return error(callable_diagnostic(failure.message, declaration.span))
         segments = boundary.scalar_operand_segments(declaration)
         if len(segments) != 0:
             size := 0
@@ -3023,8 +3044,9 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         return error(callable_diagnostic("decorated or constrained packs are outside the bootstrap subset", function_declaration.span))
                     if len(function_declaration.parameters) == 0 or not function_declaration.parameters[0].variadic:
                         return error(callable_diagnostic("bootstrap variadic packs must be the first parameter", function_declaration.span))
-                    if function_declaration.name in function_names:
-                        return error(callable_diagnostic("duplicate variadic function " + function_declaration.name, function_declaration.span))
+                    for previous in state.templates:
+                        if previous.name == function_declaration.name:
+                            return error(callable_diagnostic("duplicate variadic function " + function_declaration.name, function_declaration.span))
                     if function_declaration.parameters[0].default != None:
                         return error(callable_diagnostic("variadic packs cannot have defaults", function_declaration.span))
                     parameter_names: list[string] = []
@@ -3035,9 +3057,6 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     state.templates.append(function_declaration)
                     function_names.append(function_declaration.name)
                     continue
-                for template in state.templates:
-                    if template.name == function_declaration.name:
-                        return error(callable_diagnostic("variadic overload sets are not supported", function_declaration.span))
                 signature = callable_signature(function_declaration, int(len(state.functions)), state.records, state.declarations)
                 if own_index < len(own_ids):
                     signature.id = own_ids[own_index]
@@ -3090,6 +3109,15 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case BindingItem:
                 if binding.name in function_names:
                     return error(callable_diagnostic("binding conflicts with function " + binding.name, binding.span))
+                # Provider literals were registered in state.constants above.
+                # Materialize them at their uses instead of allocating runtime
+                # storage merely because their provider belongs to the prelude.
+                if int(binding.span.source.index) in module.prelude_sources and not binding.mutable and not binding.update:
+                    match binding.value.kind:
+                        case LiteralValue:
+                            continue
+                        case _:
+                            pass
                 resolved = callable_binding(state, binding)
                 if callable_has_drop(state, resolved.type_id):
                     return error(callable_diagnostic("global resource cleanup is not supported", binding.span))

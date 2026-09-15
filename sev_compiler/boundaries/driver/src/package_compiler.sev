@@ -1,3 +1,4 @@
+import * from "../../../universal/declaration/scalar.sev" as boundary
 import package
 import source
 import os
@@ -105,7 +106,8 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
     files: list[source.SourceFile] = []
     interface: list[string] = []
     quality_maps: list[string] = []
-    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps)
+    requirements = boundary.LoweringRequirements()
+    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements)
     if len(quality_maps) > 0:
         package.write_text(arguments[3] + ".coverage.json", quality_maps[0])
     record_inputs(files, resolution, arguments[6], arguments[5], emit in ["", "library"])
@@ -136,6 +138,6 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
         sources: list[string] = []
         for file in files:
             sources.append(file.path)
-        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [])
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements)
         if emit == "library":
             package.write_text(arguments[3] + ".interface.sev", interface[0])

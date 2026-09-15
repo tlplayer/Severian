@@ -1,3 +1,4 @@
+import * from "../../../universal/declaration/scalar.sev" as boundary
 import environment
 import file
 import path
@@ -31,7 +32,7 @@ def run_tool(arguments: list[string]):
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = []):
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()):
     package.mkdir(path.dirname(output))
     intermediate = package.temporary("package.pkg/cache/native", "run-") + "/module"
     if file.write(intermediate + ".mlir", mlir) != 0:
@@ -44,7 +45,12 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     ownership_pipeline = package.read_text(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline").strip()
     run_tool([opt, intermediate + ".mlir", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
     materialize_debug_values(intermediate + ".owned.mlir")
-    run_tool([opt, intermediate + ".owned.mlir", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf", "--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"])
+    lowering = [opt, intermediate + ".owned.mlir", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf"]
+    for name in requirements.passes:
+        lowering.append("--" + name)
+    for argument in ["--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"]:
+        lowering.append(argument)
+    run_tool(lowering)
     run_tool([translate, "--mlir-to-llvmir", intermediate + ".llvm.mlir", "-o", intermediate + ".ll"])
     if library:
         # Native providers remain explicit link inputs. This object owns only
@@ -58,11 +64,22 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
         return
     arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
     arguments.append(sysroot + "/library/core/memory/native/memory.c")
-    if mlir.contains("__sev_quality_"):
+    if requirements.quality:
         arguments.append(sysroot + "/sev_compiler/runtime/native/quality.c")
         arguments.append("-DSEV_QUALITY_TRACK_ALLOCATIONS")
     for argument in native_arguments:
         arguments.append(argument)
+    if len(requirements.libraries) > 0:
+        # Libraries are resolved against the selected toolchain, with an
+        # explicit search path override for other native dependencies.
+        toolchain = package.canonical(package.capture(["which", opt]).strip())
+        search = environment.get("SEVERIAN_NATIVE_LIBRARY_PATH", path.dirname(path.dirname(toolchain)) + "/lib")
+        for directory in search.split(":"):
+            if directory != "":
+                arguments.append("-L" + directory)
+                arguments.append("-Wl,-rpath," + directory)
+        for name in requirements.libraries:
+            arguments.append("-l" + name)
     if debug_symbols:
         arguments.append("-g")
     if strip:

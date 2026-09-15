@@ -20,7 +20,12 @@
         "source": "sev_compiler/universal/primitive/enum.sev"
       },
       {
-        "source": "library/system/io/src/text.sev"
+        "source": "sev_compiler/universal/primitive/string/format.sev",
+        "names": ["string"]
+      },
+      {
+        "source": "library/system/io/src/text.sev",
+        "names": ["print"]
       },
       {
         "source": "sev_compiler/universal/primitive/numeric/conversion.sev",
@@ -65,7 +70,8 @@
     ],
     "math": [
       {
-        "source": "library/core/math/src/lib.sev"
+        "source": "library/core/math/src/lib.sev",
+        "names": ["round"]
       }
     ]
   }

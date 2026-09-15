@@ -22,6 +22,24 @@ def tool(variable, default):
     return resolved
 
 
+def declared_native_requirements(mlir):
+    """Consume explicit artifact metadata; never infer dependencies from O names."""
+    def names(key):
+        match = re.search(r'(?<![\w.])' + re.escape(key) + r'\s*=\s*(\[[^\]]*\])', mlir)
+        return json.loads(match[1]) if match else []
+
+    passes = ["--" + name for name in names("sev.lowering.passes")]
+    libraries = names("sev.link.libraries")
+    arguments = []
+    if libraries:
+        toolchain = Path(tool("SEVERIAN_MLIR_OPT", "mlir-opt-21")).resolve().parent.parent / "lib"
+        for directory in os.environ.get("SEVERIAN_NATIVE_LIBRARY_PATH", str(toolchain)).split(":"):
+            if directory:
+                arguments.extend(["-L" + directory, "-Wl,-rpath," + directory])
+        arguments.extend("-l" + name for name in libraries)
+    return passes, arguments
+
+
 def run(arguments, *, output=None, succeeds=True, cwd=ROOT):
     result = guarded_run(arguments, cwd=cwd, timeout=180)
     if result.resources['limit']:
@@ -169,7 +187,8 @@ def main():
         emitted = ARTIFACTS / f"{name}.mlir"
         run([compiler, command, "--emit", "mlir", source_path, "--sysroot", ROOT], output=emitted)
         text = emitted.read_text()
-        assert "module {" in text and '"func.return"' in text, "expected executable MLIR"
+        passes, libraries = declared_native_requirements(text)
+        assert "module" in text and '"func.return"' in text, "expected executable MLIR"
         if name in {"example_math", "example_clamp", "scalar_functions"}:
             assert "__sev_scalar_" in text, "source functions must survive lowering"
         if name in {"example_clamp", "scalar_functions"}:
@@ -178,7 +197,7 @@ def main():
         run([opt, "--verify-each", emitted, "-o", verified])
         llvm_mlir = ARTIFACTS / f"{name}.llvm.mlir"
         run([opt, emitted, "--lift-cf-to-scf", "--buffer-deallocation-pipeline=private-function-dynamic-ownership",
-             "--convert-bufferization-to-memref", "--convert-scf-to-cf", "--convert-arith-to-llvm",
+             "--convert-bufferization-to-memref", "--convert-scf-to-cf", *passes, "--convert-arith-to-llvm",
              "--convert-cf-to-llvm", "--finalize-memref-to-llvm", "--convert-func-to-llvm", "--convert-ub-to-llvm",
              "--reconcile-unrealized-casts", "-o", llvm_mlir])
         llvm_ir = ARTIFACTS / f"{name}.ll"
@@ -186,12 +205,10 @@ def main():
         assert "__sev_string_from_" not in llvm_ir.read_text()
         assert "__sev_io_" not in llvm_ir.read_text()
         executable = ARTIFACTS / name
-        run([clang, llvm_ir, "-o", executable, "-lm"])
+        run([clang, llvm_ir, "-o", executable, "-lm", *libraries])
         result = run([executable], succeeds=name not in runtime_failures)
         if name in expected_stdout:
             assert result.stdout == expected_stdout[name], repr(result.stdout)
-            assert '"memref.global"' in text and '"memref.load"' in text
-            assert "@putchar" in llvm_ir.read_text()
         if name == "main_status":
             assert result.returncode == 7, "preserve the source main's exit status"
         if name in {"expression_values", "printing", "string_core", "string_format"} and SANITIZE:

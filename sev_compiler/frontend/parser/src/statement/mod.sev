@@ -249,6 +249,13 @@ def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | d
     first = parser_identifier(parser, "expected an import name")
     if parser_at_identifier(parser, "from"):
         parser_next(parser)
+        if parser_at_simple(parser, String):
+            locator = parser_next(parser)
+            alias: string | None := None
+            if parser_at_identifier(parser, "as"):
+                parser_next(parser)
+                alias = parser_identifier(parser, "expected an import alias")[0]
+            return universal.ImportDeclaration(universal.Locator(string(locator)), first[0], alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
         source_name = parser_identifier(parser, "expected an import source")[0]
         alias: string | None := None
         if parser_at_identifier(parser, "as"):

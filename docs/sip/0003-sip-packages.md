@@ -370,8 +370,8 @@ Checkout-only dependency locations are discovery hints, not published build path
 | `sev build` | Resolve existing locked graph, reuse/build targets, populate working realization |
 | `sev check` | Load/produce metadata without requiring native codegen; mark metadata-only results as non-linkable |
 | `sev test` | Reuse dependencies, build test targets locally, run with explicit resource/time bounds |
-| `sev publish <name> --local` | Validate name, source completeness and selected completed artifacts; exclude build/cache/debug; install atomically |
-| `sev add <name>` | Resolve and atomically update manifest/lock without compiling the dependency |
+| `sev publish <name>:version --local` | Validate name, source completeness and selected completed artifacts; exclude build/cache/debug; install atomically |
+| `sev add <name>:version` | Resolve and atomically update manifest/lock without compiling the dependency |
 | `sev update <name>` | Intentionally refresh selected dependency resolution; subsequent build evaluates freshness |
 | `sev file.sev` | Use explicit dependencies or compatible published packages/prelude from any directory |
 | `sev clean` | Remove selected local generated state; preserve authored source and registry payloads |
@@ -379,23 +379,6 @@ Checkout-only dependency locations are discovery hints, not published build path
 Export packages MUST NOT contain a metadata-only check result masquerading as a
 linkable library. Native artifacts may be omitted for an unsupported target only
 when the publication explicitly declares source-rebuild availability for it.
-
-## 10. Acceptance and recovery
-
-Native integration tests MUST build and publish source plus artifacts, move the
-producer checkout away, and compile two different consumers in unrelated directories.
-Check results, zero ordinary dependency recompiles, and reuse of published prelude
-providers. Test generics, diamond dependencies, distinct configurations, source and
-lock changes, relocation, damaged outputs, interrupted builds, concurrent consumers,
-foreign bindings, and absence of build/cache/debug files from published payloads.
-
-Emit separate events for `source-hash`, `metadata-load`, `parse`, `semantic`,
-`specialize`, `codegen`, `cache-hit`, and `link`. File reads alone do not prove a
-recompile. Missing interfaces, stale results or timeout failures reject acceptance.
-Run baseline and candidate with identical explicit time/memory bounds; record both
-absolute limits and allowed regression ratios. Do not silently raise limits to pass.
-Install only after the gate passes, retaining the previous compiler, prelude set and
-lock identities so a rejected build can be rolled back without rebuilding them.
 
 ## References
 

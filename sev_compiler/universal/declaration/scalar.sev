@@ -38,3 +38,51 @@ def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
                         case _:
                             pass
     return []
+
+
+# Lowering dependencies belong to the declaration that introduces an O. The
+# driver collects these from reachable F; the backend never inspects IR text.
+class LoweringRequirements:
+    passes: list[string] = []
+    libraries: list[string] = []
+    quality: bool = false
+
+
+def scalar_requirement_names(text: string) -> list[string]:
+    result: list[string] = []
+    for part in text.split(","):
+        name = part.strip()
+        if name == "":
+            throw Error("empty lowering requirement")
+        for character in name.characters():
+            if not ((character >= "a" and character <= "z") or (character >= "A" and character <= "Z") or (character >= "0" and character <= "9") or character in ["_", "-", "."]):
+                throw Error("invalid lowering requirement: " + name)
+        if name.starts_with("-"):
+            throw Error("invalid lowering requirement: " + name)
+        if name not in result:
+            result.append(name)
+    return result
+
+
+def scalar_requirements(function: borrow FunctionDeclaration, requirements: LoweringRequirements):
+    for decorator in borrow function.decorators:
+        if decorator.name not in ["mlir", "c"]:
+            continue
+        for argument in borrow decorator.arguments:
+            key ?= argument.name
+            if key == None:
+                continue
+            if key != None and key != "lowering" and key != "libraries":
+                continue
+            match argument.value:
+                case String:
+                    for name in scalar_requirement_names(value):
+                        if key == "lowering":
+                            if decorator.name != "mlir":
+                                throw Error("C boundaries cannot request MLIR lowering passes")
+                            if name not in requirements.passes:
+                                requirements.passes.append(name)
+                        elif name not in requirements.libraries:
+                            requirements.libraries.append(name)
+                case _:
+                    throw Error("lowering requirements require string literals")
