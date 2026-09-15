@@ -1,0 +1,49 @@
+import * from "../src/lib.sev" as dependency
+
+test "diamond graph builds once and links consumers before providers":
+    graph = dependency.graph(["app", "left", "right", "shared", "unused"], [dependency.Edge(0, 1, "left"), dependency.Edge(0, 2, "right"), dependency.Edge(1, 3, "shared"), dependency.Edge(2, 3, "shared")])
+    assert(dependency.build_order(graph, [0]) == [3, 1, 2, 0])
+    assert(dependency.link_order(graph, [0]) == [0, 2, 1, 3])
+    assert(dependency.closure(graph, [0]) == [0, 1, 2, 3])
+    assert(dependency.affected(graph, [3, 3]) == [3, 1, 2, 0])
+    assert(dependency.affected(graph, []) == [])
+    assert(dependency.build_order(graph) == [3, 1, 2, 0, 4])
+    assert(graph.edges[0].alias == "left")
+
+test "cycles and invalid identities are errors":
+    graph = dependency.graph(["a", "b"], [dependency.Edge(0, 1), dependency.Edge(1, 0)])
+    failed := false
+    try:
+        dependency.build_order(graph)
+    catch error: Error:
+        failed = error.message.contains("a -> b -> a")
+    assert(failed)
+    invalid ?= dependency.graph(["a"], [dependency.Edge(0, 1)])
+    assert(invalid is Error)
+    negative ?= dependency.closure(graph, [-1])
+    assert(negative is Error)
+    self_graph = dependency.graph(["self"], [dependency.Edge(0, 0)])
+    self_cycle ?= dependency.build_order(self_graph)
+    assert(self_cycle is Error)
+
+test "duplicate alias edges do not duplicate packages":
+    graph = dependency.graph(["root", "leaf"], [dependency.Edge(0, 1, "first"), dependency.Edge(0, 1, "second", true)])
+    assert(dependency.build_order(graph) == [1, 0])
+    assert(dependency.closure(graph, [0, 0]) == [0, 1])
+    assert(graph.edges[1].development)
+    assert(len(dependency.build_order(dependency.graph([], []))) == 0)
+
+test "deep dependency chains use an explicit stack":
+    names: list[string] = []
+    edges: list[dependency.Edge] = []
+    index := 0
+    while index < 4096:
+        names.append(string(index))
+        if index > 0:
+            edges.append(dependency.Edge(index - 1, index))
+        index += 1
+    graph = dependency.graph(names, edges)
+    order = dependency.build_order(graph, [0])
+    assert(len(order) == 4096)
+    assert(order[0] == 4095 and order[-1] == 0)
+    assert(len(dependency.affected(graph, [4095])) == 4096)

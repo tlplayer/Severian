@@ -1,0 +1,25 @@
+{
+  "package": {
+    "name": "package.linker",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Verified native link plans and atomic output publication"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "file": {
+      "path": "../../system/file"
+    },
+    "os": {
+      "path": "../../system/os"
+    },
+    "path": {
+      "path": "../../system/path"
+    },
+    "process": {
+      "path": "../../system/process"
+    }
+  }
+}

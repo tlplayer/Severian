@@ -5,6 +5,13 @@ publication in ordinary Severian source. Its design follows
 [SIP-0003: Package Interfaces, Realizations, and Incremental Dependency Builds](../../docs/sip/0003-sip-packages.md).
 The callable API and compilation-unit protocol are documented in [API.md](API.md).
 
+Two independent libraries provide the graph and linking operations:
+[package.dependency](dependency/README.md) indexes resolved edges for linear
+traversal, and [package.linker](linker/README.md) verifies and executes native
+link plans. They are integrated into build planning, compilation-unit selection,
+and native archive ordering. See the runnable
+[linker/dependency example](../../docs/examples/10-building/02-linker-dependency/README.md).
+
 SIP-0003 is a draft. The contracts below describe its intended package model;
 the implementation-status section records the remaining migration work.
 

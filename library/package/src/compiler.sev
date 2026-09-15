@@ -1,3 +1,5 @@
+import dependency
+import * from "dependency.sev"
 import * from "model.sev"
 import * from "host.sev"
 import * from "manifest.sev"
@@ -62,35 +64,29 @@ def decode_resolution(text: string) -> Resolution | Error:
 
 # Re-root a unit's graph so its identity is independent of consumers and of
 # their package indices. Only the transitive dependencies of this unit matter.
-def unit_packages(resolution: Resolution, index: int, indices: list[int]) -> unit:
-    if index in indices:
-        return
-    indices.append(index)
-    aliases: list[string] = []
-    for edge in resolution.edges:
-        if edge.parent == index:
-            aliases.append(edge.alias)
-    for alias in sorted_strings(aliases):
-        for edge in resolution.edges:
-            if edge.parent == index and edge.alias == alias:
-                unit_packages(resolution, edge.child, indices)
+def unit_packages(resolution: Resolution, index: int, indices: list[int]) -> unit | Error:
+    for member in dependency.closure(dependency_graph(resolution), [index]):
+        if member not in indices:
+            indices.append(member)
 
 
-def unit_resolution(resolution: Resolution, index: int) -> Resolution:
-    indices: list[int] = []
-    unit_packages(resolution, index, indices)
+def unit_resolution(resolution: Resolution, index: int) -> Resolution | Error:
+    graph = dependency_graph(resolution)
+    dependency.build_order(graph, [index])
+    indices = dependency.closure(graph, [index])
+    remap: list[int] = []
+    for resolved in resolution.packages:
+        remap.append(-1)
     packages: list[ResolvedPackage] = []
     edges: list[DependencyEdge] = []
     for original in indices:
+        remap[original] = int(len(packages))
         resolved = resolution.packages[original]
         identity = resolved.identity
-        # A checkout has the same identity when built directly or as a path dep.
         packages.append(ResolvedPackage(PackageIdentity(identity.name, identity.version, "path:" + resolved.root if identity.source == "root" else identity.source), resolved.root, resolved.manifest, resolved.checksum, resolved.interface_path, resolved.archive_path, resolved.build_id))
-    for parent in range(int(len(indices))):
-        for child in range(int(len(indices))):
-            for edge in resolution.edges:
-                if edge.parent == indices[parent] and edge.child == indices[child]:
-                    edges.append(DependencyEdge(parent, child, edge.alias, edge.development))
+    for edge in resolution.edges:
+        if remap[edge.parent] >= 0 and remap[edge.child] >= 0:
+            edges.append(DependencyEdge(remap[edge.parent], remap[edge.child], edge.alias, edge.development))
     return Resolution(packages, edges, "")
 
 

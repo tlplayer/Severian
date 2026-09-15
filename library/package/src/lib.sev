@@ -13,3 +13,4 @@ import * from "native.sev"
 import * from "lint.sev"
 
 import * from "link.sev"
+import * from "dependency.sev"

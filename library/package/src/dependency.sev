@@ -1,0 +1,17 @@
+import dependency
+import * from "model.sev"
+
+# Preserve package identities and alias metadata while indexing the snapshot.
+def dependency_graph(resolution: Resolution) -> dependency.Graph | Error:
+    names: list[string] = []
+    edges: list[dependency.Edge] = []
+    for resolved in resolution.packages:
+        names.append(resolved.identity.name + "@" + resolved.identity.version)
+    for edge in resolution.edges:
+        edges.append(dependency.Edge(edge.parent, edge.child, edge.alias, edge.development))
+    return dependency.graph(names, edges)
+
+def dependency_build_order(resolution: Resolution, index: int, ordered: list[int]) -> unit | Error:
+    for member in dependency.build_order(dependency_graph(resolution), [index]):
+        if member not in ordered:
+            ordered.append(member)

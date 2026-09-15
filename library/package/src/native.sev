@@ -1,3 +1,5 @@
+import dependency
+import * from "dependency.sev"
 import * from "model.sev"
 import * from "manifest.sev"
 import * from "host.sev"
@@ -96,7 +98,8 @@ def native_package(root: string, seen: list[string], arguments: list[string], fo
 def native_arguments(resolution: Resolution, sources: list[string]) -> list[string] | Error:
     seen: list[string] = []
     arguments: list[string] = []
-    for package in resolution.packages:
+    for index in dependency.link_order(dependency_graph(resolution)):
+        package = resolution.packages[index]
         if package.archive_path != "" and package.archive_path not in arguments:
             arguments.append(package.archive_path)
         if package.archive_path == "":

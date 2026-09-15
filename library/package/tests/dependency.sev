@@ -1,0 +1,15 @@
+import * from "../src/lib.sev" as package
+
+test "unit graph excludes consumers and remaps diamond edges":
+    packages: list[package.ResolvedPackage] = []
+    for name in ["app", "left", "right", "shared"]:
+        manifest = package.parse_manifest("{\"package\":{\"name\":\"" + name + "\",\"version\":\"1.0.0\"},\"lib\":{\"path\":\"src/lib.sev\"}}")
+        packages.append(package.ResolvedPackage(package.PackageIdentity(name, "1.0.0", "path:/" + name), "/" + name, manifest, name, archive_path="/" + name + ".a"))
+    resolution = package.Resolution(packages, [package.DependencyEdge(0, 1, "left", false), package.DependencyEdge(0, 2, "right", false), package.DependencyEdge(1, 3, "shared", false), package.DependencyEdge(2, 3, "shared", false)], "")
+    unit = package.unit_resolution(resolution, 2)
+    assert(len(unit.packages) == 2 and len(unit.edges) == 1)
+    assert(unit.packages[0].identity.name == "right")
+    assert(unit.packages[1].identity.name == "shared")
+    assert(unit.edges[0].parent == 0 and unit.edges[0].child == 1)
+    assert(unit.edges[0].alias == "shared")
+    assert(package.native_arguments(resolution, []) == ["/app.a", "/right.a", "/left.a", "/shared.a"])

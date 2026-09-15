@@ -1,0 +1,32 @@
+{
+  "package": {
+    "name": "linker-dependency-example",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "bin": [
+    {
+      "name": "linker-dependency-example",
+      "path": "main.sev"
+    }
+  ],
+  "dependencies": {
+    "dependency": {
+      "package": "package.dependency",
+      "path": "../../../../library/package/dependency"
+    },
+    "linker": {
+      "package": "package.linker",
+      "path": "../../../../library/package/linker"
+    },
+    "file": {
+      "path": "../../../../library/system/file"
+    },
+    "os": {
+      "path": "../../../../library/system/os"
+    },
+    "process": {
+      "path": "../../../../library/system/process"
+    }
+  }
+}

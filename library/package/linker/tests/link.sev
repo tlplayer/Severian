@@ -1,0 +1,71 @@
+import * from "../src/lib.sev" as linker
+import file
+import os
+import process
+
+def object(root: string, name: string) -> string | Error:
+    source = root + "/" + name + ".c"
+    assert(file.write(source, "int " + name + "(void) { return 42; }\n") == 0)
+    output = root + "/" + name + ".o"
+    assert(process.run(["cc", "-c", source, "-o", output]) == 0)
+    return output
+
+test "archive reuse validates output and removes stale members":
+    root = os.temporary("/tmp", "sev-linker-")
+    first = linker.input(object(root, "first"))
+    second = linker.input(object(root, "second"))
+    output = root + "/archive with spaces.a"
+    plan = linker.plan_inputs("host", "static-archive", output, "ar", [first, second], incremental=true)
+    result = linker.execute_link(plan)
+    assert(not result.reused)
+    assert(linker.execute_link(plan).reused)
+    assert(file.write(output, "damaged") == 0)
+    repaired = linker.execute_link(plan)
+    assert(not repaired.reused and repaired.checksum == result.checksum)
+    reduced = linker.plan_inputs("host", "static-archive", output, "ar", [first], incremental=true)
+    assert(not linker.execute_link(reduced).reused)
+    members = process.execute(["ar", "t", output])
+    assert(members.status == 0 and members.stdout.strip() == "first.o")
+    assert(file.read_checked(output + ".link.json").starts_with("{\"format\":1"))
+    os.remove_tree(root)
+
+test "changed or incompatible inputs fail before linking":
+    root = os.temporary("/tmp", "sev-linker-")
+    item = linker.input(object(root, "original"), target="host")
+    invalid ?= linker.plan_inputs("other", "static-archive", root + "/other.a", "ar", [item])
+    assert(invalid is Error)
+    plan = linker.plan_inputs("host", "static-archive", root + "/library.a", "ar", [item])
+    assert(file.write(item.path, "changed input") == 0)
+    changed ?= linker.execute_link(plan)
+    assert(changed is Error)
+    assert(not os.is_file(plan.output))
+    missing ?= linker.plan_link("host", "executable", root + "/app", ["cc", root + "/missing.o", "-o", root + "/app"])
+    assert(missing is Error)
+    os.remove_tree(root)
+
+test "failed and no-output link commands preserve an existing artifact":
+    root = os.temporary("/tmp", "sev-linker-")
+    item = linker.input(object(root, "value"))
+    output = root + "/library.a"
+    good = linker.execute_link(linker.plan_inputs("host", "static-archive", output, "ar", [item]))
+    failing_plan = linker.plan_inputs("host", "static-archive", output, "false", [item])
+    failed ?= linker.execute_link(failing_plan)
+    assert(failed is Error)
+    empty_plan = linker.plan_inputs("host", "static-archive", output, "true", [item])
+    empty ?= linker.execute_link(empty_plan)
+    assert(empty is Error)
+    assert(linker.link_digest(output) == good.checksum)
+    os.remove_tree(root)
+
+test "legacy commands preserve output kind and snapshot arguments":
+    root = os.temporary("/tmp", "sev-linker-")
+    location = object(root, "legacy")
+    output = root + "/legacy.a"
+    arguments = ["ar", "rcsD", output, location]
+    plan = linker.plan_link("host", "static-archive", output, arguments)
+    arguments[0] = "false"
+    assert(plan.kind == "static-archive")
+    assert(not linker.execute_link(plan).reused)
+    assert(not linker.execute_link(plan).reused)
+    assert(linker.link_quote("quote\"\\\n\tλ") == "\"quote\\\"\\\\\\u000a\\u0009λ\"")
+    os.remove_tree(root)

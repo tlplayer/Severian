@@ -1,0 +1,11 @@
+{
+  "package": {
+    "name": "package.dependency",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Indexed package dependency graphs"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

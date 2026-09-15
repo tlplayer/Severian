@@ -1,0 +1,123 @@
+# Edges point from a consumer to its dependency. Package discovery and version
+# selection remain with package.resolve; this library operates on a snapshot.
+class Edge:
+    parent: int
+    child: int
+    alias: string = ""
+    development: bool = false
+
+class Graph:
+    names: list[string]
+    edges: list[Edge]
+    outgoing: list[int]
+    incoming: list[int]
+    next_outgoing: list[int]
+    next_incoming: list[int]
+
+def node(graph: Graph, index: int) -> unit | Error:
+    if index < 0 or index >= int(len(graph.names)):
+        throw Error("dependency graph node is out of range: " + string(index))
+
+def graph(names: list[string], edges: list[Edge]) -> Graph | Error:
+    outgoing: list[int] = []
+    incoming: list[int] = []
+    next_outgoing: list[int] = []
+    next_incoming: list[int] = []
+    copied: list[Edge] = []
+    for name in names:
+        outgoing.append(-1)
+        incoming.append(-1)
+    for edge in edges:
+        if edge.parent < 0 or edge.child < 0 or edge.parent >= int(len(names)) or edge.child >= int(len(names)):
+            throw Error("dependency graph edge is out of range")
+        copied.append(Edge(edge.parent, edge.child, edge.alias, edge.development))
+        next_outgoing.append(-1)
+        next_incoming.append(-1)
+    # Prepending backwards preserves the supplied edge order in both indexes.
+    cursor := int(len(edges))
+    while cursor > 0:
+        cursor -= 1
+        edge = copied[cursor]
+        next_outgoing[cursor] = outgoing[edge.parent]
+        next_incoming[cursor] = incoming[edge.child]
+        outgoing[edge.parent] = cursor
+        incoming[edge.child] = cursor
+    return Graph(names[:], copied, outgoing, incoming, next_outgoing, next_incoming)
+
+# Iterative DFS is linear in nodes plus edges and has no recursion-depth limit.
+# An empty roots list means the whole graph, including disconnected components.
+def build_order(graph: Graph, roots: list[int] = []) -> list[int] | Error:
+    starts: list[int] = roots[:]
+    if len(starts) == 0:
+        for index in range(int(len(graph.names))):
+            starts.append(index)
+    state: list[int] = []
+    for name in graph.names:
+        state.append(0)
+    cursors = graph.outgoing[:]
+    ordered: list[int] = []
+    stack: list[int] = []
+    for root in starts:
+        node(graph, root)
+        if state[root] != 0:
+            continue
+        stack.append(root)
+        state[root] = 1
+        while len(stack) > 0:
+            current = stack[-1]
+            edge_index = cursors[current]
+            if edge_index < 0:
+                stack.pop()
+                state[current] = 2
+                ordered.append(current)
+                continue
+            cursors[current] = graph.next_outgoing[edge_index]
+            child = graph.edges[edge_index].child
+            if state[child] == 1:
+                chain: list[string] = []
+                for member in stack:
+                    chain.append(graph.names[member])
+                chain.append(graph.names[child])
+                throw Error("package dependency cycle: " + chain.join(" -> "))
+            if state[child] == 0:
+                state[child] = 1
+                stack.append(child)
+    return ordered
+
+# Breadth-first closure keeps the selected root at index zero for unit snapshots.
+# Reverse closure gives conservative rebuild candidates after a content change.
+def closure(graph: Graph, roots: list[int], reverse: bool = false) -> list[int] | Error:
+    seen: list[bool] = []
+    for name in graph.names:
+        seen.append(false)
+    result: list[int] = []
+    for root in roots:
+        node(graph, root)
+        if not seen[root]:
+            seen[root] = true
+            result.append(root)
+    cursor := 0
+    while cursor < int(len(result)):
+        current = result[cursor]
+        cursor += 1
+        edge_index := graph.incoming[current] if reverse else graph.outgoing[current]
+        while edge_index >= 0:
+            edge = graph.edges[edge_index]
+            child = edge.parent if reverse else edge.child
+            if not seen[child]:
+                seen[child] = true
+                result.append(child)
+            edge_index = graph.next_incoming[edge_index] if reverse else graph.next_outgoing[edge_index]
+    return result
+
+def affected(graph: Graph, changed: list[int]) -> list[int] | Error:
+    return closure(graph, changed, true)
+
+def link_order(graph: Graph, roots: list[int] = []) -> list[int] | Error:
+    ordered = build_order(graph, roots)
+    result: list[int] = []
+    cursor := int(len(ordered))
+    while cursor > 0:
+        cursor -= 1
+        result.append(ordered[cursor])
+    return result

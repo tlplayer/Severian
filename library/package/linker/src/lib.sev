@@ -1,0 +1,156 @@
+import * from "host.sev"
+import file
+import os
+import path
+import process
+
+class LinkInput:
+    path: string
+    kind: string
+    checksum: string
+    target: string = ""
+
+class LinkPlan:
+    target: string
+    kind: string
+    output: string
+    arguments: list[string]
+    inputs: list[LinkInput]
+    incremental: bool = false
+
+class LinkResult:
+    output: string
+    checksum: string
+    plan: LinkPlan
+    reused: bool = false
+
+def input(location: string, kind: string = "object", target: string = "") -> LinkInput | Error:
+    if kind not in ["object", "archive", "shared-library", "llvm-ir", "native-source", "response", "script"]:
+        throw Error("unsupported link input kind: " + kind)
+    if not os.is_file(location):
+        throw Error("missing link input: " + location)
+    absolute = os.canonical(location)
+    return LinkInput(absolute, kind, link_digest(absolute), target)
+
+def validate(plan: LinkPlan) -> unit | Error:
+    if plan.target == "" or plan.output == "" or plan.kind not in ["static-archive", "shared-library", "executable"] or len(plan.arguments) == 0 or len(plan.inputs) == 0:
+        throw Error("invalid native link plan")
+    bound := false
+    for argument in plan.arguments[1:]:
+        if argument == plan.output or argument == "/out:" + plan.output:
+            bound = true
+    if not bound:
+        throw Error("link command does not name its output")
+    for item in plan.inputs:
+        if item.target != "" and item.target != plan.target:
+            throw Error("incompatible link input target: " + item.path)
+        if not os.is_file(item.path) or link_digest(item.path) != item.checksum:
+            throw Error("link input changed: " + item.path)
+        if os.is_file(plan.output) and os.canonical(plan.output) == os.canonical(item.path):
+            throw Error("link output overwrites an input: " + item.path)
+
+# Structured, ordered inputs. Never sort archives: consumers precede providers.
+# Options may refer to implicit toolchain inputs, so reuse is opt-in. Callers
+# enabling it must track every external input and use a hermetic toolchain.
+def plan_inputs(target: string, kind: string, output: string, tool: string, inputs: list[LinkInput], options: list[string] = [], incremental: bool = false) -> LinkPlan | Error:
+    arguments: list[string] = [tool]
+    if kind == "static-archive":
+        arguments.append("rcsD")
+        arguments.append(output)
+    elif kind == "shared-library":
+        arguments.append("-shared")
+    captured: list[LinkInput] = []
+    for item in inputs:
+        captured.append(LinkInput(item.path, item.kind, item.checksum, item.target))
+        arguments.append(item.path)
+    for option in options:
+        arguments.append(option)
+    if kind != "static-archive":
+        arguments.append("-o")
+        arguments.append(output)
+    plan = LinkPlan(target, kind, output, arguments, captured, incremental)
+    validate(plan)
+    return plan
+
+# Compatibility adapter for existing clang, llvm-ar, lld-link and ld64 commands.
+# Raw commands can contain implicit headers/libraries; they always execute.
+def plan_link(target: string, kind: string, output: string, arguments: list[string]) -> LinkPlan | Error:
+    inputs: list[LinkInput] = []
+    for argument in arguments[1:]:
+        if argument == output or argument.starts_with("/out:"):
+            continue
+        if argument.starts_with("/implib:") or argument.starts_with("/pdb:") or argument.starts_with("/export:"):
+            continue
+        response = argument.starts_with("@")
+        location = argument[1:] if response else argument
+        extension = path.extension(location)
+        if not os.is_file(location):
+            if response or (not argument.starts_with("-") and extension in [".o", ".obj", ".a", ".lib", ".ll", ".bc", ".c"]):
+                throw Error("missing link input: " + location)
+            continue
+        role = "response" if response else "native-source" if extension == ".c" else "archive" if extension in [".a", ".lib"] else "llvm-ir" if extension in [".ll", ".bc"] else "shared-library" if extension in [".so", ".dylib", ".dll"] else "object"
+        inputs.append(input(location, role))
+    plan = LinkPlan(target, kind, output, arguments[:], inputs)
+    validate(plan)
+    return plan
+
+def record(plan: LinkPlan, checksum: string, tool: string) -> string:
+    arguments: list[string] = []
+    inputs: list[string] = []
+    for argument in plan.arguments:
+        arguments.append(link_quote(argument))
+    for item in plan.inputs:
+        inputs.append("{\"path\":" + link_quote(item.path) + ",\"kind\":" + link_quote(item.kind) + ",\"checksum\":" + link_quote(item.checksum) + ",\"target\":" + link_quote(item.target) + "}")
+    return "{\"format\":1,\"target\":" + link_quote(plan.target) + ",\"kind\":" + link_quote(plan.kind) + ",\"output\":" + link_quote(plan.output) + ",\"checksum\":" + link_quote(checksum) + ",\"linker\":" + link_quote(tool) + ",\"cwd\":" + link_quote(process.current_directory()) + ",\"arguments\":[" + arguments.join(",") + "],\"input\":[" + inputs.join(",") + "]}\n"
+
+def execute_locked(plan: LinkPlan, stage: string) -> LinkResult | Error:
+    validate(plan)
+    located = process.execute(["which", plan.arguments[0]])
+    if located.status != 0:
+        throw Error("linker not found: " + plan.arguments[0])
+    tool = os.canonical(located.stdout.strip())
+    identity = tool + " " + link_digest(tool)
+    receipt = plan.output + ".link.json"
+    if plan.incremental and os.is_file(plan.output) and os.is_file(receipt):
+        checksum = link_digest(plan.output)
+        if file.read_checked(receipt) == record(plan, checksum, identity):
+            return LinkResult(plan.output, checksum, plan, true)
+    # A fresh archive cannot retain obsolete members from an earlier link.
+    temporary = stage + "/" + path.basename(plan.output)
+    arguments: list[string] = [tool]
+    for argument in plan.arguments[1:]:
+        arguments.append(temporary if argument == plan.output else "/out:" + temporary if argument == "/out:" + plan.output else argument)
+    result = process.execute(arguments)
+    if result.status != 0:
+        throw Error("linker failed: " + plan.arguments[0] + ": " + result.stderr)
+    if not os.is_file(temporary):
+        throw Error("linker did not produce " + plan.output)
+    validate(plan)
+    if tool + " " + link_digest(tool) != identity:
+        throw Error("linker changed during execution")
+    checksum = link_digest(temporary)
+    link_write(stage + "/link.json", record(plan, checksum, identity))
+    if os.rename(temporary, plan.output) != 0:
+        throw Error("could not publish link output: " + plan.output)
+    if os.rename(stage + "/link.json", receipt) != 0:
+        throw Error("could not publish link record: " + receipt)
+    return LinkResult(plan.output, checksum, plan)
+
+def execute_link(plan: LinkPlan) -> LinkResult | Error:
+    validate(plan)
+    link_mkdir(path.dirname(plan.output))
+    lock = file.native_lock(plan.output + ".link.lock")
+    if lock < 0:
+        throw Error("could not lock link output: " + plan.output)
+    stage := ""
+    try:
+        stage = os.temporary(path.dirname(plan.output), ".sev-link-")
+        result = execute_locked(plan, stage)
+        os.remove_tree(stage)
+        file.unlock(lock)
+        return result
+    catch error: Error:
+        if stage != "":
+            os.remove_tree(stage)
+        file.unlock(lock)
+        throw Error(error.message)

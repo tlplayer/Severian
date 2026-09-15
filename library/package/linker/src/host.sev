@@ -1,0 +1,33 @@
+import file
+import os
+import path
+import process
+
+def link_digest(location: string) -> string | Error:
+    result = process.execute(["sha256sum", "--", location])
+    if result.status != 0:
+        throw Error("could not hash link input: " + location)
+    # GNU sha256sum prefixes a backslash for escaped filenames.
+    value = result.stdout
+    return "sha256:" + (value[1:65] if value.starts_with("\\") else value[:64])
+
+def link_quote(value: string) -> string:
+    result := "\""
+    for character in value.characters():
+        item = string(character)
+        if item == "\"" or item == "\\":
+            result += "\\" + item
+        elif int(character.bytes()[0]) < 32:
+            code = int(character.bytes()[0])
+            result += "\\u00" + "0123456789abcdef"[code / 16:code / 16 + 1] + "0123456789abcdef"[code % 16:code % 16 + 1]
+        else:
+            result += item
+    return result + "\""
+
+def link_mkdir(location: string) -> unit | Error:
+    if not os.make_directories(location):
+        throw Error("could not create link directory: " + location)
+
+def link_write(location: string, contents: string) -> unit | Error:
+    if file.write(location, contents) != 0:
+        throw Error("could not write link record: " + location)

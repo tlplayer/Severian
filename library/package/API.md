@@ -34,6 +34,17 @@ and can later gain an in-process adapter without moving package semantics.
 | Archives | `read_archive(path)`, `write_archive(path, Archive(...))`, `extract(archive, new_directory)` |
 | Select | `select(distribution_root, Requirements())` |
 | Clean | `clean(project, Clean())` |
+| Dependency graph | `dependency_graph(resolution)` returns a `package.dependency.Graph` |
+| Native link compatibility | `plan_link(target, kind, output, arguments)`, `execute_link(plan)` |
+
+The independently importable [package.dependency](dependency/README.md) library
+owns indexed traversal, cycle diagnostics, build/link order, and affected-node
+queries. Build planning and compilation-unit snapshots use this index, and
+native archives are ordered with consumers before providers.
+The [package.linker](linker/README.md) library owns structured input plans,
+verification, optional reuse, atomic primary-output publication, and JSON link
+records. Existing `package.LinkInput`, `package.LinkPlan`, `package.LinkResult`,
+`package.plan_link`, and `package.execute_link` imports remain supported.
 
 Request fields have defaults; empty platform/profile values inherit manifest
 settings and then `host`/`dev`. `Build.target` selects a declared target;
