@@ -1,0 +1,24 @@
+import * from "../src/lib.sev" as build
+import file
+import os
+
+test "equal intermediate output skips later stages after an upstream change":
+    root = os.temporary("/tmp", "sev-pipeline-")
+    pipeline = build.CompilerPipeline(root)
+    input = build.pipeline_text(pipeline, "value + 0\n", ".ir")
+    normalize = ["sh", "-c", "sed 's/ + 0//' \"$1\" > \"$2\"", "normalize", "{input}", "{output}"]
+    first = build.compiler_step(pipeline, "normalize", "1", input, normalize, ".ir")
+    downstream = build.compiler_step(pipeline, "codegen", "1", first, ["cp", "{input}", "{output}"], ".o")
+    changed = build.pipeline_text(pipeline, "value\n", ".ir")
+    normalized = build.compiler_step(pipeline, "normalize", "1", changed, normalize, ".ir")
+    assert(not normalized.reused and normalized.checksum == first.checksum)
+    reused = build.compiler_step(pipeline, "codegen", "1", normalized, ["cp", "{input}", "{output}"], ".o")
+    assert(reused.reused and reused.path == downstream.path)
+    revised = build.compiler_step(pipeline, "codegen", "2", normalized, ["cp", "{input}", "{output}"], ".o")
+    assert(not revised.reused)
+    assert(file.write(downstream.path, "damaged") == 0)
+    repaired = build.compiler_step(pipeline, "codegen", "1", normalized, ["cp", "{input}", "{output}"], ".o")
+    assert(not repaired.reused and repaired.checksum == downstream.checksum)
+    failed ?= build.compiler_step(pipeline, "failure", "1", normalized, ["false", "{output}"], ".o")
+    assert(failed is Error)
+    os.remove_tree(root)

@@ -161,17 +161,8 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
                 return error(parser_fail(parser, "expected function after decorator"))
             result.items.append(universal.Function(parser_function_declaration(parser, decorators)))
         elif parser_at_identifier(parser, "from"):
-            start = parser_next(parser).span
-            package_name = parser_identifier(parser, "expected an import source")[0]
-            if not parser_at_identifier(parser, "import"):
-                return error(parser_fail(parser, "expected import after source package"))
-            parser_next(parser)
-            member = parser_identifier(parser, "expected an import name")[0]
-            alias: string | None := None
-            if parser_at_identifier(parser, "as"):
-                parser_next(parser)
-                alias = parser_identifier(parser, "expected an import alias")[0]
-            result.items.append(universal.Import(universal.ImportDeclaration(universal.Name(member), package_name, alias, start)))
+            for declaration in parser_selective_imports(parser):
+                result.items.append(universal.Import(declaration))
         elif parser_at_identifier(parser, "import"):
             result.items.append(universal.Import(parser_import_declaration(parser)))
         elif parser_at_identifier(parser, "trait"):
@@ -231,6 +222,41 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
     end = parser_expect_symbol(parser, ")", "expected closing decorator parenthesis").span
     parser_expect(parser, Newline, "expected newline after decorator")
     return universal.Decorator(name, arguments, source.Span(start.source, start.start, end.end))
+
+def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+    parser_next(parser)
+    package_name = parser_identifier(parser, "expected an import source")[0]
+    if not parser_at_identifier(parser, "import"):
+        return error(parser_fail(parser, "expected import after source package"))
+    parser_next(parser)
+    multiline = parser_at_simple(parser, Newline)
+    if multiline:
+        parser_delimited_layout(parser)
+    grouped = parser_take_symbol(parser, "{") != None
+    if multiline and not grouped:
+        return error(parser_fail(parser, "a new-line import list requires braces or a backslash continuation"))
+    if grouped:
+        parser_delimited_layout(parser)
+    result: list[universal.ImportDeclaration] = []
+    while true:
+        member = parser_identifier(parser, "expected an import name")
+        alias: string | None := None
+        if parser_at_identifier(parser, "as"):
+            parser_next(parser)
+            alias = parser_identifier(parser, "expected an import alias")[0]
+        result.append(universal.ImportDeclaration(universal.Name(member[0]), package_name, alias, member[1]))
+        if grouped:
+            parser_delimited_layout(parser)
+        if parser_take_symbol(parser, ",") == None:
+            break
+        if grouped:
+            parser_delimited_layout(parser)
+            if parser_at_symbol(parser, "}"):
+                break
+    if grouped:
+        parser_expect_symbol(parser, "}", "expected } after import list")
+    return result
+
 
 def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span

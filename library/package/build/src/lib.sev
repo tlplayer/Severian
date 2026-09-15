@@ -1,0 +1,111 @@
+import profile
+import * from "model.sev"
+import * from "document.sev"
+import cache
+from cache import
+{
+    CacheValue as CompilerStepResult,
+    capture,
+    canonical,
+    digest,
+    temporary,
+    mkdir,
+    write_text,
+    read_text,
+    copy_file,
+    replace_file,
+    remove_tree,
+}
+import file
+import os
+import path
+import process
+import environment
+
+class CompilerPipeline:
+    root: string
+    enabled: bool = true
+    events: list[string] = []
+
+def build_root() -> string:
+    return process.current_directory() + "/package.pkg"
+
+def pipeline_blob(pipeline: CompilerPipeline, source: string, suffix: string) -> CompilerStepResult | Error:
+    return cache.put_file(cache.Store(pipeline.root), source, suffix)
+
+def pipeline_text(pipeline: CompilerPipeline, text: string, suffix: string) -> CompilerStepResult | Error:
+    return cache.put_text(cache.Store(pipeline.root), text, suffix)
+
+def pipeline_event(pipeline: CompilerPipeline, name: string, key: string, output: CompilerStepResult, measurement: profile.ProcessMeasurement = profile.ProcessMeasurement(0, "", "", 0.0)) -> unit:
+    pipeline.events.append("{\"stage\":" + document_quote(name) + ",\"key\":" + document_quote(key) + ",\"output\":" + document_quote(output.checksum) + ",\"reused\":" + string(output.reused) + ",\"resources\":" + profile.measurement_json(measurement) + "}")
+
+def compiler_step(pipeline: CompilerPipeline, name: string, version: string, input: CompilerStepResult, arguments: list[string], suffix: string, extra_inputs: list[string] = [], reusable: bool = true) -> CompilerStepResult | Error:
+    cache.component(name)
+    cache.component(suffix)
+    if len(arguments) == 0 or "{output}" not in arguments:
+        throw Error("compiler stage requires an explicit output")
+    stage = temporary(pipeline.root)
+    handle := -1
+    try:
+        tool := capture(["which", arguments[0]])
+        if not tool.starts_with("/"):
+            tool = process.current_directory() + "/" + tool
+        tool_checksum = digest(tool)
+        checksums: list[string] = []
+        identity := "compiler-step-1\n" + name + "\n" + version + "\n" + tool + "\n" + tool_checksum + "\n" + input.checksum + "\n" + suffix + "\n" + process.current_directory()
+        for argument in arguments[1:]:
+            identity += "\n" + document_quote(argument)
+        for location in extra_inputs:
+            checksum = digest(location)
+            checksums.append(checksum)
+            identity += "\n" + document_quote(location) + "\n" + checksum
+        for variable in ["PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH", "LD_LIBRARY_PATH", "SDKROOT", "MACOSX_DEPLOYMENT_TARGET", "SOURCE_DATE_EPOCH"]:
+            identity += "\n" + variable + "=" + environment.get(variable, "")
+        write_text(stage + "/key", identity)
+        key = digest(stage + "/key").replace(":", "-")
+        directory = pipeline.root + "/steps/" + name
+        mkdir(directory)
+        receipt = directory + "/" + key + ".json"
+        handle = file.native_lock(directory + "/" + key + ".lock")
+        if handle < 0:
+            throw Error("could not lock compiler stage: " + name)
+        if digest(input.path) != input.checksum:
+            throw Error("compiler stage input changed: " + input.path)
+        if pipeline.enabled and reusable:
+            cached = cache.lookup(cache.Store(pipeline.root), receipt, suffix)
+            if len(cached) > 0:
+                result = cached[0]
+                pipeline_event(pipeline, name, key, result)
+                file.unlock(handle)
+                remove_tree(stage)
+                return result
+        output = stage + "/value" + suffix
+        command: list[string] = [tool]
+        for argument in arguments[1:]:
+            command.append(input.path if argument == "{input}" else output if argument == "{output}" else argument)
+        result = profile.measure_command(command)
+        if result.status != 0 or not os.is_file(output):
+            throw Error("compiler stage failed: " + name + ": " + result.stderr)
+        if digest(tool) != tool_checksum:
+            throw Error("compiler stage tool changed: " + tool)
+        for index in range(int(len(extra_inputs))):
+            if digest(extra_inputs[index]) != checksums[index]:
+                throw Error("compiler stage input changed: " + extra_inputs[index])
+        if digest(input.path) != input.checksum:
+            throw Error("compiler stage input changed: " + input.path)
+        value = cache.put_file(cache.Store(pipeline.root), output, suffix, true)
+        cache.publish(receipt, value, stage)
+        pipeline_event(pipeline, name, key, value, result)
+        file.unlock(handle)
+        remove_tree(stage)
+        return value
+    catch failure: Error:
+        if handle >= 0:
+            file.unlock(handle)
+        remove_tree(stage)
+        throw failure
+
+def pipeline_report(pipeline: CompilerPipeline, destination: string) -> unit | Error:
+    report = temporary(profile.report_root(), "backend-") + "/stages.json"
+    write_text(report, "{\"format\":1,\"stages\":[" + pipeline.events.join(",") + "]}\n")
+    write_text(destination, "{\"format\":1,\"stages\":[" + pipeline.events.join(",") + "]}\n")

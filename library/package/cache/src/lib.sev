@@ -1,0 +1,82 @@
+import * from "host.sev"
+import os
+import path
+
+class Store:
+    root: string
+
+class CacheValue:
+    path: string
+    checksum: string
+    reused: bool = false
+
+def component(value: string) -> unit | Error:
+    if value == "" or value in [".", ".."]:
+        throw Error("empty cache component")
+    for character in value.characters():
+        if character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.":
+            throw Error("invalid cache component: " + value)
+
+def put_file(pipeline: Store, source: string, suffix: string, consume: bool = false) -> CacheValue | Error:
+    component(suffix)
+    checksum = digest(source)
+    destination = pipeline.root + "/blobs/" + checksum.replace(":", "-") + suffix
+    mkdir(path.dirname(destination))
+    if not os.is_file(destination) or digest(destination) != checksum:
+        stage = temporary(pipeline.root)
+        try:
+            if consume:
+                replace_file(source, stage + "/value")
+            else:
+                copy_file(source, stage + "/value")
+            if digest(stage + "/value") != checksum:
+                throw Error("cache input changed while storing: " + source)
+            replace_file(stage + "/value", destination)
+        catch failure: Error:
+            remove_tree(stage)
+            throw failure
+        remove_tree(stage)
+    return CacheValue(destination, checksum, false)
+
+def put_text(pipeline: Store, text: string, suffix: string) -> CacheValue | Error:
+    stage = temporary(pipeline.root)
+    try:
+        write_text(stage + "/value", text)
+        result = put_file(pipeline, stage + "/value", suffix, true)
+        remove_tree(stage)
+        return result
+    catch failure: Error:
+        remove_tree(stage)
+        throw failure
+
+def receipt(value: CacheValue) -> string:
+    return "{\"format\":1,\"checksum\":" + document_quote(value.checksum) + ",\"blob\":" + document_quote(path.basename(value.path)) + "}\n"
+
+# Receipts have a deliberately small fixed schema. Exact round-trip matching
+# rejects malformed JSON and extra fields before any stored path is used.
+def lookup(store: Store, location: string, suffix: string) -> list[CacheValue]:
+    try:
+        component(suffix)
+        if not os.is_file(location):
+            return []
+        text = read_text(location)
+        fields = text.split("\"")
+        if len(fields) != 11:
+            return []
+        checksum = fields[5]
+        if not checksum.starts_with("sha256:") or len(checksum) != 71:
+            return []
+        for character in checksum[7:].characters():
+            if character not in "0123456789abcdef":
+                return []
+        blob = store.root + "/blobs/" + checksum.replace(":", "-") + suffix
+        value = CacheValue(blob, checksum, true)
+        if text == receipt(value) and os.is_file(blob) and digest(blob) == checksum:
+            return [value]
+    catch damaged: Error:
+        pass
+    return []
+
+def publish(location: string, value: CacheValue, stage: string) -> unit | Error:
+    write_text(stage + "/record.json", receipt(value))
+    replace_file(stage + "/record.json", location)

@@ -145,7 +145,7 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
         sources: list[string] = []
         for file in files:
             sources.append(file.path)
-        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements)
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements, package.setting(entries, "build", "incremental", "true") != "false")
         if emit == "library":
             package.write_text(arguments[3] + ".interface.sev", interface[0])
             package.write_bytes(arguments[3] + ".interface.bin", metadata.encode_interface(interface[0]))

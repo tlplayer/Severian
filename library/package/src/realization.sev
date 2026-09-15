@@ -1,3 +1,4 @@
+import * from "document.sev"
 import * from "host.sev"
 import * from "payload.sev"
 import * from "container.sev"
@@ -20,7 +21,7 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
     triple = capture([environment.get("SEVERIAN_CLANG", "clang-21"), "-dumpmachine"])
     prefix = "artifacts/" + safe_name(triple) + "/" + safe_name(unit.profile) + "/" + build_id
     name = safe_name(unit.target.name.replace("/", "_"))
-    output := "bin/" + triple + "/" + unit.profile + "/" + build_id + "/" + name
+    output := prefix + "/executable/" + name
     if unit.include_tests:
         output = "debug/test/" + build_id + "/" + name
     interface := ""
@@ -50,6 +51,8 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         retain_container(root, root + "/" + output, triple, build_id)
     inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))
     text := "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
+    if os.is_file(cache + "/pipeline.json"):
+        retain_file(cache + "/pipeline.json", root + "/build/" + build_id + "/pipeline.json")
     if os.is_file(cache + "/link.json"):
         retain_file(cache + "/link.json", root + "/build/" + build_id + "/link.json")
     for dependency in resolution.packages[1:]:
@@ -97,6 +100,9 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
     for location in files(root + "/source", true):
         if location[int(len(root + "/source/")):] not in source_paths:
             os.remove(location)
+    if emit == "" and not unit.include_tests and unit.output != root + "/bin/" + name:
+        retain_file(root + "/" + output, root + "/bin/" + name)
+        require_command(["chmod", "755", "--", root + "/bin/" + name])
     usable = interface != "" and read_text(cache + "/artifact.interface.sev").strip() != ""
     return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "native", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
 

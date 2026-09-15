@@ -1,3 +1,4 @@
+import * from "document.sev"
 import * from "host.sev"
 import * from "manifest.sev"
 import os

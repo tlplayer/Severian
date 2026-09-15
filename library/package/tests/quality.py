@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
-COMPILER = Path(os.environ.get('SEVERIAN_SOURCE_COMPILER', ROOT / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'))
+COMPILER = Path(os.environ.get('SEVERIAN_SOURCE_COMPILER', ROOT / 'package.pkg/bin/sev_compiler'))
 
 
 class QualityPipeline(unittest.TestCase):
@@ -42,9 +42,31 @@ class QualityPipeline(unittest.TestCase):
     def diagnostics(result):
         return [json.loads(line) for line in result.stderr.splitlines() if line.startswith('{')]
 
+    def test_selective_imports_format_by_default_and_can_opt_out(self):
+        helper = self.root / 'helper'
+        helper.mkdir()
+        (helper / 'package.json').write_text(json.dumps({'package': {'name': 'helper', 'version': '0.1.0'}, 'lib': {'path': 'lib.sev'}}))
+        (helper / 'lib.sev').write_text('def first() -> int:\n    return 1\ndef second() -> int:\n    return 2\n')
+        self.manifest['dependencies'] = {'helper': {'path': 'helper'}}
+        self.manifest['lint']['rules']['L0003'] = 'warning'
+        self.write_manifest()
+        source = self.root / 'main.sev'
+        raw = 'from helper import {first,second}\ndef main():\n    print(first(), second())\n'
+        source.write_text(raw)
+        self.run_sev('build')
+        formatted = source.read_text()
+        self.assertTrue(formatted.startswith('from helper import\n{\n    first,\n    second,\n}'))
+        self.assertNotIn('compiling ', self.run_sev('build').stderr)
+        self.assertEqual(source.read_text(), formatted)
+        self.manifest['lint']['format'] = False
+        self.write_manifest()
+        source.write_text(raw)
+        self.run_sev('build')
+        self.assertEqual(source.read_text(), raw)
+
     def test_error_policy_is_deterministic_and_prevents_codegen(self):
         first = self.run_sev('build', ok=False)
-        cache = self.root / 'package.pkg/cache/quality/analysis.json'
+        cache = self.root / 'package.pkg/debug/quality/analysis.json'
         self.assertFalse(json.loads(cache.read_text())['cache_hit'])
         second = self.run_sev('build', ok=False)
         self.assertTrue(json.loads(cache.read_text())['cache_hit'])

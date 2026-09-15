@@ -232,3 +232,11 @@ test "callable specialization metadata survives list storage":
     assert(len(stored.type_arguments) == 1)
     assert(stored.type_arguments[0].type_id.index == 64)
     assert(stored.template != None)
+
+test "generic contract pack calls do not enqueue symbolic native functions":
+    input = source.virtual_source("generic-pack.sev", "def sink(*values: V):\n    pass\ndef forward[T](value: T) -> T:\n    sink(value)\n    return value\ndef main() -> i32:\n    forward(1)\n    return 0\n")
+    module = callable_fixture_environment(parser.parse(lexer.scan(input, [universal.operator_syntax(universal.Multiply())])))
+    result = semantic.analyze_callables(module)
+    for function in result.functions:
+        for type_id in function.parameter_types:
+            assert(type_id.index < 100000)

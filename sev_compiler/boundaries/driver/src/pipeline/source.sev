@@ -309,6 +309,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     lowered = mir.build_callables(typed, library_sources, export_names)
     if include_tests and len(typed.quality_files) > 0:
         quality_maps.append(quality.quality_map(lowered))
+    if emit == "library":
+        mir_outputs.append(mir_archive.encode(lowered))
     timing.finish_stage(timings, "mir")
     if emit == "agent-ir":
         result = agent_ir.emit(lowered, files)

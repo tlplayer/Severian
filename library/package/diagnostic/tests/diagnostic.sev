@@ -1,0 +1,47 @@
+import * from "../src/lib.sev" as diagnostic
+import file
+import os
+
+test "compiler coverage handoff validates runtime regions":
+    map = diagnostic.coverage_map([diagnostic.CoverageRegion("1", "Statement", "/app/src/main.sev", 2, 1)], [diagnostic.CoverageTest("7", "example")])
+    run = diagnostic.CoverageRun()
+    diagnostic.coverage_collect(run, map, "B:7\nH:1\nE:7\n")
+    metric = diagnostic.coverage_metric(run, "Statement", "/app")
+    assert(run.tests == 1 and metric.covered == 1 and metric.total == 1)
+    rejected ?= diagnostic.coverage_collect(run, map, "B:7\nH:unknown\nE:7\n")
+    assert(rejected is Error)
+
+test "file contribution report distinguishes build inputs from unselected tests":
+    root = os.temporary("/tmp", "sev-contributions-")
+    assert(os.make_directories(root + "/src"))
+    assert(os.make_directories(root + "/tests"))
+    assert(file.write(root + "/src/main.sev", "def main():\n    pass\n") == 0)
+    assert(file.write(root + "/src/unused.sev", "def unused():\n    pass\n") == 0)
+    assert(file.write(root + "/tests/check.sev", "test:\n    assert(true)\n") == 0)
+    rows = diagnostic.contributions(root, [root + "/src/main.sev"])
+    assert(len(rows) == 3)
+    assert(rows[0].contributed)
+    assert(not rows[1].contributed and rows[1].reason.starts_with("not used"))
+    assert(rows[2].reason.starts_with("test source"))
+    os.remove_tree(root)
+
+test "import formatting preserves syntax comments and literal contents":
+    grouped = "from example import { A,B as Alias, C }"
+    expected = "from example import\n{\n    A,\n    B as Alias,\n    C,\n}"
+    assert(diagnostic.format_imports(grouped) == expected)
+    assert(diagnostic.format_imports(expected) == expected)
+    long = "from example import FirstVeryLongImportedDeclaration, SecondVeryLongImportedDeclaration, ThirdDeclaration"
+    formatted = diagnostic.format_imports(long)
+    assert(formatted.contains(", \\\n"))
+    for line in formatted.split("\n"):
+        assert(len(line.characters()) <= 80)
+    assert(diagnostic.format_imports(formatted) == formatted)
+    commented = "from example import { A, # keep this\n    B,\n}\n"
+    assert(diagnostic.format_imports(commented) == commented)
+    literal = "value = \"\"\"from example import A,B\"\"\"\n"
+    assert(diagnostic.format_imports(literal) == literal)
+    assert(diagnostic.format_imports("from example import A,B # keep\n") == "from example import A, B # keep\n")
+    # Reserve the comma, space and backslash when a physical line continues.
+    boundary = diagnostic.format_import_list("example", ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "B", "CCCCCCCCCCCCCCCCCCCC"], false)
+    for line in boundary.split("\n"):
+        assert(len(line.characters()) <= 80)

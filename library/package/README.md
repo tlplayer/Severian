@@ -1,5 +1,13 @@
 # Severian packages
 
+Build outputs now belong to the invocation directory's `package.pkg`.
+Executables are delivered as `package.pkg/bin/<target-name>`; build identities
+and platform/profile variants remain in artifact storage. The independent
+[package.build](build/README.md), [package.cache](cache/README.md),
+[package.diagnostic](diagnostic/README.md), and [package.profile](profile/README.md)
+libraries define pipeline, storage, quality, and measurement boundaries.
+Their documents describe the current output and incremental-cache contract.
+
 This library owns package discovery, resolution, editing, builds, and
 publication in ordinary Severian source. Its design follows
 [SIP-0003: Package Interfaces, Realizations, and Incremental Dependency Builds](../../docs/sip/0003-sip-packages.md).
@@ -92,7 +100,7 @@ package.pkg/
 | `artifacts/` | Completed, reusable compiler and linker outputs, organized by platform, profile, or backend format |
 | `build/` | Mutable incremental state for the working checkout; never published |
 | `cache/` | Disposable intermediate and temporary execution data |
-| `bin/` | Runnable package executables, with platform/profile subdivisions where needed |
+| `bin/` | Latest selected runnable executables, directly at `bin/<target-name>` |
 | `debug/` | omitted from published: Test, coverage, profile, symbol, source-map, and compiler-mapping information |
 | `container/` | container realizations or construction metadata |
 | `source/` | source for rebuilding, specialization, debugging, or inspection |
@@ -105,9 +113,10 @@ package.pkg/
 │   ├── linux-x86_64/release/object/
 │   └── portable/mlir/
 ├── bin/
-│   └── linux-x86_64/release/geometry-tool
+│   └── geometry-tool
 ├── debug/
 │   ├── test/<platform>/<build-profile>/<invocation>/
+│   ├── quality/
 │   ├── coverage/<invocation>/
 │   └── profile/<invocation>/
 └── cache/

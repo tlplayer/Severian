@@ -32,90 +32,119 @@ def run_tool(arguments: list[string]):
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()):
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), incremental: bool = true):
     package.mkdir(path.dirname(output))
-    intermediate = package.temporary("package.pkg/cache/native", "run-") + "/module"
-    if file.write(intermediate + ".mlir", mlir) != 0:
-        throw Error("could not write MLIR artifact")
+    flow = package.CompilerPipeline(package.build_root() + "/cache/compiler", incremental)
+    initial = package.pipeline_text(flow, mlir, ".mlir")
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
-    # Both compilers consume the ownership library's standard MLIR pipeline.
-    # Run it before lowering memrefs or aliases to opaque LLVM pointers.
     ownership_pipeline = package.read_text(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline").strip()
-    run_tool([opt, intermediate + ".mlir", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", intermediate + ".owned.mlir"])
-    materialize_debug_values(intermediate + ".owned.mlir")
-    lowering = [opt, intermediate + ".owned.mlir", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf"]
+    owned = package.compiler_step(flow, "ownership", "1", initial, [opt, "{input}", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", "{output}"], ".mlir")
+    materialized = package.pipeline_text(flow, debug_values(package.read_text(owned.path)), ".mlir")
+    lowering = [opt, "{input}", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf"]
     for name in requirements.passes:
         lowering.append("--" + name)
-    for argument in ["--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", intermediate + ".llvm.mlir"]:
+    for argument in ["--convert-arith-to-llvm", "--convert-func-to-llvm", "--convert-cf-to-llvm", "--finalize-memref-to-llvm=use-generic-functions", "--convert-ub-to-llvm", "--reconcile-unrealized-casts", "-o", "{output}"]:
         lowering.append(argument)
-    run_tool(lowering)
-    run_tool([translate, "--mlir-to-llvmir", intermediate + ".llvm.mlir", "-o", intermediate + ".ll"])
+    lowered = package.compiler_step(flow, "llvm-dialect", "1", materialized, lowering, ".mlir")
+    llvm = package.compiler_step(flow, "llvm-ir", "1", lowered, [translate, "--mlir-to-llvmir", "{input}", "-o", "{output}"], ".ll")
+    module := llvm
     if library:
-        # Native providers remain explicit link inputs. This object owns only
-        # this compilation unit; it deliberately contains no executable main.
-        # Ownership lowering also generates helper definitions. Internalize
-        # every non-exported definition after those passes have run.
-        run_tool([environment.get("SEVERIAN_LLVM_OPT", "opt-21"), "--passes=internalize", "--internalize-public-api-list=" + exports.join(","), "-S", intermediate + ".ll", "-o", intermediate + ".internal.ll"])
-        run_tool([clang, "-c", intermediate + ".internal.ll", "-o", output + ".o", "-O" + string(optimization), "-fPIC"])
-        archive = [environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", output, output + ".o"]
-        shared = [clang, "-shared", "-Wl,-z,defs", output + ".o", "-o", output + ".so", "-lm"]
-        providers: list[string] = []
-        for argument in native_arguments:
-            if argument.ends_with(".c"):
-                providers.append(argument)
-            else:
-                shared.append(argument)
-        memory = sysroot + "/library/core/memory/native/memory.c"
-        if memory not in providers:
-            providers.append(memory)
-        for index in range(int(len(providers))):
-            object = output + ".providers/provider-" + string(index) + ".o"
-            package.mkdir(path.dirname(object))
-            run_tool([clang, "-c", "-fPIC", "-O" + string(optimization), "-g", "-MMD", "-MF", object + ".d", providers[index], "-o", object])
-            archive.append(object)
-            shared.append(object)
-        for name in requirements.libraries:
-            shared.append("-l" + name)
-        target = hosted_layout().triple
-        package.execute_link(package.plan_link(target, "static-archive", output, archive))
-        package.execute_link(package.plan_link(target, "shared-library", output + ".so", shared))
-        package.copy_file(intermediate + ".mlir", output + ".mlir")
-        package.copy_file(intermediate + ".internal.ll", output + ".ll")
-        run_tool([opt, intermediate + ".mlir", "--emit-bytecode", "-o", output + ".mlirbc"])
-        run_tool([environment.get("SEVERIAN_LLVM_AS", "llvm-as-21"), output + ".ll", "-o", output + ".bc"])
-        return
-    arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
-    arguments.append(sysroot + "/library/core/memory/native/memory.c")
-    if requirements.quality:
-        arguments.append(sysroot + "/sev_compiler/runtime/native/quality.c")
-        arguments.append("-DSEV_QUALITY_TRACK_ALLOCATIONS")
+        module = package.compiler_step(flow, "internalize", "1", llvm, [environment.get("SEVERIAN_LLVM_OPT", "opt-21"), "--passes=internalize", "--internalize-public-api-list=" + exports.join(","), "-S", "{input}", "-o", "{output}"], ".ll")
+    flags = ["-O" + string(optimization), "-fPIC"]
+    if debug_symbols:
+        flags.append("-g")
+    if lto:
+        flags.append("-flto")
+    object_arguments: list[string] = [clang, "-c", "{input}", "-o", "{output}"]
+    for flag in flags:
+        object_arguments.append(flag)
+    object = package.compiler_step(flow, "object", "1", module, object_arguments, ".o")
+    objects: list[string] = [object.path]
+    providers: list[string] = []
+    link_options: list[string] = []
     for argument in native_arguments:
-        arguments.append(argument)
-    if len(requirements.libraries) > 0:
-        # Libraries are resolved against the selected toolchain, with an
-        # explicit search path override for other native dependencies.
+        if argument.ends_with(".c"):
+            if argument not in providers:
+                providers.append(argument)
+        else:
+            link_options.append(argument)
+    memory = sysroot + "/library/core/memory/native/memory.c"
+    if memory not in providers:
+        providers.append(memory)
+    if requirements.quality:
+        provider = sysroot + "/sev_compiler/runtime/native/quality.c"
+        if provider not in providers:
+            providers.append(provider)
+    for index in range(int(len(providers))):
+        provider = package.canonical(providers[index])
+        value = package.CompilerStepResult(provider, package.digest(provider), false)
+        # Preprocessing rechecks transitive includes on every unit miss. Identical
+        # preprocessed text reuses object generation, including unchanged providers.
+        depfile = output + ".providers/provider-" + string(index) + ".o.d"
+        package.mkdir(path.dirname(depfile))
+        preprocessing: list[string] = [clang, "-E", "-x", "c", "{input}", "-o", "{output}", "-MMD", "-MF", depfile]
+        for flag in flags:
+            preprocessing.append(flag)
+        if requirements.quality:
+            preprocessing.append("-DSEV_QUALITY_TRACK_ALLOCATIONS")
+        preprocessed = package.compiler_step(flow, "c-preprocess", "1", value, preprocessing, ".i", reusable=false)
+        provider_arguments: list[string] = [clang, "-c", "-x", "cpp-output", "{input}", "-o", "{output}"]
+        for flag in flags:
+            provider_arguments.append(flag)
+        compiled = package.compiler_step(flow, "c-object", "1", preprocessed, provider_arguments, ".o")
+        objects.append(compiled.path)
+        if library:
+            package.copy_file(compiled.path, output + ".providers/provider-" + string(index) + ".o")
+    target = hosted_layout().triple
+    for name in requirements.libraries:
         toolchain = package.canonical(package.capture(["which", opt]).strip())
         search = environment.get("SEVERIAN_NATIVE_LIBRARY_PATH", path.dirname(path.dirname(toolchain)) + "/lib")
         for directory in search.split(":"):
             if directory != "":
-                arguments.append("-L" + directory)
-                arguments.append("-Wl,-rpath," + directory)
-        for name in requirements.libraries:
-            arguments.append("-l" + name)
-    if debug_symbols:
-        arguments.append("-g")
-    if strip:
-        arguments.append("-s")
-    if lto:
-        arguments.append("-flto")
-        arguments.append("-fuse-ld=lld")
-    package.execute_link(package.plan_link(hosted_layout().triple, "executable", output, arguments))
+                link_options.append("-L" + directory)
+                link_options.append("-Wl,-rpath," + directory)
+        link_options.append("-l" + name)
+    if library:
+        package.copy_file(object.path, output + ".o")
+        archive: list[string] = [environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", output]
+        for object_path in objects:
+            archive.append(object_path)
+        shared: list[string] = [clang, "-shared", "-Wl,-z,defs"]
+        for object_path in objects:
+            shared.append(object_path)
+        for option in ["-o", output + ".so", "-lm"]:
+            shared.append(option)
+        for option in link_options:
+            shared.append(option)
+        package.execute_link(package.plan_link(target, "static-archive", output, archive))
+        package.execute_link(package.plan_link(target, "shared-library", output + ".so", shared))
+        package.copy_file(initial.path, output + ".mlir")
+        package.copy_file(module.path, output + ".ll")
+        mlirbc = package.compiler_step(flow, "mlir-bytecode", "1", initial, [opt, "{input}", "--emit-bytecode", "-o", "{output}"], ".mlirbc")
+        bitcode = package.compiler_step(flow, "llvm-bitcode", "1", module, [environment.get("SEVERIAN_LLVM_AS", "llvm-as-21"), "{input}", "-o", "{output}"], ".bc")
+        package.copy_file(mlirbc.path, output + ".mlirbc")
+        package.copy_file(bitcode.path, output + ".bc")
+    else:
+        arguments: list[string] = [clang]
+        for object_path in objects:
+            arguments.append(object_path)
+        for option in ["-o", output, "-lm"]:
+            arguments.append(option)
+        for option in link_options:
+            arguments.append(option)
+        if strip:
+            arguments.append("-s")
+        if lto:
+            arguments.append("-flto")
+            arguments.append("-fuse-ld=lld")
+        package.execute_link(package.plan_link(target, "executable", output, arguments))
+    package.pipeline_report(flow, output + ".pipeline.json")
 
-def materialize_debug_values(location: string):
+def debug_values(text: string) -> string | Error:
     lines: list[string] = []
-    for raw in package.read_text(location).split("\n"):
+    for raw in text.split("\n"):
         line := raw
         # Omit only the default arithmetic property, never text in a source
         # filename or string attribute. Non-default math flags remain intact.
@@ -131,7 +160,10 @@ def materialize_debug_values(location: string):
             operation = "\"llvm.intr.dbg.declare\"" if declaration else "\"llvm.intr.dbg.value\""
             line = prefix.replace("\"func.call\"", operation) + suffix.replace("sev.debug.declaration" if declaration else "sev.debug.variable", "varInfo")
         lines.append(line)
-    package.write_text(location, lines.join("\n"))
+    return lines.join("\n")
+
+def materialize_debug_values(location: string):
+    package.write_text(location, debug_values(package.read_text(location)))
 
 
 def execute_native(executable: string, arguments: list[string]) -> int:

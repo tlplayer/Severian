@@ -1,0 +1,85 @@
+from cache import
+{
+    temporary,
+    write_text,
+    read_text,
+    remove_tree,
+    document_quote,
+}
+import environment
+import file
+import os
+import process
+import time
+
+class ProcessMeasurement:
+    status: int
+    stdout: string
+    stderr: string
+    wall_seconds: float
+    user_seconds: float = 0.0
+    system_seconds: float = 0.0
+    peak_rss_kib: int = 0
+
+def report_root() -> string:
+    return process.current_directory() + "/package.pkg/debug/profile"
+
+def measure_command(arguments: list[string]) -> ProcessMeasurement | Error:
+    stage = temporary(report_root(), ".measure-")
+    started = time.monotonic()
+    try:
+        command: list[string] = ["/usr/bin/time", "-f", "user_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M", "-o", stage + "/resources"]
+        for argument in arguments:
+            command.append(argument)
+        result = process.execute(command)
+        measured = ProcessMeasurement(result.status, result.stdout, result.stderr, time.monotonic() - started)
+        if os.is_file(stage + "/resources"):
+            for line in read_text(stage + "/resources").split("\n"):
+                if line.starts_with("user_seconds="):
+                    measured.user_seconds = float(line[13:])
+                elif line.starts_with("system_seconds="):
+                    measured.system_seconds = float(line[15:])
+                elif line.starts_with("peak_rss_kib="):
+                    measured.peak_rss_kib = int(line[13:])
+        remove_tree(stage)
+        return measured
+    catch failure: Error:
+        remove_tree(stage)
+        throw failure
+
+def measurement_json(measured: ProcessMeasurement) -> string:
+    return "{\"wall_seconds\":" + string(measured.wall_seconds) + ",\"user_seconds\":" + string(measured.user_seconds) + ",\"system_seconds\":" + string(measured.system_seconds) + ",\"peak_rss_kib\":" + string(measured.peak_rss_kib) + "}"
+
+class ProfileSession:
+    path: string
+    previous: float
+    rows: list[string]
+    records: list[string] = []
+    json_path: string = ""
+
+# Preserve the compiler's TSV hook while making native JSON profiles package
+# owned. RSS here is process peak, not an allocation delta for one IR pass.
+def profile_begin() -> ProfileSession | Error:
+    selected = environment.get("SEVERIAN_TIMINGS", "")
+    active = environment.get("SEVERIAN_PROFILE_ACTIVE", "") == "1"
+    if selected != "":
+        write_text(selected, "stage\tseconds\n")
+    destination := ""
+    if selected != "" or active:
+        destination = temporary(report_root(), "frontend-") + "/stages.json"
+    return ProfileSession(selected, time.monotonic() if selected != "" or active else 0.0, ["stage\tseconds"], json_path=destination)
+
+def profile_stage(session: ProfileSession, stage: string) -> unit | Error:
+    if session.json_path == "":
+        return
+    now = time.monotonic()
+    elapsed = now - session.previous
+    peak = process.peak_rss_kib()
+    session.rows.append(stage + "\t" + string(elapsed))
+    session.records.append("{\"stage\":" + document_quote(stage) + ",\"wall_seconds\":" + string(elapsed) + ",\"process_peak_rss_kib\":" + string(peak) + "}")
+    write_text(session.json_path, "{\"format\":1,\"stages\":[" + session.records.join(",") + "]}\n")
+    if session.path != "":
+        write_text(session.path, session.rows.join("\n") + "\n")
+    if environment.get("SEVERIAN_PROFILE_ACTIVE", "") == "1":
+        process.write_error("  Stage " + stage + ": " + string(elapsed) + "s wall; " + string(float(peak) / 1024.0) + " MiB process peak RSS\n")
+    session.previous = time.monotonic()

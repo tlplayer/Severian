@@ -1,0 +1,196 @@
+from build_flow import
+{
+    Entry,
+    Project,
+    setting,
+    text_setting,
+    unquote,
+    string_array,
+    relative_path,
+    parse_document,
+    entries_json,
+    document_quote,
+    build_root,
+}
+from cache import
+{
+    capture,
+    canonical,
+    digest,
+    temporary,
+    mkdir,
+    write_text,
+    read_text,
+    copy_file,
+    replace_file,
+    remove_tree,
+}
+import file
+import os
+import path
+import process
+import time
+
+import * from "host.sev"
+import source
+
+def coverage_sources(files: list[source.SourceFile], roots: list[string], excluded: list[string], prelude_sources: list[int]) -> list[source.SourceFile]:
+    selected: list[source.SourceFile] = []
+    for file in files:
+        owner := ""
+        for root in roots:
+            if file.path.starts_with(root + "/") and len(root) > len(owner):
+                owner = root
+        if owner == "" or int(file.id.index) in prelude_sources:
+            continue
+        relative = file.path[int(len(owner)) + 1:]
+        skip := false
+        for prefix in excluded:
+            skip = skip or relative == prefix or (prefix.ends_with("/") and relative.starts_with(prefix))
+        if not skip:
+            selected.append(file)
+    return selected
+
+class CoverageRegion:
+    id: string
+    kind: string
+    file: string
+    line: int
+    column: int
+    outcome: string = ""
+
+class CoverageTest:
+    id: string
+    name: string
+
+def coverage_map(regions: list[CoverageRegion], tests: list[CoverageTest]) -> string:
+    rows: list[string] = []
+    names: list[string] = []
+    for region in regions:
+        position = "{\"line\":" + string(region.line) + ",\"column\":" + string(region.column) + "}"
+        rows.append(document_quote(region.id) + ":{\"kind\":" + document_quote(region.kind) + ",\"outcome\":" + document_quote(region.outcome) + ",\"span\":{\"file\":" + document_quote(region.file) + ",\"start\":" + position + ",\"end\":" + position + "}}")
+    for test in tests:
+        names.append(document_quote(test.id) + ":" + document_quote(test.name))
+    return "{\"schema_version\":1,\"regions\":{" + rows.join(",") + "},\"tests\":{" + names.join(",") + "}}"
+
+class CoverageRun:
+    regions: list[CoverageRegion] = []
+    hits: list[string] = []
+    failures: list[string] = []
+    tests: int = 0
+    allocations: int = 0
+    allocated_bytes: int = 0
+    retained_bytes: int = 0
+
+def coverage_collect(run: CoverageRun, map_text: string, records: string) -> unit | Error:
+    entries = parse_document(map_text)
+    known: list[string] = []
+    for entry in entries:
+        if entry.table.starts_with("regions.") and entry.key == "kind":
+            id = entry.table.split(".")[1]
+            known.append(id)
+            candidate = CoverageRegion(id, unquote(entry.value), text_setting(entries, entry.table + ".span", "file"), int(setting(entries, entry.table + ".span.start", "line")), int(setting(entries, entry.table + ".span.start", "column")))
+            found := false
+            for region in run.regions:
+                if region.id == id:
+                    if region.kind != candidate.kind or region.file != candidate.file or region.line != candidate.line or region.column != candidate.column:
+                        throw Error("conflicting coverage region: " + id)
+                    found = true
+            if not found:
+                run.regions.append(candidate)
+    active := ""
+    exercised := false
+    completed: list[string] = []
+    for record in records.split("\n"):
+        if record == "":
+            continue
+        parts = record.split(":")
+        if len(parts) != 2:
+            throw Error("malformed runtime quality record")
+        kind = parts[0]
+        value = parts[1]
+        if kind == "B":
+            if active != "" or text_setting(entries, "tests", value, "") == "":
+                throw Error("invalid runtime test boundary")
+            active = value
+            exercised = false
+        elif kind == "H":
+            if active == "" or value not in known:
+                throw Error("runtime reported an unknown coverage region")
+            if value not in run.hits:
+                run.hits.append(value)
+            exercised = true
+        elif kind == "E":
+            if active != value or value in completed:
+                throw Error("invalid runtime test completion")
+            if not exercised:
+                run.failures.append("L0009: test executed no production coverage: " + text_setting(entries, "tests", value))
+            run.tests += 1
+            completed.append(value)
+            active = ""
+        elif kind in ["A", "M", "L"]:
+            if active == "":
+                throw Error("allocation measurement outside a test")
+            measured = int(value)
+            if measured < 0:
+                throw Error("negative allocation measurement")
+            if kind == "A":
+                run.allocations += measured
+            elif kind == "L":
+                run.retained_bytes += measured
+            else:
+                run.allocated_bytes += measured
+        else:
+            throw Error("unknown runtime quality record")
+    for entry in entries:
+        if entry.table == "tests" and entry.key not in completed:
+            run.failures.append("test did not complete: " + unquote(entry.value))
+
+class CoverageMetric:
+    covered: int
+    total: int
+
+def coverage_metric(run: CoverageRun, kind: string, root: string = "") -> CoverageMetric:
+    declared: list[string] = []
+    covered: list[string] = []
+    for region in run.regions:
+        if region.kind != kind or (root != "" and not region.file.starts_with(root + "/")):
+            continue
+        key = region.file + ":" + string(region.line) if kind == "Statement" else region.id
+        if key not in declared:
+            declared.append(key)
+        if region.id in run.hits and key not in covered:
+            covered.append(key)
+    return CoverageMetric(int(len(covered)), int(len(declared)))
+
+def coverage_finish(project: Project, run: CoverageRun, directory: string) -> int:
+    metrics: list[string] = []
+    for kind in ["Statement", "Branch", "Function", "Condition"]:
+        label = "line" if kind == "Statement" else kind.lower()
+        measured = coverage_metric(run, kind, project.root)
+        threshold = int(setting(project.manifest.entries, "test", "coverage-" + label + "-min", setting(project.manifest.entries, "test", "coverage-min", "91")))
+        if measured.total > 0 and measured.covered * 100 < threshold * measured.total:
+            run.failures.append(label + " coverage below " + string(threshold) + "%: " + string(measured.covered) + "/" + string(measured.total))
+        metrics.append(document_quote(label) + ":{\"covered\":" + string(measured.covered) + ",\"total\":" + string(measured.total) + ",\"threshold\":" + string(threshold) + "}")
+    if run.tests == 0:
+        run.failures.append("no executable tests were collected")
+    allocations = int(setting(project.manifest.entries, "test", "allocations-max", "999999999"))
+    if run.allocations > allocations:
+        run.failures.append("test allocations exceed package limit: " + string(run.allocations) + " > " + string(allocations))
+    leaks = text_setting(project.manifest.entries, "test", "leaks", "deny")
+    if run.retained_bytes > 0 and leaks == "deny":
+        run.failures.append("tests retained " + string(run.retained_bytes) + " bytes allocated through core.memory")
+    elif run.retained_bytes > 0 and leaks == "warn":
+        process.write_error("quality warning: tests retained " + string(run.retained_bytes) + " bytes\n")
+    regions: list[string] = []
+    for region in run.regions:
+        position = "{\"line\":" + string(region.line) + ",\"column\":" + string(region.column) + "}"
+        regions.append(document_quote(region.id) + ":{\"kind\":" + document_quote(region.kind) + ",\"span\":{\"file\":" + document_quote(region.file) + ",\"start\":" + position + ",\"end\":" + position + "}}")
+    write_text(directory + "/coverage-map.json", "{\"schema_version\":1,\"regions\":{" + regions.join(",") + "}}")
+    write_text(directory + "/coverage.hits", sorted_strings(run.hits).join("\n") + "\n")
+    failures: list[string] = []
+    for failure in run.failures:
+        failures.append(document_quote(failure))
+        process.write_error("quality error: " + failure + "\n")
+    write_text(directory + "/summary.json", "{\"schema_version\":1,\"tests\":" + string(run.tests) + ",\"allocations\":" + string(run.allocations) + ",\"allocated_bytes\":" + string(run.allocated_bytes) + ",\"retained_bytes\":" + string(run.retained_bytes) + ",\"metrics\":{" + metrics.join(",") + "},\"failures\":[" + failures.join(",") + "]}")
+    return int(len(run.failures))

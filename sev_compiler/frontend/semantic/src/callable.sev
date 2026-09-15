@@ -551,6 +551,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
         namespace = lookup
     concrete: list[universal.FunctionParameter] = []
     suffix := ""
+    symbolic := false
     for parameter in parameters:
         for argument in bound.arguments:
             if argument.name == parameter.name:
@@ -562,6 +563,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
                     case _:
                         expected = callable_annotation(parameter.annotation, state.records, namespace, state.declarations)
                 typed = callable_expression(callable_scope(state), argument.value, expected)
+                symbolic = symbolic or callable_symbolic_type(state, typed.type_id)
                 known ?= scalar.scalar_type(typed.type_id)
                 if known != None or typed.type_id.index >= 1000:
                     suffix += "_" + string(typed.type_id.index)
@@ -578,7 +580,14 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup, owner_type=template.owner_type, constructor=template.constructor, prelude=template.prelude)
     signature = callable_signature(instance, int(len(state.functions)), state.records, state.declarations)
     signature.pack_specialization = true
-    state.functions.append(signature)
+    # Contract checking may call a pack with an enclosing generic's symbolic
+    # parameter. Its annotation is meaningful only in that generic environment.
+    # Concrete callers reselect the pack after substitution; do not enqueue a
+    # symbolic body for native lowering in the global declaration environment.
+    if not symbolic:
+        state.functions.append(signature)
+    else:
+        signature.definition = template.definition
     return CallableSelection(signature, bound.arguments)
 
 
@@ -3054,6 +3063,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         if parameter.name in parameter_names:
                             return error(callable_diagnostic("duplicate parameter " + parameter.name, parameter.span))
                         parameter_names.append(parameter.name)
+                    function_declaration.definition = definitions.definition_id(function_declaration.name, 30000 + int(len(state.templates)))
                     state.templates.append(function_declaration)
                     function_names.append(function_declaration.name)
                     continue

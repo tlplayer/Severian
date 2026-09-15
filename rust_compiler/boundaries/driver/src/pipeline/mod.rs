@@ -1908,7 +1908,9 @@ impl NativeProviderSources {
             .replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| CompileError::NativeLink(error.to_string()))?.as_nanos();
-        let directory = root.join(format!("package.pkg/cache/build-info/run-{}-{nonce}", std::process::id()));
+        let directory = std::env::current_dir()
+            .map_err(|error| CompileError::NativeLink(error.to_string()))?
+            .join(format!("package.pkg/cache/build-info/run-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&directory).map_err(|error| CompileError::NativeLink(error.to_string()))?;
         let output = directory.join("build_info.c");
         std::fs::write(&output, format!("const char *{symbol}(void) {{ return \"{literal}\"; }}\n"))

@@ -71,6 +71,16 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
 
         start = cursor
         character = characters[cursor]
+        if character == "\\":
+            end := cursor + 1
+            if end < len(characters) and characters[end] == "\r":
+                end += 1
+            if end < len(characters) and characters[end] == "\n":
+                cursor = end + 1
+                while cursor < len(characters) and characters[cursor] in [" ", "\t"]:
+                    cursor += 1
+                line_start = false
+                continue
         result := LexemeMatch(start, None, false)
         if discovery:
             # Source may contain a package-defined literal whose contents are

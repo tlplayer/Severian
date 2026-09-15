@@ -179,7 +179,7 @@ impl Parser<'_> {
                 if !decorators.is_empty() {
                     return Err(self.error("decorators may only precede declarations"));
                 }
-                module.items.push(Item::Import(self.import_declaration()?));
+                module.items.extend(self.import_declarations()?.into_iter().map(Item::Import));
             } else if self.looks_like_type_alias() {
                 module.items.push(Item::Type(self.type_alias(decorators)?));
             } else {
@@ -1831,6 +1831,54 @@ impl Parser<'_> {
             }),
             span: Span::new(start.source, start.start, end),
         })
+    }
+
+    fn import_declarations(&mut self) -> Result<Vec<ImportDeclaration>, Diagnostic> {
+        if !self.at_identifier("from") {
+            return Ok(vec![self.import_declaration()?]);
+        }
+        self.next();
+        let (source, _) = self.identifier("expected an import source after `from`")?;
+        if !self.at_identifier("import") {
+            return Err(self.error("expected `import` after import source"));
+        }
+        self.next();
+        let multiline = self.at(&TokenKind::Newline);
+        if multiline { self.import_layout(); }
+        let grouped = self.take(&TokenKind::LeftBrace).is_some();
+        if multiline && !grouped {
+            return Err(self.error("a new-line import list requires braces or a backslash continuation"));
+        }
+        if grouped { self.import_layout(); }
+        let mut imports = Vec::new();
+        loop {
+            let (name, start) = self.identifier("expected an import name")?;
+            let (alias, end) = if self.at_identifier("as") {
+                self.next();
+                let (alias, span) = self.identifier("expected an import alias")?;
+                (Some(alias), span.end)
+            } else { (None, start.end) };
+            imports.push(ImportDeclaration {
+                subject: ImportSubject::Name(name), source: Some(source.clone()), alias,
+                span: Span::new(start.source, start.start, end),
+            });
+            if grouped { self.import_layout(); }
+            if self.take(&TokenKind::Comma).is_none() { break; }
+            if grouped {
+                self.import_layout();
+                if self.at(&TokenKind::RightBrace) { break; }
+            }
+        }
+        if grouped {
+            self.expect(&TokenKind::RightBrace, "expected `}` after import list")?;
+        }
+        Ok(imports)
+    }
+
+    fn import_layout(&mut self) {
+        while matches!(self.peek().kind, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent) {
+            self.next();
+        }
     }
 
     fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {

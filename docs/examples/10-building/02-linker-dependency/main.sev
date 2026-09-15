@@ -8,7 +8,7 @@ def main():
     root = process.current_directory() + "/package.pkg"
     output = root + "/artifacts/host/dev"
     assert(os.make_directories(output))
-    assert(os.make_directories(root + "/bin/host/dev"))
+    assert(os.make_directories(root + "/bin"))
     graph = dependency.graph(["app", "left", "right", "shared"], [dependency.Edge(0, 1), dependency.Edge(0, 2), dependency.Edge(1, 3), dependency.Edge(2, 3)])
     bodies = ["int left(void); int right(void); int main(void) { return left() + right() == 84 ? 0 : 1; }", "int shared(void); int left(void) { return shared(); }", "int shared(void); int right(void) { return shared(); }", "int shared(void) { return 42; }"]
     for index in dependency.build_order(graph, [0]):
@@ -23,6 +23,6 @@ def main():
     for index in dependency.link_order(graph, [0]):
         if index != 0:
             inputs.append(linker.input(output + "/" + graph.names[index] + ".a", "archive"))
-    result = linker.execute_link(linker.plan_inputs("host", "executable", root + "/bin/host/dev/diamond", "cc", inputs))
+    result = linker.execute_link(linker.plan_inputs("host", "executable", root + "/bin/diamond", "cc", inputs))
     assert(process.run([result.output]) == 0)
     print("Linked and ran " + result.output)

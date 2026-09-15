@@ -188,6 +188,40 @@ fn package_reexports_reach_the_same_fixed_point_in_reverse_graph_order() {
 }
 
 #[test]
+fn selective_facades_preserve_nominal_identity_in_reverse_graph_order() {
+    let root = temporary();
+    std::fs::write(root.join("leaf.sev"), "class Leaf:\n    value: i32\ndef make_leaf(value: i32) -> Leaf:\n    return Leaf(value)\n").unwrap();
+    std::fs::write(root.join("middle.sev"), "from leaf import Leaf as Shared\nfrom leaf import make_leaf\n").unwrap();
+    std::fs::write(root.join("facade.sev"), "from middle import Shared\nfrom middle import make_leaf\n").unwrap();
+    std::fs::write(root.join("entry.sev"), "import facade\ndef selected() -> facade.Shared:\n    return facade.make_leaf(7)\n").unwrap();
+    let packages = severian_modules::PackageGraph {
+        root: PackageId(0),
+        packages: ["entry", "facade", "middle", "leaf"].iter().enumerate().map(|(id, name)| {
+            (PackageId(id as u32), severian_modules::ResolvedPackage {
+                id: PackageId(id as u32),
+                root: root.clone(),
+                library: root.join(format!("{name}.sev")),
+                dependencies: if id < 3 {
+                    BTreeMap::from([(["facade", "middle", "leaf"][id].to_owned(), PackageId(id as u32 + 1))])
+                } else { BTreeMap::new() },
+            })
+        }).collect(),
+    };
+    let mut graph = severian_modules::resolve_with_packages(&root.join("entry.sev"), &packages).unwrap();
+    let mut forward = collect_declarations(&graph).unwrap();
+    resolve_imports(&graph, &mut forward);
+    let leaf = graph.modules.iter().find(|m| m.path.ends_with("leaf.sev")).unwrap().id;
+    let facade = graph.modules.iter().find(|m| m.path.ends_with("facade.sev")).unwrap().id;
+    assert_eq!(forward.exports[&leaf]["Leaf"], forward.exports[&facade]["Shared"]);
+    graph.modules.reverse();
+    let mut reversed = collect_declarations(&graph).unwrap();
+    resolve_imports(&graph, &mut reversed);
+    assert_eq!(forward.exports, reversed.exports);
+    analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_enums_keep_their_identity_and_defining_module_payload_types() {
     let root = temporary();
     std::fs::write(

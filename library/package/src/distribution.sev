@@ -1,3 +1,4 @@
+import * from "document.sev"
 import * from "host.sev"
 import * from "model.sev"
 import * from "manifest.sev"
@@ -39,7 +40,7 @@ def select(root: string, requirements: Requirements) -> Selection | Error:
             realization = parse_document(read_text(location))
             if text_setting(realization, "", "kind", "") == "native" and text_setting(realization, "", "profile", "") == requirements.profile:
                 output = relative_path(text_setting(realization, "", "output"))
-                if path.basename(output) == selected and output.starts_with("bin/") and os.is_file(root + "/" + output):
+                if path.basename(output) == selected and (output.starts_with("bin/") or output.starts_with("artifacts/")) and os.is_file(root + "/" + output):
                     return Selection("native", root + "/" + output, rejected)
     rejected.append("no compatible native artifact for " + requirements.platform + "/" + requirements.profile)
     if os.is_file(manifest_file(root + "/source")):

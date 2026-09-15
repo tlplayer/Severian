@@ -6,6 +6,12 @@ import package
 def encode_sections(magic: string, sections: list[string]) -> list[u8]:
     bytes: list[u8] = []
     package.append_text(bytes, magic)
+    if len(bytes) == 0 or len(bytes) > 8:
+        throw Error("compiler metadata magic must fit eight bytes")
+    # Magic padding is binary data. A character-to-string conversion may use
+    # a NUL-terminated hosted representation and cannot carry this padding.
+    for index in range(int(len(bytes)), 8):
+        bytes.append(u8(0))
     package.append_number(bytes, 1, 4)
     package.append_number(bytes, int(len(sections)), 4)
     offset := 16 + int(len(sections)) * 20
@@ -21,8 +27,12 @@ def encode_sections(magic: string, sections: list[string]) -> list[u8]:
 
 
 def decode_section(bytes: list[u8], magic: string, selected: int) -> string | Error:
-    if int(len(bytes)) < 16 or package.archive_text(bytes, 0, 8) != magic:
+    width = int(len(magic.bytes()))
+    if width == 0 or width > 8 or int(len(bytes)) < 16 or package.archive_text(bytes, 0, width) != magic:
         throw Error("invalid compiler metadata magic")
+    for index in range(width, 8):
+        if bytes[index] != 0:
+            throw Error("invalid compiler metadata magic padding")
     if package.number(bytes, 8, 4) != 1:
         throw Error("unsupported compiler metadata version")
     count = package.number(bytes, 12, 4)
@@ -48,12 +58,12 @@ def decode_section(bytes: list[u8], magic: string, selected: int) -> string | Er
 
 
 def encode_interface(contract: string) -> list[u8]:
-    return encode_sections("SEVPKGI" + string(char(0)), ["severian-scalar-c-1", contract])
+    return encode_sections("SEVPKGI", ["severian-scalar-c-1", contract])
 
 
 def decode_interface(location: string) -> string | Error:
     bytes = package.read_bytes(location)
-    magic = "SEVPKGI" + string(char(0))
+    magic = "SEVPKGI"
     if decode_section(bytes, magic, 1) != "severian-scalar-c-1":
         throw Error("incompatible Severian interface ABI")
     return decode_section(bytes, magic, 2)

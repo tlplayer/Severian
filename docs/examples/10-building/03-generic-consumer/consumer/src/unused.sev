@@ -1,0 +1,3 @@
+# Intentionally outside the selected target's import graph.
+def unused() -> int:
+    return 99

@@ -1,0 +1,19 @@
+import * from "../src/lib.sev" as parser
+import lexer
+import source
+import universal
+
+test "selective imports accept groups aliases and continued lists":
+    examples = ["from example import A, B as Alias, C\n", "from example import\n{\n    A,\n    B as Alias,\n    C,\n}\n", "from example import A, \\\n    B as Alias, C\n"]
+    for text in examples:
+        module = parser.parse(lexer.scan(source.virtual_source("imports.sev", text)))
+        assert(len(module.items) == 3)
+        previous := -1
+        for item in module.items:
+            match item:
+                case Import:
+                    assert(declaration.source_name == "example")
+                    assert(int(declaration.span.start) > previous)
+                    previous = int(declaration.span.start)
+                case _:
+                    assert(false)

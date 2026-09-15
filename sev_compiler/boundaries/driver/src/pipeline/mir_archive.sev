@@ -7,12 +7,12 @@ import package
 def encode(module: universal.Module) -> list[u8]:
     tokens: list[string] = []
     codec.put_universal_Module(tokens, module)
-    return metadata.encode_sections("SEVMIR" + string(char(0)) + string(char(0)), [codec.schema(), tokens.join("\n")])
+    return metadata.encode_sections("SEVMIR", [codec.schema(), tokens.join("\n")])
 
 
 def decode(location: string) -> universal.Module | Error:
     bytes = package.read_bytes(location)
-    magic = "SEVMIR" + string(char(0)) + string(char(0))
+    magic = "SEVMIR"
     if metadata.decode_section(bytes, magic, 1) != codec.schema():
         throw Error("incompatible Severian MIR schema")
     input = codec.ArchiveInput(metadata.decode_section(bytes, magic, 2).split("\n"))

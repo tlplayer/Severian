@@ -76,7 +76,14 @@ def plan_inputs(target: string, kind: string, output: string, tool: string, inpu
 # Raw commands can contain implicit headers/libraries; they always execute.
 def plan_link(target: string, kind: string, output: string, arguments: list[string]) -> LinkPlan | Error:
     inputs: list[LinkInput] = []
+    option_value := false
     for argument in arguments[1:]:
+        if option_value:
+            option_value = false
+            continue
+        if argument in ["-install_name", "-soname", "-rpath", "-L", "-F", "-arch", "--sysroot", "-isysroot", "--target", "-target", "-framework", "-undefined"]:
+            option_value = true
+            continue
         if argument == output or argument.starts_with("/out:"):
             continue
         if argument.starts_with("/implib:") or argument.starts_with("/pdb:") or argument.starts_with("/export:"):
@@ -108,8 +115,12 @@ def execute_locked(plan: LinkPlan, stage: string) -> LinkResult | Error:
     located = process.execute(["which", plan.arguments[0]])
     if located.status != 0:
         throw Error("linker not found: " + plan.arguments[0])
-    tool = os.canonical(located.stdout.strip())
-    identity = tool + " " + link_digest(tool)
+    # Driver symlink names select modes (lld-link, ld64.lld, clang++).
+    # Hash the resolved executable but invoke the selected spelling.
+    tool := located.stdout.strip()
+    if not tool.starts_with("/"):
+        tool = process.current_directory() + "/" + tool
+    identity = os.canonical(tool) + " " + link_digest(tool)
     receipt = plan.output + ".link.json"
     if plan.incremental and os.is_file(plan.output) and os.is_file(receipt):
         checksum = link_digest(plan.output)
@@ -126,7 +137,7 @@ def execute_locked(plan: LinkPlan, stage: string) -> LinkResult | Error:
     if not os.is_file(temporary):
         throw Error("linker did not produce " + plan.output)
     validate(plan)
-    if tool + " " + link_digest(tool) != identity:
+    if os.canonical(tool) + " " + link_digest(tool) != identity:
         throw Error("linker changed during execution")
     checksum = link_digest(temporary)
     link_write(stage + "/link.json", record(plan, checksum, identity))

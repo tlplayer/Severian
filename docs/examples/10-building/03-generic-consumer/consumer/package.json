@@ -1,0 +1,27 @@
+{
+  "package": {
+    "name": "generic-consumer",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "bin": [
+    {
+      "name": "generic-consumer",
+      "path": "src/main.sev"
+    }
+  ],
+  "dependencies": {
+    "printer": {
+      "package": "generic-printer",
+      "path": "../producer"
+    }
+  },
+  "lint": {
+    "enabled": false
+  },
+  "profile": {
+    "dev": {
+      "debug-symbols": false
+    }
+  }
+}

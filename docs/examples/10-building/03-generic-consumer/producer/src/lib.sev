@@ -1,0 +1,2 @@
+def foo[T](value: T):
+    print(value)

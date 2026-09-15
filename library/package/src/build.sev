@@ -1,7 +1,21 @@
+import * from "document.sev"
+import diagnostic
+import * from "stages.sev"
 import dependency
 import * from "dependency.sev"
 import * from "lint.sev"
-import * from "coverage.sev"
+from diagnostic import
+{
+    coverage_sources,
+    CoverageRegion,
+    CoverageTest,
+    coverage_map,
+    CoverageRun,
+    coverage_collect,
+    CoverageMetric,
+    coverage_metric,
+    coverage_finish,
+}
 import * from "compiler.sev"
 import * from "host.sev"
 import * from "model.sev"
@@ -14,13 +28,14 @@ import process
 import file
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return project.root + "/package.pkg/bin/" + safe_name(platform) + "/" + safe_name(profile)
+    return build_root() + "/bin"
 
 def test_output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return project.root + "/package.pkg/debug/test/" + safe_name(platform) + "/" + safe_name(profile)
+    return build_root() + "/debug/test/" + safe_name(platform) + "/" + safe_name(profile)
 
 def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan | Error:
     mutable_project(project.root)
+    diagnostic.format_sources(project)
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
     if not request.locked and project.lock_text != resolution.lock:
         lock = file.native_lock(project.root + "/.sev-edit.lock")
@@ -59,11 +74,11 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
             continue
         if mode == "run" and target.kind != "binary":
             continue
-        destination := ""
+        destination := root + "/" + target.name if target.kind == "binary" else ""
         if mode == "test":
             destination = test_output_root(project, platform, profile) + "/bin/" + target.name
         elif request.emit != "":
-            destination = project.root + "/package.pkg/cache/emit/" + target.name + (".json" if request.emit == "agent-ir" else "." + request.emit)
+            destination = build_root() + "/cache/emit/" + target.name + (".json" if request.emit == "agent-ir" else "." + request.emit)
         if request.output != "":
             destination = request.output
         units.append(BuildUnit(0, target, platform, profile, destination, mode == "test"))
@@ -87,6 +102,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
 def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
     enforce_lint(plan.project, plan.lint, plan.mode == "test")
     artifacts: list[Artifact] = []
+    consumed: list[string] = []
     for unit in plan.units:
         if unit.package_index != 0:
             dependency = plan.resolution.packages[unit.package_index]
@@ -107,6 +123,18 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
         else:
             mkdir(path.dirname(unit.output))
             artifacts.append(compile_unit(compiler, unit, plan.resolution, plan.emit))
+    report_resolution = unit_resolution(plan.resolution, 0)
+    for artifact in artifacts:
+        location = artifact.package_root + "/build/" + artifact.build_id + "/inputs"
+        if artifact.build_id != "" and os.is_file(location):
+            for entry in parse_document(read_text(location)):
+                if unquote(entry.value) == "missing":
+                    continue
+                source = relocated_path(entry.key, report_resolution, plan.project.root, compiler.sysroot)
+                if source not in consumed:
+                    consumed.append(source)
+    if len(consumed) > 0:
+        diagnostic.report_contributions(plan.project.root, consumed, build_root() + "/debug/quality", plan.mode == "test")
     return BuildResult(plan, artifacts)
 
 def build(project: Project, compiler: Compiler, request: Build) -> BuildResult | Error:
@@ -130,7 +158,7 @@ def test(project: Project, compiler: Compiler, request: Test) -> TestReport | Er
     tests: list[TestResult] = []
     coverage = CoverageRun()
     covered = setting(project.manifest.entries, "test", "coverage", "true") != "false" and request.emit == ""
-    reports = temporary(project.root + "/package.pkg/debug/coverage", "run-")
+    reports = temporary(build_root() + "/debug/coverage", "run-")
     failed := 0
     for artifact in result.artifacts:
         if request.filter != "" and not artifact.target.name.contains(request.filter):
@@ -164,16 +192,16 @@ def run(project: Project, compiler: Compiler, request: Run) -> int | Error:
 
 def clean(project: Project, request: Clean) -> unit | Error:
     mutable_project(project.root)
-    destination := project.root + "/package.pkg"
+    destination := build_root()
     if request.profile != "" and request.platform == "":
         throw Error("clean profile requires a platform")
     if request.platform != "":
-        destination += "/" + safe_name(request.platform)
+        destination += "/artifacts/" + safe_name(request.platform)
     if request.profile != "":
         destination += "/" + safe_name(request.profile)
     if os.exists(destination):
         resolved = canonical(destination)
-        if resolved != project.root + "/package.pkg" and not resolved.starts_with(project.root + "/package.pkg/"):
+        if resolved != build_root() and not resolved.starts_with(build_root() + "/"):
             throw Error("artifact directory escapes project root")
         remove_tree(destination)
 

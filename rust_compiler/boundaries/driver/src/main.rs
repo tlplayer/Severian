@@ -312,7 +312,7 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         let output = options
             .output
             .clone()
-            .unwrap_or_else(|| input_root(&input).join("package.pkg").join("agent-ir"));
+            .unwrap_or_else(|| env::current_dir().expect("invocation directory").join("package.pkg/cache/agent-ir"));
         compiler(&config, manifest, false)?
             .emit_agent_ir(targets[0].path(), input_root(&input), &output, package)
             .map_err(|error| error.to_string())?;
@@ -509,7 +509,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
             DeclaredTarget::Binary(binary) => {
                 let roots = manifest.map(|m| m.package_graph.packages.values().map(|p| p.root.clone()).collect()).unwrap_or_else(|| vec![root.to_path_buf()]);
                 let configuration = format!("{config:?}\n{target:?}\n{:?}", manifest.map(|m| &m.package_graph));
-                if !build_cache::compile(&compiler, &binary.path, &output, root, configuration, roots)? {
+                if !build_cache::compile(&compiler, &binary.path, &output, &env::current_dir().map_err(|error| error.to_string())?, configuration, roots)? {
                     artifacts.push(output);
                     continue;
                 }
@@ -1027,7 +1027,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         return Err("`sev test` does not accept application arguments".into());
     }
     let requested = options.path.clone().unwrap_or_else(|| PathBuf::from("."));
-    let (mut sources, fixture_packages, root, manifest, validation) =
+    let (mut sources, fixture_packages, _root, manifest, validation) =
         if requested.is_dir() && !severian_driver::config::document::path(&requested).is_file() {
             let mut sources = Vec::new();
             test_runner::collect_sources(&requested, &mut sources)?;
@@ -1081,7 +1081,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("could not identify test invocation: {error}"))?
         .as_nanos();
-    let output_base = root.join("package.pkg").join("debug").join("tests");
+    let output_base = env::current_dir().map_err(|error| error.to_string())?.join("package.pkg").join("debug").join("tests");
     let output_root = output_base
         .join(target_directory(&config.target))
         .join(&config.profile)
@@ -1251,15 +1251,15 @@ fn input_root(input: &Input) -> &Path {
     }
 }
 
-fn artifact_path(root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) -> PathBuf {
-    let base = root
-        .join("package.pkg")
-        .join(target_directory(&config.target))
-        .join(&config.profile);
+fn artifact_path(_root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) -> PathBuf {
+    let base = env::current_dir().expect("invocation directory").join("package.pkg");
     match target {
         DeclaredTarget::Binary(binary) => base.join("bin").join(&binary.name),
         DeclaredTarget::Library(library) => base
-            .join("pkg")
+            .join("artifacts")
+            .join(target_directory(&config.target))
+            .join(&config.profile)
+            .join("package")
             .join(format!("{}-{}.pkg", library.name, library.version)),
     }
 }

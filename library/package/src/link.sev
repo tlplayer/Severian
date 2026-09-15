@@ -1,6 +1,9 @@
 # Compatibility facade; package.linker owns link semantics.
-from linker import LinkInput
-from linker import LinkPlan
-from linker import LinkResult
-from linker import plan_link
-from linker import execute_link
+from linker import
+{
+    LinkInput,
+    LinkPlan,
+    LinkResult,
+    plan_link,
+    execute_link,
+}

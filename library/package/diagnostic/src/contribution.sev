@@ -1,0 +1,62 @@
+from build_flow import
+{
+    Entry,
+    Project,
+    setting,
+    text_setting,
+    unquote,
+    string_array,
+    relative_path,
+    parse_document,
+    entries_json,
+    document_quote,
+    build_root,
+}
+from cache import
+{
+    capture,
+    canonical,
+    digest,
+    temporary,
+    mkdir,
+    write_text,
+    read_text,
+    copy_file,
+    replace_file,
+    remove_tree,
+}
+import file
+import os
+import path
+import process
+import time
+
+import * from "host.sev"
+
+class FileContribution:
+    path: string
+    contributed: bool
+    reason: string
+
+# Recorded compiler inputs provide evidence for the selected target set. This
+# does not label test-only files or alternate-target sources universally dead.
+def contributions(root: string, consumed: list[string], testing: bool = false) -> list[FileContribution] | Error:
+    result: list[FileContribution] = []
+    for location in files(root):
+        if not location.ends_with(".sev"):
+            continue
+        relative = location[int(len(root)) + 1:]
+        used = canonical(location) in consumed
+        reason := "compiler input" if used else "not used by the selected build targets; review before removal"
+        if not used and not testing and (relative.starts_with("tests/") or relative.starts_with("test/")):
+            reason = "test source; not selected by this build"
+        result.append(FileContribution(relative, used, reason))
+    return result
+
+def report_contributions(root: string, consumed: list[string], directory: string, testing: bool = false) -> unit | Error:
+    rows: list[string] = []
+    for item in contributions(root, consumed, testing):
+        rows.append("{\"file\":" + document_quote(item.path) + ",\"contributed\":" + string(item.contributed) + ",\"reason\":" + document_quote(item.reason) + "}")
+        if not item.contributed and item.reason.starts_with("not used"):
+            process.write_error(item.path + ": info[B0001]: " + item.reason + "\n")
+    write_text(directory + "/build-inputs.json", "{\"format\":1,\"package_root\":" + document_quote(root) + ",\"scope\":\"selected targets\",\"files\":[" + rows.join(",") + "]}\n")

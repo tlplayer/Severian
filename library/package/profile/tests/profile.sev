@@ -1,0 +1,8 @@
+import * from "../src/lib.sev" as profile
+
+test "profiling retains command output and exit status":
+    measured = profile.measure_command(["sh", "-c", "printf measured; exit 7"])
+    assert(measured.status == 7 and measured.stdout == "measured")
+    assert(measured.wall_seconds >= 0.0)
+    assert(measured.user_seconds >= 0.0 and measured.system_seconds >= 0.0)
+    assert(measured.peak_rss_kib > 0)

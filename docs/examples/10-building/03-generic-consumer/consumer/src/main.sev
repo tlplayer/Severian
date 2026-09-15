@@ -1,0 +1,14 @@
+import printer
+
+def answer() -> int:
+    return 41
+
+def main():
+    letter = 'x'
+    for repetition in range(3):
+        printer.foo("hello")
+        printer.foo(letter)
+        printer.foo(42)
+        printer.foo(1.5)
+        printer.foo(true)
+    print(answer())

@@ -1,0 +1,13 @@
+{
+  "package": {
+    "name": "generic-printer",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "lint": {
+    "enabled": false
+  }
+}

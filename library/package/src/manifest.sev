@@ -14,123 +14,11 @@ def safe_name(value: string) -> string | Error:
             throw Error("invalid package or target name: " + value)
     return value
 
-def relative_path(value: string) -> string | Error:
-    if value == "" or value.starts_with("/") or value.contains("\\") or value.contains(":"):
-        throw Error("unsafe package path: " + value)
-    for component in value.split("/"):
-        if component == "" or component == "." or component == "..":
-            throw Error("unsafe package path: " + value)
-    for byte in value.bytes():
-        if int(byte) < 32 or int(byte) == 127:
-            throw Error("control character in package path")
-    return value
-
 def inside(root: string, value: string) -> string | Error:
     resolved = canonical(root + "/" + relative_path(value[:]))
     if not resolved.starts_with(canonical(root) + "/"):
         throw Error("source path escapes package root: " + value)
     return resolved
-
-def toml_quote(value: string) -> string:
-    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
-
-def unquote(raw: string) -> string | Error:
-    value = raw.strip()
-    if int(len(value)) < 2:
-        throw Error("expected a TOML string: " + raw)
-    if value.starts_with("'") and value.ends_with("'"):
-        return value[1:int(int(len(value))) - 1]
-    if not value.starts_with("\"") or not value.ends_with("\""):
-        throw Error("expected a TOML string: " + raw)
-    reader = DocumentReader(value.characters())
-    decoded = reader.quoted()
-    if reader.cursor != int(len(reader.characters)):
-        throw Error("trailing input after string")
-    return decoded
-
-# Delimiters inside strings and nested arrays/inline tables are data.
-def split_fields(text: string, separator: string) -> list[string] | Error:
-    result: list[string] = []
-    part := ""
-    quote_mark := ""
-    escaped := false
-    depth := 0
-    comment := false
-    for character in text.characters():
-        item = string(character)
-        if comment:
-            if item != "\n":
-                continue
-            comment = false
-        if quote_mark != "":
-            part += item
-            if escaped:
-                escaped = false
-            elif item == "\\" and quote_mark == "\"":
-                escaped = true
-            elif item == quote_mark:
-                quote_mark = ""
-        elif item == "\"" or item == "'":
-            quote_mark = item
-            part += item
-        elif item == "#":
-            comment = true
-        elif item == "[" or item == "{":
-            depth += 1
-            part += item
-        elif item == "]" or item == "}":
-            depth -= 1
-            part += item
-        elif item == separator and depth == 0:
-            if part.strip() != "":
-                result.append(part.strip())
-            part = ""
-        else:
-            part += item
-    if quote_mark != "" or depth != 0:
-        throw Error("unterminated TOML value")
-    if part.strip() != "":
-        result.append(part.strip())
-    return result
-
-def parse_document(text: string) -> list[Entry] | Error:
-    if text.strip().starts_with("{") or text.strip().starts_with("//") or text.strip().starts_with("/*"):
-        return parse_json5_document(text)
-    entries: list[Entry] = []
-    section := ""
-    array := false
-    binary := 0
-    for line in split_fields(text, "\n"):
-        if line.starts_with("[[") and line.ends_with("]]"):
-            name = line[2:int(int(len(line))) - 2].strip()
-            section = name + "." + string(binary)
-            array = true
-            binary += 1
-        elif line.starts_with("[") and line.ends_with("]"):
-            section = line[1:int(int(len(line))) - 1].strip()
-            array = false
-        else:
-            pair = split_fields(line, "=")
-            if int(len(pair)) != 2:
-                throw Error("invalid TOML assignment: " + line)
-            key := pair[0]
-            if key.starts_with("\"") or key.starts_with("'"):
-                key = unquote(key)
-            for entry in entries:
-                if entry.table == section and entry.key == key:
-                    throw Error("duplicate TOML key: " + section + "." + key)
-            entries.append(Entry(section, key, pair[1], array))
-    return entries
-
-def setting(entries: list[Entry], table: string, key: string, fallback: string = "") -> string:
-    for entry in entries:
-        if entry.table == table and entry.key == key:
-            return entry.value
-    return fallback
-
-def text_setting(entries: list[Entry], table: string, key: string, fallback: string = "") -> string:
-    raw = setting(entries, table, key)
-    return fallback if raw == "" else unquote(raw)
 
 def reference(value: string) -> Reference | Error:
     if value.starts_with("git+") or value.starts_with("github.com/"):
@@ -253,17 +141,6 @@ def open(location: string = ".") -> Project | Error:
         inside(root, target.path)
     return Project(root, manifest, original, lock)
 
-def string_array(value: string) -> list[string] | Error:
-    if not value.starts_with("[") or not value.ends_with("]"):
-        throw Error("expected a string array")
-    result: list[string] = []
-    for field in split_fields(value[1:int(len(value)) - 1], ","):
-        if field.strip() != "":
-            result.append(unquote(field.strip()))
-    return result
-
-# Workspace members are explicit manifest locations, independent of import
-# aliases and organizational directory depth. Reading the catalog is read-only.
 def workspace_library(root: string, name: string) -> string | Error:
     document = parse_document(read_text(manifest_file(root)))
     members = string_array(setting(document, "workspace", "members", "[]"))
@@ -340,46 +217,5 @@ def standalone_dependency(root: string, importer: string, alias: string) -> stri
     return workspace_library(root, alias)
 
 # Render normalized Entry values without exposing TOML as the package format.
-def value_json(raw: string) -> string | Error:
-    value = raw.strip()
-    if value.starts_with("\"") or value.starts_with("'"):
-        return document_quote(unquote(value))
-    if value.starts_with("["):
-        values: list[string] = []
-        for part in split_fields(value[1:int(len(value)) - 1], ","):
-            values.append(value_json(part))
-        return "[" + values.join(", ") + "]"
-    if value.starts_with("{"):
-        values: list[string] = []
-        for entry in parse_document(split_fields(value[1:int(len(value)) - 1], ",").join("\n")):
-            values.append(document_quote(entry.key) + ": " + value_json(entry.value))
-        return "{" + values.join(", ") + "}"
-    return value
-
-def entries_json(entries: list[Entry]) -> string | Error:
-    nodes: list[DocumentNode] = [DocumentNode(-1, "", "object")]
-    for entry in entries:
-        parent := 0
-        components = entry.table.split(".") if entry.table != "" else []
-        for index in range(int(len(components))):
-            key = components[index]
-            found := -1
-            for child in range(1, int(len(nodes))):
-                if nodes[child].parent == parent and nodes[child].key == key:
-                    found = child
-                    break
-            if found < 0:
-                kind = "array" if entry.array and index == int(len(components)) - 2 else "object"
-                found = int(len(nodes))
-                nodes.append(DocumentNode(parent, key, kind))
-            parent = found
-        nodes.append(DocumentNode(parent, entry.key, "scalar", value_json(entry.value)))
-    # Top-level sections get their own lines; leaf values stay compact.
-    sections: list[string] = []
-    for index in range(1, int(len(nodes))):
-        if nodes[index].parent == 0:
-            sections.append("  " + document_quote(nodes[index].key) + ": " + document_render(nodes, index))
-    return "{\n" + sections.join(",\n") + "\n}\n"
-
 def write_document(destination: string, text: string) -> unit | Error:
     write_text(destination, entries_json(parse_document(text)))

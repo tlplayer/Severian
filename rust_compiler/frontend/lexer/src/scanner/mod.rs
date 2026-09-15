@@ -114,6 +114,18 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 continue;
             }
+            b'\\' if bytes.get(cursor + 1) == Some(&b'\n') => {
+                cursor += 2;
+                while matches!(bytes.get(cursor), Some(b' ' | b'\t')) { cursor += 1; }
+                line_start = false;
+                continue;
+            }
+            b'\\' if bytes.get(cursor + 1..cursor + 3) == Some(b"\r\n") => {
+                cursor += 3;
+                while matches!(bytes.get(cursor), Some(b' ' | b'\t')) { cursor += 1; }
+                line_start = false;
+                continue;
+            }
             b'\n' => {
                 cursor += 1;
                 line_start = true;

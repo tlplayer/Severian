@@ -42,6 +42,18 @@
     "linker": {
       "package": "package.linker",
       "path": "linker"
+    },
+    "build_flow": {
+      "package": "package.build",
+      "path": "build"
+    },
+    "diagnostic": {
+      "package": "package.diagnostic",
+      "path": "diagnostic"
+    },
+    "profile": {
+      "package": "package.profile",
+      "path": "profile"
     }
   }
 }

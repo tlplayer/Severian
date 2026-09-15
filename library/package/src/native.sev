@@ -1,3 +1,5 @@
+import * from "document.sev"
+import * from "stages.sev"
 import dependency
 import * from "dependency.sev"
 import * from "model.sev"
@@ -27,7 +29,7 @@ def native_build_info(root: string, symbol: string) -> string | Error:
     built = capture(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"])
     report = "built: " + built + "\nsource: " + root + "\ncommit: " + commit
     literal = report.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    output = temporary(root + "/package.pkg/cache/build-info", "run-") + "/build_info.c"
+    output = temporary(build_root() + "/cache/build-info", "run-") + "/build_info.c"
     write_text(output, "const char *" + symbol + "(void) { return \"" + literal + "\"; }\n")
     return output
 

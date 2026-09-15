@@ -1,0 +1,104 @@
+import * from "host.sev"
+import lexer
+import source
+
+# Keep comments and literal contents intact. Only complete selective import
+# token ranges are rewritten; malformed input remains for parser diagnostics.
+def format_import_list(package_name: string, members: list[string], grouped: bool) -> string:
+    if grouped:
+        return "from " + package_name + " import\n{\n    " + members.join(",\n    ") + ",\n}"
+    line := "from " + package_name + " import"
+    lines: list[string] = []
+    for index in range(int(len(members))):
+        separator = " " if index == 0 else ", "
+        limit = 80 if index == int(len(members)) - 1 else 77
+        if len((line + separator + members[index]).characters()) > limit:
+            lines.append(line + (" \\" if index == 0 else ", \\"))
+            line = "    " + members[index]
+        else:
+            line += separator + members[index]
+    lines.append(line)
+    return lines.join("\n")
+
+def import_layout(tokens: list[lexer.Token], start: int) -> int:
+    cursor := start
+    while cursor < len(tokens) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]:
+        cursor += 1
+    return cursor
+
+def format_imports(text: string) -> string | Error:
+    input = source.virtual_source("imports.sev", text)
+    tokens = lexer.scan_bootstrap(input)
+    parts: list[string] = []
+    retained := 0
+    index := 0
+    while index + 3 < len(tokens):
+        token = tokens[index]
+        start = int(token.span.start)
+        if token.kind != lexer.TokenKind.Identifier or string(token) != "from" or (start > 0 and text[start - 1:start] != "\n"):
+            index += 1
+            continue
+        if tokens[index + 1].kind != lexer.TokenKind.Identifier or string(tokens[index + 2]) != "import":
+            index += 1
+            continue
+        package_name = string(tokens[index + 1])
+        cursor := import_layout(tokens, index + 3)
+        grouped = cursor < len(tokens) and string(tokens[cursor]) == "{"
+        if grouped:
+            cursor = import_layout(tokens, cursor + 1)
+        elif cursor != index + 3:
+            index += 1
+            continue
+        members: list[string] = []
+        valid := true
+        end := start
+        while cursor < len(tokens):
+            if tokens[cursor].kind != lexer.TokenKind.Identifier:
+                valid = false
+                break
+            member := string(tokens[cursor])
+            end = int(tokens[cursor].span.end)
+            cursor += 1
+            if cursor < len(tokens) and string(tokens[cursor]) == "as":
+                cursor += 1
+                if cursor >= len(tokens) or tokens[cursor].kind != lexer.TokenKind.Identifier:
+                    valid = false
+                    break
+                member += " as " + string(tokens[cursor])
+                end = int(tokens[cursor].span.end)
+                cursor += 1
+            members.append(member)
+            if grouped:
+                cursor = import_layout(tokens, cursor)
+            if cursor >= len(tokens) or string(tokens[cursor]) != ",":
+                break
+            cursor += 1
+            if grouped:
+                cursor = import_layout(tokens, cursor)
+                if cursor < len(tokens) and string(tokens[cursor]) == "}":
+                    break
+        if grouped:
+            valid = valid and cursor < len(tokens) and string(tokens[cursor]) == "}"
+            if valid:
+                end = int(tokens[cursor].span.end)
+                cursor += 1
+        else:
+            valid = valid and cursor < len(tokens) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]
+        if valid and len(members) > 0 and not text[start:end].contains("#"):
+            parts.append(text[retained:start])
+            parts.append(format_import_list(package_name, members, grouped))
+            retained = end
+        index = max(index + 1, cursor)
+    parts.append(text[retained:])
+    return parts.join("")
+
+def format_sources(project: Project) -> unit | Error:
+    if setting(project.manifest.entries, "lint", "enabled", "true") == "false" or setting(project.manifest.entries, "lint", "format", "true") == "false":
+        return
+    for location in files(project.root):
+        if not location.ends_with(".sev"):
+            continue
+        before = read_text(location)
+        after = format_imports(before)
+        if after != before:
+            write_text(location, after)

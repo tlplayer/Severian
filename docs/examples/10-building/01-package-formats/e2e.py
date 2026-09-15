@@ -56,6 +56,8 @@ def main():
 
     def run(*command, cwd=work, succeeds=True, extra_env=None, timeout=300):
         started = time.monotonic()
+        if str(command[0]) == str(compiler):
+            command = (*command, '--sysroot', ROOT) if len(command) > 1 and not str(command[1]).startswith('__') else command
         result = subprocess.run(list(map(str, command)), cwd=cwd, env={**env, **(extra_env or {})},
                                 capture_output=True, text=True, timeout=timeout)
         records.append({'command': list(map(str, command)), 'status': result.returncode,
@@ -69,14 +71,16 @@ def main():
     shutil.copytree(HERE / 'geometry', producer, ignore=shutil.ignore_patterns('package.pkg', '.sev-*'))
     shutil.copytree(HERE / 'consumer', consumer, ignore=shutil.ignore_patterns('package.pkg', '.sev-*'))
     run(compiler, 'build', producer)
-    package = producer / 'package.pkg'
+    package = work / 'package.pkg'
+    assert (package / 'bin/geometry-tool').is_file()
+    assert not list(producer.rglob('package.pkg'))
     manifests = [read_json(p) for p in (package / 'metadata/realizations').glob('*.json')
                  if not p.name.endswith('.inputs.json')]
     library = next(m for m in manifests if m['kind'] == 'library')
     native = next(m for m in manifests if m['kind'] == 'native')
     build_id, triple = library['build-id'], library['target']
     artifact_root = package / 'artifacts' / triple / 'dev' / build_id
-    assert run(package / native['output']).stdout.strip() == '84'
+    assert run(package / native['output']).stdout.strip() == '85'
     for location in ['package.json', 'package.lock', 'source-index.json', 'artifacts.json']:
         read_json(package / 'metadata' / location)
     read_json(producer / 'package.lock')
@@ -161,7 +165,7 @@ def main():
     shutil.move(producer, work / 'producer-unavailable')
     # Each new consumer compiles itself while loading the dependency's interface.
     result = run(compiler, 'run', consumer)
-    assert result.stdout.strip() == '84', result.stdout
+    assert result.stdout.strip() == '85', result.stdout
     assert 'compiling ' in result.stderr and '/metadata/src/' not in result.stderr
     published_lib = next(read_json(p) for p in (release / 'metadata/realizations').glob('*.json')
                          if read_json(p).get('kind') == 'library')
@@ -171,7 +175,7 @@ def main():
     archive = release / published_lib['output']
     shared = next(release / p for p in published_lib['files'] if p.endswith('/dynamic/libgeometry.so'))
     c_probe = work / 'consumer.c'
-    c_probe.write_text('#include "geometry.h"\nint main(void) { return geometry_area(6, 7) != 84 || geometry_answer() != 42; }\n')
+    c_probe.write_text('#include "geometry.h"\nint main(void) { return geometry_area(6, 7) != 85 || geometry_answer() != 42; }\n')
     run('clang-21', c_probe, '-I', header.parent, archive, '-lm', '-o', work / 'c-static')
     run(work / 'c-static')
     run('clang-21', c_probe, '-I', header.parent, shared, '-Wl,-rpath,' + str(shared.parent), '-o', work / 'c-shared')
@@ -180,7 +184,7 @@ def main():
     (rust_consumer / 'src').mkdir(parents=True)
     crate = (release / 'package.pkgi' / binding['rust']).parent
     (rust_consumer / 'Cargo.toml').write_text('[package]\nname="consumer"\nversion="1.0.0"\nedition="2024"\n[dependencies]\ngeometry={path=' + json.dumps(str(crate)) + '}\n[workspace]\n')
-    (rust_consumer / 'src/main.rs').write_text('fn main() { unsafe { assert_eq!(geometry::area(6, 7), 84); assert_eq!(geometry::answer(), 42); } }\n')
+    (rust_consumer / 'src/main.rs').write_text('fn main() { unsafe { assert_eq!(geometry::area(6, 7), 85); assert_eq!(geometry::answer(), 42); } }\n')
     run('cargo', 'run', '--offline', '--manifest-path', rust_consumer / 'Cargo.toml')
     assert snapshot(release) == frozen, 'consumption changed immutable publication'
     # Inventory corruption is a hard failure, never permission to compile source.

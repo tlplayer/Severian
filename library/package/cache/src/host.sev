@@ -1,0 +1,59 @@
+import file
+import os
+import path
+import process
+
+def capture(arguments: list[string]) -> string | Error:
+    result = process.execute(arguments)
+    if result.status != 0:
+        throw Error("host operation failed: " + arguments[0] + ": " + result.stderr)
+    return result.stdout.strip()
+
+def canonical(value: string) -> string | Error:
+    return os.canonical(value)
+
+def mkdir(value: string) -> unit | Error:
+    if not os.make_directories(value):
+        throw Error("could not create directory " + value)
+
+def write_text(destination: string, contents: string) -> unit | Error:
+    mkdir(path.dirname(destination))
+    if file.write(destination, contents) != 0:
+        throw Error("could not write " + destination)
+
+def read_text(location: string) -> string | Error:
+    return file.read_checked(location)
+
+def temporary(parent: string, prefix: string = ".sev-") -> string | Error:
+    mkdir(parent)
+    return os.temporary(parent, prefix)
+
+def replace_file(source: string, destination: string) -> unit | Error:
+    if os.rename(source, destination) != 0:
+        throw Error("could not replace " + destination)
+
+def remove_tree(location: string) -> unit | Error:
+    os.remove_tree(location)
+
+def copy_file(source: string, destination: string) -> unit | Error:
+    mkdir(path.dirname(destination))
+    if not os.copy(source, destination):
+        throw Error("could not copy " + source)
+
+def digest(location: string) -> string | Error:
+    value = capture(["sha256sum", "--", location])
+    return "sha256:" + (value[1:65] if value.starts_with("\\") else value[:64])
+
+def document_quote(value: string) -> string:
+    result := "\""
+    for character in value.characters():
+        item = string(character)
+        if item == "\\" or item == "\"":
+            result += "\\" + item
+        elif int(character.bytes()[0]) < 32:
+            code = int(character.bytes()[0])
+            result += "\\u00" + "0123456789abcdef"[code / 16:code / 16 + 1] + "0123456789abcdef"[code % 16:code % 16 + 1]
+        else:
+            result += item
+    return result + "\""
+

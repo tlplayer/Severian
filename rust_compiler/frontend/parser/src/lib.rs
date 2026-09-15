@@ -1160,6 +1160,32 @@ output = f"""module {{
     }
 
     #[test]
+    fn selective_import_lists_preserve_each_member_alias_and_span() {
+        for text in [
+            "from pkg import A, B as Renamed, C\n",
+            "from pkg import {A, B as Renamed, C,}\n",
+            "from pkg import\n{\n    A,\n    B as Renamed, # retained comment\n    C,\n}\n",
+            "from pkg import A, \\\n    B as Renamed, C\n",
+            "from pkg import A, \\\r\n    B as Renamed, C\n",
+        ] {
+            let input = SourceFile::virtual_source("imports.sev", text);
+            let module = parse(&scan(&input).unwrap()).unwrap();
+            assert_eq!(module.items.len(), 3, "{text}");
+            let imports = module.items.iter().map(|item| {
+                let severian_ast::Item::Import(import) = item else { panic!("expected import") };
+                assert_eq!(import.source.as_deref(), Some("pkg"));
+                import
+            }).collect::<Vec<_>>();
+            assert_eq!(imports[1].alias.as_deref(), Some("Renamed"));
+            assert!(imports[0].span.end <= imports[1].span.start);
+            assert!(imports[1].span.end <= imports[2].span.start);
+        }
+        for text in ["from pkg import {}", "from pkg import {A B}", "from pkg import {A,", "from pkg import A,\nB"] {
+            assert!(parse(&scan(&SourceFile::virtual_source("bad.sev", text)).unwrap()).is_err(), "{text}");
+        }
+    }
+
+    #[test]
     fn parses_raw_pointer_types_addresses_and_structured_throws() {
         let source = SourceFile::virtual_source(
             "pointers.sev",

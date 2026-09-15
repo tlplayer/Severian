@@ -1,3 +1,5 @@
+import * from "document.sev"
+import * from "stages.sev"
 import dependency
 import * from "dependency.sev"
 import * from "model.sev"
@@ -120,11 +122,14 @@ def source_cache_root(input: string) -> string:
 
 
 def unit_cache_root(root: string) -> string | Error:
-    if not published_project(root):
-        return root + "/package.pkg/build"
-    # Published realizations are immutable. Their local compiler state is shared
-    # across consumers, outside the verified publication.
-    return package_home() + "/packages/cache/" + source_checksum(root).replace(":", "-") + "/package.pkg/build"
+    return build_root() + "/build"
+
+
+def realization_root(resolution: Resolution, index: int) -> string | Error:
+    if index == 0 or len(resolution.packages) == 0:
+        return build_root()
+    owner = resolution.packages[index]
+    return build_root() + "/dependencies/" + safe_name(owner.identity.name) + "-" + safe_name(owner.identity.version) + "/" + owner.checksum.replace(":", "-")
 
 
 def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false, source_path: string = "") -> Artifact | Error:
@@ -154,7 +159,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                     identity += "\n" + tool + "\n" + capture([tool, "--version"])
         write_text(stage + "/key", identity)
         build_id = digest(stage + "/key").replace(":", "-")
-        cache = unit_cache_root(root) + "/" + build_id
+        cache = realization_root(resolution, unit.package_index) + "/build/" + build_id
         mkdir(cache)
         cache_lock = file.native_lock(cache + "/lock")
         if cache_lock < 0:
@@ -212,6 +217,8 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                     write_text(cache + "/artifact", paths.join("\n"))
                 else:
                     copy_file(stage + "/artifact", cache + "/artifact")
+                if os.is_file(stage + "/artifact.pipeline.json"):
+                    copy_file(stage + "/artifact.pipeline.json", cache + "/pipeline.json")
                 if os.is_file(stage + "/artifact.link.json"):
                     copy_file(stage + "/artifact.link.json", cache + "/link.json")
                 if os.is_file(stage + "/artifact.coverage.json"):
@@ -258,6 +265,6 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         remove_tree(stage)
         throw Error(error.message)
     remove_tree(stage)
-    if result.path == "":
+    if unit.output != "":
         result.path = unit.output
     return result

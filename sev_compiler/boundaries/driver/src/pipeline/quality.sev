@@ -10,19 +10,10 @@ def prepare_quality(module: universal.Module, files: list[source.SourceFile], re
     if package.setting(project.manifest.entries, "test", "coverage", "true") == "false":
         return
     excluded = package.string_array(package.setting(project.manifest.entries, "test", "coverage-exclude", "[\"tests/\",\"test/\"]"))
-    for file in files:
-        owner := ""
-        for dependency in resolution.packages:
-            if file.path.starts_with(dependency.root + "/") and len(dependency.root) > len(owner):
-                owner = dependency.root
-        if owner == "" or int(file.id.index) in module.prelude_sources:
-            continue
-        relative = file.path[int(len(owner)) + 1:]
-        skip := false
-        for prefix in excluded:
-            skip = skip or relative == prefix or (prefix.ends_with("/") and relative.starts_with(prefix))
-        if not skip:
-            module.quality_files.append(file)
+    roots: list[string] = []
+    for dependency in resolution.packages:
+        roots.append(dependency.root)
+    module.quality_files = package.coverage_sources(files, roots, excluded, module.prelude_sources)
     for test in module.tests:
         module.quality_exclusions.append(test.span)
     # main is the execution harness; unit coverage measures its callable APIs.
@@ -34,12 +25,11 @@ def prepare_quality(module: universal.Module, files: list[source.SourceFile], re
 
 def quality_map(module: universal.Module) -> string:
     quality.quality_branches(module)
-    regions: list[string] = []
+    regions: list[package.CoverageRegion] = []
     for region in module.quality_regions:
         kind = "Branch" if region.kind.starts_with("Branch") else "Condition" if region.kind.starts_with("Condition") else region.kind
-        position = "{\"line\":" + string(region.line) + ",\"column\":" + string(region.column) + "}"
-        regions.append(package.document_quote(string(region.id)) + ":{\"kind\":" + package.document_quote(kind) + ",\"outcome\":" + package.document_quote(region.kind) + ",\"span\":{\"file\":" + package.document_quote(region.file) + ",\"start\":" + position + ",\"end\":" + position + "}}")
-    tests: list[string] = []
+        regions.append(package.CoverageRegion(string(region.id), kind, region.file, region.line, region.column, region.kind))
+    tests: list[package.CoverageTest] = []
     for test in module.tests:
         function ?= test.function
         if function != None:
@@ -47,5 +37,5 @@ def quality_map(module: universal.Module) -> string:
             label := "unnamed test"
             if name != None:
                 label = name
-            tests.append(package.document_quote(string(function.value)) + ":" + package.document_quote(label))
-    return "{\"schema_version\":1,\"regions\":{" + regions.join(",") + "},\"tests\":{" + tests.join(",") + "}}"
+            tests.append(package.CoverageTest(string(function.value), label))
+    return package.coverage_map(regions, tests)

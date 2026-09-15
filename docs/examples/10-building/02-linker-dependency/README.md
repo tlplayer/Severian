@@ -21,7 +21,7 @@ package.pkg/
 │   ├── left.c, left.o, left.a, left.a.link.json
 │   ├── right.c, right.o, right.a, right.a.link.json
 │   └── shared.c, shared.o, shared.a, shared.a.link.json
-└── bin/host/dev/
+└── bin/
     ├── diamond
     └── diamond.link.json
 ```

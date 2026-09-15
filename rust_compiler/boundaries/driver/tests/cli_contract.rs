@@ -873,16 +873,20 @@ fn build_emits_every_declared_binary_and_library_artifact() {
     .unwrap();
     fs::write(root.join("src/main.sev"), "print(\"binary\")\n").unwrap();
     fs::write(root.join("src/lib.sev"), "library_value := 1\n").unwrap();
-    let output = sev().args(["build"]).arg(&root).output().unwrap();
+    let invocation = root.join("invocation");
+    fs::create_dir(&invocation).unwrap();
+    let output = sev().current_dir(&invocation).args(["build"]).arg(&root).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let target = root.join("package.pkg/host/dev");
+    let target = invocation.join("package.pkg");
+    assert!(!root.join("package.pkg").exists());
+    assert!(!root.join("src/package.pkg").exists());
     assert!(!root.join("target").exists());
     assert!(target.join("bin/mixed").is_file());
-    let package = fs::read(target.join("pkg/mixed_core-0.1.0.pkg")).unwrap();
+    let package = fs::read(target.join("artifacts/host/dev/package/mixed_core-0.1.0.pkg")).unwrap();
     assert!(package.starts_with(b"SEVPKG\0\x01"));
     assert!(package.ends_with(b"library_value := 1\n"));
     fs::remove_dir_all(root).unwrap();
@@ -927,14 +931,14 @@ fn a_library_only_package_builds_without_a_binary() {
     )
     .unwrap();
     fs::write(root.join("src/lib.sev"), "library_value := 1\n").unwrap();
-    let output = sev().args(["build"]).arg(&root).output().unwrap();
+    let output = sev().current_dir(&root).args(["build"]).arg(&root).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root
-        .join("package.pkg/host/dev/pkg/library_only-2.4.1.pkg")
+        .join("package.pkg/artifacts/host/dev/package/library_only-2.4.1.pkg")
         .is_file());
     fs::remove_dir_all(root).unwrap();
 }
@@ -988,12 +992,14 @@ fn native_optimization_uses_the_selected_profile() {
         .unwrap();
         fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let log = root.join("arguments");
+    let log = root.join("package.pkg/debug/arguments");
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
     for program in ["def main():\n    pass\n", "print(\"optimized\")\n"] {
         fs::write(root.join("src/main.sev"), program).unwrap();
         for (profile, expected) in [("dev", "-O0"), ("release", "-O2")] {
             fs::write(&log, "").unwrap();
             let output = sev()
+                .current_dir(&root)
                 .arg("build")
                 .arg(&root)
                 .args(["--build-profile", profile])
@@ -1020,7 +1026,7 @@ fn native_optimization_uses_the_selected_profile() {
                 "{arguments}"
             );
             assert!(
-                Command::new(root.join(format!("package.pkg/host/{profile}/bin/optimized")))
+                Command::new(root.join("package.pkg/bin/optimized"))
                     .status()
                     .unwrap()
                     .success()

@@ -968,13 +968,11 @@ fn visible_class_names(
     for (binding, resolution) in &scope.scope.bindings {
         match resolution {
             Resolution::Module(target) => {
-                if index
-                    .exports
-                    .get(target)
-                    .and_then(|exports| exports.get(&class.declaration.name))
-                    .is_some_and(&matches_class)
-                {
-                    names.push(format!("{binding}.{}", class.declaration.name));
+                for (exported, resolution) in index.exports.get(target).into_iter().flatten() {
+                    if !matches_class(resolution) {
+                        continue;
+                    }
+                    names.push(format!("{binding}.{exported}"));
                     // Tensor is the language-facing generic value type. Keep
                     // its annotation available beside the `tensor(...)`
                     // constructor after an ordinary `import tensor`.
@@ -2114,6 +2112,20 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                         Resolution::Module(edge.module),
                     )
                 };
+                // Selective imports are facade declarations too. Keep their
+                // original DefIds when re-exporting so downstream packages see
+                // the same nominal type and callable, not a copied definition.
+                if import.source.is_some() {
+                    insert_binding(
+                        index
+                            .exports
+                            .get_mut(&module.id)
+                            .expect("every graph module has exports"),
+                        name.clone(),
+                        resolution.clone(),
+                        &index.definitions,
+                    );
+                }
                 let scope = &mut index
                     .modules
                     .get_mut(&module.id)

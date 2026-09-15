@@ -1,0 +1,20 @@
+import * from "../src/lib.sev" as cache
+import file
+import os
+
+test "cache reuses bytes and rejects damaged blobs and receipts":
+    root = os.temporary("/tmp", "sev-cache-")
+    store = cache.Store(root)
+    first = cache.put_text(store, "typed IR", ".ir")
+    second = cache.put_text(store, "typed IR", ".ir")
+    assert(first.path == second.path and first.checksum == second.checksum)
+    stage = os.temporary(root, "stage-")
+    cache.publish(root + "/entry.json", first, stage)
+    assert(len(cache.lookup(store, root + "/entry.json", ".ir")) == 1)
+    assert(file.write(first.path, "corrupt") == 0)
+    assert(len(cache.lookup(store, root + "/entry.json", ".ir")) == 0)
+    repaired = cache.put_text(store, "typed IR", ".ir")
+    assert(repaired.checksum == first.checksum)
+    assert(file.write(root + "/entry.json", "{broken") == 0)
+    assert(len(cache.lookup(store, root + "/entry.json", ".ir")) == 0)
+    os.remove_tree(root)
