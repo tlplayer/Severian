@@ -1,0 +1,101 @@
+import * from "host.sev"
+import * from "cross_native.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import * from "edit.sev"
+import os
+import path
+import environment
+
+# The compiler returns files beside the requested output. Package policy owns
+# their permanent destinations and inventories, including foreign tool outputs.
+def library_sidecars() -> list[string]:
+    return [".o", ".mlir", ".mlirbc", ".ll", ".bc", ".so", ".mir", ".interface.sev", ".interface.bin", ".h", ".rs"]
+
+
+def artifact_kind(location: string) -> string:
+    if location.ends_with(".o") or location.ends_with(".obj"):
+        return "relocatable-object"
+    if location.ends_with(".import.lib"):
+        return "import-library"
+    if location.ends_with(".a") or location.ends_with(".lib"):
+        return "static-archive"
+    if location.ends_with(".so") or location.ends_with(".dylib") or location.ends_with(".dll"):
+        return "shared-library"
+    if location.ends_with(".rmeta") or location.ends_with(".rlib"):
+        return "rust-provider"
+    if location.ends_with(".mir"):
+        return "severian-mir"
+    if location.ends_with(".mlirbc") or location.ends_with(".mlir"):
+        return "mlir"
+    if location.ends_with(".bc") or location.ends_with(".ll"):
+        return "llvm-ir"
+    return "interface" if location.starts_with("package.pkgi/") else "native"
+
+
+def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string) -> list[string] | Error:
+    paths: list[string] = []
+    for suffix in [".mlirbc", ".ll", ".bc", ".mir"]:
+        relative = prefix + "/ir/" + name + suffix
+        payload_copy(cache + "/artifact" + suffix, root + "/" + relative)
+        paths.append(relative)
+    dynamic = prefix + "/dynamic/lib" + name + ".so"
+    payload_copy(cache + "/artifact.so", root + "/" + dynamic)
+    paths.append(dynamic)
+    abi = build_id
+    c = "package.pkgi/c/" + abi + "/" + name + ".h"
+    rust = "package.pkgi/rust/" + abi
+    payload_copy(cache + "/artifact.h", root + "/" + c)
+    payload_copy(cache + "/artifact.rs", root + "/" + rust + "/src/lib.rs")
+    payload_text(root + "/" + rust + "/Cargo.toml", "[package]\nname = " + toml_quote(name.replace("_", "-")) + "\nversion = " + toml_quote(owner.identity.version) + "\nedition = \"2024\"\nbuild = \"build.rs\"\n[lib]\npath = \"src/lib.rs\"\n[workspace]\n")
+    # Cargo computes the path after relocation; no producer checkout is baked in.
+    payload_text(root + "/" + rust + "/build.rs", "fn main() {\n let root = std::path::PathBuf::from(std::env::var_os(\"CARGO_MANIFEST_DIR\").unwrap());\n println!(\"cargo:rustc-link-search=native={}\", root.join(" + toml_quote("../../../" + prefix + "/archive") + ").display());\n println!(\"cargo:rustc-link-lib=static=" + name + "\");\n println!(\"cargo:rustc-link-lib=m\");\n}\n")
+    for relative in [c, rust + "/Cargo.toml", rust + "/src/lib.rs", rust + "/build.rs"]:
+        paths.append(relative)
+    index = root + "/package.pkgi/index.json"
+    previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
+    if not previous.contains(toml_quote(build_id)):
+        write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\ntarget = " + toml_quote(triple) + "\nabi-id = " + toml_quote(abi) + "\nabi = \"severian-scalar-c-1\"\npath = " + toml_quote("severian/" + build_id + "/interface.bin") + "\nc = " + toml_quote("c/" + abi + "/" + name + ".h") + "\nrust = " + toml_quote("rust/" + abi + "/Cargo.toml") + "\n")
+    if os.is_dir(cache + "/artifact.providers"):
+        for location in files(cache + "/artifact.providers", true):
+            leaf = path.basename(location)
+            if leaf.ends_with(".d"):
+                payload_copy(location, root + "/build/" + build_id + "/dep-info/" + leaf)
+            else:
+                relative = prefix + "/object/" + leaf
+                payload_copy(location, root + "/" + relative)
+                paths.append(relative)
+    # Rust metadata remains opaque: only a matching Rust compiler may consume it.
+    for provider in string_array(setting(owner.manifest.entries, "xxi.rust", "sources", "[]")):
+        compiler = environment.get("SEVERIAN_RUSTC", "rustc")
+        provider_name = safe_name(path.basename(provider).replace(".rs", "").replace("-", "_"))
+        if os.is_file(root + "/" + prefix + "/archive/" + provider_name + ".toolchain.json"):
+            for leaf in ["lib" + provider_name + ".rlib", "lib" + provider_name + ".rmeta", provider_name + ".toolchain.json"]:
+                paths.append(prefix + "/archive/" + leaf)
+            continue
+        stage = temporary(cache + "/staging")
+        require_command([compiler, inside(owner.root, provider), "--crate-name", provider_name, "--crate-type=rlib", "--emit=link,metadata,dep-info", "--out-dir", stage])
+        for location in files(stage, true):
+            leaf = path.basename(location)
+            if leaf.ends_with(".d"):
+                payload_copy(location, root + "/build/" + build_id + "/dep-info/" + leaf)
+            else:
+                relative = prefix + "/archive/" + leaf
+                payload_copy(location, root + "/" + relative)
+                paths.append(relative)
+        write_document(root + "/" + prefix + "/archive/" + provider_name + ".toolchain.json", "compiler = " + toml_quote(capture([compiler, "-vV"])) + "\ntarget = " + toml_quote(triple) + "\n")
+        paths.append(prefix + "/archive/" + provider_name + ".toolchain.json")
+        remove_tree(stage)
+    for relative in retain_cross_native(owner, root, prefix.split("/")[2], build_id):
+        paths.append(relative)
+    return paths
+
+
+def payload_copy(source: string, destination: string) -> unit | Error:
+    if not os.is_file(destination) or digest(source) != digest(destination):
+        copy_file(source, destination)
+
+
+def payload_text(destination: string, text: string) -> unit | Error:
+    if not os.is_file(destination) or read_text(destination) != text:
+        write_text(destination, text)

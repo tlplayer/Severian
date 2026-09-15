@@ -1,0 +1,4 @@
+import * from "lib.sev"
+
+def main():
+    print(area(6, 7))

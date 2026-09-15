@@ -1,0 +1,41 @@
+import * from "host.sev"
+import * from "manifest.sev"
+import os
+import path
+
+# OCI layers contain the runnable file and its discovered ELF runtime closure.
+# Package construction owns the layout; the compiler only supplies the binary.
+def retain_container(root: string, executable: string, triple: string, build_id: string) -> unit | Error:
+    destination = root + "/container/" + triple + "/" + build_id
+    if os.is_file(destination + "/index.json"):
+        return
+    stage = temporary(root + "/cache")
+    try:
+        copy_file(executable, stage + "/rootfs/app")
+        require_command(["chmod", "755", "--", stage + "/rootfs/app"])
+        for line in capture(["ldd", executable]).split("\n"):
+            for token in line.strip().split(" "):
+                if token.starts_with("/") and os.is_file(token):
+                    copy_file(token, stage + "/rootfs" + token)
+                    require_command(["chmod", "755", "--", stage + "/rootfs" + token])
+        require_command(["tar", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-cf", stage + "/layer.tar", "-C", stage + "/rootfs", "."])
+        layer = digest(stage + "/layer.tar")
+        architecture = "arm64" if triple.starts_with("aarch64") else "amd64" if triple.starts_with("x86_64") else ""
+        if architecture == "":
+            throw Error("unsupported OCI architecture: " + triple)
+        write_text(stage + "/config.json", "{\"architecture\":" + toml_quote(architecture) + ",\"os\":\"linux\",\"config\":{\"Entrypoint\":[\"/app\"]},\"rootfs\":{\"type\":\"layers\",\"diff_ids\":[" + toml_quote(layer) + "]}}\n")
+        config = digest(stage + "/config.json")
+        layer_size = capture(["stat", "-c", "%s", stage + "/layer.tar"])
+        config_size = capture(["stat", "-c", "%s", stage + "/config.json"])
+        write_text(stage + "/manifest.json", "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"config\":{\"mediaType\":\"application/vnd.oci.image.config.v1+json\",\"digest\":" + toml_quote(config) + ",\"size\":" + config_size + "},\"layers\":[{\"mediaType\":\"application/vnd.oci.image.layer.v1.tar\",\"digest\":" + toml_quote(layer) + ",\"size\":" + layer_size + "}]}\n")
+        manifest = digest(stage + "/manifest.json")
+        for leaf in ["layer.tar", "config.json", "manifest.json"]:
+            hash = digest(stage + "/" + leaf).replace("sha256:", "")
+            copy_file(stage + "/" + leaf, destination + "/blobs/sha256/" + hash)
+        write_text(destination + "/oci-layout", "{\"imageLayoutVersion\":\"1.0.0\"}\n")
+        size = capture(["stat", "-c", "%s", stage + "/manifest.json"])
+        write_text(destination + "/index.json", "{\"schemaVersion\":2,\"manifests\":[{\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"digest\":" + toml_quote(manifest) + ",\"size\":" + size + ",\"platform\":{\"architecture\":" + toml_quote(architecture) + ",\"os\":\"linux\"}}]}\n")
+    catch failure: Error:
+        remove_tree(stage)
+        throw failure
+    remove_tree(stage)

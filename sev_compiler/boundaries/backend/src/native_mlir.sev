@@ -59,8 +59,32 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
         # every non-exported definition after those passes have run.
         run_tool([environment.get("SEVERIAN_LLVM_OPT", "opt-21"), "--passes=internalize", "--internalize-public-api-list=" + exports.join(","), "-S", intermediate + ".ll", "-o", intermediate + ".internal.ll"])
         run_tool([clang, "-c", intermediate + ".internal.ll", "-o", output + ".o", "-O" + string(optimization), "-fPIC"])
-        run_tool([environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", output, output + ".o"])
+        archive = [environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", output, output + ".o"]
+        shared = [clang, "-shared", "-Wl,-z,defs", output + ".o", "-o", output + ".so", "-lm"]
+        providers: list[string] = []
+        for argument in native_arguments:
+            if argument.ends_with(".c"):
+                providers.append(argument)
+            else:
+                shared.append(argument)
+        memory = sysroot + "/library/core/memory/native/memory.c"
+        if memory not in providers:
+            providers.append(memory)
+        for index in range(int(len(providers))):
+            object = output + ".providers/provider-" + string(index) + ".o"
+            package.mkdir(path.dirname(object))
+            run_tool([clang, "-c", "-fPIC", "-O" + string(optimization), "-g", "-MMD", "-MF", object + ".d", providers[index], "-o", object])
+            archive.append(object)
+            shared.append(object)
+        for name in requirements.libraries:
+            shared.append("-l" + name)
+        target = hosted_layout().triple
+        package.execute_link(package.plan_link(target, "static-archive", output, archive))
+        package.execute_link(package.plan_link(target, "shared-library", output + ".so", shared))
         package.copy_file(intermediate + ".mlir", output + ".mlir")
+        package.copy_file(intermediate + ".internal.ll", output + ".ll")
+        run_tool([opt, intermediate + ".mlir", "--emit-bytecode", "-o", output + ".mlirbc"])
+        run_tool([environment.get("SEVERIAN_LLVM_AS", "llvm-as-21"), output + ".ll", "-o", output + ".bc"])
         return
     arguments = [clang, intermediate + ".ll", "-o", output, "-O" + string(optimization), "-lm"]
     arguments.append(sysroot + "/library/core/memory/native/memory.c")
@@ -87,7 +111,7 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     if lto:
         arguments.append("-flto")
         arguments.append("-fuse-ld=lld")
-    run_tool(arguments)
+    package.execute_link(package.plan_link(hosted_layout().triple, "executable", output, arguments))
 
 def materialize_debug_values(location: string):
     lines: list[string] = []

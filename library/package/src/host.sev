@@ -136,7 +136,7 @@ def recover_edit(root: string) -> unit | Error:
 def published_project(root: string) -> bool:
     directory := canonical(root)
     while directory != "/":
-        if os.is_file(directory + "/metadata/publication.json"):
+        if os.is_file(metadata_path(directory, "publication")):
             return true
         directory = path.dirname(directory)
     return false
@@ -149,3 +149,9 @@ def manifest_file(root: string) -> string:
     if os.is_file(root + "/package.json") or not os.is_file(root + "/package.toml"):
         return root + "/package.json"
     return root + "/package.toml"
+
+
+def metadata_path(root: string, name: string) -> string:
+    preferred = root + "/metadata/" + name + ".json"
+    legacy = root + "/metadata/" + name + ".toml"
+    return preferred if os.is_file(preferred) or not os.is_file(legacy) else legacy

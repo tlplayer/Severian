@@ -1,0 +1,72 @@
+import * from "host.sev"
+import * from "link.sev"
+import * from "manifest.sev"
+import * from "model.sev"
+import os
+import path
+import environment
+
+# A native provider can opt into freestanding cross builds without claiming
+# cross compilation of Severian bodies or inventing another platform's files.
+def retain_cross_native(owner: ResolvedPackage, root: string, profile: string, build_id: string) -> list[string] | Error:
+    paths: list[string] = []
+    targets = string_array(setting(owner.manifest.entries, "xxi.c", "targets", "[]"))
+    exports = string_array(setting(owner.manifest.entries, "xxi.c", "exports", "[]"))
+    for target in targets:
+        if target not in ["x86_64-pc-windows-msvc", "aarch64-apple-macos11"]:
+            throw Error("unsupported freestanding native provider target: " + target)
+        windows = target.contains("windows")
+        prefix = "artifacts/" + target + "/" + profile + "/" + build_id
+        name = safe_name(owner.identity.name) + "-native"
+        static = prefix + "/archive/" + name + (".lib" if windows else ".a")
+        dynamic = prefix + "/dynamic/" + name + (".dll" if windows else ".dylib")
+        mkdir(root + "/" + prefix + "/archive")
+        mkdir(root + "/" + prefix + "/dynamic")
+        symbols = root + "/debug/symbols/" + build_id + "/" + target
+        mkdir(symbols)
+        complete = root + "/" + prefix + "/native-inputs.json"
+        retained: list[string] = []
+        valid := os.is_file(complete)
+        if valid:
+            for entry in parse_document(read_text(complete)):
+                location = root + "/" + relative_path(entry.key)
+                if not os.is_file(location) or digest(location) != unquote(entry.value):
+                    valid = false
+                retained.append(entry.key)
+        if valid:
+            for relative in retained:
+                paths.append(relative)
+            paths.append(prefix + "/native-inputs.json")
+            continue
+        first = int(len(paths))
+        archive = [environment.get("SEVERIAN_AR", "llvm-ar-21"), "rcsD", root + "/" + static]
+        linker := [environment.get("SEVERIAN_LLD_LINK", "lld-link-21"), "/dll", "/noentry", "/out:" + root + "/" + dynamic, "/implib:" + root + "/" + prefix + "/archive/" + name + ".import.lib", "/debug", "/pdb:" + symbols + "/" + name + ".pdb"]
+        if not windows:
+            linker = [environment.get("SEVERIAN_LD64_LLD", "ld64.lld-21"), "-dylib", "-arch", "arm64", "-platform_version", "macos", "11.0", "11.0", "-install_name", "@rpath/" + name + ".dylib", "-o", root + "/" + dynamic]
+        for symbol in exports:
+            if windows:
+                linker.append("/export:" + symbol)
+        for source in string_array(setting(owner.manifest.entries, "xxi.c", "sources", "[]")):
+            object = prefix + "/object/" + path.basename(source).replace(".c", ".obj" if windows else ".o")
+            mkdir(path.dirname(root + "/" + object))
+            arguments = [environment.get("SEVERIAN_CLANG", "clang-21"), "--target=" + target, "-ffreestanding", "-g", "-c", inside(owner.root, source), "-o", root + "/" + object]
+            if windows:
+                arguments.append("-gcodeview")
+            require_command(arguments)
+            archive.append(root + "/" + object)
+            linker.append(root + "/" + object)
+            paths.append(object)
+        execute_link(plan_link(target, "static-archive", root + "/" + static, archive))
+        execute_link(plan_link(target, "shared-library", root + "/" + dynamic, linker))
+        paths.append(static)
+        paths.append(dynamic)
+        if windows:
+            paths.append(prefix + "/archive/" + name + ".import.lib")
+        else:
+            require_command([environment.get("SEVERIAN_DSYMUTIL", "dsymutil-21"), root + "/" + dynamic, "-o", symbols + "/" + name + ".dSYM"])
+        records: list[string] = []
+        for relative in paths[first:]:
+            records.append(toml_quote(relative) + " = " + toml_quote(digest(root + "/" + relative)))
+        write_document(complete, records.join("\n") + "\n")
+        paths.append(prefix + "/native-inputs.json")
+    return paths

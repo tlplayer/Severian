@@ -1,0 +1,54 @@
+import * from "host.sev"
+import * from "model.sev"
+import * from "manifest.sev"
+import os
+import path
+
+class LinkInput:
+    path: string
+    kind: string
+    checksum: string
+
+class LinkPlan:
+    target: string
+    kind: string
+    output: string
+    arguments: list[string]
+    inputs: list[LinkInput]
+
+class LinkResult:
+    output: string
+    checksum: string
+    plan: LinkPlan
+
+
+# Link plans consume completed compilation outputs. They do not discover
+# packages, rerun resolution, or require a compiler-owned directory layout.
+def plan_link(target: string, kind: string, output: string, arguments: list[string]) -> LinkPlan | Error:
+    if kind not in ["static-archive", "shared-library", "executable"] or len(arguments) == 0:
+        throw Error("invalid native link plan")
+    inputs: list[LinkInput] = []
+    for argument in arguments[1:]:
+        if argument == output or not os.is_file(argument):
+            continue
+        role = "native-source" if argument.ends_with(".c") else "archive" if argument.ends_with(".a") or argument.ends_with(".lib") else "llvm-ir" if argument.ends_with(".ll") or argument.ends_with(".bc") else "object"
+        inputs.append(LinkInput(argument, role, digest(argument)))
+    if len(inputs) == 0:
+        throw Error("native link plan contains no inputs")
+    return LinkPlan(target, kind, output, arguments, inputs)
+
+
+def execute_link(plan: LinkPlan) -> LinkResult | Error:
+    for input in plan.inputs:
+        if not os.is_file(input.path) or digest(input.path) != input.checksum:
+            throw Error("link input changed: " + input.path)
+    mkdir(path.dirname(plan.output))
+    require_command(plan.arguments)
+    if not os.is_file(plan.output):
+        throw Error("linker did not produce " + plan.output)
+    checksum = digest(plan.output)
+    records := "format = 1\ntarget = " + toml_quote(plan.target) + "\nkind = " + toml_quote(plan.kind) + "\noutput = " + toml_quote(path.basename(plan.output)) + "\nchecksum = " + toml_quote(checksum) + "\nlinker = " + toml_quote(plan.arguments[0]) + "\n"
+    for input in plan.inputs:
+        records += "\n[[input]]\nname = " + toml_quote(path.basename(input.path)) + "\nkind = " + toml_quote(input.kind) + "\nchecksum = " + toml_quote(input.checksum) + "\n"
+    write_document(plan.output + ".link.json", records)
+    return LinkResult(plan.output, checksum, plan)

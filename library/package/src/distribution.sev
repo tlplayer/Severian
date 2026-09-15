@@ -69,8 +69,6 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
     version_root = root + "/" + safe_name(project.manifest.name) + "/" + safe_name(project.manifest.version)
     name = project.manifest.name + "-" + project.manifest.version + ".pkg"
     include_source = request.include_source and setting(project.manifest.entries, "publish", "include-source") != "false"
-    if not include_source:
-        throw Error("published packages must include source")
     resolved = resolve(project, Resolve("publish", false, request.registry))
     frozen = frozen_manifest(project, resolved)
     # Resolve the frozen graph before building: sibling checkouts cannot satisfy
@@ -98,16 +96,16 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         distribution = stage + "/distribution"
         mkdir(distribution)
         write_document(distribution + "/metadata/build.json", "architecture = " + toml_quote(capture(["uname", "-m"])) + "\nos = " + toml_quote(capture(["uname", "-s"])) + "\nruntime-abi = \"severian-source-1\"\n")
-        write_text(manifest_file(distribution + "/metadata"), frozen)
+        write_text(distribution + "/metadata/package.json", frozen)
         write_text(distribution + "/metadata/package.lock", published.lock)
-        if include_source:
+        if true:
             for location in files(project.root):
                 relative = location[int(len(project.root)) + 1:]
                 if relative in ["package.json", "package.toml", "sev.lock", "package.lock"]:
                     continue
                 # Include native providers, headers and other package assets.
                 copy_file(location, distribution + "/source/" + relative_path(relative))
-            write_text(manifest_file(distribution + "/source"), frozen)
+            write_text(distribution + "/source/package.json", frozen)
             if source_checksum(distribution + "/source") != checksum:
                 throw Error("package source changed while staging publication")
             source_project = Project(distribution + "/source", parse_manifest(frozen), frozen, "")
@@ -128,6 +126,8 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
                 selected = artifact.package_root + "/" + directory
                 if os.is_dir(selected):
                     for location in files(selected, true):
+                        if location.ends_with(".inputs.json"):
+                            continue
                         destination = distribution + "/" + directory + location[int(len(selected)):]
                         copy_file(location, destination)
                         if directory == "bin":
@@ -136,11 +136,16 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
             retain_file(artifact.package_root + "/metadata/artifacts.json", distribution + "/metadata/artifacts.json")
         # Worker state exists only while staging, never in the publication.
         remove_tree(distribution + "/source/package.pkg")
+        if not include_source:
+            for artifact in artifacts:
+                if artifact.target.kind == "library" and artifact.interface_path == "":
+                    throw Error("source-free publication requires a complete exported interface")
+            remove_tree(distribution + "/source")
         write_document(distribution + "/metadata/publication.json", identity)
         entries: list[ArchiveEntry] = []
         for location in files(distribution, true):
             relative = location[int(len(distribution)) + 1:]
-            entries.append(ArchiveEntry(relative, relative.starts_with("artifacts/"), read_bytes(location)))
+            entries.append(ArchiveEntry(relative, (relative.starts_with("bin/") or relative.starts_with("artifacts/")), read_bytes(location)))
         write_archive(distribution + "/" + name, Archive(2, project.manifest.name, entries))
         write_text(distribution + "/metadata/archive.sha256", digest(distribution + "/" + name) + "\n")
         write_text(distribution + "/metadata/content.sha256", publication_files(distribution, name))

@@ -1,3 +1,4 @@
+import * from "../../../boundaries/interface/src/package_metadata.sev" as metadata
 import lexer
 import diagnostics
 import source
@@ -11,6 +12,11 @@ import * from "lexical.sev"
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
     # the IOError payload through that result gives render the wrong layout.
+    if path.ends_with("/interface.bin"):
+        try:
+            return source.SourceFile(source.SourceId(0), path, metadata.decode_interface(path))
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
     result ?= source.load(path)
     if result is SourceFile:
         return result

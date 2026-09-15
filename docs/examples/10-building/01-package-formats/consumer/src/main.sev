@@ -1,0 +1,4 @@
+import geometry
+
+def main():
+    print(geometry.area(6, 7))

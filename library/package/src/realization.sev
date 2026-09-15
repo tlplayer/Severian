@@ -1,4 +1,6 @@
 import * from "host.sev"
+import * from "payload.sev"
+import * from "container.sev"
 import * from "manifest.sev"
 import * from "model.sev"
 import * from "edit.sev"
@@ -27,16 +29,16 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         output = prefix + "/archive/lib" + name + ".a"
         object = prefix + "/object/" + name + ".o"
         ir = prefix + "/ir/" + name + ".mlir"
-        interface = "package.pkgi/severian/" + build_id + "/interface.sev"
+        interface = "package.pkgi/severian/" + build_id + "/interface.bin"
         retain_file(cache + "/artifact.o", root + "/" + object)
         retain_file(cache + "/artifact.mlir", root + "/" + ir)
-        retain_file(cache + "/artifact.interface.sev", root + "/" + interface)
-        for relative in [object, ir, interface]:
+        retain_file(cache + "/artifact.interface.bin", root + "/" + interface)
+        adapter = "package.pkgi/severian/" + build_id + "/scalar.sev"
+        retain_file(cache + "/artifact.interface.sev", root + "/" + adapter)
+        for relative in [object, ir, interface, adapter]:
             inventory.append(toml_quote(relative) + " = " + toml_quote(digest(root + "/" + relative)))
-        index = root + "/package.pkgi/index.json"
-        previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
-        if not previous.contains(toml_quote(build_id)):
-            write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\npath = " + toml_quote(interface) + "\nabi = \"severian-scalar-c-1\"\nsource-fallback = true\n")
+        for relative in retain_payload(owner, cache, root, prefix, name, build_id, triple):
+            inventory.append(toml_quote(relative) + " = " + toml_quote(digest(root + "/" + relative)))
     retain_file(cache + "/artifact", root + "/" + output)
     if unit.include_tests and os.is_file(cache + "/artifact.coverage.json"):
         coverage = output + ".coverage.json"
@@ -44,30 +46,58 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         inventory.append(toml_quote(coverage) + " = " + toml_quote(digest(root + "/" + coverage)))
     if emit == "":
         require_command(["chmod", "755", "--", root + "/" + output])
+    if emit == "" and not unit.include_tests and setting(owner.manifest.entries, "package.metadata.artifacts", "container", "false") == "true":
+        retain_container(root, root + "/" + output, triple, build_id)
     inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))
-    text = "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
+    text := "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
+    if os.is_file(cache + "/link.json"):
+        retain_file(cache + "/link.json", root + "/build/" + build_id + "/link.json")
+    for dependency in resolution.packages[1:]:
+        text += "\n[[dependency]]\nname = " + toml_quote(dependency.identity.name) + "\nversion = " + toml_quote(dependency.identity.version) + "\ncontent-id = " + toml_quote(dependency.checksum) + "\nbuild-id = " + toml_quote(dependency.build_id) + "\n"
+    for item in inventory:
+        relative = unquote(item.split(" = ")[0])
+        text += "\n[[artifact]]\npath = " + toml_quote(relative) + "\nkind = " + toml_quote(artifact_kind(relative)) + "\ntarget = " + toml_quote(relative.split("/")[1] if relative.starts_with("artifacts/") else triple) + "\n"
+    if emit == "library":
+        dependencies: list[string] = []
+        for line in capture(["readelf", "-d", cache + "/artifact.so"]).split("\n"):
+            if line.contains("(NEEDED)"):
+                dependencies.append(toml_quote(line.split("[")[1].split("]")[0]))
+        text += "\n[runtime]\nneeded = [" + dependencies.join(", ") + "]\n"
+    text += "\n[compatibility]\nllvm = " + toml_quote(capture([environment.get("SEVERIAN_LLVM_OPT", "opt-21"), "--version"])) + "\nmlir = " + toml_quote(capture([environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), "--version"])) + "\nmlir-stage = \"before-ownership-lowering\"\n"
     write_document(root + "/metadata/realizations/" + build_id + ".json", text)
     index = root + "/metadata/artifacts.json"
     previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
     if not previous.contains(toml_quote(build_id)):
         write_document(index, previous + "\n[[realization]]\nbuild-id = " + toml_quote(build_id) + "\nmanifest = " + toml_quote("realizations/" + build_id + ".json") + "\n")
-    if os.is_file(cache + "/inputs"):
-        write_document(root + "/metadata/realizations/" + build_id + ".inputs.json", read_text(cache + "/inputs"))
-    write_text(manifest_file(root + "/metadata"), render_manifest(owner.manifest.entries))
+    write_text(root + "/metadata/package.json", render_manifest(owner.manifest.entries))
     lock = project_lock_file(owner.root)
-    write_text(root + "/metadata/package.lock", read_text(lock) if os.is_file(lock) else resolution.lock)
+    write_document(root + "/metadata/package.lock", read_text(lock) if os.is_file(lock) else resolution.lock)
     source_index: list[string] = []
     source_paths: list[string] = []
+    for directory in ["dep-info", "incremental", "staging"]:
+        mkdir(root + "/build/" + build_id + "/" + directory)
+    for category in ["symbols", "profile", "test", "coverage"]:
+        mkdir(root + "/debug/" + category + "/" + build_id)
+    mkdir(root + "/cache")
+    mkdir(root + "/container/" + triple + "/" + build_id)
+    if os.is_file(cache + "/inputs"):
+        write_document(root + "/build/" + build_id + "/inputs.json", read_text(cache + "/inputs"))
     for location in files(owner.root):
         relative = location[int(len(owner.root)) + 1:]
+        if relative in ["package.json", "package.toml", "package.lock", "sev.lock"]:
+            continue
         retain_file(location, root + "/source/" + relative)
         source_paths.append(relative)
         source_index.append(toml_quote(relative) + " = " + toml_quote(digest(location)))
+    for leaf in ["package.json", "package.lock"]:
+        retain_file(root + "/metadata/" + leaf, root + "/source/" + leaf)
+        source_paths.append(leaf)
+        source_index.append(toml_quote(leaf) + " = " + toml_quote(digest(root + "/source/" + leaf)))
     write_document(root + "/metadata/source-index.json", "format = 1\n\n[files]\n" + source_index.join("\n") + "\n")
     for location in files(root + "/source", true):
         if location[int(len(root + "/source/")):] not in source_paths:
             os.remove(location)
-    usable = interface != "" and read_text(root + "/" + interface).strip() != ""
+    usable = interface != "" and read_text(cache + "/artifact.interface.sev").strip() != ""
     return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "native", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
 
 def sidecars_match(cache: string) -> bool:
@@ -96,16 +126,48 @@ def restore_realization(root: string, cache: string, build_id: string, emit: str
     if interface == "":
         return false
     copy_file(root + "/" + relative_path(output), cache + "/artifact")
-    copy_file(root + "/" + relative_path(interface), cache + "/artifact.interface.sev")
+    copy_file(root + "/" + relative_path(interface), cache + "/artifact.interface.bin")
     for entry in entries:
-        if entry.table == "files" and entry.key.ends_with(".o"):
-            copy_file(root + "/" + relative_path(entry.key), cache + "/artifact.o")
-        if entry.table == "files" and entry.key.ends_with(".mlir"):
-            copy_file(root + "/" + relative_path(entry.key), cache + "/artifact.mlir")
+        if entry.table != "files":
+            continue
+        if entry.key.ends_with("/scalar.sev"):
+            copy_file(root + "/" + relative_path(entry.key), cache + "/artifact.interface.sev")
+        for suffix in library_sidecars():
+            if entry.key.ends_with(suffix) and not path.basename(entry.key).starts_with("provider-") and not entry.key.ends_with("/build.rs"):
+                copy_file(root + "/" + relative_path(entry.key), cache + "/artifact" + suffix)
+    # Restoring needs all compiler sidecars; absence requests compilation.
     sidecars: list[string] = []
-    for suffix in [".o", ".mlir", ".interface.sev"]:
+    for suffix in library_sidecars():
+        if not os.is_file(cache + "/artifact" + suffix):
+            return false
         sidecars.append(toml_quote("artifact" + suffix) + " = " + toml_quote(digest(cache + "/artifact" + suffix)))
     write_document(cache + "/sidecars.json", sidecars.join("\n"))
-    copy_file(root + "/metadata/realizations/" + build_id + ".inputs.json", cache + "/inputs")
+    inputs = root + "/build/" + build_id + "/inputs.json"
+    if not os.is_file(inputs):
+        return false
+    copy_file(inputs, cache + "/inputs")
     write_text(cache + "/output", digest(cache + "/artifact"))
     return true
+
+# Installed packages are immutable link inputs. Verify the completed inventory
+# and choose by compatibility before requesting any producer compilation.
+def installed_realization(owner: ResolvedPackage, unit: BuildUnit, compiler: Compiler) -> Artifact | Error:
+    root = path.dirname(owner.root)
+    triple = capture([environment.get("SEVERIAN_CLANG", "clang-21"), "-dumpmachine"])
+    if os.is_dir(root + "/metadata/realizations"):
+        for location in files(root + "/metadata/realizations"):
+            if not location.ends_with(".json") or location.ends_with(".inputs.json"):
+                continue
+            entries = parse_document(read_text(location))
+            if text_setting(entries, "", "content-id") != owner.checksum or text_setting(entries, "", "kind") != "library" or text_setting(entries, "", "target") != triple or text_setting(entries, "", "profile") != unit.profile or text_setting(entries, "", "compiler") != digest(compiler.executable):
+                continue
+            interface = text_setting(entries, "", "interface")
+            if interface == "":
+                continue
+            for entry in entries:
+                if entry.table == "files":
+                    file = root + "/" + relative_path(entry.key)
+                    if not os.is_file(file) or digest(file) != unquote(entry.value):
+                        throw Error("PackageIntegrityError: damaged realization " + file)
+            return Artifact(unit.target, triple, unit.profile, "archive", root + "/" + relative_path(text_setting(entries, "", "output")), text_setting(entries, "", "build-id"), root, root + "/" + relative_path(interface))
+    throw Error("no compatible installed library realization for " + owner.identity.name + "/" + triple + "/" + unit.profile)

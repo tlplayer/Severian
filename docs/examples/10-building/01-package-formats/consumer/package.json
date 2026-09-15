@@ -1,0 +1,15 @@
+{
+  "package": {
+    "name": "geometry-consumer",
+    "version": "1.0.0"
+  },
+  "bin": [
+    {
+      "name": "geometry-consumer",
+      "path": "src/main.sev"
+    }
+  ],
+  "dependencies": {
+    "geometry": "1.0.0"
+  }
+}

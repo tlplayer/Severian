@@ -6,6 +6,9 @@ import path
 import * from "pipeline/source.sev" as pipeline
 import * from "../../backend/src/native_mlir.sev" as backend
 import * from "pipeline/frontend_archive.sev" as frontend_archive
+import * from "../../interface/src/package_metadata.sev" as metadata
+import * from "pipeline/mir_archive.sev" as mir_archive
+import * from "pipeline/package_interface.sev" as package_interface
 import diagnostics
 from diagnostics import Diagnostic
 
@@ -31,11 +34,12 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
     for file in files:
         location = package.canonical(file.path)
         package.write_text(destination + ".source", file.text)
-        records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(destination + ".source")))
+        records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if location.ends_with("/interface.bin") else package.digest(destination + ".source")))
         recorded.append(location)
     roots: list[string] = []
     for resolved in resolution.packages:
-        roots.append(resolved.root)
+        if resolved.archive_path == "":
+            roots.append(resolved.root)
     for file in files:
         compiled := false
         for resolved in resolution.packages:
@@ -106,8 +110,11 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
     files: list[source.SourceFile] = []
     interface: list[string] = []
     quality_maps: list[string] = []
+    mir_outputs: list[list[u8]] = []
     requirements = boundary.LoweringRequirements()
-    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements)
+    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements, mir_outputs)
+    if emit == "library" and len(resolution.packages) > 0 and package.setting(resolution.packages[0].manifest.entries, "package", "export", "[]") != "[]" and interface[0] == "":
+        throw Error("unsupported exported ABI: this compiler requires non-generic scalar functions")
     if len(quality_maps) > 0:
         package.write_text(arguments[3] + ".coverage.json", quality_maps[0])
     record_inputs(files, resolution, arguments[6], arguments[5], emit in ["", "library"])
@@ -141,3 +148,8 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
         backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements)
         if emit == "library":
             package.write_text(arguments[3] + ".interface.sev", interface[0])
+            package.write_bytes(arguments[3] + ".interface.bin", metadata.encode_interface(interface[0]))
+            package.write_bytes(arguments[3] + ".mir", mir_outputs[0])
+            name = resolution.packages[0].identity.name.replace("-", "_")
+            package.write_text(arguments[3] + ".h", package_interface.foreign_declarations(interface[0], false, name))
+            package.write_text(arguments[3] + ".rs", package_interface.foreign_declarations(interface[0], true, name))

@@ -1,0 +1,22 @@
+import * from "../../../../package.pkg/build/mir_archive.sev" as codec
+import * from "../../../interface/src/package_metadata.sev" as metadata
+import universal
+import package
+
+
+def encode(module: universal.Module) -> list[u8]:
+    tokens: list[string] = []
+    codec.put_universal_Module(tokens, module)
+    return metadata.encode_sections("SEVMIR" + string(char(0)) + string(char(0)), [codec.schema(), tokens.join("\n")])
+
+
+def decode(location: string) -> universal.Module | Error:
+    bytes = package.read_bytes(location)
+    magic = "SEVMIR" + string(char(0)) + string(char(0))
+    if metadata.decode_section(bytes, magic, 1) != codec.schema():
+        throw Error("incompatible Severian MIR schema")
+    input = codec.ArchiveInput(metadata.decode_section(bytes, magic, 2).split("\n"))
+    module = codec.get_universal_Module(input)
+    if input.cursor != int(len(input.lines)):
+        throw Error("unindexed Severian MIR data")
+    return module

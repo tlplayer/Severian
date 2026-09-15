@@ -40,26 +40,20 @@ geometry/
 ├── native/                              # When this package owns native providers
 └── package.pkg/
     ├── package.pkgi/
-    │   ├── index.toml                   # Available interfaces and binding sets
+    │   ├── index              # Available interfaces and binding sets
     │   ├── severian/<build-id>/interface.bin
     │   ├── c/<abi-id>/geometry.h
     │   ├── rust/<abi-id>/Cargo.toml
     │   ├── rust/<abi-id>/src/lib.rs
     │   └── python/<abi-id>/geometry.pyi
     ├── metadata/
-    │   ├── package.toml                 # Snapshot of package definition
-    │   ├── package.lock                 # Snapshot of exact resolution
-    │   ├── source-index.toml
-    │   ├── artifacts.toml
-    │   ├── publication.toml             # Written when preparing publication
-    │   └── realizations/<build-id>.toml
+    │   └── realizations/<build-id>
     ├── artifacts/<target-triple>/<profile>/<build-id>/
     │   ├── object/
     │   ├── archive/
     │   ├── dynamic/
     │   └── ir/
     ├── build/<build-id>/
-    │   ├── inputs.toml
     │   ├── dep-info/
     │   ├── incremental/
     │   └── staging/
@@ -72,7 +66,7 @@ geometry/
     │   └── coverage/<build-id>/
     ├── container/<target-triple>/<build-id>/
     └── source/
-        ├── package.toml
+        ├── package.json
         ├── package.lock
         ├── src/
         └── native/

@@ -61,3 +61,41 @@ def scalar_interface(module: borrow universal.Module, resolution: package.Resolu
         if found != 1:
             return ""
     return lines.join("\n\n")
+
+
+# The same checked scalar contract drives both foreign declaration sets.
+def foreign_type(spelling: string, rust: bool) -> string | Error:
+    if spelling == "unit":
+        return "()" if rust else "void"
+    if spelling in ["i32", "i64", "u32", "u64"]:
+        if rust:
+            return spelling
+        return ("uint" if spelling.starts_with("u") else "int") + spelling[1:] + "_t"
+    if spelling == "f32":
+        return "f32" if rust else "float"
+    if spelling == "f64":
+        return "f64" if rust else "double"
+    throw Error("unsupported foreign ABI type: " + spelling)
+
+
+def foreign_declarations(contract: string, rust: bool, name_prefix: string) -> string | Error:
+    output := "#![no_std]\nunsafe extern \"C\" {\n" if rust else "#pragma once\n#include <stdint.h>\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n"
+    symbol := ""
+    for line in contract.split("\n"):
+        if line.starts_with("@c(symbol="):
+            symbol = line.split("\"")[1]
+        elif line.starts_with("def "):
+            name = line[4:].split("(")[0]
+            parameters = line.split("(")[1].split(")")[0]
+            result = foreign_type(line.split(" -> ")[1], rust)
+            declarations: list[string] = []
+            if parameters != "":
+                for parameter in parameters.split(", "):
+                    parts = parameter.split(": ")
+                    kind = foreign_type(parts[1], rust)
+                    declarations.append(parts[0] + ": " + kind if rust else kind + " " + parts[0])
+            if rust:
+                output += "    #[link_name = " + package.toml_quote(symbol) + "]\n    pub fn " + name + "(" + declarations.join(", ") + ") -> " + result + ";\n"
+            else:
+                output += result + " " + symbol + "(" + (declarations.join(", ") if len(declarations) > 0 else "void") + ");\n#define " + name_prefix + "_" + name + " " + symbol + "\n"
+    return output + ("}\n" if rust else "#ifdef __cplusplus\n}\n#endif\n")

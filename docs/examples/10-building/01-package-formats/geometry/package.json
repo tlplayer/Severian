@@ -1,0 +1,51 @@
+{
+  "package": {
+    "name": "geometry",
+    "version": "1.0.0",
+    "export": [
+      "area",
+      "answer"
+    ],
+    "metadata": {
+      "artifacts": {
+        "container": true
+      }
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "xxi": {
+    "c": {
+      "sources": [
+        "native/scale.c"
+      ],
+      "exports": [
+        "geometry_scale"
+      ],
+      "targets": [
+        "x86_64-pc-windows-msvc",
+        "aarch64-apple-macos11"
+      ]
+    },
+    "rust": {
+      "sources": [
+        "native/provider.rs"
+      ]
+    }
+  },
+  "profile": {
+    "dev": {
+      "debug-symbols": true
+    }
+  },
+  "publish": {
+    "include-source": false
+  },
+  "bin": [
+    {
+      "name": "geometry-tool",
+      "path": "src/main.sev"
+    }
+  ]
+}

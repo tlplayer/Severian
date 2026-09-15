@@ -101,7 +101,7 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
             # source listing here previously repeated the full semantic pass.
             if setting(dependency.manifest.entries, "package", "export", "[]") == "[]":
                 continue
-            artifact = compile_unit(compiler, unit, plan.resolution, "library", guard_tests=plan.mode == "test")
+            artifact = installed_realization(dependency, unit, compiler) if published_project(dependency.root) else compile_unit(compiler, unit, plan.resolution, "library", guard_tests=plan.mode == "test")
             if artifact.interface_path != "":
                 dependency.interface_path = artifact.interface_path
                 dependency.archive_path = artifact.path

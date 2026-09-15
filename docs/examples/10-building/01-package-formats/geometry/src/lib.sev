@@ -1,0 +1,8 @@
+@c(symbol="geometry_scale")
+def scale(value: i64) -> i64
+
+def area(width: i64, height: i64) -> i64:
+    return scale(width * height)
+
+def answer() -> i64:
+    return 42

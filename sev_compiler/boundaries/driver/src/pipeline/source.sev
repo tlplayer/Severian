@@ -16,6 +16,7 @@ import * from "../../../../transforms/mlir/src/ir/text.sev" as text
 import * from "../../../../frontend/modules/src/source.sev"
 import * from "timing.sev" as timing
 import * from "package_interface.sev" as package_interface
+import * from "mir_archive.sev" as mir_archive
 import * from "../../../backend/src/native_mlir.sev" as native
 import * from "quality.sev" as quality
 import * from "editor.sev" as editor
@@ -65,8 +66,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()) -> string | Error:
-    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = []) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements, mir_outputs=mir_outputs)
     if result is string:
         return result
     if result is Diagnostic:
@@ -76,7 +77,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements()) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = []) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
