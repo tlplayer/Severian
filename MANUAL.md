@@ -38,3 +38,18 @@ Tests use:
     throws(...)      expected Error
     mock(...)        test-scoped function behavior
 '''
+
+
+## Testing
+
+Tests are seperated cleanly from code. this provides core benefits. 
+- Compilation can be isolated from testing.
+- No external libraries are needed to bake into the project
+- Function naming can be a string to avoid test_foo_bar() notation which becomes word soup
+- different imports can live solely in the test
+
+
+```sev
+test "Foo is a valid function":
+
+```

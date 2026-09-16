@@ -1,5 +1,4 @@
 trait File:
-    @file
     def read(path: string) -> string with 
     {
         (path) -> bool 
