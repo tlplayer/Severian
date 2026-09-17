@@ -2,10 +2,10 @@
 # This is a dimensioned size, independent of integer values and element counts.
 
 class byte:
-    amount: float
+    amount: int
 
     operator string() -> string:
-        return string(self.amount / 8.0) + "B"
+        return string(self.amount / 8) + "B"
 
 
     operator ==[G:Equal](other: Self) -> bool:
@@ -20,5 +20,5 @@ class byte:
         return byte(self.amount + other.amount)
 
 
-    operator /[G:Divide](other: Self) -> float:
+    operator /[G:Divide](other: Self) -> int:
         return self.amount / other.amount

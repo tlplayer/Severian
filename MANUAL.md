@@ -10,6 +10,44 @@ Severian is a programming language that deals with these cyclical problems:
 - Code should be fast and flexible
 - Rewriting code is a waste, extending code and improving one place should apply broadly to many places
 
+## Scopes
+
+Severian has the following scopes:
+
+- global 
+- main
+- test
+
+By isolating global certain setup work can occur before all else
+By isolating test into it's own block we can break some rules for safety/behavior while not polluting the file
+We also get to keep tests proximally close to what they test 
+
+
+```sev
+#Constant global executes
+
+X = "value"
+
+def main():
+    assert()
+    def foobar():
+        return 2
+    test "foobar() returns 2 always":
+        assert(foobar() == 2)
+
+    return true
+
+test "Testing if value is set":
+    assert(X == "value")
+
+'''
+Scoping the test's functionality with allows finer grain test scoping and pipelining in the package
+`sev test --integ` will run the below while sev test --unit only runs the smaller scopes
+This allows extension and tiering of tests to follow a pyramid pattern
+'''
+test with integ "testing main":
+    assert(main() == true) 
+```
 
 ## Prelude
 
@@ -59,6 +97,24 @@ test "Foo is a valid function and returns 2":
 
 test "Foo is a valid function and returns 2":
     assert(foo() == 1)
+```
+
+## Memory & Ownership
+
+
+
+```sev
+view # Const reference to an object, you can view it but it might be changed/altered by another process
+copy # copy an object 
+move # Take ownership of the object
+borrow # Temporarily take ownership of the object and return it potentially changed
+mirror # Copy on write equivalent but flat, and cannot mirror a mirror to a T
+```
+
+Severian have some core methods for owning objects
+
+```sev
+
 ```
 
 
@@ -153,13 +209,15 @@ For `Add`:
 
 ```sev
 class PositiveAdd: Add:
-    operator +(left: int, right: int) -> int with {
+    operator +(left: int, right: int) -> int with 
+    {
         left > 0,
         right > 0,
     }
 
 class BigAdd: Add:
-    operator +(left: int, right: int) -> int with {
+    operator +(left: int, right: int) -> int with 
+    {
         left > 10_000,
         right > 10_000,
     }

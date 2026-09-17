@@ -4,7 +4,7 @@ import * from "syntax.sev"
 # Y is the compiler-term kind for an interned, resolved symbol. Operator tags
 # are symbols, not strings and not Rust enum variants.
 trait Y:
-throw Error("Unimplemented")
+    throw Error("Unimplemented")
 
 
 trait Operator:

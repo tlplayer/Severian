@@ -1,4 +1,22 @@
-import * from "conversion.sev"
+
+enum ConversionKind:
+    Identity
+    Promote
+    Checked
+    Lossy
+
+
+class TypeRef:
+    name: string
+
+
+class Constructor:
+    source: TypeRef
+    kind: ConversionKind
+
+
+trait Conversion:
+    property constructors: list[Constructor]
 
 enum Size:
     Fixed(bytes: u64)
