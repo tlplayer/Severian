@@ -14,26 +14,15 @@ Superseded by:
 
 -- all terms, file formats, variables, classes, functions, traits in a table
 
-## Context the proposal in one paragraph
+## Context
 
 ## Problem(s)
 
 ## Examples
 
-
-## Illustration
-
-
 ## Testing
 
 
 ## Performance
-
-## Optimization
-
-## Rollback Procedure
-
-## Milestones (max 5)
-
 
 

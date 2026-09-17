@@ -1,0 +1,40 @@
+def balanced(text: string) -> bool:
+    stack: list[char] = []
+
+    for character in text:
+        if character == '(':
+            stack.append(character)
+
+        elif character == ')':
+            if len(stack) == 0:
+                return false
+
+            stack.pop()
+
+    return len(stack) == 0
+
+
+def main():
+    inputs = [
+        "()",
+        "(())",
+        "()()",
+        "(()",
+        "())",
+        "(((())))",
+    ]
+
+    for value in inputs:
+        print(value, balanced(value))
+
+
+test "balanced parentheses":
+    assert(balanced("") == true)
+    assert(balanced("()") == true)
+    assert(balanced("(())") == true)
+    assert(balanced("()()") == true)
+
+    assert(balanced("(") == false)
+    assert(balanced(")") == false)
+    assert(balanced("(()") == false)
+    assert(balanced("())") == false)

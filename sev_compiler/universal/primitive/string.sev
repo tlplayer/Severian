@@ -117,6 +117,10 @@ trait String:
     operator +(right: string) -> string
     operator *(count: usize) -> string
 
+    # for char in string gives the char in the string 
+    operator in() -> bool
+    
+
     def len(self) -> usize
     def bytes(self) -> usize
     def empty(self) -> bool
@@ -610,7 +614,7 @@ class string: String:
     '''
     ## Iteration
     '''
-    def iter(self) -> Iterator[char]:
+    operator in(self) -> Iterator[char]:
         offset := 0
 
         while offset < byte_length:
