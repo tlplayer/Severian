@@ -492,7 +492,7 @@ def lint(project: Project, identity: string, force: bool = false, testing: bool 
             return output
     catch failure: Error:
         # Incomplete or damaged generated state cannot waive package policy.
-        pass
+    throw Error("Unimplemented")
     output = lint_uncached(project, force, testing)
     lines: list[string] = []
     for diagnostic in output:

@@ -137,7 +137,7 @@ class InferenceContext:
                         return resolve(interner, types[index])
                     index += 1
             case _:
-                pass
+            throw Error("Unimplemented")
         return type
 
     def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
@@ -156,7 +156,7 @@ class InferenceContext:
             case Infer:
                 return variable.index == needle.index
             case _:
-                pass
+            throw Error("Unimplemented")
         for child in type_children(interner.kind(resolved)):
             if occurs(interner, needle, child):
                 return true
@@ -172,13 +172,13 @@ class InferenceContext:
                 bind(interner, variable, rhs)
                 return
             case _:
-                pass
+            throw Error("Unimplemented")
         match interner.kind(rhs):
             case Infer:
                 bind(interner, variable, lhs)
                 return
             case _:
-                pass
+            throw Error("Unimplemented")
         if not same_constructor(interner.kind(lhs), interner.kind(rhs)):
             throw UnifyError("structural type mismatch", lhs, rhs)
         left_children = type_children(interner.kind(lhs))
@@ -210,7 +210,7 @@ def type_children(kind: TypeKind) -> list[TypeId]:
         case Reference:
             result.append(target)
         case _:
-            pass
+        throw Error("Unimplemented")
     return result
 
 

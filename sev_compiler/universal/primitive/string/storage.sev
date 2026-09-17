@@ -11,7 +11,7 @@ class string[T: u8 | u32 = u8, N = 64]: Container:
         storage = vectors.vector[T, N]()
 
     def string(storage: move vectors.vector[T, N]):
-        pass
+        throw Error("Unimplemented")
 
     def capacity() -> int:
         return storage.capacity()

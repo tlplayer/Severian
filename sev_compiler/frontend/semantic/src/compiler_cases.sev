@@ -8,7 +8,7 @@ def module(subject: universal.Module, case: universal.CompilerTestCase, namespac
     for item in subject.items:
         match item:
             case Test:
-                pass
+            throw Error("Unimplemented")
             case _:
                 result.items.append(item)
     for item in case.declarations:

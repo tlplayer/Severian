@@ -1,8 +1,8 @@
 # CompileType is an ordinary core protocol. Universal only receives its
 # resolved stable declaration identities during bootstrap.
 trait Compiler:
-    pass
+throw Error("Unimplemented")
 
 
 trait CompileType[C]:
-    pass
+throw Error("Unimplemented")

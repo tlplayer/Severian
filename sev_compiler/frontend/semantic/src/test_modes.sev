@@ -55,9 +55,9 @@ def policy(declaration: universal.TraitDeclaration) -> Policy | diagnostics.Diag
                 case StringValue:
                     mode = value
                 case _:
-                    pass
+                throw Error("Unimplemented")
         case _:
-            pass
+        throw Error("Unimplemented")
     if mode == "" or mode == "compiler":
         return error(diagnostics.diagnostic_at("E000215", "test policy requires a nonreserved mode name", selected.span))
     names: list[string] = []
@@ -74,9 +74,9 @@ def policy(declaration: universal.TraitDeclaration) -> Policy | diagnostics.Diag
                             case StringValue:
                                 binding = value
                             case _:
-                                pass
+                            throw Error("Unimplemented")
                     case _:
-                        pass
+                    throw Error("Unimplemented")
                 getter = path(values[index])
                 if binding == "" or binding in names or getter == "":
                     return error(diagnostics.diagnostic_at("E000215", "test bindings require unique names and getter references", key.span))
@@ -156,7 +156,7 @@ def project(expression: universal.Expression, names: list[string], getters: list
         case Stringify:
             kind = universal.Stringify(project(value, names, getters, contexts, bound))
         case _:
-            pass
+        throw Error("Unimplemented")
     return universal.Expression(kind, expression.span, grammar=expression.grammar)
 
 
@@ -180,9 +180,9 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
                                     message = arguments[1].value
                                 projected = universal.Assert(arguments[0].value, message, expression.span, arguments[0].value.span)
                     case _:
-                        pass
+                    throw Error("Unimplemented")
             case _:
-                pass
+            throw Error("Unimplemented")
         match projected:
             case Defer:
                 result.statements.append(universal.Defer(project(value, names, getters, contexts, bound), span))
@@ -380,7 +380,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         expanded.append(universal.Test(universal.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup, mode_arguments=declaration.mode_arguments)))
                         ordinal += 1
             case _:
-                pass
+            throw Error("Unimplemented")
         if not table:
             expanded.append(item)
     module.items = expanded
@@ -402,7 +402,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         wanted.append(mode)
                         wanted_spans.append(declaration.span)
             case _:
-                pass
+            throw Error("Unimplemented")
     if len(wanted) == 0 and not runner:
         module = reported_tests(module, files)
         module.items.append(summary(test_count, suite_span, namespace))
@@ -414,7 +414,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
             case Trait:
                 declarations.append(declaration)
             case _:
-                pass
+            throw Error("Unimplemented")
     for declaration in declarations:
         for base in declaration.bases:
             if universal.simple_type_name(base) == "TestMode":
@@ -450,7 +450,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         case LiteralValue:
                             constant = true
                         case _:
-                            pass
+                        throw Error("Unimplemented")
                 # Plain `=` is resolved as reassignment by callable analysis.
                 # Only the first binding can be lifted out as a constant.
                 if binding.name not in bindings:
@@ -460,7 +460,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                 else:
                     suite.statements.append(universal.BindingStatement(binding))
             case Test:
-                pass
+            throw Error("Unimplemented")
             case _:
                 items.append(item)
     for selected in policies[::-1]:
@@ -530,7 +530,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                     suite.statements.append(statement)
                 suite.statements.append(report("  ok " + title, declaration.span))
             case _:
-                pass
+            throw Error("Unimplemented")
     for selected in policies[::-1]:
         suite.statements.append(universal.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
     items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))

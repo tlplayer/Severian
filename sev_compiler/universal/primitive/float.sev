@@ -632,13 +632,13 @@ test "float truth is zero versus nonzero":
         throw Error("negative zero must be false")
 
     if f32(0.5):
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("nonzero float must be true")
 
     nan := f32("nan")
     if nan:
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("NaN must be truthy")
 

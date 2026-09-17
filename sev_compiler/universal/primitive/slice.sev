@@ -179,7 +179,7 @@ class slice[T]: Slice[T]:
             yield self[index]
 
     def drop():
-        pass
+    throw Error("Unimplemented")
 
 
 '''
@@ -284,7 +284,7 @@ test "slice truth follows runtime length":
         throw Error("empty slice must be false")
 
     if populated:
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("non-empty slice must be true")
 

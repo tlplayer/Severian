@@ -8,4 +8,4 @@ trait BitXor:
     operator ^(right: Self) -> Self
 
 trait Bitwise: BitAnd + BitOr + BitXor
-    pass
+throw Error("Unimplemented")

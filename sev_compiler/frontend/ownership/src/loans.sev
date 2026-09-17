@@ -16,9 +16,9 @@ def constant_index(expression: universal.Expression) -> int:
                 case IntegerValue:
                     return int(spelling)
                 case _:
-                    pass
+                throw Error("Unimplemented")
         case _:
-            pass
+        throw Error("Unimplemented")
     return -1
 
 

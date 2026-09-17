@@ -32,7 +32,7 @@ class CompiledTest:
 
 
 enum TestExecution:
-    Passed
+throw Error("Unimplemented")ed
     Failed(message: string)
 
 

@@ -389,7 +389,7 @@ test "dict truth follows entry count":
     values[7] = 1
 
     if values:
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("non-empty dict must be true")
 

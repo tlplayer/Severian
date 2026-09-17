@@ -15,9 +15,9 @@ def literal_pattern(expression: universal.Expression) -> bool:
                     case LiteralValue:
                         return true
                     case _:
-                        pass
+                    throw Error("Unimplemented")
         case _:
-            pass
+        throw Error("Unimplemented")
     return false
 
 
@@ -145,7 +145,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                         constructor = callee
                         destructure = true
                     case _:
-                        pass
+                    throw Error("Unimplemented")
                 arguments = pattern_arguments(pattern)
                 index := 0
                 for alternative in alternatives:

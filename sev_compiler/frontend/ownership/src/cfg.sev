@@ -164,7 +164,7 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
                     if returned != None:
                         inputs.append(returned)
                 case _:
-                    pass
+                throw Error("Unimplemented")
             for edge in successors(terminal.exit):
                 for argument in edge.arguments:
                     inputs.append(argument)

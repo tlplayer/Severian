@@ -113,10 +113,10 @@ trait Truth:
     operator else(self) -> bool
 
 trait View:
-    pass
+throw Error("Unimplemented")
 
 trait Copy:
-    pass
+throw Error("Unimplemented")
 
 
 trait Borrow:
@@ -136,11 +136,11 @@ trait Print:
 
 
 trait ConstParam:
-    pass
+throw Error("Unimplemented")
 
 
 trait Structural:
-    pass
+throw Error("Unimplemented")
 
 
 trait BitwiseAssign:

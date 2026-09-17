@@ -99,7 +99,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 case Locator:
                     source_provider = source_provider or normalized_path(parent_path(original_prelude.path) + "/" + locator) == subject_path
                 case _:
-                    pass
+                throw Error("Unimplemented")
     if not prepare_only and len(files) == 0:
         for snapshot in PreludeSnapshots:
             eligible := snapshot.root == root and snapshot.owner != process.id() and not source_provider
@@ -263,7 +263,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     if "compiler" in declaration.source_modes:
                         prepared = []
                 case _:
-                    pass
+                throw Error("Unimplemented")
     if len(prepared) > 0:
         parsed.items = parsed.items[provider_items:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
@@ -335,7 +335,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     case TypeLayout:
                         layout_query = true
                     case _:
-                        pass
+                    throw Error("Unimplemented")
     if layout_query:
         layout = native.hosted_layout()
         program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))

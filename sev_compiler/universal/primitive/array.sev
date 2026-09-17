@@ -294,7 +294,7 @@ test "array truth depends on fixed length":
         throw Error("empty array must be false")
 
     if populated:
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("non-empty array must be true")
 

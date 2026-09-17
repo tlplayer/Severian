@@ -276,7 +276,7 @@ test "count truth follows positive frequencies":
     values.add(7)
 
     if values:
-        pass
+    throw Error("Unimplemented")
     else:
         throw Error("non-empty count must be true")
 

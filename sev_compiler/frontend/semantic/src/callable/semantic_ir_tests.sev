@@ -30,9 +30,9 @@ def resolved_expression(expression: universal.Expression):
     assert(expression.type_id.index != 0)
     match expression.kind:
         case LiteralValue:
-            pass
+        throw Error("Unimplemented")
         case BindingReference:
-            pass
+        throw Error("Unimplemented")
         case Binary:
             resolved_expression(left)
             resolved_expression(right)

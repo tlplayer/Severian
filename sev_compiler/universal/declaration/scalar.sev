@@ -12,7 +12,7 @@ def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
                         case String:
                             return value
                         case _:
-                            pass
+                        throw Error("Unimplemented")
     return ""
 
 
@@ -36,14 +36,14 @@ def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
                                 segments.append(size)
                             return segments
                         case _:
-                            pass
+                        throw Error("Unimplemented")
     return []
 
 
 # Lowering dependencies belong to the declaration that introduces an O. The
 # driver collects these from reachable F; the backend never inspects IR text.
 class LoweringRequirements:
-    passes: list[string] = []
+throw Error("Unimplemented")es: list[string] = []
     libraries: list[string] = []
     quality: bool = false
 

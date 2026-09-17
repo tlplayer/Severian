@@ -15,7 +15,7 @@ def after(context: int):
 
 
 def finish(context: int):
-    pass
+throw Error("Unimplemented")
 
 
 def prepared(context: Measurement) -> Measurement:
@@ -31,4 +31,4 @@ def report(context: Measurement):
     print("profile:", elapsed.amount, "ns;", calls, "allocations;", allocated.amount / 8.0, "allocated bytes")
 
 def measured_finish(context: Measurement):
-    pass
+throw Error("Unimplemented")

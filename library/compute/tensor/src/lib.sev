@@ -1,13 +1,13 @@
 import os
 
 trait TensorElement:
-    pass
+throw Error("Unimplemented")
 
 trait Dim:
-    pass
+throw Error("Unimplemented")
 
 trait Shape:
-    pass
+throw Error("Unimplemented")
 
 class Tensor[T: TensorElement, *Shape: Dim]:
     handle: string
