@@ -74,7 +74,7 @@ def control_surface(value: int):
     locked = lock copied
     try:
         always pending > 0:
-            pass
+            throw Error("Unimplemented")
     catch Error:
         pending = 0
     select:

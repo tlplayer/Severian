@@ -58,7 +58,7 @@ test "unused locals exclude strings, comments and other scopes":
     assert(occurrences(metrics("def a(value: int):\n    print(value)\n"), "L0004") == 0)
 
 test "class, match and conditional structural metrics":
-    text = "class Example:\n    def a():\n        pass\n    def b():\n        pass\ndef choose(value: int):\n    match value:\n        case 1:\n            print(1)\n        case _:\n            print(2)\n    if value == 1:\n        print(1)\n    elif value == 2:\n        print(2)\n"
+    text = "class Example:\n    def a():\n        throw Error("Unimplemented")    def b():\n        throw Error("Unimplemented")def choose(value: int):\n    match value:\n        case 1:\n            print(1)\n        case _:\n            print(2)\n    if value == 1:\n        print(1)\n    elif value == 2:\n        print(2)\n"
     values = metrics(text, "{lint:{'class-methods':1,'match-arms':1,'conditional-branches':1}}")
     assert(occurrences(values, "L0006") == 1)
     assert(occurrences(values, "L0007") == 1)
@@ -69,13 +69,13 @@ test "class, match and conditional structural metrics":
     assert(occurrences(boundary, "L0008") == 0)
 
 test "dead callable reachability includes callbacks and excludes dead cycles":
-    input = package.lint_source("example.sev", "def main():\n    use(callback)\ndef callback():\n    pass\ndef dead():\n    other()\ndef other():\n    dead()\n")
+    input = package.lint_source("example.sev", "def main():\n    use(callback)\ndef callback():\n    throw Error("Unimplemented")def dead():\n    other()\ndef other():\n    dead()\n")
     package.lint_declarations(input, false, [])
     live = package.lint_reachable([input])
     assert("callback" in live)
     assert("dead" not in live)
     assert("other" not in live)
-    library = package.lint_source("lib.sev", "def exported():\n    private()\ndef private():\n    pass\n")
+    library = package.lint_source("lib.sev", "def exported():\n    private()\ndef private():\n    throw Error("Unimplemented")")
     package.lint_declarations(library, true, [])
     assert("exported" in package.lint_reachable([library]))
 

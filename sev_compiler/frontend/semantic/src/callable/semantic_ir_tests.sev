@@ -19,7 +19,7 @@ def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
 def callable_fixture_environment(module: universal.Module) -> universal.Module:
     # HIR fixtures resolve control contracts explicitly, just as their syntax
     # fixtures do. Native CFG tests exercise the executable source bodies.
-    input = source.SourceFile(source.SourceId(1), "control-contracts.sev", "trait G:\n    pass\ntrait If: G:\n    control_flow: ControlFlow = Branch\ntrait Return: G:\n    control_flow: ControlFlow = Return\n")
+    input = source.SourceFile(source.SourceId(1), "control-contracts.sev", "trait G:\n    throw Error("Unimplemented")trait If: G:\n    control_flow: ControlFlow = Branch\ntrait Return: G:\n    control_flow: ControlFlow = Return\n")
     contracts = parser.parser_module(parser.Parser(lexer.scan(input)))
     for item in contracts.items:
         module.items.append(item)
@@ -234,7 +234,7 @@ test "callable specialization metadata survives list storage":
     assert(stored.template != None)
 
 test "generic contract pack calls do not enqueue symbolic native functions":
-    input = source.virtual_source("generic-pack.sev", "def sink(*values: V):\n    pass\ndef forward[T](value: T) -> T:\n    sink(value)\n    return value\ndef main() -> i32:\n    forward(1)\n    return 0\n")
+    input = source.virtual_source("generic-pack.sev", "def sink(*values: V):\n    throw Error("Unimplemented")def forward[T](value: T) -> T:\n    sink(value)\n    return value\ndef main() -> i32:\n    forward(1)\n    return 0\n")
     module = callable_fixture_environment(parser.parse(lexer.scan(input, [universal.operator_syntax(universal.Multiply())])))
     result = semantic.analyze_callables(module)
     for function in result.functions:

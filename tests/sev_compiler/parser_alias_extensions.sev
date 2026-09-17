@@ -32,7 +32,7 @@ test "as aliases retain their target and generic defaults":
 
 
 test "concrete extension arguments do not declare type parameters":
-    module = parse_fixture("extend list[string]:\n    pass\n")
+    module = parse_fixture("extend list[string]:\n    throw Error("Unimplemented")")
     registered = definitions.register_declarations(module, definitions.SemanticDefinitions())
     assert(len(registered.implementations) == 1)
     extension = registered.implementations[0]
@@ -48,7 +48,7 @@ test "concrete extension arguments do not declare type parameters":
 
 
 test "extension parameters are inferred against declared type identities":
-    module = parse_fixture("class Payload:\n    value: int\nextend Box[Payload]:\n    pass\nextend Box[T]:\n    pass\n")
+    module = parse_fixture("class Payload:\n    value: int\nextend Box[Payload]:\n    throw Error("Unimplemented")extend Box[T]:\n    throw Error("Unimplemented")")
     registered = definitions.register_declarations(module, definitions.SemanticDefinitions())
     assert(len(registered.implementations[1].type_parameters) == 0)
     assert(registered.implementations[2].type_parameters == ["T"])

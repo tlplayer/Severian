@@ -693,15 +693,9 @@ test "integer truth is zero versus nonzero":
     if i32(0):
         throw Error("zero must be false")
 
-    if i32(27):
-        pass
-    else:
-        throw Error("nonzero integer must be true")
+    assert(i32(27),Error("nonzero integer must be true"))
 
-    if i32(-1):
-        pass
-    else:
-        throw Error("negative nonzero integer must be true")
+    assert(i32(-1) == true, Error("negative nonzero integer must be true"))
 
 
 test "integer arithmetic uses the concrete type":
