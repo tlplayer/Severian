@@ -1,5 +1,0 @@
-{
-  "service": "Severian container database",
-  "port": 8080,
-  "formats": ["json", "txt", "yml", "ymls"]
-}

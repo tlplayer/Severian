@@ -1,6 +1,0 @@
-import model
-import os
-
-def model_files(model_root: string) -> bool:
-    selected = model.artifact("", "", model_root)
-    return model.valid_artifact(model_root) and os.file_size(selected.weights) > 200MB

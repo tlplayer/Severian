@@ -243,7 +243,7 @@ sev test
 
 Type
     What a value is.
-    int, bool, string, list[T], User, T | Error
+    int, bool, string, list[T], User, union, T | Error
 
 Primitive
     Compiler-known fundamental types.
@@ -306,6 +306,20 @@ Constraint
     T implements Ordered
     x: int {x > 0}
     type equality
+
+Fixity With [W]
+    def interface() with condition
+    def interface() with 
+    foo(a) with a>5:
+    for i in 0..5 with j := 1:
+        if i > j:...
+    def increment_by_ten(x,view y) with 
+    {
+        prefix fix x > 0, # x enters the function and must be greater than 0
+        suffix x >= 10, # At the end of the function x must be greater than or equal to 10
+        fix x < 100, # Throughout the function x cannot be greater than 99
+        defer unchanged(y) # If y changes throughout the function fail, defer is an alias for fix
+    }
 
 Effect
     What computation does beyond returning a value.
@@ -371,6 +385,7 @@ API ID: `prelude.function.assert`
 | `clone`  | copy an object             |
 | `view`  | only view but not modify object                  |
 | `drop`  | drop memory of an object                  |
+| `mirror`  | similar to COw cannot mirror a mirror'd item                  |
 
 ### Collections
 

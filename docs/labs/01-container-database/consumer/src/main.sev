@@ -1,4 +1,0 @@
-import container_database as database
-
-def main():
-    print(database.menu())

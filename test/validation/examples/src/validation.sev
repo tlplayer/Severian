@@ -1,3 +1,0 @@
-# Package anchor for the canonical documentation-example validation context.
-# Discovery and isolation are driven by validation.toml and `sev test`.
-
