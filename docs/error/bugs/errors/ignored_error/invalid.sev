@@ -1,7 +1,0 @@
-import file
-
-def save(path: string) -> unit | IOError:
-    return file.write(path, "state")
-
-def main():
-    save("state.txt")

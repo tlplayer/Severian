@@ -1,5 +1,0 @@
-# E000104: a match arm pattern must end with a colon.
-def main():
-    match ".yaml":
-        ".yaml" | ".yml"
-            print("configuration")

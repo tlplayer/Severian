@@ -1,8 +1,0 @@
-def transmit(payload: list[u8]):
-    print(size(payload))
-
-def main():
-    packet = [1, 2, 3]
-    outbound = move packet
-    transmit(outbound)
-    print(size(packet))
