@@ -1,0 +1,2 @@
+trait Iterable:
+    def next(item:T) -> T

@@ -7,7 +7,7 @@ trait String:
     def ends_with(sub_string:string|char) -> bool
     def starts_with(sub_string:string|char) -> bool
     # Finds the index of sub_string within start/end
-    def find(sub_string:string|char, start:int|absent, end:int|absent) -> int
+    def find(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
     # ",".join(["a","b","c"]) -> "a,b,c"
     def join(iterable,conjunctor:string) -> string
 
@@ -16,6 +16,8 @@ trait String:
     def strip() -> string
     def append(borrow self, addition:string|char) -> self 
     def remove(borrow self, removed:string|char) -> self
+    # Without indices [] or int "abc".without(1) -> "ac"
+    def without(indices: int | list[int]) -> string
     # Returns if an object is in the string "a"|'a' in "apple"-> true
     operator in(self,right:string) -> bool
     operator +(self,right:string) -> string
@@ -35,7 +37,7 @@ PRINTABLE = digits + ascii_letters + punctuation + whitespace
 
 # Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
 # N is the initial vector capacity and does not limit the string's length.
-class string[T: u8 | u32 = u8, N = 64]: Container + String:
+class string[T: u8 | u32 = u8, N = 64]: Container + String + Iterable:
     storage: vectors.vector[T, N]
 
     def string():

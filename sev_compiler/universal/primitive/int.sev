@@ -64,7 +64,7 @@ trait IntegerArithmetic:
     operator /(right: Self) -> Self
     operator //(right: Self) -> Self
     operator %(right: Self) -> Self
-    operator **(right: u32) -> Self
+    operator **(right: f32) -> Self
 
     operator +=(right: Self)
     operator -=(right: Self)
