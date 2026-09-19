@@ -166,17 +166,17 @@ def __base(value: string) -> index:
     return __buffer_base(value.storage.data)
 
 @mlir("llvm.inttoptr")
-def __pointer(value: int) -> native_ptr
+def __pointer(value: int) -> pointer
 
 @c(symbol="strfromd")
-def __decimal(destination: native_ptr, capacity: int, format: native_ptr, value: f64) -> i32
+def __decimal(destination: pointer, capacity: int, format: pointer, value: f64) -> i32
 
 @c(symbol="strtod")
-def __parse(value: native_ptr, end: native_ptr) -> f64
+def __parse(value: pointer, end: pointer) -> f64
 
 
 # Only whole buffers with offset zero are passed to this boundary.
-def __address(value: string) -> native_ptr:
+def __address(value: string) -> pointer:
     return __pointer(text.__size(__base(value)))
 
 

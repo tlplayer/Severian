@@ -2,15 +2,15 @@ import * from "../../../core/storage/src/buffer.sev" as storage
 import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="__sev_file_open_read")
-def __open_read(path: native_ptr) -> i32
+def __open_read(path: pointer) -> i32
 @c(symbol="__sev_file_open_write")
-def __open_write(path: native_ptr) -> i32
+def __open_write(path: pointer) -> i32
 @c(symbol="mkstemp")
-def __temporary(path: native_ptr) -> i32
+def __temporary(path: pointer) -> i32
 @c(symbol="unlink")
-def __remove(path: native_ptr) -> i32
+def __remove(path: pointer) -> i32
 
-def __address(data: array[u8]) -> native_ptr:
+def __address(data: array[u8]) -> pointer:
     return raw.__raw_pointer(raw.__raw_index(raw.__raw_buffer_address(data)))
 
 def __terminated(value: string) -> array[u8]:

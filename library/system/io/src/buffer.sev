@@ -2,9 +2,9 @@
 import * from "../../../interop/xxi/src/buffer.sev" as xxi
 
 @c(symbol="__sev_io_read")
-def __read(handle: int, destination: native_ptr, count: int) -> int
+def __read(handle: int, destination: pointer, count: int) -> int
 @c(symbol="__sev_io_write")
-def __write(handle: int, source: native_ptr, count: int) -> int
+def __write(handle: int, source: pointer, count: int) -> int
 @c(symbol="__sev_io_error")
 def error() -> i32
 @c(symbol="close")

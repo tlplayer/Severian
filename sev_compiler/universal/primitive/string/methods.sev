@@ -7,7 +7,7 @@ import * from "../slicing.sev" as slicing
 def __float_end_address(value: array[int]) -> index
 
 @mlir("llvm.ptrtoint")
-def __float_pointer_value(value: native_ptr) -> int
+def __float_pointer_value(value: pointer) -> int
 
 def __parse_float_buffer(value: string, end: borrow array[int]) -> float:
     return format.__parse(format.__address(value), format.__pointer(text.__size(__float_end_address(end))))

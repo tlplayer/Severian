@@ -119,10 +119,30 @@ trait String:
 
     # for char in string gives the char in the string 
     operator in() -> bool
+    # Returns if an object is in the string "a"|'a' in "apple"-> true
+    operator in(left:string|char) -> bool
     
+    def append(value: string | char)
+    def encode()
+    def ends_with(sub_string:string|char) -> bool
+    def starts_with(sub_string:string|char) -> bool
+    # Finds the index of sub_string within start/end
+    def find(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
+    def rfind(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
+
+    #Split a string by a substring "a,b,c".split(",")-> ["a","b","c"]
+    def split[C=list]() -> C
+    def strip() -> string
+    def append(borrow self, addition:string|char) -> self 
+    def remove(borrow self, removed:string|char) -> self
+    # Without indices [] or int "abc".without(1) -> "ac"
+    def without(indices: int | list[int]) -> string
 
     def len(self) -> usize
-    def bytes(self) -> usize
+    #Number of bytes consumed
+    def bytes(self) -> byte
+    #total consumed memory of object 
+    def memory(self) -> byte
     def empty(self) -> bool
     def raw(self) -> slice[u8]
     #starts/ends with the index is where is starts searching from

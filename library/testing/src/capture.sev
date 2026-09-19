@@ -1,9 +1,9 @@
 import * from "../../../sev_compiler/universal/primitive/string/core.sev" as text
 
 @c(symbol="tmpfile")
-def __temporary() -> native_ptr
+def __temporary() -> pointer
 @c(symbol="fileno")
-def __descriptor(stream: native_ptr) -> i32
+def __descriptor(stream: pointer) -> i32
 @c(symbol="dup")
 def __duplicate(descriptor: i32) -> i32
 @c(symbol="dup2")
@@ -11,34 +11,34 @@ def __redirect(source: i32, destination: i32) -> i32
 @c(symbol="close")
 def __close(descriptor: i32) -> i32
 @c(symbol="fclose")
-def __close_stream(stream: native_ptr) -> i32
+def __close_stream(stream: pointer) -> i32
 @c(symbol="fflush")
-def __flush(stream: native_ptr) -> i32
+def __flush(stream: pointer) -> i32
 @c(symbol="setbuf")
-def __buffer(stream: native_ptr, buffer: native_ptr)
+def __buffer(stream: pointer, buffer: pointer)
 @c(symbol="lseek")
 def __offset(descriptor: i32, offset: int, origin: i32) -> int
 @c(symbol="fseek")
-def __seek(stream: native_ptr, offset: int, origin: i32) -> i32
+def __seek(stream: pointer, offset: int, origin: i32) -> i32
 @c(symbol="ftruncate")
 def __truncate(descriptor: i32, size: int) -> i32
 @c(symbol="fgetc")
-def __read(stream: native_ptr) -> i32
+def __read(stream: pointer) -> i32
 @mlir("llvm.inttoptr")
-def __pointer(value: int) -> native_ptr
+def __pointer(value: int) -> pointer
 @mlir("llvm.ptrtoint")
-def __address(value: native_ptr) -> int
+def __address(value: pointer) -> int
 
 
-def __position(stream: native_ptr) -> int:
+def __position(stream: pointer) -> int:
     # stdout/stderr use distinct FILE objects sharing these descriptors. Query
     # the kernel offset; ftell may return the capture FILE's cached position.
     return __offset(__descriptor(stream), 0, 1)
 
 
 class Capture:
-    output: native_ptr
-    errors: native_ptr
+    output: pointer
+    errors: pointer
     saved_output: i32
     saved_errors: i32
     output_prefix: int
@@ -75,7 +75,7 @@ def reset(context: Capture) -> Capture:
     return context
 
 
-def contents(stream: native_ptr) -> string:
+def contents(stream: pointer) -> string:
     assert(__flush(__pointer(0)) == 0)
     size = __position(stream)
     assert(size >= 0)

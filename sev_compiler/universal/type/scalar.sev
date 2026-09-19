@@ -96,8 +96,8 @@ def make_scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
         return ScalarType(TypeId(3), "string", 8, false, "utf8")
     if id.index == 4 or name == "index":
         return ScalarType(TypeId(4), "index", 64, false, "index")
-    if id.index == 5 or name == "native_ptr":
-        return ScalarType(TypeId(5), "native_ptr", 64, false, "pointer")
+    if id.index == 5 or name == "pointer":
+        return ScalarType(TypeId(5), "pointer", 64, false, "pointer")
     if id.index == 6 or name == "None":
         return ScalarType(TypeId(6), "None", 64, false, "pointer")
     if id.index == 7 or name == "absent":

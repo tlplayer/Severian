@@ -1,7 +1,7 @@
 # cf.assert terminates the process, but its hosted LLVM lowering prints through
 # buffered stdout. Emit the diagnostic to stderr before handing it the condition.
 @c(symbol="write")
-def __assert_write(descriptor: i32, data: native_ptr, size: int) -> int
+def __assert_write(descriptor: i32, data: pointer, size: int) -> int
 
 @mlir("memref.extract_aligned_pointer_as_index")
 def __assert_address(value: array[u8]) -> index
@@ -10,7 +10,7 @@ def __assert_address(value: array[u8]) -> index
 def __assert_index(value: index) -> int
 
 @mlir("llvm.inttoptr")
-def __assert_pointer(value: int) -> native_ptr
+def __assert_pointer(value: int) -> pointer
 
 def __assert_condition(condition: bool, message: string) -> bool:
     if not condition:

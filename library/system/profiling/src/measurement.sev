@@ -2,7 +2,7 @@ import * from "../../../core/storage/src/statistics.sev" as storage
 import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="clock_gettime")
-def __clock_gettime(clock: i32, result: native_ptr) -> i32
+def __clock_gettime(clock: i32, result: pointer) -> i32
 
 def begin() -> int:
     value = [0, 0]

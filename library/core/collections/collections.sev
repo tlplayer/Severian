@@ -2,7 +2,6 @@ import * from "../../../library/core/memory/src/buffer_intrinsics.sev" as memory
 import * from "../../../library/core/collections/traits/src/container.sev"
 # Source list construction, access, mutation, truth and iteration protocols.
 # array[T] is the typed rank-one MLIR storage boundary.
-import * from "slicing.sev" as slicing
 #TODO: Move this to the collections library out of primitives...
 
 union ListElement:

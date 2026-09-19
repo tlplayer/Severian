@@ -58,7 +58,7 @@ def __ending(value: None) -> string:
 
 #TODO: Replace with MMLIR/Syste native approach defer for now
 @c(symbol="fflush")
-def __flush(stream: native_ptr) -> i32
+def __flush(stream: pointer) -> i32
 
 
 # V packs specialize to the concrete value types at each call. The loop is

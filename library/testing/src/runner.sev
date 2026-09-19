@@ -6,13 +6,13 @@ def __test_fork() -> i32
 @c(symbol="setpgid")
 def __test_group(process: i32, group: i32) -> i32
 @c(symbol="waitpid")
-def __test_waitpid(process: i32, status: native_ptr, options: i32) -> i32
+def __test_waitpid(process: i32, status: pointer, options: i32) -> i32
 @c(symbol="kill")
 def __test_kill(process: i32, signal: i32) -> i32
 @c(symbol="usleep")
 def __test_sleep(microseconds: u32) -> i32
 @c(symbol="fflush")
-def __test_flush(stream: native_ptr) -> i32
+def __test_flush(stream: pointer) -> i32
 @c(symbol="_exit")
 def __test_exit(status: i32)
 

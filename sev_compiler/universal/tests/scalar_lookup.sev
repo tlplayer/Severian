@@ -30,7 +30,7 @@ test "scalar lookup preserves the catalog and rejects unknown identities":
         names.append(entry.name)
         assert(scalar.scalar_type_name(entry.name) == entry.id)
         assert(scalar.scalar_type_name("$buffer$" + entry.name) == scalar.TypeId(entry.id.index + 200))
-    assert(names.join(",") == "bool,unit,string,index,native_ptr,None,absent,f64,u8,u16,u32,u64,char,i8,i16,i32,i64")
+    assert(names.join(",") == "bool,unit,string,index,pointer,None,absent,f64,u8,u16,u32,u64,char,i8,i16,i32,i64")
     assert(scalar.scalar_type_name("usize") == scalar.TypeId(564))
     assert(scalar.scalar_type_name("int") == scalar.TypeId(64))
     assert(scalar.scalar_type_name("float") == scalar.TypeId(164))

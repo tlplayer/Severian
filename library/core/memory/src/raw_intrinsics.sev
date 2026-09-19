@@ -1,21 +1,21 @@
 # Hosted raw-memory boundaries; typed buffers use the same target memory lowering.
 @c(symbol="__sev_memory_zeroed")
-def __raw_calloc(count: int, width: int) -> native_ptr
+def __raw_calloc(count: int, width: int) -> pointer
 
 @c(symbol="__sev_memory_release")
-def __raw_free(value: native_ptr)
+def __raw_free(value: pointer)
 
 @mlir("llvm.ptrtoint")
-def __raw_integer(value: native_ptr) -> int
+def __raw_integer(value: pointer) -> int
 
 @mlir("llvm.inttoptr")
-def __raw_pointer(value: int) -> native_ptr
+def __raw_pointer(value: int) -> pointer
 
 @mlir("llvm.load")
-def __raw_load[T](value: native_ptr) -> T
+def __raw_load[T](value: pointer) -> T
 
 @mlir("llvm.store")
-def __raw_store[T](value: T, destination: native_ptr)
+def __raw_store[T](value: T, destination: pointer)
 
 @mlir("memref.extract_aligned_pointer_as_index")
 def __raw_buffer_address[T](value: array[T]) -> index
@@ -23,7 +23,7 @@ def __raw_buffer_address[T](value: array[T]) -> index
 @mlir("arith.index_cast")
 def __raw_index(value: index) -> int
 
-def __raw_allocate(count: int, width: int) -> native_ptr:
+def __raw_allocate(count: int, width: int) -> pointer:
     assert(count >= 0)
     assert(width > 0)
     assert(count <= 9223372036854775807 / width)
@@ -32,7 +32,7 @@ def __raw_allocate(count: int, width: int) -> native_ptr:
     assert(__raw_integer(result) != 0)
     return result
 
-def __raw_offset(base: native_ptr, offset: int) -> native_ptr:
+def __raw_offset(base: pointer, offset: int) -> pointer:
     return __raw_pointer(__raw_integer(base) + offset)
 
 def __raw_byte_offset(size: byte) -> int:

@@ -2,7 +2,7 @@ import * from "../../../../library/core/collections/vector/src/vector.sev" as ve
 import * from "../char/utf8.sev" as encoding
 
 trait String:
-    def append(value: string | )
+    def append(value: string | char)
     def encode()
     def ends_with(sub_string:string|char) -> bool
     def starts_with(sub_string:string|char) -> bool

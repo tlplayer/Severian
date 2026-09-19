@@ -1,12 +1,22 @@
-# The hosted pointer representation retains T in source types. Allocation is
-# explicit: these pointers never participate in managed buffer deallocation.
-import * from "../../../library/core/text/src/format.sev" as format
+@mlir("ptr.load")
+def __raw_load[T](value: pointer[T]) -> T
 
-@mlir("llvm.ptrtoint")
-def __pointer_bits(value: native_ptr) -> u64
+@mlir("ptr.store")
+def __raw_store[T](value: T, destination: pointer[T])
 
-class pointer[T]:
-    __address: native_ptr
+@mlir("ptr.ptr_add")
+def __raw_offset[T](base: pointer[T], bytes: int) -> pointer[T]
 
-    operator string(self) -> string:
-        return format.pointer_text(__pointer_bits(__address))
+trait Pointer[T]: Primitive:
+    operator store(self, value: T)
+    operator [](self) -> T
+    operator +(self, bytes: int) -> self
+
+    operator address(self) -> u64
+
+
+class pointer[T]: Pointer:
+    __pointer = mlir["!ptr.ptr"]    
+    __address: i64
+
+    

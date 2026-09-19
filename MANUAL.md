@@ -10,6 +10,28 @@ Severian is a programming language that deals with these cyclical problems:
 - Code should be fast and flexible
 - Rewriting code is a waste, extending code and improving one place should apply broadly to many places
 
+## Package structure and layout
+
+Severian has 3 core files in the package:
+- lib.sev # Contains the trait interfaces consumers of the package call through this
+- mod.sev # Module implementation for the interfaces of the package
+- main.sev # what is compiled to a binary/ 
+
+It avoids recompilation by checking commit, timestamp, and hash of the files changed which contribute to the build.
+The interface is described/exposed through the package.pkgi/ directory which contains how files interact with the package
+Static/dynamic functions are defined using things like:
+
+```
+def view foobar():
+    return 1
+
+You can't change foobar()
+
+def move foobar():
+...
+
+This is a dynamic function which the caller owns. 
+```
 ## Scopes
 
 Severian has the following scopes:
