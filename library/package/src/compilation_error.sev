@@ -1,0 +1,45 @@
+import * from "../build/src/model.sev"
+import * from "../diagnostic/src/compilation.sev" as report
+
+# An iterative search retains the consumer-to-provider path, including aliases.
+# The visited parent indexes handle shared dependencies without repeated frames.
+def compilation_frames(resolution: Resolution, selected: int) -> list[report.CompilationFrame]:
+    count = int(len(resolution.packages))
+    if selected < 0 or selected >= count:
+        return []
+    parents: list[int] = []
+    aliases: list[string] = []
+    for item in resolution.packages:
+        parents.append(-1)
+        aliases.append("")
+    parents[0] = 0
+    pending: list[int] = [0]
+    cursor := 0
+    while cursor < int(len(pending)) and parents[selected] < 0:
+        parent = pending[cursor]
+        cursor += 1
+        for edge in resolution.edges:
+            if edge.parent == parent and edge.child >= 0 and edge.child < count and parents[edge.child] < 0:
+                parents[edge.child] = parent
+                aliases[edge.child] = edge.alias
+                pending.append(edge.child)
+    chain: list[int] = [selected]
+    current := selected
+    while current != 0 and parents[current] >= 0:
+        current = parents[current]
+        chain.append(current)
+    frames: list[report.CompilationFrame] = []
+    cursor = int(len(chain)) - 1
+    while cursor >= 0:
+        index = chain[cursor]
+        owner = resolution.packages[index]
+        frames.append(report.CompilationFrame(owner.identity.name, owner.identity.version, owner.root, aliases[index]))
+        cursor -= 1
+    return frames
+
+def compilation_error(resolution: Resolution, unit: BuildUnit, compiler: Compiler, stage: string, cause: string, source_path: string = "") -> string:
+    frames = compilation_frames(resolution, unit.package_index)
+    source := source_path if source_path != "" else unit.target.path
+    if source_path == "" and len(frames) > 0:
+        source = frames[-1].root + "/" + unit.target.path
+    return report.render_compilation_failure(report.CompilationFailure(frames, unit.target.name + " (" + unit.target.kind + ")", source, compiler.executable, unit.platform, unit.profile, stage, cause))

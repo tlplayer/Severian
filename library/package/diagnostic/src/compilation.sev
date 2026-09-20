@@ -1,0 +1,32 @@
+# Ordered compilation context, from the requesting package to the failed unit.
+class CompilationFrame:
+    name: string
+    version: string
+    root: string
+    alias: string = ""
+
+class CompilationFailure:
+    frames: list[CompilationFrame]
+    target: string
+    source: string
+    compiler: string
+    platform: string
+    profile: string
+    stage: string
+    cause: string
+
+def render_compilation_failure(failure: CompilationFailure) -> string:
+    owner = failure.frames[-1].name + "@" + failure.frames[-1].version if len(failure.frames) > 0 else "standalone source"
+    lines: list[string] = ["compilation failed for package " + owner, "Compilation error chain (requested package first):"]
+    for index in range(int(len(failure.frames))):
+        frame = failure.frames[index]
+        alias = " via dependency " + frame.alias if frame.alias != "" else ""
+        lines.append("  " + string(index) + ": " + frame.name + "@" + frame.version + alias)
+        lines.append("     package root: " + frame.root)
+    lines.append("  target: " + failure.target)
+    lines.append("  source: " + failure.source)
+    lines.append("  compiler: " + failure.compiler)
+    lines.append("  platform/profile: " + failure.platform + "/" + failure.profile)
+    lines.append("  stage: " + failure.stage)
+    lines.append("Caused by:\n" + failure.cause)
+    return lines.join("\n")

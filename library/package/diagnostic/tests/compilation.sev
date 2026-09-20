@@ -1,0 +1,22 @@
+import * from "../src/compilation.sev"
+
+test "compilation failure retains package chain and complete original cause":
+    cause = "could not resolve path: /sysroot/missing.c\n  native input inventory\n    original tool diagnostic λ"
+    frames = [CompilationFrame("geometry-consumer", "0.1.0", "/consumer"), CompilationFrame("geometry", "1.2.0", "/geometry", "geometry"), CompilationFrame("dimensions", "2.0.0", "/dimensions", "measure")]
+    rendered = render_compilation_failure(CompilationFailure(frames, "dimensions (library)", "/dimensions/src/lib.sev", "/tools/sev", "host", "dev", "compile library", cause))
+    assert(rendered.starts_with("compilation failed for package dimensions@2.0.0\n"))
+    assert(rendered.contains("0: geometry-consumer@0.1.0"))
+    assert(rendered.contains("1: geometry@1.2.0 via dependency geometry"))
+    assert(rendered.contains("2: dimensions@2.0.0 via dependency measure"))
+    assert(rendered.contains("package root: /dimensions"))
+    assert(rendered.contains("source: /dimensions/src/lib.sev"))
+    assert(rendered.contains("compiler: /tools/sev"))
+    assert(rendered.contains("platform/profile: host/dev"))
+    assert(rendered.contains("stage: compile library"))
+    assert(rendered.ends_with("Caused by:\n" + cause))
+
+test "standalone failure reports its source and original multiline error":
+    rendered = render_compilation_failure(CompilationFailure([], "main (binary)", "/work/main.sev", "sev", "host", "release", "identify compiler and native toolchain", "tool exited 1\nmissing linker"))
+    assert(rendered.starts_with("compilation failed for package standalone source"))
+    assert(rendered.contains("source: /work/main.sev"))
+    assert(rendered.ends_with("Caused by:\ntool exited 1\nmissing linker"))

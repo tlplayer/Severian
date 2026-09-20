@@ -8,6 +8,14 @@ import * from "package_compiler.sev"
 def session_exit(status: i32)
 
 
+def report_session_failure(request: string, message: string):
+    try:
+        package.write_text(request + ".diagnostic", message)
+    catch reporting: Error:
+        process.write_error("could not retain worker diagnostic: " + reporting.message + "\n")
+    process.write_error("error: " + message + "\n")
+
+
 # The package orchestrator runs in the client. This parent only forks pristine
 # compilation workers; unit analysis can never modify the next unit's prelude.
 def serve_package_session(client: int) -> int | Error:
@@ -39,11 +47,11 @@ def serve_package_session(client: int) -> int | Error:
                     compile_package_unit(arguments)
                     status = 0
                 catch failure: Error:
-                    process.write_error("error: " + failure.message + "\n")
+                    report_session_failure(request, failure.message)
                 session_exit(i32(status))
             status = process.session_wait(worker)
         catch failure: Error:
-            process.write_error("error: " + failure.message + "\n")
+            report_session_failure(request, failure.message)
         if not process.session_reply(status):
             break
         ordinal += 1

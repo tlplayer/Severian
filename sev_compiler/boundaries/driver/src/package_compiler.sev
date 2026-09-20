@@ -96,7 +96,10 @@ def compile_package_unit(arguments: list[string]) -> unit | Error:
         compile_package_unit_checked(arguments)
     catch failure: Error:
         if len(arguments) == 10:
-            package.write_text(arguments[3] + ".diagnostic", failure.message)
+            try:
+                package.write_text(arguments[3] + ".diagnostic", failure.message)
+            catch reporting: Error:
+                throw Error(failure.message + "\nAdditionally, writing the compilation diagnostic failed:\n" + reporting.message)
         throw failure
 
 

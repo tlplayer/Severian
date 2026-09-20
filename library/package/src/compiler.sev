@@ -9,6 +9,7 @@ import * from "edit.sev"
 import * from "reuse.sev"
 import * from "realization.sev"
 import * from "generators.sev"
+import * from "compilation_error.sev"
 import path
 import os
 import environment
@@ -133,12 +134,14 @@ def realization_root(resolution: Resolution, index: int) -> string | Error:
 
 
 def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, emit: string, guard_tests: bool = false, source_path: string = "") -> Artifact | Error:
-    if unit.output != "":
-        mkdir(path.dirname(unit.output))
-    stage = temporary("/tmp")
+    stage := ""
+    phase := "prepare compilation unit"
     cache_lock := -1
     result := Artifact(unit.target, unit.platform, unit.profile, emit if emit != "" else "native", unit.output)
     try:
+        if unit.output != "":
+            mkdir(path.dirname(unit.output))
+        stage = temporary("/tmp")
         scoped = unit_resolution(resolution, unit.package_index) if len(resolution.packages) > 0 else resolution
         prepare_generators(scoped)
         graph = encode_resolution(scoped)
@@ -146,6 +149,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         input = canonical(source_path) if source_path != "" else inside(scoped.packages[0].root, unit.target.path)
         root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
         sysroot = canonical(compiler.sysroot)
+        phase = "identify compiler and native toolchain"
         identity := "unit-cache-5\n" + portable_graph(scoped) + "\n" + digest(compiler.executable) + "\n" + portable_path(input, scoped, root, sysroot) + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
         identity += "\n" + registry_discovery_state()
         for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), environment.get("SEVERIAN_LLVM_OPT", "opt-21"), environment.get("SEVERIAN_AR", "llvm-ar-21")]:
@@ -160,6 +164,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         write_text(stage + "/key", identity)
         build_id = digest(stage + "/key").replace(":", "-")
         cache = realization_root(resolution, unit.package_index) + "/build/" + build_id
+        phase = "load compilation cache"
         mkdir(cache)
         cache_lock = file.native_lock(cache + "/lock")
         if cache_lock < 0:
@@ -178,6 +183,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             if reused and unit.include_tests and len(scoped.packages) > 0 and setting(scoped.packages[0].manifest.entries, "test", "coverage", "true") != "false":
                 reused = os.is_file(cache + "/artifact.coverage.json") and os.is_file(cache + "/coverage.digest") and digest(cache + "/artifact.coverage.json") == read_text(cache + "/coverage.digest")
         if not reused:
+            phase = "compile " + (emit if emit != "" else "native")
             process.write_error("compiling " + input + "\n")
             # Never let a failed compilation validate a previous artifact.
             if os.is_file(cache + "/output"):
@@ -192,6 +198,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                 if seconds <= 0:
                     throw Error("test timeout must be positive")
             status := 0
+            output := ""
             if process.session_available() and compiler.executable == process.executable():
                 encoded: list[string] = []
                 for argument in arguments:
@@ -202,12 +209,22 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             else:
                 if seconds > 0:
                     arguments = process.guarded_command(arguments, seconds, memory)
-                status = command(arguments)
+                child = process.execute(arguments)
+                status = child.status
+                output = child.stdout + child.stderr
+                if status == 0:
+                    if child.stdout != "":
+                        print(child.stdout, end="")
+                    if child.stderr != "":
+                        process.write_error(child.stderr)
             if status != 0:
                 diagnostic = stage + "/artifact.diagnostic"
                 if os.is_file(diagnostic):
-                    throw Error("compilation failed for " + unit.target.name + ":\n" + read_text(diagnostic).strip())
-                throw Error("compiler process failed for " + unit.target.name + " (exit status " + string(status) + "); no source diagnostic was produced. Check the compiler/tool output above for a crash, resource limit, or native tool failure.")
+                    throw Error(read_text(diagnostic) + ("\nCompiler output:\n" + output if output != "" else ""))
+                if os.is_file(stage + "/request.json.diagnostic"):
+                    throw Error(read_text(stage + "/request.json.diagnostic"))
+                throw Error("compiler process exited with status " + string(status) + "; no source diagnostic was produced." + ("\nCompiler output:\n" + output if output != "" else "\nThe compilation worker exited before reporting its cause."))
+            phase = "retain compiler outputs"
             if emit != "check":
                 if emit == "sources":
                     paths: list[string] = []
@@ -237,10 +254,12 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
                 portable_inputs(stage + "/resolution.json.inputs", cache + "/inputs", scoped, root, sysroot)
                 write_text(cache + "/output", "check" if emit == "check" else digest(cache + "/artifact"))
         if len(scoped.packages) > 0 and emit in ["", "library"]:
+            phase = "retain package realization"
             result = retain_realization(scoped, unit, compiler, cache, build_id, emit)
             if unit.output == "":
                 unit.output = result.path
         if emit != "check" and unit.output != "":
+            phase = "deliver compilation output"
             if unit.include_tests and os.is_file(cache + "/artifact.coverage.json"):
                 copy_file(cache + "/artifact.coverage.json", unit.output + ".coverage.json")
             if not reused or not os.is_file(unit.output) or digest(unit.output) != digest(cache + "/artifact"):
@@ -260,10 +279,15 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         file.unlock(cache_lock)
         cache_lock = -1
     catch error: Error:
+        message = compilation_error(resolution, unit, compiler, phase, error.message, source_path)
         if cache_lock >= 0:
             file.unlock(cache_lock)
-        remove_tree(stage)
-        throw Error(error.message)
+        if stage != "":
+            try:
+                remove_tree(stage)
+            catch cleanup: Error:
+                throw Error(message + "\nAdditionally, temporary-file cleanup failed:\n" + cleanup.message)
+        throw Error(message)
     remove_tree(stage)
     if unit.output != "":
         result.path = unit.output

@@ -1,0 +1,21 @@
+import * from "../src/compilation_error.sev"
+import * from "../build/src/model.sev"
+
+test "failed dependency reports its consumer path rather than build order":
+    packages: list[ResolvedPackage] = []
+    for name in ["consumer", "geometry", "dimensions", "unused"]:
+        packages.append(ResolvedPackage(PackageIdentity(name, "0.1.0", "path:/" + name), "/" + name, Manifest(name, "0.1.0", "", [], [], []), "content"))
+    graph = Resolution(packages, [DependencyEdge(0, 1, "shape", false), DependencyEdge(1, 2, "measure", false), DependencyEdge(2, 1, "cycle", false)], "")
+    frames = compilation_frames(graph, 2)
+    assert(len(frames) == 3)
+    assert(frames[0].name == "consumer")
+    assert(frames[1].name == "geometry" and frames[1].alias == "shape")
+    assert(frames[2].name == "dimensions" and frames[2].alias == "measure")
+    unit = BuildUnit(2, Target("math", "library", "src/lib.sev"), "host", "dev", "", false)
+    message = compilation_error(graph, unit, Compiler("/tools/sev", "/sysroot"), "compile library", "missing input\noriginal cause")
+    assert(message.contains("package dimensions@0.1.0"))
+    assert(message.contains("target: math (library)"))
+    assert(message.contains("source: /dimensions/src/lib.sev"))
+    assert(message.ends_with("Caused by:\nmissing input\noriginal cause"))
+    assert(len(compilation_frames(graph, 0)) == 1)
+    assert(len(compilation_frames(graph, 99)) == 0)
