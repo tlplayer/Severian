@@ -1,0 +1,160 @@
+# Kind describes an artifact's role. Format describes its representation.
+# Neither is inferred from the filename: .lib can be static or an import library.
+enum ArtifactKind:
+    Source
+    Interface
+    Metadata
+    Object
+    StaticLibrary
+    DynamicLibrary
+    ImportLibrary
+    IntermediateRepresentation
+    Executable
+    ForeignBinding
+    DebugInformation
+    PackageArchive
+    ContainerImage
+    Resource
+
+enum ArtifactFormat:
+    SeverianSource
+    SeverianInterface
+    Json
+    Elf
+    Coff
+    MachO
+    Wasm
+    Archive
+    ThinArchive
+    SeverianMir
+    MlirText
+    MlirBytecode
+    LlvmText
+    LlvmBitcode
+    RustLibrary
+    RustMetadata
+    CHeader
+    RustSource
+    PythonStub
+    Dwarf
+    Pdb
+    Dsym
+    SeverianPackage
+    OciImage
+    Raw
+    Other(name: string, version: string)
+
+# An artifact may support several uses. MLIR specialization and dynamic loading
+# are distinct from passing a native object or archive to a linker.
+enum ArtifactUse:
+    Compile
+    Import
+    Link
+    Load
+    Specialize
+    Execute
+    Inspect
+    Package
+
+# References remain meaningful after relocation and across dependency packages.
+# package_id is the owning package's content identity; id is realization-local.
+class ArtifactRef:
+    package_id: string
+    build_id: string
+    id: string
+
+# Empty target/ABI fields describe target-independent payloads such as source.
+# compiler and options identify effective producer inputs, not timestamps.
+class ArtifactCompatibility:
+    target: string = ""
+    abi: string = ""
+    compiler: string = ""
+    backend: string = ""
+    options: string = ""
+    cpu: string = ""
+    features: list[string] = []
+
+# All stored paths are normalized UTF-8 paths relative to the owning package.pkg.
+# A directory artifact (for example OCI or dSYM) inventories its individual files.
+# Checksums identify completed file bytes; size is the byte count.
+class ArtifactFile:
+    path: string
+    checksum: string
+    size: u64
+    executable: bool = false
+
+enum ArtifactRelationKind:
+    Source
+    Interface
+    Metadata
+    ArchiveMember
+    ImportLibrary
+    RuntimeLibrary
+    DebugInformation
+    SpecializationInput
+
+class ArtifactRelation:
+    kind: ArtifactRelationKind
+    artifact: ArtifactRef
+
+# A completed artifact can consist of a single file or an inventoried directory.
+# path names its primary file/directory; files contains all its payload files.
+# Related independently addressable artifacts are referenced through relations.
+class ArtifactRecord:
+    reference: ArtifactRef
+    kind: ArtifactKind
+    format: ArtifactFormat
+    path: string
+    compatibility: ArtifactCompatibility
+    uses: list[ArtifactUse]
+    files: list[ArtifactFile]
+    relations: list[ArtifactRelation] = []
+
+# A requested output has no checksum or completed-file inventory yet.
+class ArtifactOutput:
+    reference: ArtifactRef
+    kind: ArtifactKind
+    format: ArtifactFormat
+    path: string
+    compatibility: ArtifactCompatibility
+    uses: list[ArtifactUse]
+
+# SDK/system requirements are logical identities, not package paths or shell
+# arguments. The host/toolchain supplies their concrete locations when binding.
+class ExternalRequirement:
+    name: string
+    version: string
+    kind: ArtifactKind
+    use: ArtifactUse
+    compatibility: ArtifactCompatibility
+
+# Metadata resolves a declaration to a particular artifact before requesting use.
+# symbol_id is the compiler's declaration identity; entry is its native/link/load
+# name. specialization is the compiler's opaque specialization key.
+class ArtifactRequest:
+    artifact: ArtifactRef
+    use: ArtifactUse
+    compatibility: ArtifactCompatibility
+    symbol_id: string = ""
+    entry: string = ""
+    specialization: string = ""
+
+# Bindings retain the requested use, selected primary artifact, and ordered
+# supporting artifacts. Link order is significant; these lists are not sets.
+class ArtifactBinding:
+    request: ArtifactRequest
+    primary: ArtifactRecord
+    supporting: list[ArtifactRecord] = []
+    external: list[ExternalRequirement] = []
+
+# One production may produce an object, IR and debug companions together.
+# The producer returns completed records corresponding to the requested outputs.
+class ArtifactProduction:
+    outputs: list[ArtifactOutput]
+    inputs: list[ArtifactBinding] = []
+    external: list[ExternalRequirement] = []
+
+class ArtifactInventory:
+    package_id: string
+    build_id: string
+    artifacts: list[ArtifactRecord]

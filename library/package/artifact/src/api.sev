@@ -1,0 +1,20 @@
+import * from "model.sev"
+
+# Metadata can use a catalog to describe an exact artifact reference without
+# opening source, invoking a compiler, or selecting a linker command.
+trait ArtifactCatalog:
+    def describe(reference: ArtifactRef) -> ArtifactRecord | Error
+    def inventory(package_id: string, build_id: string) -> ArtifactInventory | Error
+    def record(value: ArtifactInventory) -> unit | Error
+
+# Compilers, linkers and packagers implement this contract for the output kinds
+# and formats they produce. Production order is carried in the request's lists.
+trait ArtifactProducer:
+    def supports(output: ArtifactOutput) -> bool
+    def produce(request: ArtifactProduction) -> list[ArtifactRecord] | Error
+
+# Importers, linkers, loaders and specializers bind an artifact for a specific
+# use. Binding describes inputs; execution/loading belongs to that consumer.
+trait ArtifactConsumer:
+    def supports(kind: ArtifactKind, format: ArtifactFormat, use: ArtifactUse) -> bool
+    def bind(request: ArtifactRequest) -> ArtifactBinding | Error

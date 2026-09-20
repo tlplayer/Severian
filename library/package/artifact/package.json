@@ -1,0 +1,11 @@
+{
+  "package": {
+    "name": "package.artifact",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Artifact data models and producer, catalog and consumer contracts"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

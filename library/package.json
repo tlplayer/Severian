@@ -78,7 +78,8 @@
       "system/profiling",
       "testing",
       "package/metadata",
-      "package/interface"
+      "package/interface",
+      "package/artifact"
     ],
     "metadata": {
       "library": {
