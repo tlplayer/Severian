@@ -1,0 +1,45 @@
+import * from "model.sev"
+import * from "codec.sev"
+import metadata
+
+# Consumer name lookup only needs the dependency .sevi declarations.
+def lookup(value: Interface, name: string) -> Declaration | Error:
+    validate(value)
+    for declaration in value.declarations:
+        if declaration.name == name:
+            return declaration
+    throw Error("unknown dependency interface export: " + name)
+
+def same_package(actual: metadata.PackageIdentity, expected: metadata.PackageIdentity) -> bool:
+    return actual.name == expected.name and actual.version == expected.version and actual.content_id == expected.content_id
+
+# Check the complete public surface. Private metadata records may support public
+# layouts or generic contracts without becoming visible to consumer imports.
+def validate_binding(value: Interface, realization: metadata.Realization) -> unit | Error:
+    validate(value)
+    metadata.validate(realization)
+    if not same_package(value.package, realization.package) or value.build_id != realization.build_id or value.semantic_id != realization.interface.semantic_id or realization.interface.path != interface_path(value.build_id):
+        throw Error(".sevi interface does not bind this metadata realization")
+    exported := 0
+    for symbol in realization.symbols:
+        if symbol.exported:
+            exported += 1
+    if exported != int(len(value.declarations)):
+        throw Error(".sevi exports do not match metadata exports")
+    for declaration in value.declarations:
+        symbol = metadata.lookup_symbol(realization, declaration.name)
+        if symbol.id != declaration.symbol_id:
+            throw Error(".sevi declaration points to a different metadata symbol: " + declaration.name)
+
+# A compiler can validate declarations against its metadata before publishing
+# the .sevi file. No metadata file or implementation payload is read here.
+def create(realization: metadata.Realization, declarations: list[Declaration]) -> Interface | Error:
+    value = Interface(realization.package, realization.build_id, realization.interface.semantic_id, declarations)
+    validate_binding(value, realization)
+    return value
+
+def resolve_symbol(dependency: DependencyInterface, name: string) -> metadata.SymbolRecord | Error:
+    validate_binding(dependency.interface, dependency.realization)
+    declaration = lookup(dependency.interface, name)
+    symbol = metadata.lookup_symbol(dependency.realization, declaration.name)
+    return symbol

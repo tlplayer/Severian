@@ -1,0 +1,27 @@
+{
+  "package": {
+    "name": "package.interface",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Dependency .sevi interfaces between consumer source and package metadata"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "metadata": {
+      "package": "package.metadata",
+      "path": "../metadata"
+    },
+    "build_flow": {
+      "package": "package.build",
+      "path": "../build"
+    },
+    "file": {
+      "path": "../../system/file"
+    },
+    "os": {
+      "path": "../../system/os"
+    }
+  }
+}

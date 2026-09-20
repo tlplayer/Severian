@@ -1,0 +1,66 @@
+import * from "model.sev"
+import metadata
+import build_flow
+
+def interface_path(build_id: string) -> string | Error:
+    return "package.pkgi/severian/" + metadata.component(build_id) + "/lib.sevi"
+
+def validate(value: Interface) -> unit | Error:
+    metadata.identifier(value.package.name)
+    metadata.identifier(value.package.version)
+    metadata.identifier(value.package.content_id)
+    metadata.component(value.build_id)
+    metadata.identifier(value.semantic_id)
+    names: list[string] = []
+    symbols: list[string] = []
+    for declaration in value.declarations:
+        metadata.unique(names, declaration.name, "interface export")
+        metadata.unique(symbols, declaration.symbol_id, "interface symbol")
+        build_flow.relative_path(declaration.source)
+        if not declaration.source.starts_with("source/") or not declaration.source.ends_with(".sev"):
+            throw Error("interface declaration provenance must name a source/*.sev file")
+        if declaration.contract.strip() == "":
+            throw Error("interface declaration requires a compiler contract")
+
+def encode_declaration(value: Declaration) -> string:
+    return "{\"name\":" + build_flow.document_quote(value.name) + ",\"symbol-id\":" + build_flow.document_quote(value.symbol_id) + ",\"source\":" + build_flow.document_quote(value.source) + ",\"contract\":" + build_flow.document_quote(value.contract) + "}"
+
+# Canonical, versioned UTF-8 JSON. Contracts are preserved verbatim as strings;
+# this layer does not parse or rewrite compiler semantics as source code.
+def encode(value: Interface) -> string | Error:
+    validate(value)
+    declarations: list[string] = []
+    for declaration in value.declarations:
+        declarations.append(encode_declaration(declaration))
+    binding = "{\"build-id\":" + build_flow.document_quote(value.build_id) + ",\"path\":" + build_flow.document_quote(metadata.realization_path(value.build_id)) + "}"
+    return "{\"format\":\"severian.interface\",\"version\":1,\"package\":" + metadata.encode_package_identity(value.package) + ",\"semantic-id\":" + build_flow.document_quote(value.semantic_id) + ",\"metadata\":" + binding + ",\"declarations\":[" + declarations.join(",") + "]}\n"
+
+def decode_declaration(nodes: list[build_flow.DocumentNode], index: int) -> Declaration | Error:
+    metadata.object_fields(nodes, index, ["name", "symbol-id", "source", "contract"])
+    name = metadata.string_value(nodes, metadata.member(nodes, index, "name"))
+    symbol = metadata.string_value(nodes, metadata.member(nodes, index, "symbol-id"))
+    source = metadata.string_value(nodes, metadata.member(nodes, index, "source"))
+    contract = metadata.string_value(nodes, metadata.member(nodes, index, "contract"))
+    return Declaration(name, symbol, source, contract)
+
+def decode(text: string) -> Interface | Error:
+    nodes = build_flow.document_nodes(text)
+    metadata.object_fields(nodes, 0, ["format", "version", "package", "semantic-id", "metadata", "declarations"])
+    if metadata.string_value(nodes, metadata.member(nodes, 0, "format")) != "severian.interface":
+        throw Error("invalid .sevi interface format")
+    if metadata.int_value(nodes, metadata.member(nodes, 0, "version")) != 1:
+        throw Error("unsupported .sevi interface version")
+    package = metadata.decode_package_identity(nodes, metadata.member(nodes, 0, "package"))
+    semantic_id = metadata.string_value(nodes, metadata.member(nodes, 0, "semantic-id"))
+    binding = metadata.member(nodes, 0, "metadata")
+    metadata.object_fields(nodes, binding, ["build-id", "path"])
+    build_id = metadata.string_value(nodes, metadata.member(nodes, binding, "build-id"))
+    location = metadata.string_value(nodes, metadata.member(nodes, binding, "path"))
+    if location != metadata.realization_path(build_id):
+        throw Error(".sevi metadata path does not match its build identity")
+    declarations: list[Declaration] = []
+    for child in metadata.array_items(nodes, metadata.member(nodes, 0, "declarations")):
+        declarations.append(decode_declaration(nodes, child))
+    value = Interface(package, build_id, semantic_id, declarations)
+    validate(value)
+    return value

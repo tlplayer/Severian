@@ -1,0 +1,87 @@
+import * from "model.sev"
+import * from "codec.sev"
+import * from "query.sev"
+import metadata
+import build_flow
+import file
+import os
+
+# .sevi files have one canonical location for each metadata build binding.
+def read(root: string, relative: string) -> Interface | Error:
+    location = metadata.resolve_path(root, relative)
+    value = decode(file.read_checked(location))
+    if relative != interface_path(value.build_id):
+        throw Error(".sevi file path does not match its build identity")
+    return value
+
+# Create each component separately, checking before writing beneath it. Writers
+# reject directory symlinks; readers may follow verified internal symlinks.
+def ensure_directory(root: string, relative: string) -> string | Error:
+    build_flow.relative_path(relative)
+    current := os.canonical(root)
+    for component in relative.split("/"):
+        current += "/" + component
+        if os.is_symlink(current):
+            throw Error("interface output directory cannot be a symlink")
+        if not os.exists(current) and not os.make_directories(current):
+            throw Error("could not create interface output directory")
+        if not os.is_dir(current):
+            throw Error("interface output parent is not a directory")
+    return current
+
+# Publish a complete immutable file, then return the reference metadata stores.
+# Equal writes reuse it; changed contents require a different build identity.
+def write(root: string, value: Interface) -> metadata.InterfaceRecord | Error:
+    contents = encode(value)
+    relative = interface_path(value.build_id)
+    directory = ensure_directory(root, "package.pkgi/severian/" + value.build_id)
+    destination = directory + "/lib.sevi"
+    lock_path = directory + "/.write.lock"
+    if os.is_symlink(lock_path):
+        throw Error("interface lock cannot be a symlink")
+    lock = file.native_lock(lock_path)
+    if lock < 0:
+        throw Error("could not lock interface output")
+    stage := ""
+    try:
+        if os.is_symlink(destination):
+            throw Error("interface output cannot be a symlink")
+        if os.exists(destination):
+            if file.read_checked(destination) != contents:
+                throw Error("interface build identity already has different declarations")
+        else:
+            stage = os.temporary(directory, ".interface-")
+            temporary = stage + "/lib.sevi"
+            if file.write(temporary, contents) != 0:
+                throw Error("could not write .sevi interface")
+            if os.rename(temporary, destination) != 0:
+                throw Error("could not publish .sevi interface")
+        result = metadata.InterfaceRecord(relative, metadata.digest(destination), value.semantic_id)
+        if stage != "":
+            os.remove_tree(stage)
+        file.unlock(lock)
+        return result
+    catch failure: Error:
+        if stage != "":
+            os.remove_tree(stage)
+        file.unlock(lock)
+        throw failure
+
+# Route a dependency .sevi to metadata only when requested. The resolver supplies
+# the locked package identity and compiler compatibility requirements. Loading
+# accepts metadata-only check results and never opens native implementation files.
+def open_dependency(root: string, relative: string, expected: metadata.PackageIdentity, required: metadata.Compatibility) -> DependencyInterface | Error:
+    location = metadata.resolve_path(root, relative)
+    contents = file.read_checked(location)
+    value = decode(contents)
+    if relative != interface_path(value.build_id) or not same_package(value.package, expected):
+        throw Error(".sevi interface does not match the requested dependency")
+    reference = metadata.InterfaceRecord(relative, metadata.digest(location), value.semantic_id)
+    realization = metadata.load(root, value.build_id, reference)
+    validate_binding(value, realization)
+    metadata.validate_compatibility(required)
+    if not metadata.compatible(realization.compatibility, required):
+        throw Error("incompatible dependency interface metadata")
+    if file.read_checked(location) != contents:
+        throw Error(".sevi interface changed while opening dependency metadata")
+    return DependencyInterface(value, realization)

@@ -1,0 +1,24 @@
+import metadata
+
+# One public declaration visible to importing .sev source. The compiler owns
+# contract syntax (including generic parameters, constraints and effects).
+# source is provenance inside the package source snapshot, not an import input.
+class Declaration:
+    name: string
+    symbol_id: string
+    source: string
+    contract: string
+
+# A .sevi file routes declarations by symbol ID into one metadata realization.
+# Its own checksum is held by metadata, avoiding a self-referential file hash.
+class Interface:
+    package: metadata.PackageIdentity
+    build_id: string
+    semantic_id: string
+    declarations: list[Declaration]
+
+# An opened, identity-checked dependency. Metadata remains the authority for
+# types, layouts, private supporting symbols and implementation selection.
+class DependencyInterface:
+    interface: Interface
+    realization: metadata.Realization
