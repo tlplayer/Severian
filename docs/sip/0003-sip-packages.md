@@ -7,7 +7,7 @@ Created: 2026-09-11
 Updated: 2026-09-19
 Target: Package system
 
-## 1. Contract and compilation boundary
+## Contract and compilation boundary
 
 This SIP specifies required behavior; it does not assert implementation status.
 It supersedes source-optional publication and older XDG registry layouts.
@@ -15,7 +15,7 @@ It supersedes source-optional publication and older XDG registry layouts.
 - `package.json` defines the package, targets, exports, dependencies, and options.
 - `package.lock` pins exact dependency identities and the resolved graph.
 - `package.pkg/` is the generated package realization directory.
-- `package.pkg/package.pkgi/` is a DIRECTORY containing compiler interfaces/interop files.
+- `package.pkg/package.pkgi/` is a DIRECTORY containing compiler interfaces in .sevi format
 - Source MUST ship in every published package, including native provider sources.
 - Compatible dependencies MUST reuse metadata and compiled implementations.
 - Source availability MUST NOT cause dependency recompilation on every import.
@@ -26,16 +26,17 @@ Source modules organize declarations inside that target. Importing a module does
 not create another dependency build. Compiler-selected codegen units may produce
 multiple objects; they need not correspond one-to-one with source files.
 
-The package library has the following sub libraries related to building good software
-- test: which handles testing code/artifacts
-- linker handles linking .o/.so files for dynamic information retrieval and loading
-- archive handles 
-- profile: handles timing/memory usage to understand how the program behaves over time/input
-- diagnostic: handles observability into the software bugs, linting etc.
-- build: handles the built artifacts
+The package library has the following sub libraries with the following responsibilities
+- interface: this file handles .sevi file creation and routing to metadata. It's the surface that all packages communicate through
+- metadata: handles every question the compiler has about *.sev/*.sevi dependencies/.o/.so/.a and gets that information from the compiler and retransmits it back underneath the sevi for the package to keep implementation underneath interface
+- linker handles linking .o/.so files for dynamic information retrieval and loading pulls from metadata
+- dependency: resolving dependencies through the metadata
+- archive: handles archives of files 
+- profile: handles timing/memory usage to understand how the program behaves over time/input and puts that information in debug
+- diagnostic: handles observability into the software bugs, coverage, linting etc.
+- test: which handles testing code/artifacts in debug
+- build: handles the built artifact outputs
 - cache: hot items which would take up a lot of space if left unclean 
-- dependency: resolving dependencies
-- metadata: handles 
 
 Exports declared with `package.export(foo)`, `with package.export:`, or
 `[package].export` MUST populate one canonical export model. Published metadata
@@ -53,13 +54,13 @@ includes supporting private declarations needed for public layouts and generics.
 | `sev add <name>:version` | Resolve and atomically update manifest/lock without compiling the dependency |
 | `sev update <name>` | Intentionally refresh selected dependency resolution; subsequent build evaluates freshness |
 | `sev file.sev` | Use explicit dependencies or compatible published packages/prelude from any directory |
-| `sev clean` | Remove selected local generated state; preserve authored source and registry payloads |
+| `sev clean` | Remove bloat, old builds, cache/* build/* etc.  |
 
 Export packages MUST NOT contain a metadata-only check result masquerading as a
 linkable library. Native artifacts may be omitted for an unsupported target only
 when the publication explicitly declares source-rebuild availability for it.
 
-## 2. Working package and local build layout
+##  Working package and local build layout
 
 ```text
 
@@ -113,7 +114,7 @@ metadata snapshots. Generated inputs require either their contents or the source
 and declared recipe needed to reproduce them. Dependency sources belong to their
 own locked packages; system SDKs and tools are explicit external requirements.
 
-## 4. File formats and roles
+##  File formats and roles
 
 All stored paths are package-relative, normalized UTF-8 paths. Readers reject
 absolute paths and traversal outside the package. Linker arguments use structured
@@ -126,7 +127,7 @@ interface.sevi       REQUIRED
 .o            BUILD PRODUCT
     native codegen units
 
-.a / .lib            DEFAULT REUSABLE STATIC IMPLEMENTATION
+.a/.lib            DEFAULT REUSABLE STATIC IMPLEMENTATION
     archive of native codegen units
 
 .so/.dylib/.dll       DYNAMIC IMPLEMENTATION
@@ -140,7 +141,7 @@ executable           BINARY TARGET
 ```
 
 
-## 3. Published package layout
+##  Published package layout
 
 Publication includes completed payloads and source, excluding local state:
 
@@ -150,7 +151,16 @@ Publication includes completed payloads and source, excluding local state:
 └──<publication-id>/
     └── package.pkg/
         ├── package.pkgi/                # Same interface/binding layout as above
-        ├── metadata/                   # Snapshots, inventories, link/run records
+        ├── metadata/                   # Snapshots, inventories, link/run records├── symbols/
+            └── <symbol-id>.json
+            ├── types/
+            │   └── <type-id>.json
+            ├── layouts/
+            │   └── <abi-id>.json
+            ├── dependencies/
+            │   └── <build-id>.json
+            └── realizations/ #... add more here as needed
+    └── <build-id>.json
         ├── artifacts/<target-triple>/<build-id>/
         │   ├── object/
         │   ├── archive/
@@ -163,6 +173,58 @@ Publication includes completed payloads and source, excluding local state:
             ├── package.lock
             ├── src/
 ```
+## Diagram
+
+caller.sev
+   ↓
+resolve geometry.foobar
+   ↓
+lib.sevi
+   ↓
+metadata/symbols/geometry.foobar
+   ↓
+select realization
+   ↓
+artifacts/x86_64.../<build-id>/object/geometry.o
+   ↓
+caller.o + geometry.o
+   ↓
+link
+
+                         implementation
+                        /              \
+interface -> metadata -> .o/.so       MLIR
+                        |               |
+                        |           specialize
+                        |               |
+                        +-------> .o <--+
+                                   |
+                                  link
+
+
+## Test
+
+The test for this process is as follows:
+
+### lib.sev
+
+The interface is what consumers use and what the pkgi/ folder contains
+```sev
+trait FooBar
+    def foobar(a:T,b:T) -> int
+```
+
+### mod.sev implements the interface 
+```
+class FooBarClass: Foobar
+    def foobar(a:T,b:T) -> int: FooBar
+        return a+b
+```
+
+This should result in monomorphized implementations of the polymorphic types
+
+
+
 ## References
 
 - [Rust compiler metadata and libraries](https://rustc-dev-guide.rust-lang.org/backend/libs-and-metadata.html)
