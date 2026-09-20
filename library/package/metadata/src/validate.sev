@@ -1,0 +1,142 @@
+import * from "model.sev"
+import build_flow
+
+def identifier(value: string) -> string | Error:
+    if value == "":
+        throw Error("empty metadata identity")
+    for byte in value.bytes():
+        if int(byte) < 32 or int(byte) == 127:
+            throw Error("control character in metadata identity")
+    return value
+
+def component(value: string) -> string | Error:
+    build_flow.relative_path(value)
+    if value.contains("/"):
+        throw Error("metadata identity must be a path component")
+    return value
+
+def checksum(value: string) -> string | Error:
+    if not value.starts_with("sha256:") or len(value) != 71:
+        throw Error("metadata requires a SHA-256 checksum")
+    for digit in value[7:].characters():
+        if not "0123456789abcdef".contains(string(digit)):
+            throw Error("invalid metadata checksum")
+    return value
+
+def unique(values: list[string], value: string, role: string) -> unit | Error:
+    identifier(value)
+    if value in values:
+        throw Error("duplicate metadata " + role + ": " + value)
+    values.append(value)
+
+def validate_compatibility(value: Compatibility) -> unit | Error:
+    for field in [value.compiler, value.abi, value.target, value.backend, value.profile, value.options, value.dependencies]:
+        identifier(field)
+
+def validate(value: Realization) -> unit | Error:
+    identifier(value.package.name)
+    identifier(value.package.version)
+    identifier(value.package.content_id)
+    component(value.build_id)
+    validate_compatibility(value.compatibility)
+    build_flow.relative_path(value.interface.path)
+    if not value.interface.path.starts_with("package.pkgi/") or not value.interface.path.ends_with(".sevi"):
+        throw Error("metadata interface must name a package.pkgi .sevi file")
+    checksum(value.interface.checksum)
+    identifier(value.interface.semantic_id)
+    if value.state not in ["complete", "metadata-only"]:
+        throw Error("invalid metadata realization state")
+    artifact_ids: list[string] = []
+    paths: list[string] = [value.interface.path]
+    for item in value.artifacts:
+        unique(artifact_ids, item.id, "artifact")
+        unique(paths, build_flow.relative_path(item.path), "path")
+        checksum(item.checksum)
+        if item.kind not in ["source", "object", "archive", "dynamic", "mlir", "executable"]:
+            throw Error("unknown metadata artifact kind: " + item.kind)
+        if item.kind != "source" and item.target != value.compatibility.target:
+            throw Error("incompatible metadata artifact target")
+        if item.kind == "source" and not item.path.starts_with("source/"):
+            throw Error("source artifact must be in source/")
+    type_ids: list[string] = []
+    for item in value.types:
+        unique(type_ids, item.id, "type")
+        identifier(item.kind)
+        parameters: list[string] = []
+        for parameter in item.parameters:
+            unique(parameters, parameter, "type parameter")
+    symbol_ids: list[string] = []
+    exports: list[string] = []
+    for item in value.symbols:
+        unique(symbol_ids, item.id, "symbol")
+        identifier(item.name)
+        if item.exported:
+            unique(exports, item.name, "export")
+        if item.kind not in ["function", "method", "constructor", "operator", "type", "trait", "constant", "variable", "macro", "module"]:
+            throw Error("unknown metadata symbol kind: " + item.kind)
+        if item.type_id not in type_ids:
+            throw Error("unknown symbol type: " + item.type_id)
+    for item in value.symbols:
+        support: list[string] = []
+        for supporting in item.support:
+            unique(support, supporting, "supporting symbol")
+            if supporting not in symbol_ids:
+                throw Error("unknown supporting symbol: " + supporting)
+    layout_types: list[string] = []
+    for item in value.layouts:
+        unique(layout_types, item.type_id, "layout")
+        if item.type_id not in type_ids or item.abi != value.compatibility.abi:
+            throw Error("unknown layout type or incompatible ABI")
+        if item.size < 0 or item.alignment <= 0:
+            throw Error("invalid layout size or alignment")
+        alignment := item.alignment
+        while alignment > 1 and alignment % 2 == 0:
+            alignment = alignment / 2
+        if alignment != 1 or item.size % item.alignment != 0:
+            throw Error("invalid layout alignment")
+        fields: list[string] = []
+        for field in item.fields:
+            unique(fields, field.name, "layout field")
+            if field.type_id not in type_ids or field.offset < 0 or field.offset > item.size:
+                throw Error("invalid layout field")
+    aliases: list[string] = []
+    for item in value.dependencies:
+        unique(aliases, item.alias, "dependency alias")
+        for field in [item.name, item.version, item.content_id, item.build_id, item.interface_id]:
+            identifier(field)
+    implementation_keys: list[string] = []
+    for item in value.implementations:
+        unique(implementation_keys, build_flow.document_quote(item.symbol_id) + build_flow.document_quote(item.specialization), "implementation")
+        if item.symbol_id not in symbol_ids or len(item.artifacts) == 0:
+            throw Error("implementation requires a known symbol and artifacts")
+        selected: list[string] = []
+        mode := ""
+        for artifact_id in item.artifacts:
+            unique(selected, artifact_id, "implementation artifact")
+            if artifact_id not in artifact_ids:
+                throw Error("unknown implementation artifact: " + artifact_id)
+            for artifact in value.artifacts:
+                if artifact.id != artifact_id:
+                    continue
+                if artifact.kind not in ["object", "archive", "dynamic", "mlir", "source"]:
+                    throw Error("artifact cannot implement a symbol")
+                current = "specialize" if artifact.kind == "mlir" else "compile" if artifact.kind == "source" else "link"
+                if mode != "" and mode != current:
+                    throw Error("implementation mixes native, MLIR or source inputs")
+                mode = current
+        if mode == "link":
+            identifier(item.entry)
+            if value.state != "complete":
+                throw Error("metadata-only realization cannot provide native implementations")
+    runtime_ids: list[string] = []
+    for item in value.runtime:
+        unique(runtime_ids, item.artifact_id, "runtime artifact")
+        found := false
+        for artifact in value.artifacts:
+            if artifact.id == item.artifact_id and artifact.kind in ["dynamic", "executable"]:
+                found = true
+        if not found:
+            throw Error("runtime record requires a dynamic library or executable")
+        needed: list[string] = []
+        for name in item.needed:
+            unique(needed, component(name), "runtime dependency")

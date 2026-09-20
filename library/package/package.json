@@ -54,6 +54,10 @@
     "profile": {
       "package": "package.profile",
       "path": "profile"
+    },
+    "metadata": {
+      "package": "package.metadata",
+      "path": "metadata"
     }
   }
 }

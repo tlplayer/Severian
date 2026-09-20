@@ -1,0 +1,96 @@
+import * from "model.sev"
+import * from "validate.sev"
+import * from "codec.sev"
+import build_flow
+import file
+import os
+import path
+import process
+
+# Resolve on disk as well as lexically: symlinks may only refer inside the root.
+def resolve_path(root: string, relative: string) -> string | Error:
+    build_flow.relative_path(relative)
+    base = os.canonical(root)
+    resolved = os.canonical(base + "/" + relative)
+    if not resolved.starts_with(base + "/"):
+        throw Error("metadata path escapes package root: " + relative)
+    return resolved
+
+def digest(location: string) -> string | Error:
+    result = process.execute(["sha256sum", "--", location])
+    if result.status != 0:
+        throw Error("could not hash metadata payload: " + location)
+    output = result.stdout
+    return checksum("sha256:" + (output[1:65] if output.starts_with("\\") else output[:64]))
+
+def verify_file(root: string, relative: string, expected: string) -> string | Error:
+    checksum(expected)
+    location = resolve_path(root, relative)
+    if not os.is_file(location) or digest(location) != expected:
+        throw Error("metadata payload checksum mismatch: " + relative)
+    return location
+
+def verify(value: Realization, root: string) -> unit | Error:
+    validate(value)
+    verify_file(root, value.interface.path, value.interface.checksum)
+    for artifact in value.artifacts:
+        verify_file(root, artifact.path, artifact.checksum)
+
+def realization_path(build_id: string) -> string | Error:
+    return "metadata/realizations/" + component(build_id) + ".json"
+
+# An interface supplies both its semantic ID and its payload identity. Neither
+# an arbitrary build ID nor an adjacent implementation file establishes binding.
+def load(root: string, build_id: string, interface: InterfaceRecord) -> Realization | Error:
+    value = decode(file.read_checked(resolve_path(root, realization_path(build_id))))
+    if value.build_id != build_id or value.interface.path != interface.path or value.interface.checksum != interface.checksum or value.interface.semantic_id != interface.semantic_id:
+        throw Error("interface does not bind this metadata realization")
+    verify_file(root, value.interface.path, value.interface.checksum)
+    return value
+
+# Write an immutable snapshot after verifying every payload. Publishing a fresh
+# file by rename makes readers see either no record or a complete JSON document.
+# Writers serialize per directory; equal repeat publication is a no-op.
+def save(root: string, value: Realization) -> string | Error:
+    verify(value, root)
+    base = os.canonical(root)
+    relative = realization_path(value.build_id)
+    directory = base + "/metadata"
+    if not os.make_directories(directory):
+        throw Error("could not create metadata directory")
+    resolve_path(base, "metadata")
+    if not os.make_directories(directory + "/realizations"):
+        throw Error("could not create metadata realizations directory")
+    directory = resolve_path(base, "metadata/realizations")
+    # Reject a pre-existing lock symlink before the native lock opens it.
+    lock_path = directory + "/.write.lock"
+    if os.is_symlink(lock_path):
+        throw Error("metadata lock cannot be a symlink")
+    lock = file.native_lock(lock_path)
+    if lock < 0:
+        throw Error("could not lock metadata directory")
+    stage := ""
+    try:
+        destination = base + "/" + relative
+        contents = encode(value)
+        if os.exists(destination):
+            existing = file.read_checked(resolve_path(base, relative))
+            if existing != contents:
+                throw Error("metadata build identity already has a different snapshot")
+        else:
+            stage = os.temporary(directory, ".metadata-")
+            temporary = stage + "/realization.json"
+            if file.write(temporary, contents) != 0:
+                throw Error("could not write metadata snapshot")
+            verify(value, base)
+            if os.rename(temporary, destination) != 0:
+                throw Error("could not publish metadata snapshot")
+        if stage != "":
+            os.remove_tree(stage)
+        file.unlock(lock)
+        return relative
+    catch failure: Error:
+        if stage != "":
+            os.remove_tree(stage)
+        file.unlock(lock)
+        throw failure

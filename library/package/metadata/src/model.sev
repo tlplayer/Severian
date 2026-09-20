@@ -1,0 +1,93 @@
+# Compiler-produced facts shared by interfaces, dependency resolution and linking.
+# IDs are opaque compiler identities; paths are relative to package.pkg/.
+class PackageIdentity:
+    name: string
+    version: string
+    content_id: string
+
+class Compatibility:
+    compiler: string
+    abi: string
+    target: string
+    backend: string
+    profile: string
+    options: string
+    dependencies: string
+
+class InterfaceRecord:
+    path: string
+    checksum: string
+    semantic_id: string
+
+class ArtifactRecord:
+    id: string
+    path: string
+    kind: string
+    checksum: string
+    target: string
+
+class SymbolRecord:
+    id: string
+    name: string
+    kind: string
+    type_id: string
+    exported: bool = false
+    support: list[string] = []
+
+class TypeRecord:
+    id: string
+    kind: string
+    parameters: list[string] = []
+
+class FieldLayout:
+    name: string
+    type_id: string
+    offset: int
+
+class LayoutRecord:
+    type_id: string
+    abi: string
+    size: int
+    alignment: int
+    fields: list[FieldLayout] = []
+
+class DependencyRecord:
+    alias: string
+    name: string
+    version: string
+    content_id: string
+    build_id: string
+    interface_id: string
+
+# Specialization is an opaque compiler key, not a spelling of type arguments.
+# Empty specialization denotes a non-generic native implementation or a generic
+# MLIR template. Ordered artifacts may include private supporting codegen units.
+class ImplementationRecord:
+    symbol_id: string
+    specialization: string
+    artifacts: list[string]
+    entry: string = ""
+
+class RuntimeRecord:
+    artifact_id: string
+    needed: list[string] = []
+
+class Realization:
+    package: PackageIdentity
+    build_id: string
+    compatibility: Compatibility
+    interface: InterfaceRecord
+    state: string
+    artifacts: list[ArtifactRecord] = []
+    symbols: list[SymbolRecord] = []
+    types: list[TypeRecord] = []
+    layouts: list[LayoutRecord] = []
+    dependencies: list[DependencyRecord] = []
+    implementations: list[ImplementationRecord] = []
+    runtime: list[RuntimeRecord] = []
+
+class ImplementationSelection:
+    symbol: SymbolRecord
+    implementation: ImplementationRecord
+    artifacts: list[ArtifactRecord]
+    action: string

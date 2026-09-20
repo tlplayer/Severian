@@ -64,7 +64,7 @@ when the publication explicitly declares source-rebuild availability for it.
 
 ```text
 
-#Build/ABI Id is in the format YYYY-MM-DD-HH-min-commit(a12c2a30)-hash-source
+#Build/ABI Id is in the format YYYY-MM-DD-HH-min-commit(a12c2a30)-hash(last 5 chars)-source-symbol
 The ID is used to determine if recompilation is needed/not from a quick glance
 
 geometry/
@@ -93,7 +93,6 @@ geometry/
     ├── cache/ #temporary artifacts used for hot operations
     ├── bin/<target-triple>/<build-id>/
     ├── debug/
-    │   ├── symbols/<build-id>/
     │   ├── profile/<build-id>/
     │   ├── test/<build-id>/
     │   └── coverage/<build-id>/

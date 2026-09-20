@@ -76,7 +76,8 @@
       "system/platform",
       "system/process",
       "system/profiling",
-      "testing"
+      "testing",
+      "package/metadata"
     ],
     "metadata": {
       "library": {

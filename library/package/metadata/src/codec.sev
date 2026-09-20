@@ -1,0 +1,330 @@
+import * from "model.sev"
+import * from "validate.sev"
+import build_flow
+
+# Versioned JSON interchange. Strict field types and references fail closed;
+# document_nodes also rejects duplicate keys and bounds document nesting.
+def member(nodes: list[build_flow.DocumentNode], parent: int, key: string) -> int | Error:
+    for index in range(parent + 1, int(len(nodes))):
+        if nodes[index].parent == parent and nodes[index].key == key:
+            return index
+    throw Error("missing metadata field: " + key)
+
+def object_fields(nodes: list[build_flow.DocumentNode], parent: int, allowed: list[string]) -> unit | Error:
+    if nodes[parent].kind != "object":
+        throw Error("metadata record requires an object")
+    for node in nodes:
+        if node.parent == parent and node.key not in allowed:
+            throw Error("unknown metadata field: " + node.key)
+
+def string_value(nodes: list[build_flow.DocumentNode], index: int) -> string | Error:
+    if nodes[index].kind != "string":
+        throw Error("metadata field requires a string")
+    return nodes[index].value
+
+def bool_value(nodes: list[build_flow.DocumentNode], index: int) -> bool | Error:
+    if nodes[index].kind != "scalar" or nodes[index].value not in ["true", "false"]:
+        throw Error("metadata field requires a boolean")
+    return nodes[index].value == "true"
+
+def int_value(nodes: list[build_flow.DocumentNode], index: int) -> int | Error:
+    raw = nodes[index].value
+    if nodes[index].kind != "scalar" or raw == "":
+        throw Error("metadata field requires a nonnegative integer")
+    result := 0
+    for character in raw.characters():
+        digit = string(character)
+        if not "0123456789".contains(digit):
+            throw Error("metadata field requires a nonnegative integer")
+        number = int(digit)
+        if result > (9223372036854775807 - number) / 10:
+            throw Error("metadata integer overflow")
+        result = result * 10 + number
+    return result
+
+def array_items(nodes: list[build_flow.DocumentNode], index: int) -> list[int] | Error:
+    if nodes[index].kind != "array":
+        throw Error("metadata field requires an array")
+    result: list[int] = []
+    for child in range(index + 1, int(len(nodes))):
+        if nodes[child].parent == index:
+            result.append(child)
+    return result
+
+def encode_strings(values: list[string]) -> string:
+    parts: list[string] = []
+    for value in values:
+        parts.append(build_flow.document_quote(value))
+    return "[" + parts.join(",") + "]"
+
+def decode_strings(nodes: list[build_flow.DocumentNode], index: int) -> list[string] | Error:
+    result: list[string] = []
+    for child in array_items(nodes, index):
+        result.append(string_value(nodes, child))
+    return result
+
+def encode_package_identity(value: PackageIdentity) -> string:
+    fields: list[string] = []
+    fields.append("\"name\":" + build_flow.document_quote(value.name))
+    fields.append("\"version\":" + build_flow.document_quote(value.version))
+    fields.append("\"content-id\":" + build_flow.document_quote(value.content_id))
+    return "{" + fields.join(",") + "}"
+
+def decode_package_identity(nodes: list[build_flow.DocumentNode], index: int) -> PackageIdentity | Error:
+    object_fields(nodes, index, ["name", "version", "content-id"])
+    name = string_value(nodes, member(nodes, index, "name"))
+    version = string_value(nodes, member(nodes, index, "version"))
+    content_id = string_value(nodes, member(nodes, index, "content-id"))
+    return PackageIdentity(name, version, content_id)
+
+def encode_compatibility(value: Compatibility) -> string:
+    fields: list[string] = []
+    fields.append("\"compiler\":" + build_flow.document_quote(value.compiler))
+    fields.append("\"abi\":" + build_flow.document_quote(value.abi))
+    fields.append("\"target\":" + build_flow.document_quote(value.target))
+    fields.append("\"backend\":" + build_flow.document_quote(value.backend))
+    fields.append("\"profile\":" + build_flow.document_quote(value.profile))
+    fields.append("\"options\":" + build_flow.document_quote(value.options))
+    fields.append("\"dependencies\":" + build_flow.document_quote(value.dependencies))
+    return "{" + fields.join(",") + "}"
+
+def decode_compatibility(nodes: list[build_flow.DocumentNode], index: int) -> Compatibility | Error:
+    object_fields(nodes, index, ["compiler", "abi", "target", "backend", "profile", "options", "dependencies"])
+    compiler = string_value(nodes, member(nodes, index, "compiler"))
+    abi = string_value(nodes, member(nodes, index, "abi"))
+    target = string_value(nodes, member(nodes, index, "target"))
+    backend = string_value(nodes, member(nodes, index, "backend"))
+    profile = string_value(nodes, member(nodes, index, "profile"))
+    options = string_value(nodes, member(nodes, index, "options"))
+    dependencies = string_value(nodes, member(nodes, index, "dependencies"))
+    return Compatibility(compiler, abi, target, backend, profile, options, dependencies)
+
+def encode_interface_record(value: InterfaceRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"path\":" + build_flow.document_quote(value.path))
+    fields.append("\"checksum\":" + build_flow.document_quote(value.checksum))
+    fields.append("\"semantic-id\":" + build_flow.document_quote(value.semantic_id))
+    return "{" + fields.join(",") + "}"
+
+def decode_interface_record(nodes: list[build_flow.DocumentNode], index: int) -> InterfaceRecord | Error:
+    object_fields(nodes, index, ["path", "checksum", "semantic-id"])
+    path = string_value(nodes, member(nodes, index, "path"))
+    checksum = string_value(nodes, member(nodes, index, "checksum"))
+    semantic_id = string_value(nodes, member(nodes, index, "semantic-id"))
+    return InterfaceRecord(path, checksum, semantic_id)
+
+def encode_artifact_record(value: ArtifactRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"id\":" + build_flow.document_quote(value.id))
+    fields.append("\"path\":" + build_flow.document_quote(value.path))
+    fields.append("\"kind\":" + build_flow.document_quote(value.kind))
+    fields.append("\"checksum\":" + build_flow.document_quote(value.checksum))
+    fields.append("\"target\":" + build_flow.document_quote(value.target))
+    return "{" + fields.join(",") + "}"
+
+def decode_artifact_record(nodes: list[build_flow.DocumentNode], index: int) -> ArtifactRecord | Error:
+    object_fields(nodes, index, ["id", "path", "kind", "checksum", "target"])
+    id = string_value(nodes, member(nodes, index, "id"))
+    path = string_value(nodes, member(nodes, index, "path"))
+    kind = string_value(nodes, member(nodes, index, "kind"))
+    checksum = string_value(nodes, member(nodes, index, "checksum"))
+    target = string_value(nodes, member(nodes, index, "target"))
+    return ArtifactRecord(id, path, kind, checksum, target)
+
+def encode_symbol_record(value: SymbolRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"id\":" + build_flow.document_quote(value.id))
+    fields.append("\"name\":" + build_flow.document_quote(value.name))
+    fields.append("\"kind\":" + build_flow.document_quote(value.kind))
+    fields.append("\"type-id\":" + build_flow.document_quote(value.type_id))
+    fields.append("\"exported\":" + string(value.exported))
+    fields.append("\"support\":" + encode_strings(value.support))
+    return "{" + fields.join(",") + "}"
+
+def decode_symbol_record(nodes: list[build_flow.DocumentNode], index: int) -> SymbolRecord | Error:
+    object_fields(nodes, index, ["id", "name", "kind", "type-id", "exported", "support"])
+    id = string_value(nodes, member(nodes, index, "id"))
+    name = string_value(nodes, member(nodes, index, "name"))
+    kind = string_value(nodes, member(nodes, index, "kind"))
+    type_id = string_value(nodes, member(nodes, index, "type-id"))
+    exported = bool_value(nodes, member(nodes, index, "exported"))
+    support = decode_strings(nodes, member(nodes, index, "support"))
+    return SymbolRecord(id, name, kind, type_id, exported, support)
+
+def encode_type_record(value: TypeRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"id\":" + build_flow.document_quote(value.id))
+    fields.append("\"kind\":" + build_flow.document_quote(value.kind))
+    fields.append("\"parameters\":" + encode_strings(value.parameters))
+    return "{" + fields.join(",") + "}"
+
+def decode_type_record(nodes: list[build_flow.DocumentNode], index: int) -> TypeRecord | Error:
+    object_fields(nodes, index, ["id", "kind", "parameters"])
+    id = string_value(nodes, member(nodes, index, "id"))
+    kind = string_value(nodes, member(nodes, index, "kind"))
+    parameters = decode_strings(nodes, member(nodes, index, "parameters"))
+    return TypeRecord(id, kind, parameters)
+
+def encode_field_layout(value: FieldLayout) -> string:
+    fields: list[string] = []
+    fields.append("\"name\":" + build_flow.document_quote(value.name))
+    fields.append("\"type-id\":" + build_flow.document_quote(value.type_id))
+    fields.append("\"offset\":" + string(value.offset))
+    return "{" + fields.join(",") + "}"
+
+def decode_field_layout(nodes: list[build_flow.DocumentNode], index: int) -> FieldLayout | Error:
+    object_fields(nodes, index, ["name", "type-id", "offset"])
+    name = string_value(nodes, member(nodes, index, "name"))
+    type_id = string_value(nodes, member(nodes, index, "type-id"))
+    offset = int_value(nodes, member(nodes, index, "offset"))
+    return FieldLayout(name, type_id, offset)
+
+def encode_layout_record(value: LayoutRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"type-id\":" + build_flow.document_quote(value.type_id))
+    fields.append("\"abi\":" + build_flow.document_quote(value.abi))
+    fields.append("\"size\":" + string(value.size))
+    fields.append("\"alignment\":" + string(value.alignment))
+    fields: list[string] = []
+    for item in value.fields:
+        fields.append(encode_field_layout(item))
+    fields.append("\"fields\":" + "[" + fields.join(",") + "]")
+    return "{" + fields.join(",") + "}"
+
+def decode_layout_record(nodes: list[build_flow.DocumentNode], index: int) -> LayoutRecord | Error:
+    object_fields(nodes, index, ["type-id", "abi", "size", "alignment", "fields"])
+    type_id = string_value(nodes, member(nodes, index, "type-id"))
+    abi = string_value(nodes, member(nodes, index, "abi"))
+    size = int_value(nodes, member(nodes, index, "size"))
+    alignment = int_value(nodes, member(nodes, index, "alignment"))
+    fields: list[FieldLayout] = []
+    for child in array_items(nodes, member(nodes, index, "fields")):
+        fields.append(decode_field_layout(nodes, child))
+    return LayoutRecord(type_id, abi, size, alignment, fields)
+
+def encode_dependency_record(value: DependencyRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"alias\":" + build_flow.document_quote(value.alias))
+    fields.append("\"name\":" + build_flow.document_quote(value.name))
+    fields.append("\"version\":" + build_flow.document_quote(value.version))
+    fields.append("\"content-id\":" + build_flow.document_quote(value.content_id))
+    fields.append("\"build-id\":" + build_flow.document_quote(value.build_id))
+    fields.append("\"interface-id\":" + build_flow.document_quote(value.interface_id))
+    return "{" + fields.join(",") + "}"
+
+def decode_dependency_record(nodes: list[build_flow.DocumentNode], index: int) -> DependencyRecord | Error:
+    object_fields(nodes, index, ["alias", "name", "version", "content-id", "build-id", "interface-id"])
+    alias = string_value(nodes, member(nodes, index, "alias"))
+    name = string_value(nodes, member(nodes, index, "name"))
+    version = string_value(nodes, member(nodes, index, "version"))
+    content_id = string_value(nodes, member(nodes, index, "content-id"))
+    build_id = string_value(nodes, member(nodes, index, "build-id"))
+    interface_id = string_value(nodes, member(nodes, index, "interface-id"))
+    return DependencyRecord(alias, name, version, content_id, build_id, interface_id)
+
+def encode_implementation_record(value: ImplementationRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"symbol-id\":" + build_flow.document_quote(value.symbol_id))
+    fields.append("\"specialization\":" + build_flow.document_quote(value.specialization))
+    fields.append("\"artifacts\":" + encode_strings(value.artifacts))
+    fields.append("\"entry\":" + build_flow.document_quote(value.entry))
+    return "{" + fields.join(",") + "}"
+
+def decode_implementation_record(nodes: list[build_flow.DocumentNode], index: int) -> ImplementationRecord | Error:
+    object_fields(nodes, index, ["symbol-id", "specialization", "artifacts", "entry"])
+    symbol_id = string_value(nodes, member(nodes, index, "symbol-id"))
+    specialization = string_value(nodes, member(nodes, index, "specialization"))
+    artifacts = decode_strings(nodes, member(nodes, index, "artifacts"))
+    entry = string_value(nodes, member(nodes, index, "entry"))
+    return ImplementationRecord(symbol_id, specialization, artifacts, entry)
+
+def encode_runtime_record(value: RuntimeRecord) -> string:
+    fields: list[string] = []
+    fields.append("\"artifact-id\":" + build_flow.document_quote(value.artifact_id))
+    fields.append("\"needed\":" + encode_strings(value.needed))
+    return "{" + fields.join(",") + "}"
+
+def decode_runtime_record(nodes: list[build_flow.DocumentNode], index: int) -> RuntimeRecord | Error:
+    object_fields(nodes, index, ["artifact-id", "needed"])
+    artifact_id = string_value(nodes, member(nodes, index, "artifact-id"))
+    needed = decode_strings(nodes, member(nodes, index, "needed"))
+    return RuntimeRecord(artifact_id, needed)
+
+def encode_realization(value: Realization) -> string:
+    fields: list[string] = []
+    fields.append("\"format\":1")
+    fields.append("\"package\":" + encode_package_identity(value.package))
+    fields.append("\"build-id\":" + build_flow.document_quote(value.build_id))
+    fields.append("\"compatibility\":" + encode_compatibility(value.compatibility))
+    fields.append("\"interface\":" + encode_interface_record(value.interface))
+    fields.append("\"state\":" + build_flow.document_quote(value.state))
+    artifacts: list[string] = []
+    for item in value.artifacts:
+        artifacts.append(encode_artifact_record(item))
+    fields.append("\"artifacts\":" + "[" + artifacts.join(",") + "]")
+    symbols: list[string] = []
+    for item in value.symbols:
+        symbols.append(encode_symbol_record(item))
+    fields.append("\"symbols\":" + "[" + symbols.join(",") + "]")
+    types: list[string] = []
+    for item in value.types:
+        types.append(encode_type_record(item))
+    fields.append("\"types\":" + "[" + types.join(",") + "]")
+    layouts: list[string] = []
+    for item in value.layouts:
+        layouts.append(encode_layout_record(item))
+    fields.append("\"layouts\":" + "[" + layouts.join(",") + "]")
+    dependencies: list[string] = []
+    for item in value.dependencies:
+        dependencies.append(encode_dependency_record(item))
+    fields.append("\"dependencies\":" + "[" + dependencies.join(",") + "]")
+    implementations: list[string] = []
+    for item in value.implementations:
+        implementations.append(encode_implementation_record(item))
+    fields.append("\"implementations\":" + "[" + implementations.join(",") + "]")
+    runtime: list[string] = []
+    for item in value.runtime:
+        runtime.append(encode_runtime_record(item))
+    fields.append("\"runtime\":" + "[" + runtime.join(",") + "]")
+    return "{" + fields.join(",") + "}"
+
+def decode_realization(nodes: list[build_flow.DocumentNode], index: int) -> Realization | Error:
+    object_fields(nodes, index, ["format", "package", "build-id", "compatibility", "interface", "state", "artifacts", "symbols", "types", "layouts", "dependencies", "implementations", "runtime"])
+    if int_value(nodes, member(nodes, index, "format")) != 1:
+        throw Error("unsupported package metadata format")
+    package = decode_package_identity(nodes, member(nodes, index, "package"))
+    build_id = string_value(nodes, member(nodes, index, "build-id"))
+    compatibility = decode_compatibility(nodes, member(nodes, index, "compatibility"))
+    interface = decode_interface_record(nodes, member(nodes, index, "interface"))
+    state = string_value(nodes, member(nodes, index, "state"))
+    artifacts: list[ArtifactRecord] = []
+    for child in array_items(nodes, member(nodes, index, "artifacts")):
+        artifacts.append(decode_artifact_record(nodes, child))
+    symbols: list[SymbolRecord] = []
+    for child in array_items(nodes, member(nodes, index, "symbols")):
+        symbols.append(decode_symbol_record(nodes, child))
+    types: list[TypeRecord] = []
+    for child in array_items(nodes, member(nodes, index, "types")):
+        types.append(decode_type_record(nodes, child))
+    layouts: list[LayoutRecord] = []
+    for child in array_items(nodes, member(nodes, index, "layouts")):
+        layouts.append(decode_layout_record(nodes, child))
+    dependencies: list[DependencyRecord] = []
+    for child in array_items(nodes, member(nodes, index, "dependencies")):
+        dependencies.append(decode_dependency_record(nodes, child))
+    implementations: list[ImplementationRecord] = []
+    for child in array_items(nodes, member(nodes, index, "implementations")):
+        implementations.append(decode_implementation_record(nodes, child))
+    runtime: list[RuntimeRecord] = []
+    for child in array_items(nodes, member(nodes, index, "runtime")):
+        runtime.append(decode_runtime_record(nodes, child))
+    return Realization(package, build_id, compatibility, interface, state, artifacts, symbols, types, layouts, dependencies, implementations, runtime)
+
+def encode(value: Realization) -> string | Error:
+    validate(value)
+    return encode_realization(value) + "\n"
+
+def decode(text: string) -> Realization | Error:
+    value = decode_realization(build_flow.document_nodes(text), 0)
+    validate(value)
+    return value

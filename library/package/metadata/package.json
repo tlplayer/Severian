@@ -1,14 +1,18 @@
 {
   "package": {
-    "name": "package.linker",
+    "name": "package.metadata",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Verified native link plans and atomic output publication"
+    "description": "Typed interface bindings, realization metadata and implementation lookup"
   },
   "lib": {
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "build_flow": {
+      "package": "package.build",
+      "path": "../build"
+    },
     "file": {
       "path": "../../system/file"
     },
@@ -20,10 +24,6 @@
     },
     "process": {
       "path": "../../system/process"
-    },
-    "metadata": {
-      "package": "package.metadata",
-      "path": "../metadata"
     }
   }
 }

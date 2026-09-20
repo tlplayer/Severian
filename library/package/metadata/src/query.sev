@@ -1,0 +1,82 @@
+import * from "model.sev"
+import * from "validate.sev"
+
+def compatible(actual: Compatibility, required: Compatibility) -> bool:
+    return actual.compiler == required.compiler and actual.abi == required.abi and actual.target == required.target and actual.backend == required.backend and actual.profile == required.profile and actual.options == required.options and actual.dependencies == required.dependencies
+
+# Selection is by effective inputs, never by source presence or timestamps.
+def select_realization(values: list[Realization], package: PackageIdentity, required: Compatibility, linkable: bool = true) -> Realization | Error:
+    validate_compatibility(required)
+    selected := -1
+    for index in range(int(len(values))):
+        value = values[index]
+        validate(value)
+        if value.package.name != package.name or value.package.version != package.version or value.package.content_id != package.content_id or not compatible(value.compatibility, required):
+            continue
+        if linkable and value.state != "complete":
+            continue
+        if selected >= 0:
+            throw Error("ambiguous compatible metadata realizations")
+        selected = index
+    if selected < 0:
+        throw Error("no compatible metadata realization")
+    return values[selected]
+
+def lookup_symbol(value: Realization, name: string) -> SymbolRecord | Error:
+    validate(value)
+    for item in value.symbols:
+        if item.exported and item.name == name:
+            return item
+    throw Error("unknown exported symbol: " + name)
+
+def lookup_type(value: Realization, type_id: string) -> TypeRecord | Error:
+    validate(value)
+    for item in value.types:
+        if item.id == type_id:
+            return item
+    throw Error("unknown metadata type: " + type_id)
+
+def lookup_layout(value: Realization, type_id: string, abi: string) -> LayoutRecord | Error:
+    validate(value)
+    for item in value.layouts:
+        if item.type_id == type_id and item.abi == abi:
+            return item
+    throw Error("no compatible type layout: " + type_id)
+
+def lookup_dependency(value: Realization, alias: string) -> DependencyRecord | Error:
+    validate(value)
+    for item in value.dependencies:
+        if item.alias == alias:
+            return item
+    throw Error("unknown metadata dependency: " + alias)
+
+def lookup_implementation(value: Realization, name: string, required: Compatibility, specialization: string = "") -> ImplementationSelection | Error:
+    symbol = lookup_symbol(value, name)
+    validate_compatibility(required)
+    if not compatible(value.compatibility, required):
+        throw Error("incompatible implementation realization")
+    selected := -1
+    fallback := -1
+    for index in range(int(len(value.implementations))):
+        item = value.implementations[index]
+        if item.symbol_id != symbol.id:
+            continue
+        if item.specialization == specialization:
+            selected = index
+        elif item.specialization == "":
+            fallback = index
+    if selected < 0:
+        selected = fallback
+    if selected < 0:
+        throw Error("no implementation for exported symbol: " + name)
+    implementation = value.implementations[selected]
+    artifacts: list[ArtifactRecord] = []
+    for artifact_id in implementation.artifacts:
+        for artifact in value.artifacts:
+            if artifact.id == artifact_id:
+                artifacts.append(artifact)
+    kind = artifacts[0].kind
+    action = "specialize" if kind == "mlir" else "compile" if kind == "source" else "link"
+    if action == "link" and (value.state != "complete" or implementation.specialization != specialization):
+        throw Error("no completed native implementation for specialization: " + name)
+    return ImplementationSelection(symbol, implementation, artifacts, action)
