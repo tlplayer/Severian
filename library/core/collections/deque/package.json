@@ -10,15 +10,18 @@
         "implementation": "source",
         "status": "experimental"
       }
-    }
+    },
+    "export": [
+      "deque"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
   },
   "dependencies": {
     "storage": {
-      "package": "core.collections.internal.contiguous_storage",
-      "path": "../internal/contiguous_storage",
+      "package": "core.storage",
+      "path": "../../storage",
       "version": "0.1.0"
     }
   }

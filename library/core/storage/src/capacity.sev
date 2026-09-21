@@ -1,6 +1,3 @@
-import * from "../../../sev_compiler/universal/primitive/primitive.sev"
-import * from "../../../sev_compiler/universal/primitive/bool.sev"
-import * from "../../../sev_compiler/universal/primitive/int.sev"
 
 
 # Explicit lossy conversion produces all bits set at the target's pointer width.

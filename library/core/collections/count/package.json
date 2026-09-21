@@ -1,0 +1,36 @@
+{
+  "package": {
+    "name": "collections.count",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Checked frequency collections over insertion-ordered dictionaries",
+    "export": [
+      "count",
+      "Count"
+    ]
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "dict": {
+      "package": "collections.dict",
+      "path": "../dict",
+      "version": "0.1.0"
+    },
+    "traits": {
+      "package": "collections.traits",
+      "path": "../traits",
+      "version": "0.1.0"
+    },
+    "storage": {
+      "package": "core.storage",
+      "path": "../../storage",
+      "version": "0.1.0"
+    },
+    "list": {
+      "path": "../list",
+      "version": "0.1.0"
+    }
+  }
+}

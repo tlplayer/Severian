@@ -17,9 +17,9 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "storage": {
-      "package": "core.collections.internal.contiguous_storage",
-      "path": "../contiguous_storage",
+    "hashed": {
+      "package": "collections.hash",
+      "path": "../../hash",
       "version": "0.1.0"
     },
     "traits": {

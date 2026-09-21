@@ -33,6 +33,9 @@ class list[T]: Sequence[T]
     def set(index: usize, item: T):
         storage.set(index, item)
 
+    def replace(index: usize, item: T) -> T:
+        return storage.replace(index, item)
+
     def append(item: T):
         storage.append(item)
 
@@ -90,6 +93,58 @@ class list[T]: Sequence[T]
 
     def iter() -> ListIterator[T]:
         return ListIterator[T](borrow self, 0)
+
+
+    def cap() -> usize:
+        return capacity()
+
+    def bytes() -> byte:
+        return byte(float(capacity()) * bytes(T).amount)
+
+    operator [](index: usize) -> borrow T:
+        return get(index)
+
+    operator []=(index: usize, item: T):
+        set(index, item)
+
+    operator if(self) -> bool:
+        return not empty()
+
+    operator else(self) -> bool:
+        return empty()
+
+    def find(item: view T) -> usize | None:
+        for index in range(len()):
+            if get(index) == item:
+                return index
+        return None
+
+    def contains(item: view T) -> bool:
+        found ?= find(item)
+        return found is not None
+
+    def remove_value(item: view T) -> T | None:
+        found ?= find(item)
+        if found is None:
+            return None
+        return remove(found)
+
+    def copy(self: view Self) -> Self:
+        result := list[T](len())
+        for index in range(len()):
+            result.append(copy get(index))
+        return result
+
+    operator copy(self) -> Self:
+        return self.copy()
+
+    operator ==(right: view Self) -> bool:
+        if len() != right.len():
+            return false
+        for index in range(len()):
+            if get(index) != right.get(index):
+                return false
+        return true
 
 
 def with_capacity[T](capacity: usize) -> list[T]:

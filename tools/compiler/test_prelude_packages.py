@@ -34,7 +34,7 @@ class PreludePackages(unittest.TestCase):
                 published.add(root.name)
             self.assertEqual(packages[-1].name, 'prelude')
             runtime = Path(temporary)/'runtime'
-            self.assertTrue((runtime/'library/core/storage/native/statistics.c').is_file())
+            self.assertTrue((runtime/'library/core/storage/statistics/native/statistics.c').is_file())
             self.assertTrue((runtime/'library/core/memory/native/memory.h').is_file())
             self.assertIn('import print from ', (runtime/'lib.sev').read_text())
             self.assertEqual((Path(temporary)/'math/lib.sev').read_text(),

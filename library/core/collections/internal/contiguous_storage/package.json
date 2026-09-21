@@ -17,9 +17,9 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "memory": {
-      "package": "core.memory",
-      "path": "../../../memory",
+    "storage": {
+      "package": "core.storage",
+      "path": "../../../storage",
       "version": "0.1.0"
     }
   }

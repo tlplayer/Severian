@@ -1,4 +1,5 @@
 import traits
+import * from list as lists
 
 # Nodes own integer entry indices. Only the dense arrays own K and V;
 # unused node slots never construct keys or values.
@@ -12,24 +13,24 @@ class Location:
     found: bool
 
 class BTree[K:traits.Ordered, V]:
-    __nodes: list[TreeNode]
-    __slots: list[int]
-    __children: list[int]
-    __free: list[int]
-    __keys: list[K]
-    __values: list[V]
+    __nodes: lists.list[TreeNode]
+    __slots: lists.list[int]
+    __children: lists.list[int]
+    __free: lists.list[int]
+    __keys: lists.list[K]
+    __values: lists.list[V]
     __degree: int
     __width: int
     __root: int
 
     def BTree(minimum_degree: int = 8):
         assert(minimum_degree >= 2 and minimum_degree <= 65536)
-        __nodes = []
-        __slots = []
-        __children = []
-        __free = []
-        __keys = []
-        __values = []
+        __nodes = lists.list[TreeNode]()
+        __slots = lists.list[int]()
+        __children = lists.list[int]()
+        __free = lists.list[int]()
+        __keys = lists.list[K]()
+        __values = lists.list[V]()
         __degree = minimum_degree
         __width = minimum_degree * 2 - 1
         __root = 0
@@ -64,7 +65,7 @@ class BTree[K:traits.Ordered, V]:
         node := len(__nodes)
         if len(__free) > 0:
             node = __free[len(__free) - 1]
-            __free = __free[:len(__free) - 1]
+            __free.truncate(usize(len(__free) - 1))
             __nodes[node] = TreeNode(0, leaf)
         else:
             __nodes.append(TreeNode(0, leaf))
@@ -134,8 +135,7 @@ class BTree[K:traits.Ordered, V]:
         found = __locate(key)
         if found.found:
             slot = __slot(found.node, found.index)
-            previous = __values[slot]
-            __values[slot] = value
+            previous = __values.replace(usize(slot), value)
             return previous
         slot = len(__keys)
         if slot == 0:
@@ -214,7 +214,6 @@ class BTree[K:traits.Ordered, V]:
         if not found.found:
             return None
         slot = __slot(found.node, found.index)
-        previous = __values[slot]
         __delete(__root, key)
         if __nodes[__root].count == 0:
             old_root = __root
@@ -226,11 +225,10 @@ class BTree[K:traits.Ordered, V]:
             moved = __locate(__keys[last])
             assert(moved.found)
             __put(moved.node, moved.index, slot)
-            __keys[slot] = __keys[last]
-            __values[slot] = __values[last]
-        __keys = __keys[:last]
-        __values = __values[:last]
-        return previous
+            __keys.swap(usize(slot), usize(last))
+            __values.swap(usize(slot), usize(last))
+        drop __keys.remove(usize(last))
+        return __values.remove(usize(last))
 
     def __delete(node: int, key: K):
         index := __position(node, key)
@@ -265,19 +263,21 @@ class BTree[K:traits.Ordered, V]:
             index = __rebalance(node, index)
         __delete(__child(node, index), key)
 
-    def __ordered_slots() -> list[int]:
-        result: list[int] = []
+    def __ordered_slots() -> lists.list[int]:
+        result: lists.list[int] = lists.list[int]()
         if len(__keys) == 0:
             return result
-        nodes := [__root]
-        positions := [0]
+        nodes := lists.list[int]()
+        nodes.append(__root)
+        positions := lists.list[int]()
+        positions.append(0)
         while len(nodes) > 0:
             top = len(nodes) - 1
             node = nodes[top]
             position = positions[top]
             if position > __nodes[node].count * 2:
-                nodes = nodes[:top]
-                positions = positions[:top]
+                nodes.truncate(usize(top))
+                positions.truncate(usize(top))
             else:
                 positions[top] += 1
                 if position % 2 == 0:
@@ -288,20 +288,20 @@ class BTree[K:traits.Ordered, V]:
                     result.append(__slot(node, position / 2))
         return result
 
-    def keys() -> list[K]:
-        result: list[K] = []
+    def keys() -> lists.list[K]:
+        result: lists.list[K] = lists.list[K]()
         for slot in __ordered_slots():
             result.append(__keys[slot])
         return result
 
-    def values() -> list[V]:
-        result: list[V] = []
+    def values() -> lists.list[V]:
+        result: lists.list[V] = lists.list[V]()
         for slot in __ordered_slots():
             result.append(__values[slot])
         return result
 
-    def range(start: K, stop: K) -> list[K]:
-        result: list[K] = []
+    def range(start: K, stop: K) -> lists.list[K]:
+        result: lists.list[K] = lists.list[K]()
         for slot in __ordered_slots():
             key = __keys[slot]
             if not (key < start) and key < stop:
@@ -309,12 +309,12 @@ class BTree[K:traits.Ordered, V]:
         return result
 
     def clear():
-        __nodes = []
-        __slots = []
-        __children = []
-        __free = []
-        __keys = []
-        __values = []
+        __nodes = lists.list[TreeNode]()
+        __slots = lists.list[int]()
+        __children = lists.list[int]()
+        __free = lists.list[int]()
+        __keys = lists.list[K]()
+        __values = lists.list[V]()
         __root = 0
 
     def valid() -> bool:
@@ -322,16 +322,18 @@ class BTree[K:traits.Ordered, V]:
             return false
         if len(__keys) == 0:
             return true
-        nodes := [__root]
-        levels := [0]
+        nodes := lists.list[int]()
+        nodes.append(__root)
+        levels := lists.list[int]()
+        levels.append(0)
         leaf_level := -1
         count := 0
         while len(nodes) > 0:
             top = len(nodes) - 1
             node = nodes[top]
             level = levels[top]
-            nodes = nodes[:top]
-            levels = levels[:top]
+            nodes.truncate(usize(top))
+            levels.truncate(usize(top))
             occupied = __nodes[node].count
             if occupied > __width or occupied < (1 if node == __root else __degree - 1):
                 return false
@@ -469,3 +471,16 @@ class BTree[K:traits.Ordered, V]:
         self.__set_count(parent, occupied - 1)
         self.__set_count(left, left_length + right_length + 1)
         self.__release(right)
+
+    def insert(key: K, item: V) -> V | None:
+        return replace(key, item)
+
+    def items():
+        for slot in __ordered_slots():
+            yield (__keys[slot], __values[slot])
+
+    def copy(self: view Self) -> Self:
+        result := BTree[K, V](__degree)
+        for slot in __ordered_slots():
+            result.set(copy __keys[slot], copy __values[slot])
+        return result

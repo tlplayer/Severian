@@ -1,1 +1,2 @@
 import * from "vector.sev"
+import * from "numeric.sev"

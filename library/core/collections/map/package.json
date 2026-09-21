@@ -10,7 +10,10 @@
         "implementation": "source",
         "status": "experimental"
       }
-    }
+    },
+    "export": [
+      "map"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
@@ -23,6 +26,10 @@
     "traits": {
       "package": "collections.traits",
       "path": "../traits",
+      "version": "0.1.0"
+    },
+    "list": {
+      "path": "../list",
       "version": "0.1.0"
     }
   }

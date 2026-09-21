@@ -1,0 +1,49 @@
+class Range:
+    start: int
+    stop: int
+    step: int
+
+def range(stop: int) -> Range:
+    return Range(0, stop, 1)
+
+def range(start: int, stop: int, step: int = 1) -> Range:
+    assert(step != 0)
+    return Range(start, stop, step)
+
+operator iteration_start(value: Range) -> int:
+    return value.start
+
+operator iteration_more(value: Range, position: int) -> bool:
+    return position < value.stop if value.step > 0 else position > value.stop
+
+operator iteration_next(value: Range, position: int) -> int:
+    # Reaching an unrepresentable next value necessarily crosses any valid
+    # exclusive stop in this direction. Return the stop sentinel before adding.
+    if value.step > 0:
+        if position > 9223372036854775807 - value.step:
+            return value.stop
+    else:
+        if position < -9223372036854775808 - value.step:
+            return value.stop
+    return position + value.step
+
+operator element_at(value: Range, position: int) -> int:
+    return position
+
+
+test "ranges terminate before signed step overflow":
+    count := 0
+    for value in range(9223372036854775806, 9223372036854775807, 2):
+        assert(value == 9223372036854775806)
+        count += 1
+    assert(count == 1)
+    count = 0
+    for value in range(-9223372036854775807, -9223372036854775808, -2):
+        assert(value == -9223372036854775807)
+        count += 1
+    assert(count == 1)
+    count = 0
+    for value in range(0, -9223372036854775808, -9223372036854775808):
+        assert(value == 0)
+        count += 1
+    assert(count == 1)

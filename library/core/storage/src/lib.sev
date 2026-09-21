@@ -1,2 +1,4 @@
 import * from "buffer.sev"
-import * from "statistics.sev"
+import * from "capacity.sev"
+import * from "contiguous.sev"
+import * from "ring.sev"

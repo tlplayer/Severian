@@ -1,0 +1,16 @@
+{
+  "package": {
+    "name": "collections.range",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Non-owning integer iteration ranges",
+    "export": [
+      "Range",
+      "range"
+    ]
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {}
+}

@@ -1,5 +1,14 @@
+import array from array
+import list, slice, region from list
+import deque from deque
+import queue from queue
+import stack from stack
+import heap from heap
+import dict from dict
+import count from count
+import Range, range from range
 import set from set
-import vector from vector
+import vector, numeric_vector from vector
 import map from map
 import BTree from btree
 import Hash from hashed

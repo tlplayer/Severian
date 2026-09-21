@@ -3,7 +3,30 @@
     "name": "collections",
     "version": "0.2.0",
     "edition": "2026",
-    "description": "Collection facade over independently published providers"
+    "description": "Collection facade over independently published providers",
+    "export": [
+      "array",
+      "list",
+      "slice",
+      "region",
+      "deque",
+      "queue",
+      "stack",
+      "heap",
+      "dict",
+      "count",
+      "Range",
+      "range",
+      "set",
+      "vector",
+      "numeric_vector",
+      "map",
+      "BTree",
+      "Hash",
+      "MappingStorage",
+      "HashKey",
+      "Ordered"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
@@ -34,6 +57,51 @@
     "traits": {
       "package": "collections.traits",
       "path": "traits",
+      "version": "0.1.0"
+    },
+    "array": {
+      "package": "array",
+      "path": "array",
+      "version": "0.1.0"
+    },
+    "list": {
+      "package": "list",
+      "path": "list",
+      "version": "0.1.0"
+    },
+    "deque": {
+      "package": "deque",
+      "path": "deque",
+      "version": "0.1.0"
+    },
+    "queue": {
+      "package": "queue",
+      "path": "queue",
+      "version": "0.1.0"
+    },
+    "stack": {
+      "package": "stack",
+      "path": "stack",
+      "version": "0.1.0"
+    },
+    "heap": {
+      "package": "heap",
+      "path": "heap",
+      "version": "0.1.0"
+    },
+    "dict": {
+      "package": "collections.dict",
+      "path": "dict",
+      "version": "0.1.0"
+    },
+    "count": {
+      "package": "collections.count",
+      "path": "count",
+      "version": "0.1.0"
+    },
+    "range": {
+      "package": "collections.range",
+      "path": "range",
       "version": "0.1.0"
     }
   }

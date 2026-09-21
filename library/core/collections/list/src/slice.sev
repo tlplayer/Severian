@@ -1,0 +1,30 @@
+import * from "list.sev"
+
+class slice[T]:
+    owner: borrow list[T]
+    offset: usize
+    length: usize
+
+    def slice(values: borrow list[T], start: usize, count: usize):
+        assert(start <= values.len())
+        assert(count <= values.len() - start)
+        owner = borrow values
+        offset = start
+        length = count
+
+    def len() -> usize:
+        return length
+
+    def get(index: usize) -> borrow T:
+        assert(index < length)
+        return owner.get(offset + index)
+
+    def set(index: usize, item: T):
+        assert(index < length)
+        owner.set(offset + index, item)
+
+    operator [](index: usize) -> borrow T:
+        return get(index)
+
+    operator []=(index: usize, item: T):
+        set(index, item)

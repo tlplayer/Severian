@@ -1,0 +1,27 @@
+{
+  "package": {
+    "name": "core.storage.statistics",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Optional native storage allocation instrumentation",
+    "unsafe": {
+      "capabilities": [
+        "native-abi"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {},
+  "xxi": {
+    "c": {
+      "sources": [
+        "native/statistics.c"
+      ]
+    }
+  }
+}

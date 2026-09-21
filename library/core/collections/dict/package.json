@@ -1,25 +1,25 @@
 {
   "package": {
-    "name": "collections.hash",
+    "name": "collections.dict",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Typed open-addressed hash mapping provider",
+    "description": "Insertion-ordered dictionaries over the shared hash provider",
     "export": [
-      "Hash"
+      "dict"
     ]
   },
   "lib": {
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "hashed": {
+      "package": "collections.hash",
+      "path": "../hash",
+      "version": "0.1.0"
+    },
     "traits": {
       "package": "collections.traits",
       "path": "../traits",
-      "version": "0.1.0"
-    },
-    "list": {
-      "package": "list",
-      "path": "../list",
       "version": "0.1.0"
     }
   }

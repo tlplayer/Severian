@@ -1,5 +1,6 @@
 import btree
 import traits
+import * from list as lists
 
 class set[T, C:traits.MappingStorage[T,bool]=btree.BTree]:
     storage: C[T,bool]
@@ -34,5 +35,115 @@ class set[T, C:traits.MappingStorage[T,bool]=btree.BTree]:
     def clear():
         storage.clear()
 
-    def values() -> list[T]:
+    def values() -> lists.list[T]:
         return storage.keys()
+
+    def iter():
+        for item in values():
+            yield item
+
+    def get(item: T) -> T | None:
+        return storage.get_key(item)
+
+    def first() -> T | None:
+        result: T | None = None
+        for item in values():
+            if result is None or item < result:
+                result = item
+        return result
+
+    def last() -> T | None:
+        result: T | None = None
+        for item in values():
+            if result is None or result < item:
+                result = item
+        return result
+
+    def lower_bound(value: T) -> T | None:
+        result: T | None = None
+        for item in values():
+            if not (item < value) and (result is None or item < result):
+                result = item
+        return result
+
+    def upper_bound(value: T) -> T | None:
+        result: T | None = None
+        for item in values():
+            if value < item and (result is None or item < result):
+                result = item
+        return result
+
+    def pop_first() -> T | None:
+        item ?= first()
+        if item is not None:
+            remove(item)
+        return item
+
+    def pop_last() -> T | None:
+        item ?= last()
+        if item is not None:
+            remove(item)
+        return item
+
+    def range(start: T, stop: T):
+        item ?= lower_bound(start)
+        while item is not None and item < stop:
+            yield item
+            item ?= upper_bound(item)
+
+    def copy(self: view Self) -> Self:
+        result := set[T, C]()
+        for item in values():
+            result.add(copy item)
+        return result
+
+    operator if(self) -> bool:
+        return not empty()
+
+def union[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> set[T,C]:
+    result := left.copy()
+    for value in right.iter():
+        result.add(value)
+    return result
+
+
+def intersection[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> set[T,C]:
+    result := set[T,C]()
+    for value in left.iter():
+        if right.contains(value):
+            result.add(value)
+    return result
+
+
+def difference[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> set[T,C]:
+    result := set[T,C]()
+    for value in left.iter():
+        if not right.contains(value):
+            result.add(value)
+    return result
+
+
+def symmetric_difference[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> set[T,C]:
+    result := difference(left, right)
+    for value in right.iter():
+        if not left.contains(value):
+            result.add(value)
+    return result
+
+
+def subset[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> bool:
+    for value in left.iter():
+        if not right.contains(value):
+            return false
+    return true
+
+
+def superset[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> bool:
+    return subset(right, left)
+
+
+def disjoint[T, C: traits.MappingStorage[T,bool], R: traits.MappingStorage[T,bool]](left: borrow set[T,C], right: borrow set[T,R]) -> bool:
+    for value in left.iter():
+        if right.contains(value):
+            return false
+    return true

@@ -3,7 +3,13 @@
     "name": "collections.vector",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Growable contiguous vectors with an initial capacity"
+    "description": "Growable contiguous vectors with an initial capacity",
+    "export": [
+      "vector",
+      "numeric_vector",
+      "VectorScalar",
+      "Vector"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
@@ -12,6 +18,11 @@
     "storage": {
       "package": "core.storage",
       "path": "../../storage",
+      "version": "0.1.0"
+    },
+    "traits": {
+      "package": "collections.traits",
+      "path": "../traits",
       "version": "0.1.0"
     }
   }

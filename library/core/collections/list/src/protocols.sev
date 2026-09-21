@@ -1,0 +1,38 @@
+import * from "list.sev"
+import * from "slice.sev"
+
+operator len[T](values: view list[T]) -> usize:
+    return values.len()
+
+operator size[T](values: view list[T]) -> usize:
+    return values.len()
+
+operator element_at[T](values: borrow list[T], position: int) -> borrow T:
+    assert(position >= 0)
+    return values.get(usize(position))
+
+operator element_set[T](values: borrow list[T], position: int, item: T):
+    assert(position >= 0)
+    values.set(usize(position), item)
+
+operator iteration_start[T](values: view list[T]) -> int:
+    return 0
+
+operator iteration_more[T](values: view list[T], position: int) -> bool:
+    return position < int(values.len())
+
+operator iteration_next[T](values: view list[T], position: int) -> int:
+    return position + 1
+
+operator in[T](item: view T, values: view list[T]) -> bool:
+    return values.contains(item)
+
+def region[T](values: borrow list[T], start: usize, count: usize) -> slice[T]:
+    return slice[T](borrow values, start, count)
+
+operator list_create[T](size: int, exemplar: T) -> list[T]:
+    assert(size >= 0)
+    result := list[T](usize(size))
+    for position in range(size):
+        result.append(copy exemplar)
+    return result

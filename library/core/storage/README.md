@@ -23,3 +23,9 @@ the preserved native compatibility implementation in [`native/storage.c`](native
 including shared enum payload ownership and its tested limits. The
 [ownership library](../../../sev_compiler/frontend/ownership/README.md) owns the
 contract; the C registry is not the authority for source buffer lifetimes.
+
+`ContiguousStorage[T]` and `RingStorage[T]` own initialized elements, bounds,
+capacity, and relocation for collections. Their cleanup drops initialized values
+before the allocation is released. Native measurement hooks are in the optional
+`core.storage.statistics` package and are not part of this package's dependency
+or build graph.

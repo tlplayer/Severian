@@ -70,8 +70,8 @@ test:
             'lint': {'enabled': False},
         }
         (consumer/'package.json').write_text(json.dumps(consumer_manifest))
-        (consumer/'main.sev').write_text('import * from "package:runtime/library/core/storage/src/statistics.sev" as stats\n'
-                                         'import * from "package:storage/src/statistics.sev" as local_stats\n'
+        (consumer/'main.sev').write_text('import * from "package:runtime/library/core/storage/statistics/src/lib.sev" as stats\n'
+                                         'import * from "package:storage/statistics/src/lib.sev" as local_stats\n'
                                          'test:\n    assert(stats.allocation_count() >= u64(0))\n'
                                          '    assert(local_stats.allocation_count() >= u64(0))\n')
         sev('test', consumer)

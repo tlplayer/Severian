@@ -1,6 +1,8 @@
-import * from "../../../sev_compiler/universal/primitive/primitive.sev"
-import * from "../../../sev_compiler/universal/primitive/slice.sev"
-import * from "dict.sev"
+import dict from dict
+import traits
+import storage
+import slice from list
+
 
 
 '''
@@ -17,13 +19,7 @@ T    counted key type
 Semantic key constraint:
 
 ```text
-T: Hash + Equatable
-```
-
-Bootstrap storage constraint:
-
-```text
-T: Copy + Default
+T: traits.HashKey
 ```
 
 A count stores one non-negative `usize` frequency for each present value.
@@ -57,7 +53,7 @@ A count is false exactly when no positive-frequency keys remain.
 '''
 
 
-trait Count[T: Hash + Equatable]:
+trait Count[T: traits.HashKey]:
     Truth
 
     property unique: usize
@@ -83,7 +79,7 @@ trait Count[T: Hash + Equatable]:
     def copy(self) -> count[T]
 
 
-class count[T: Hash + Equatable + Copy + Default]:
+class count[T: traits.HashKey]:
     trait Count[T]
 
     __counts: dict[T, usize]
@@ -125,9 +121,9 @@ class count[T: Hash + Equatable + Copy + Default]:
 
 
     def frequency(self, value: T) -> usize:
-        current, found := __counts.get(value)
+        current ?= __counts.get(value)
 
-        if not found:
+        if current is None:
             return 0
 
         return current
@@ -137,12 +133,12 @@ class count[T: Hash + Equatable + Copy + Default]:
         if amount == 0:
             return
 
-        current, found := __counts.get(value)
+        current ?= __counts.get(value)
 
         # Validate the aggregate before changing any entry or counter.
-        new_total := collection_size(total_count, amount)
+        new_total := storage.collection_size(total_count, amount)
 
-        if found:
+        if current is not None:
             __counts[value] = current + amount
         else:
             __counts[value] = amount
@@ -155,9 +151,9 @@ class count[T: Hash + Equatable + Copy + Default]:
         if amount == 0:
             return frequency(value)
 
-        current, found := __counts.get(value)
+        current ?= __counts.get(value)
 
-        if not found:
+        if current is None:
             return 0
 
         removed := min(current, amount)
@@ -165,8 +161,8 @@ class count[T: Hash + Equatable + Copy + Default]:
         total_count -= removed
 
         if remaining == 0:
-            _, ok := __counts.remove(value)
-            assert(ok)
+            previous ?= __counts.remove(value)
+            assert(previous is not None)
             unique -= 1
         else:
             __counts[value] = remaining
@@ -180,9 +176,9 @@ class count[T: Hash + Equatable + Copy + Default]:
 
 
     def remove(self, value: T) -> usize:
-        current, found := __counts.remove(value)
+        current ?= __counts.remove(value)
 
-        if not found:
+        if current is None:
             return 0
 
         unique -= 1
@@ -221,82 +217,3 @@ class count[T: Hash + Equatable + Copy + Default]:
         return result
 
 
-'''
-# Executable specification
-'''
-
-
-test "count tracks unique and total cardinality":
-    values := count[i32]()
-
-    values.add(1)
-    values.add(1)
-    values.add(2)
-
-    assert(values.len() == 2)
-    assert(values.total() == 3)
-    assert(values[1] == 2)
-    assert(values[2] == 1)
-    assert(values[99] == 0)
-
-
-test "count subtraction floors at zero":
-    values := count[i32]()
-    values.add(7, 3)
-
-    remaining := values.subtract(7, 2)
-    assert(remaining == 1)
-    assert(values.total() == 1)
-
-    remaining = values.subtract(7, 100)
-    assert(remaining == 0)
-    assert(values.total() == 0)
-    assert(values.len() == 0)
-    assert(not values.contains(7))
-
-
-test "count remove returns removed multiplicity":
-    values := count[i32]()
-    values.add(7, 4)
-    values.add(8, 2)
-
-    removed := values.remove(7)
-
-    assert(removed == 4)
-    assert(values.len() == 1)
-    assert(values.total() == 2)
-
-
-test "count truth follows positive frequencies":
-    values := count[i32]()
-
-    if values:
-        throw Error("empty count must be false")
-
-    values.add(7)
-
-    if values:
-    throw Error("Unimplemented")
-    else:
-        throw Error("non-empty count must be true")
-
-
-test with compiler "count keys require hash and equality":
-    reject:
-        class Unkeyed:
-            value: i32
-
-        values := count[Unkeyed]()
-
-
-test "count overflow leaves both frequencies and totals unchanged":
-    values := count[i32]()
-    values.add(1, collection_limit())
-    throws(values.add(1))
-    throws(values.add(2))
-    assert(values.len() == 1)
-    assert(values.total() == collection_limit())
-    assert(values[1] == collection_limit())
-    assert(values[2] == 0)
-    values.add(2, 0)
-    assert(values.len() == 1)

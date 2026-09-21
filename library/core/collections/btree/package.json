@@ -3,7 +3,10 @@
     "name": "btree",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Typed ordered B-tree mapping provider"
+    "description": "Typed ordered B-tree mapping provider",
+    "export": [
+      "BTree"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
@@ -12,6 +15,11 @@
     "traits": {
       "package": "collections.traits",
       "path": "../traits",
+      "version": "0.1.0"
+    },
+    "list": {
+      "package": "list",
+      "path": "../list",
       "version": "0.1.0"
     }
   }

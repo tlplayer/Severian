@@ -10,7 +10,10 @@
         "implementation": "source",
         "status": "experimental"
       }
-    }
+    },
+    "export": [
+      "queue"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"

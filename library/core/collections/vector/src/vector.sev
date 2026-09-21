@@ -1,4 +1,5 @@
-import * from "../../../storage/src/lib.sev" as storage
+import storage
+import Container from traits
 
 # The vector owns its buffer directly. N is the initial capacity; reserve
 # chooses growth and core.storage checks allocations through core.memory. Replacing or

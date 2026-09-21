@@ -1,4 +1,4 @@
-import * from "../../memory/src/lib.sev" as memory
+import memory
 
 # Safe owning allocations. Collection capacity and growth are deliberately
 # absent: vector owns those policies and uses these same memory primitives.

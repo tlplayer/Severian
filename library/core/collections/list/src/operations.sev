@@ -1,7 +1,7 @@
 import * from "list.sev"
 
 
-def extend[T](values: borrow mut list[T], additions: list[T]):
+def extend[T](values: borrow list[T], additions: list[T]):
     values.extend(move additions)
 
 

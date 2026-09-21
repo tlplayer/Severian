@@ -10,7 +10,17 @@
         "implementation": "source",
         "status": "experimental"
       }
-    }
+    },
+    "export": [
+      "set",
+      "union",
+      "intersection",
+      "difference",
+      "symmetric_difference",
+      "subset",
+      "superset",
+      "disjoint"
+    ]
   },
   "lib": {
     "path": "src/lib.sev"
@@ -23,6 +33,10 @@
     "traits": {
       "package": "collections.traits",
       "path": "../traits",
+      "version": "0.1.0"
+    },
+    "list": {
+      "path": "../list",
       "version": "0.1.0"
     }
   }

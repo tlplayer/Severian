@@ -2,10 +2,10 @@ import storage
 
 
 class deque[T]:
-    storage: storage.ContiguousStorage[T]
+    storage: storage.RingStorage[T]
 
     def deque(capacity: usize = 0):
-        this.storage := storage.create[T](capacity)
+        this.storage := storage.RingStorage[T](capacity)
 
     def len() -> usize:
         return storage.len()
@@ -28,23 +28,48 @@ class deque[T]:
         return storage.get(len() - 1)
 
     def push_front(item: T):
-        storage.insert(0, item)
+        storage.push_front(item)
 
     def push_back(item: T):
-        storage.append(item)
+        storage.push_back(item)
 
     def pop_front() -> T | None:
         if empty():
             return None
-        return storage.remove(0)
+        return storage.pop_front()
 
     def pop_back() -> T | None:
         if empty():
             return None
-        return storage.remove(len() - 1)
+        return storage.pop_back()
 
     def get(index: usize) -> borrow T:
         return storage.get(index)
 
     def clear():
         storage.clear()
+
+    def set(index: usize, item: T):
+        storage.set(index, item)
+
+    def cap() -> usize:
+        return capacity()
+
+    operator [](index: usize) -> borrow T:
+        return get(index)
+
+    operator []=(index: usize, item: T):
+        set(index, item)
+
+    def iter():
+        for index in range(len()):
+            yield get(index)
+
+    def copy(self: view Self) -> Self:
+        result := deque[T](capacity())
+        for index in range(len()):
+            result.push_back(copy get(index))
+        return result
+
+    operator if(self) -> bool:
+        return not empty()

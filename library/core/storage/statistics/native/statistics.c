@@ -1,5 +1,5 @@
 #include "statistics.h"
-#include "../../memory/native/memory.h"
+#include "../../../memory/native/memory.h"
 
 /* The reference-counted provider is embedded in the bootstrap runtime. Native
  * memrefs use the physical adapter instead. Both may coexist: storage_new uses

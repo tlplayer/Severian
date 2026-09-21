@@ -1,0 +1,75 @@
+import memory
+import * from "capacity.sev"
+
+class RingStorage[T]:
+    allocation: memory.Allocation[T]
+    head: usize
+    used: usize
+
+    def RingStorage(capacity: usize = 0):
+        allocation = memory.Allocation[T](capacity)
+        head = 0
+        used = 0
+
+    def len() -> usize:
+        return used
+
+    def capacity() -> usize:
+        return allocation.capacity
+
+    def empty() -> bool:
+        return used == 0
+
+    def position(index: usize) -> usize:
+        tail := capacity() - head
+        return index - tail if index >= tail else head + index
+
+    def reserve(minimum: usize):
+        if minimum <= capacity():
+            return
+        replacement := memory.Allocation[T](collection_capacity(capacity(), minimum))
+        for index in range(used):
+            replacement.write(index, allocation.take(position(index)))
+        allocation = move replacement
+        head = 0
+
+    def get(index: usize) -> borrow T:
+        assert(index < used)
+        return allocation.read(position(index))
+
+    def set(index: usize, item: T):
+        assert(index < used)
+        slot := position(index)
+        drop allocation.take(slot)
+        allocation.write(slot, item)
+
+    def push_front(item: T):
+        reserve(collection_size(used, 1))
+        head = capacity() - 1 if head == 0 else head - 1
+        allocation.write(head, item)
+        used += 1
+
+    def push_back(item: T):
+        reserve(collection_size(used, 1))
+        allocation.write(position(used), item)
+        used += 1
+
+    def pop_front() -> T:
+        assert(used > 0)
+        item := allocation.take(head)
+        head = 0 if head + 1 == capacity() else head + 1
+        used -= 1
+        return item
+
+    def pop_back() -> T:
+        assert(used > 0)
+        used -= 1
+        return allocation.take(position(used))
+
+    def clear():
+        while used > 0:
+            drop pop_back()
+        head = 0
+
+    operator drop(move self) -> unit:
+        clear()

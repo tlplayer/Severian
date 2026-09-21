@@ -40,7 +40,7 @@ class heap[T: Ordered]:
     def sift_up(start: usize):
         index := start
         while index > 0:
-            parent := (index - 1) / 2
+            parent := (index - 1) // 2
             if not (storage.get(index) < storage.get(parent)):
                 return
             storage.swap(index, parent)
@@ -61,3 +61,20 @@ class heap[T: Ordered]:
                 return
             storage.swap(index, smallest)
             index = smallest
+
+    def replace(item: T) -> T | None:
+        if empty():
+            push(item)
+            return None
+        previous := storage.remove(0)
+        storage.insert(0, item)
+        sift_down(0)
+        return previous
+
+    def push_pop(item: T) -> T:
+        if empty() or not (storage.get(0) < item):
+            return item
+        previous := storage.remove(0)
+        storage.insert(0, item)
+        sift_down(0)
+        return previous

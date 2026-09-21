@@ -1,14 +1,11 @@
-import btree
+import hashed
 import traits
-import * from list as lists
 
-class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]:
-    storage: C[K,V]
+class dict[K: traits.HashKey, V]:
+    storage: hashed.Hash[K, V]
 
-    def map(*entries: tuple[K,V]):
-        storage = C[K,V]()
-        for entry in entries:
-            storage.set(entry[0], entry[1])
+    def dict():
+        storage = hashed.Hash[K, V]()
 
     def len() -> usize:
         return storage.len()
@@ -34,29 +31,39 @@ class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]:
     def remove(key: K) -> V | None:
         return storage.remove(key)
 
-    def clear():
-        storage.clear()
-
-    def keys() -> lists.list[K]:
-        return storage.keys()
-
-    def values() -> lists.list[V]:
-        return storage.values()
+    def set_default(key: K, item: V) -> V:
+        existing ?= get(key)
+        if existing is not None:
+            return existing
+        set(key, item)
+        return item
 
     operator [](key: K) -> V:
         result ?= get(key)
-        assert(result is not None, "map key is not present")
+        assert(result is not None, "dictionary key is not present")
         return result
 
     operator []=(key: K, item: V):
         set(key, item)
+
+    operator if(self) -> bool:
+        return not empty()
+
+    def keys():
+        return storage.keys()
+
+    def values():
+        return storage.values()
 
     def items():
         for key in keys():
             yield (key, self[key])
 
     def copy(self: view Self) -> Self:
-        result := map[K, V, C]()
+        result := dict[K, V]()
         for key in keys():
             result.set(copy key, copy self[key])
         return result
+
+    def clear():
+        storage.clear()
