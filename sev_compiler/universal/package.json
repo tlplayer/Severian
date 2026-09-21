@@ -9,6 +9,10 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "sentence": {
+      "package": "sev-compiler-sentence",
+      "path": "../frontend/sentence"
+    },
     "profiling": {
       "path": "../../library/system/profiling"
     },

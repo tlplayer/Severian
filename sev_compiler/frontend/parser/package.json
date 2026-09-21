@@ -9,17 +9,25 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "sentence": {
+      "package": "sev-compiler-sentence",
+      "path": "../sentence"
+    },
     "diagnostics": {
-      "path": "../../diagnostics"
+      "path": "../../diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "lexer": {
-      "path": "../lexer"
+      "path": "../lexer",
+      "package": "sev-compiler-lexer"
     },
     "source": {
-      "path": "../../source"
+      "path": "../../source",
+      "package": "sev-compiler-source"
     },
     "universal": {
-      "path": "../../universal"
+      "path": "../../universal",
+      "package": "sev-compiler-universal"
     }
   }
 }

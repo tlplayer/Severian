@@ -1,0 +1,175 @@
+import package
+import path
+import os
+import process
+import environment
+
+class OwnedSource:
+    location: string
+    group: string
+
+def contained(root: string, location: string) -> string | Error:
+    resolved = os.canonical(location)
+    if not resolved.starts_with(root + "/") or not os.is_file(resolved):
+        throw Error("prelude input escapes source tree: " + location)
+    return resolved
+
+def owner(sources: list[OwnedSource], location: string) -> string:
+    for source in sources:
+        if source.location == location:
+            return source.group
+    return ""
+
+def import_path(line: string) -> string:
+    if not line.starts_with("import ") or not line.contains(" from \""):
+        return ""
+    return line.split(" from \"")[1].split("\"")[0]
+
+def copy_asset(root: string, destination: string, group: string, location: string, copied: list[string]) -> unit | Error:
+    source = contained(root, location)
+    key = group + ":" + source
+    if key in copied:
+        return
+    copied.append(key)
+    package.copy_file(source, destination + "/" + group + "/" + source[int(len(root)) + 1:])
+    for line in package.read_text(source).split("\n"):
+        directive = line.strip()
+        if directive.starts_with("#include \"") or directive.starts_with("# include \""):
+            copy_asset(root, destination, group, path.dirname(source) + "/" + directive.split("\"")[1], copied)
+
+def stage(root: string, destination: string) -> list[string] | Error:
+    recipe = package.parse_document(package.read_text(root + "/library/prelude/packages.json"))
+    version = package.text_setting(recipe, "", "version")
+    sources: list[OwnedSource] = []
+    groups: list[string] = []
+    for entry in recipe:
+        if entry.table.starts_with("packages.") and entry.key == "source":
+            group = entry.table.split(".")[1]
+            if group not in groups:
+                groups.append(group)
+            sources.append(OwnedSource(contained(root, root + "/" + package.unquote(entry.value)), group))
+    cursor := 0
+    while cursor < int(len(sources)):
+        source = sources[cursor]
+        cursor += 1
+        for line in package.read_text(source.location).split("\n"):
+            relative = import_path(line)
+            if relative == "":
+                continue
+            child = contained(root, path.dirname(source.location) + "/" + relative)
+            if owner(sources, child) == "":
+                sources.append(OwnedSource(child, source.group))
+    copied: list[string] = []
+    for group in groups:
+        dependencies: list[string] = []
+        native: list[string] = []
+        symbols: list[string] = []
+        for source in sources:
+            if source.group == group:
+                for line in package.read_text(source.location).split("\n"):
+                    if line.strip().starts_with("@c(") and line.contains("symbol") and line.contains("\""):
+                        symbols.append(line.split("\"")[1])
+        for source in sources:
+            if source.group != group:
+                continue
+            lines: list[string] = []
+            for line in package.read_text(source.location).split("\n"):
+                relative = import_path(line)
+                rewritten := line
+                if relative != "":
+                    child = contained(root, path.dirname(source.location) + "/" + relative)
+                    dependency = owner(sources, child)
+                    if dependency != group:
+                        if dependency not in dependencies:
+                            dependencies.append(dependency)
+                        rewritten = line.replace("\"" + relative + "\"", package.toml_quote("package:" + dependency + "/" + child[int(len(root)) + 1:]))
+                lines.append(rewritten)
+            package.write_text(destination + "/" + group + "/" + source.location[int(len(root)) + 1:], lines.join("\n"))
+            parent := path.dirname(source.location)
+            while parent.starts_with(root):
+                if os.is_file(parent + "/package.json"):
+                    manifest = package.parse_document(package.read_text(parent + "/package.json"))
+                    for relative in package.string_array(package.setting(manifest, "xxi.c", "sources", "[]")):
+                        provider = contained(root, parent + "/" + relative)
+                        text = package.read_text(provider).replace(" ", "").replace("\t", "").replace("\n", "")
+                        selected := false
+                        for symbol in symbols:
+                            selected = selected or text.contains(symbol + "(")
+                        if selected:
+                            portable = provider[int(len(root)) + 1:]
+                            if portable not in native:
+                                native.append(portable)
+                            copy_asset(root, destination, group, provider, copied)
+                    break
+                if parent == root:
+                    break
+                parent = path.dirname(parent)
+        exports: list[string] = []
+        for entry in recipe:
+            if entry.table.starts_with("packages." + group + ".") and entry.key == "source":
+                alias = package.text_setting(recipe, entry.table, "alias")
+                for name in package.string_array(package.setting(recipe, entry.table, "names", "[\"*\"]")):
+                    exports.append("import " + name + " from " + entry.value + (" as " + alias if alias != "" else ""))
+        package.write_text(destination + "/" + group + "/lib.sev", exports.join("\n") + "\n")
+        write_manifest(destination, group, version, dependencies, native)
+    exports: list[string] = []
+    for group in groups:
+        exports.append("import * from " + package.toml_quote("package:" + group))
+    package.write_text(destination + "/prelude/lib.sev", exports.join("\n") + "\n")
+    package.copy_file(root + "/sev_compiler/universal/prelude.toml", destination + "/prelude/prelude.toml")
+    write_manifest(destination, "prelude", version, groups, [])
+    graph = package.resolve(package.open(destination + "/prelude"))
+    result: list[string] = []
+    ordered: list[int] = []
+    package.dependency_build_order(graph, 0, ordered)
+    for index in ordered:
+        result.append(graph.packages[index].root)
+    return result
+
+def write_manifest(destination: string, group: string, version: string, dependencies: list[string], native: list[string]) -> unit | Error:
+    name = "sev-prelude" + ("" if group == "prelude" else "-" + group)
+    text := "[package]\nname = " + package.toml_quote(name) + "\nversion = " + package.toml_quote(version) + "\nedition = \"2026\"\n[package.metadata.prelude]\nformat = 1\nrole = " + package.toml_quote("root" if group == "prelude" else "provider") + "\n[lib]\npath = \"lib.sev\"\n[dependencies]\n"
+    for dependency in dependencies:
+        text += dependency + " = { package = " + package.toml_quote("sev-prelude-" + dependency) + ", path = " + package.toml_quote("../" + dependency) + ", version = " + package.toml_quote(version) + " }\n"
+    if len(native) > 0:
+        values: list[string] = []
+        for location in native:
+            values.append(package.toml_quote(location))
+        text += "[xxi.c]\nsources = [" + values.join(", ") + "]\n"
+    package.write_document(destination + "/" + group + "/package.json", text)
+
+def main():
+    root := environment.get("SEVERIAN_SYSROOT", process.current_directory())
+    directory := ""
+    compiler := "sev"
+    stage_only := false
+    arguments = process.arguments()
+    cursor := 1
+    while cursor < int(len(arguments)):
+        option = arguments[cursor]
+        cursor += 1
+        if option == "--stage-only":
+            stage_only = true
+        elif option in ["--root", "--directory", "--compiler"] and cursor < int(len(arguments)):
+            value = arguments[cursor]
+            cursor += 1
+            if option == "--root":
+                root = value
+            elif option == "--directory":
+                directory = value
+            else:
+                compiler = value
+        else:
+            throw Error("unknown or incomplete prelude option: " + option)
+    root = os.canonical(root)
+    directory = directory if directory != "" else root + "/library/prelude/package.pkg/staged"
+    packages = stage(root, directory)
+    if not stage_only:
+        prelude = packages[-1]
+        lock = package.capture([compiler, "resolve", prelude, "--sysroot", root])
+        package.write_text(prelude + "/package.lock", lock)
+        package.require_command([compiler, "__precompile-prelude", prelude, prelude + "/package.pkg/validation", root])
+    for selected in packages:
+        print(selected)
+        if not stage_only:
+            package.require_command([compiler, "publish", selected, "--sysroot", root])

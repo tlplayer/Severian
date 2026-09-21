@@ -1,0 +1,11 @@
+{
+  "package": {"name": "sev-compiler-tools", "version": "0.1.0", "edition": "2026", "publish": false},
+  "bin": [{"name": "prelude-packages", "path": "prelude_packages.sev"}],
+  "dependencies": {
+    "package": {"path": "../../library/package"},
+    "path": {"path": "../../library/system/path"},
+    "os": {"path": "../../library/system/os"},
+    "process": {"path": "../../library/system/process"},
+    "environment": {"path": "../../library/system/environment"}
+  }
+}

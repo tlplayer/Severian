@@ -1,12 +1,36 @@
 import source
 
+class CallFrame:
+    package: string
+    callable: string
+    source: string
+    line: int = 0
+    column: int = 0
+
 class Diagnostic: Error
     code: string
     message: string
     span: source.Span | None
+    callstack: list[CallFrame] = []
 
     def display() -> string:
-        return code + ": " + message
+        return code + ": " + message + render_callstack(callstack)
+
+
+def render_callstack(frames: list[CallFrame]) -> string:
+    if len(frames) == 0:
+        return ""
+    lines: list[string] = ["\nCall stack (innermost first):"]
+    for frame in frames:
+        location = frame.source + (":" + string(frame.line) + ":" + string(frame.column) if frame.line > 0 else "")
+        lines.append("  at " + frame.package + "." + frame.callable + " (" + location + ")")
+    return lines.join("\n")
+
+
+def with_frame(value: Diagnostic, frame: CallFrame) -> Diagnostic:
+    frames = value.callstack[:]
+    frames.append(frame)
+    return Diagnostic(value.code, value.message, value.span, frames)
 
 
 def diagnostic(code: string, message: string) -> Diagnostic:
@@ -21,8 +45,8 @@ def render(value: Diagnostic, files: list[source.SourceFile]) -> string:
     heading = value.code + ": " + value.message
     location ?= value.span
     if location != None:
-        return heading + render_location(location, files)
-    return heading
+        return heading + render_location(location, files) + render_callstack(value.callstack)
+    return heading + render_callstack(value.callstack)
 
 
 def render_location(location: source.Span, files: list[source.SourceFile]) -> string:
