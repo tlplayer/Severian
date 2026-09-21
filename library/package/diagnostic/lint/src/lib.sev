@@ -31,7 +31,7 @@ import path
 import process
 import time
 
-import * from "package:support"
+import * from "../../support/src/lib.sev"
 import * from "policy.sev"
 import lexer
 import source

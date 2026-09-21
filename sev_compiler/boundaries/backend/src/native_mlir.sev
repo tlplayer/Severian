@@ -1,4 +1,4 @@
-import * from "package:universal/declaration/scalar.sev" as boundary
+import * from "../../../universal/declaration/scalar.sev" as boundary
 import environment
 import file
 import path

@@ -1,1 +1,1 @@
-import * from "package:lint/src/policy.sev"
+import * from "../lint/src/policy.sev"

@@ -57,7 +57,7 @@ def save_sections(root: string, value: Realization) -> unit | Error:
         else:
             for item in value.dependencies:
                 rows.append(encode_dependency_record(item))
-        directory = root + "/metadata/" + section
+        directory := root + "/metadata/" + section
         if os.is_symlink(directory) or not os.make_directories(directory):
             throw Error("invalid metadata section directory")
         directory = resolve_path(root, "metadata/" + section)

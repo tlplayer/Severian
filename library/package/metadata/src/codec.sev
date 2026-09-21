@@ -185,10 +185,10 @@ def encode_layout_record(value: LayoutRecord) -> string:
     fields.append("\"abi\":" + build_flow.document_quote(value.abi))
     fields.append("\"size\":" + string(value.size))
     fields.append("\"alignment\":" + string(value.alignment))
-    fields: list[string] = []
+    members: list[string] = []
     for item in value.fields:
-        fields.append(encode_field_layout(item))
-    fields.append("\"fields\":" + "[" + fields.join(",") + "]")
+        members.append(encode_field_layout(item))
+    fields.append("\"fields\":" + "[" + members.join(",") + "]")
     return "{" + fields.join(",") + "}"
 
 def decode_layout_record(nodes: list[build_flow.DocumentNode], index: int) -> LayoutRecord | Error:

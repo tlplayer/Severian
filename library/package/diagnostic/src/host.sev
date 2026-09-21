@@ -1,1 +1,1 @@
-import * from "package:support"
+import * from "../support/src/lib.sev"

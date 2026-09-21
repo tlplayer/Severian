@@ -1,2 +1,2 @@
 # Compatibility entry; package.diagnostic.lint owns quality analysis.
-import * from "package:lint"
+import * from "../lint/src/lib.sev"
