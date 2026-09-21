@@ -157,6 +157,15 @@ impl<'a> Resolver<'a> {
                 None,
             )
         })?;
+        // Relative imports can enter a nested dependency package. Resolve its
+        // imports against the owning manifest, not the caller's dependencies.
+        let package = self
+            .packages
+            .packages
+            .values()
+            .filter(|candidate| canonical.starts_with(&candidate.root))
+            .max_by_key(|candidate| candidate.root.components().count())
+            .map_or(package, |candidate| candidate.id);
         if self.visited.contains(&canonical) {
             return Ok(());
         }
@@ -300,6 +309,34 @@ fn source_import(
     let locator = match &import.subject {
         ImportSubject::Name(name) => {
             return package_source(importer_package, import, name, packages).map(Some)
+        }
+        ImportSubject::Locator(locator) if locator.starts_with("package:") => {
+            let locator = &locator["package:".len()..];
+            let (alias, member) = locator.split_once('/').unwrap_or((locator, ""));
+            let (library, dependency) =
+                package_source(importer_package, import, alias, packages)?;
+            if member.is_empty() {
+                return Ok(Some((library, dependency)));
+            }
+            let root = &packages.packages[&dependency].root;
+            let path = std::fs::canonicalize(root.join(member)).map_err(|error| {
+                Diagnostic::new(
+                    "E000123",
+                    format!("could not resolve package source import `{locator}`: {error}"),
+                    Some(import.span),
+                )
+            })?;
+            let root = std::fs::canonicalize(root).map_err(|error| {
+                Diagnostic::new("E000123", error.to_string(), Some(import.span))
+            })?;
+            if !path.starts_with(root) || !path.is_file() {
+                return Err(Diagnostic::new(
+                    "E000123",
+                    format!("package source import `{locator}` must name a file inside its package"),
+                    Some(import.span),
+                ));
+            }
+            return Ok(Some((path, dependency)));
         }
         ImportSubject::Locator(locator) if locator.contains(':') => return Ok(None),
         ImportSubject::Locator(locator) => locator.clone(),

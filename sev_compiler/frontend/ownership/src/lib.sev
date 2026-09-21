@@ -6,3 +6,8 @@ def validate(program: universal.Program):
     for module in program.modules:
         validate_module(module)
     return unit
+
+import * from "cfg.sev"
+import * from "effects.sev"
+import * from "loans.sev"
+import * from "places.sev"

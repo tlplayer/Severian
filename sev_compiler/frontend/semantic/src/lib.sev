@@ -46,3 +46,7 @@ def analyze(module: universal.Module) -> universal.Program | diagnostics.Diagnos
 
 def analyze_tests(module: universal.Module) -> universal.Program | diagnostics.Diagnostic:
     return analyze_with_package_functions(module, definitions.SemanticDefinitions(), AnalysisContext(Test, "memory"), [], [], [])
+
+import * from "macros.sev"
+import * from "callable.sev"
+import * from "definitions.sev"

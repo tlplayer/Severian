@@ -10,3 +10,7 @@ import * from "build/mod.sev"
 
 def empty_module() -> universal.Module:
     return universal.empty_module()
+
+import * from "agent_ir.sev"
+import * from "callable.sev"
+import * from "quality.sev"

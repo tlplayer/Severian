@@ -3,7 +3,7 @@
     "name": "sev-compiler-mir",
     "version": "0.1.0",
     "edition": "2026",
-    "publish": false
+    "publish": true
   },
   "lib": {
     "name": "mir",

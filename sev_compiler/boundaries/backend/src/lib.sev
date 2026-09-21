@@ -186,3 +186,5 @@ def emit_executable(module: universal.Module, output_path: string) -> Artifact |
     if result.status != 0:
         return error(CompilerFailed(result.stderr))
     return Artifact(output_path, Executable)
+
+import * from "native_mlir.sev"

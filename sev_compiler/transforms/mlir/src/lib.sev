@@ -1,3 +1,6 @@
 import * from "ir/lib.sev"
 import * from "emit/mod.sev"
 import * from "verify.sev"
+
+import * from "emit/callable.sev"
+import * from "ir/text.sev"

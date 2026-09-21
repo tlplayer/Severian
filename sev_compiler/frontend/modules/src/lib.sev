@@ -124,3 +124,5 @@ def resolve(root: string) -> ModuleGraph | diagnostics.Diagnostic:
     package = universal.PackageId(0)
     packages = PackageGraph(package, {package: ResolvedPackage(package, file.parent(root), root, {})})
     return resolve_with_packages(root, packages)
+
+import * from "source.sev"

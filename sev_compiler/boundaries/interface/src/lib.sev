@@ -138,3 +138,4 @@ def encode_representation(representation: RepresentationRecord) -> list[u8]:
         case Character:
             return [9]
 
+import * from "package_metadata.sev"
