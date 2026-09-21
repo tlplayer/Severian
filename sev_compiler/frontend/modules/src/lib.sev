@@ -4,8 +4,7 @@ import source
 import diagnostics
 import universal
 
-class ModuleGraph:
-    modules: list[universal.Module]
+from universal import ModuleGraph
 
 
 class ResolvedPackage:

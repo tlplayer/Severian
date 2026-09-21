@@ -127,9 +127,11 @@ def unit_cache_root(root: string) -> string | Error:
 
 
 def realization_root(resolution: Resolution, index: int) -> string | Error:
-    if index == 0 or len(resolution.packages) == 0:
+    if len(resolution.packages) == 0:
         return build_root()
     owner = resolution.packages[index]
+    if not published_project(owner.root):
+        return owner.root + "/package.pkg"
     return build_root() + "/dependencies/" + safe_name(owner.identity.name) + "-" + safe_name(owner.identity.version) + "/" + owner.checksum.replace(":", "-")
 
 
@@ -150,7 +152,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
         sysroot = canonical(compiler.sysroot)
         phase = "identify compiler and native toolchain"
-        identity := "unit-cache-5\n" + portable_graph(scoped) + "\n" + digest(compiler.executable) + "\n" + portable_path(input, scoped, root, sysroot) + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
+        identity := "unit-cache-6\n" + portable_graph(scoped) + "\n" + digest(compiler.executable) + "\n" + portable_path(input, scoped, root, sysroot) + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
         identity += "\n" + registry_discovery_state()
         for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), environment.get("SEVERIAN_LLVM_OPT", "opt-21"), environment.get("SEVERIAN_AR", "llvm-ar-21")]:
             identity += "\n" + tool + "\n" + capture([tool, "--version"])

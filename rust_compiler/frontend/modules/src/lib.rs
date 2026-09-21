@@ -268,11 +268,13 @@ fn module_id(
             )
         })?;
     let relative = path.strip_prefix(root).unwrap_or(path);
-    let key = format!(
-        "{}:{}",
-        package.0,
-        relative.to_string_lossy().replace('\\', "/")
-    );
+    // Graph indices vary between independent package builds and consumers.
+    // Bind module identity to its declared package and package-relative path.
+    let identity = std::fs::read_to_string(root.join("package.json")).ok()
+        .and_then(|text| json5::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| Some(format!("{}@{}", value["package"]["name"].as_str()?, value["package"]["version"].as_str()?)))
+        .unwrap_or_else(|| root.to_string_lossy().into_owned());
+    let key = format!("{identity}:{}", relative.to_string_lossy().replace('\\', "/"));
     const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
     const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
     let mut hash = OFFSET;

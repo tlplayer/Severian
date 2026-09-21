@@ -3013,6 +3013,7 @@ pub(super) fn specialize_signature(
         type_parameters: Vec::new(),
         parameter_names: function.parameter_names.clone(),
         parameter_variadics: function.parameter_variadics.clone(),
+        parameter_views: function.parameter_views.clone(),
         parameters: function
             .parameters
             .iter()

@@ -6,7 +6,7 @@ mod library;
 pub mod structured;
 mod verify;
 
-pub use emit::{render, MlirArtifact, MlirError};
+pub use emit::{render, render_library, MlirArtifact, MlirError};
 pub use library::{registered_libraries, MlirLibrary};
 pub use severian_lir::{
     LoweredFloatFormat, LoweredTensorDimension, LoweredTensorElement, LoweredTensorShape,

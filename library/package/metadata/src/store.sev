@@ -39,6 +39,38 @@ def verify(value: Realization, root: string) -> unit | Error:
 def realization_path(build_id: string) -> string | Error:
     return "metadata/realizations/" + component(build_id) + ".json"
 
+# Section snapshots are derived from the validated realization, never a second
+# source of compiler facts. Consumers bind through lib.sevi and the realization.
+def save_sections(root: string, value: Realization) -> unit | Error:
+    verify(value, root)
+    for section in ["symbols", "types", "layouts", "dependencies"]:
+        rows: list[string] = []
+        if section == "symbols":
+            for item in value.symbols:
+                rows.append(encode_symbol_record(item))
+        elif section == "types":
+            for item in value.types:
+                rows.append(encode_type_record(item))
+        elif section == "layouts":
+            for item in value.layouts:
+                rows.append(encode_layout_record(item))
+        else:
+            for item in value.dependencies:
+                rows.append(encode_dependency_record(item))
+        directory = root + "/metadata/" + section
+        if os.is_symlink(directory) or not os.make_directories(directory):
+            throw Error("invalid metadata section directory")
+        directory = resolve_path(root, "metadata/" + section)
+        stage = os.temporary(directory, ".section-")
+        contents = "{\"build-id\":" + build_flow.document_quote(value.build_id) + ",\"records\":[" + rows.join(",") + "]}\n"
+        if file.write(stage + "/section.json", contents) != 0:
+            os.remove_tree(stage)
+            throw Error("could not write metadata section")
+        if os.rename(stage + "/section.json", directory + "/" + value.build_id + ".json") != 0:
+            os.remove_tree(stage)
+            throw Error("could not publish metadata section")
+        os.remove_tree(stage)
+
 # An interface supplies both its semantic ID and its payload identity. Neither
 # an arbitrary build ID nor an adjacent implementation file establishes binding.
 def load(root: string, build_id: string, interface: InterfaceRecord) -> Realization | Error:

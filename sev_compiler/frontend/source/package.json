@@ -1,0 +1,17 @@
+{
+  "package": {
+    "name": "sev-compiler-source",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "name": "source",
+    "path": "source.sev"
+  },
+  "dependencies": {
+    "file": {
+      "path": "../../../library/system/file"
+    }
+  }
+}

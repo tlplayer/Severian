@@ -6,6 +6,7 @@
     "publish": false
   },
   "lib": {
+    "name": "parser",
     "path": "src/lib.sev"
   },
   "dependencies": {
@@ -22,7 +23,7 @@
       "package": "sev-compiler-lexer"
     },
     "source": {
-      "path": "../../source",
+      "path": "../source",
       "package": "sev-compiler-source"
     },
     "universal": {

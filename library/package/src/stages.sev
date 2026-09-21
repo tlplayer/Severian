@@ -4,6 +4,7 @@ from build_flow import
     CompilerPipeline,
     CompilerStepResult,
     build_root,
+    compiler_cache_root,
     pipeline_blob,
     pipeline_text,
     compiler_step,

@@ -34,7 +34,7 @@ def artifact_kind(location: string) -> string:
     return "interface" if location.starts_with("package.pkgi/") else "native"
 
 
-def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string) -> list[string] | Error:
+def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string, profile: string) -> list[string] | Error:
     paths: list[string] = []
     for suffix in [".mlirbc", ".ll", ".bc", ".mir"]:
         relative = prefix + "/ir/" + name + suffix
@@ -56,7 +56,7 @@ def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: 
     index = root + "/package.pkgi/index.json"
     previous = render_legacy_manifest(parse_document(read_text(index))) if os.is_file(index) else "format = 1\n"
     if not previous.contains(toml_quote(build_id)):
-        write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\ntarget = " + toml_quote(triple) + "\nabi-id = " + toml_quote(abi) + "\nabi = \"severian-scalar-c-1\"\npath = " + toml_quote("severian/" + build_id + "/interface.bin") + "\nc = " + toml_quote("c/" + abi + "/" + name + ".h") + "\nrust = " + toml_quote("rust/" + abi + "/Cargo.toml") + "\n")
+        write_document(index, previous + "\n[[interface]]\nbuild-id = " + toml_quote(build_id) + "\ntarget = " + toml_quote(triple) + "\nabi-id = " + toml_quote(abi) + "\nabi = \"severian-scalar-c-1\"\npath = " + toml_quote("severian/" + build_id + "/lib.sevi") + "\nc = " + toml_quote("c/" + abi + "/" + name + ".h") + "\nrust = " + toml_quote("rust/" + abi + "/Cargo.toml") + "\n")
     if os.is_dir(cache + "/artifact.providers"):
         for location in files(cache + "/artifact.providers", true):
             leaf = path.basename(location)
@@ -87,7 +87,7 @@ def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: 
         write_document(root + "/" + prefix + "/archive/" + provider_name + ".toolchain.json", "compiler = " + toml_quote(capture([compiler, "-vV"])) + "\ntarget = " + toml_quote(triple) + "\n")
         paths.append(prefix + "/archive/" + provider_name + ".toolchain.json")
         remove_tree(stage)
-    for relative in retain_cross_native(owner, root, prefix.split("/")[2], build_id):
+    for relative in retain_cross_native(owner, root, profile, build_id):
         paths.append(relative)
     return paths
 

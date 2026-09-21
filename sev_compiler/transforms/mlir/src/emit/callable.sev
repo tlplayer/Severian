@@ -1,11 +1,11 @@
-import * from "../../../../frontend/ownership/src/plan.sev" as ownership
+import * from "package:ownership/src/plan.sev" as ownership
 import universal
-import * from "../../../../universal/type/storage.sev" as storage_types
-import * from "../../../../universal/type/scalar.sev" as scalar
+import * from "package:universal/type/storage.sev" as storage_types
+import * from "package:universal/type/scalar.sev" as scalar
 import * from "../ir/lib.sev"
 import * from "strings.sev"
 import * from "debug.sev" as debug
-import * from "../../../../universal/declaration/scalar.sev" as boundary
+import * from "package:universal/declaration/scalar.sev" as boundary
 
 
 def callable_mlir_type(id: universal.TypeId, records: borrow list[universal.RecordDeclaration] = []) -> MlirType:

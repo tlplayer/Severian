@@ -6,19 +6,16 @@
     "publish": false
   },
   "lib": {
+    "name": "lowering",
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "artifact": {
-      "path": "../../artifact"
-    },
     "mir": {
+      "package": "sev-compiler-mir",
       "path": "../mir"
     },
-    "target": {
-      "path": "../../target"
-    },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

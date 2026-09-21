@@ -179,6 +179,8 @@ def visit(project: Project, source: string, development: bool, registry: string,
                 location = ref.location if ref.location.starts_with("/") else project.root + "/" + ref.location
             else:
                 location = fetch(ref, registry[:])
+            if not os.is_file(manifest_file(location)):
+                throw Error("missing package manifest for " + ref.name + "@" + ref.selector + ": " + manifest_file(location))
             child = open(location)
             if child.manifest.name != ref.name or not version_matches(child.manifest.version, ref.selector):
                 throw Error("dependency identity does not match " + ref.name)

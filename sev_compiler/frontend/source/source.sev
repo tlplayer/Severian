@@ -1,0 +1,48 @@
+import file
+
+# Source identities and ranges are frontend types, owned by frontend/source.
+class SourceId:
+    index: u32
+
+class Span:
+    source: SourceId
+    start: u32
+    end: u32
+
+class SourceFile:
+    id: SourceId
+    path: string
+    text: string
+    characters: list[string]
+
+    def SourceFile(id: SourceId, path: string, text: string):
+        self.id = id
+        self.path = path
+        self.text = text
+        characters = text.characters()
+
+def source_id(index: u32) -> SourceId:
+    return SourceId(index)
+
+def span(source: SourceId, start: u32, end: u32) -> Span:
+    return Span(source, start, end)
+
+def virtual_source(path: string, text: string) -> SourceFile:
+    return SourceFile(SourceId(0), path, text)
+
+def load(path: string) -> SourceFile | Error:
+    return virtual_source(path, file.read_checked(path))
+
+class SourceMap:
+    files: list[SourceFile] = []
+
+    def add_virtual(path: string, text: string) -> SourceId:
+        id = SourceId(u32(len(files)))
+        files.append(SourceFile(id, path, text))
+        return id
+
+    def load(path: string) -> SourceId | Error:
+        return add_virtual(path, file.read_checked(path))
+
+    def get(id: SourceId) -> SourceFile:
+        return files[id.index]

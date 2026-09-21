@@ -6,6 +6,7 @@
     "publish": false
   },
   "lib": {
+    "name": "lexer",
     "path": "src/lib.sev"
   },
   "dependencies": {
@@ -17,7 +18,7 @@
       "package": "sev-compiler-diagnostics"
     },
     "source": {
-      "path": "../../source",
+      "path": "../source",
       "package": "sev-compiler-source"
     },
     "universal": {

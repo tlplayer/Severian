@@ -1,2 +1,2 @@
 # Compatibility import: parameter effects belong to the ownership library.
-import * from "../../ownership/src/effects.sev"
+import * from "package:ownership/src/effects.sev"

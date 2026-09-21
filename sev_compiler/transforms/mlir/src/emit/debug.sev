@@ -1,7 +1,7 @@
 import universal
 import source
 import * from "../ir/lib.sev"
-import * from "../../../../universal/type/scalar.sev" as scalar
+import * from "package:universal/type/scalar.sev" as scalar
 
 def debug_quote(text: string) -> string:
     return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\0A") + "\""

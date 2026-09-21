@@ -1,6 +1,6 @@
 import universal
-import * from "../../../universal/type/scalar.sev" as scalar
-import * from "../../../universal/declaration/scalar.sev" as boundary
+import * from "package:universal/type/scalar.sev" as scalar
+import * from "package:universal/declaration/scalar.sev" as boundary
 
 
 class CachedEffect:
@@ -28,7 +28,7 @@ def root(value: borrow universal.Expression) -> string:
             if mode != "clone":
                 return root(value)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return ""
 
 
@@ -171,7 +171,7 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
                     if root(object) in aliases:
                         result = max(result, call(called, 0, functions, active, cache, visited, true))
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             index := shift
             for argument in borrow arguments:
                 result = max(result, expression_effect(argument.value, aliases, functions, active, cache, visited))
@@ -205,7 +205,7 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
             for element in borrow elements:
                 result = max(result, expression_effect(element, aliases, functions, active, cache, visited))
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return result
 
 
@@ -233,7 +233,7 @@ def block_effect(body: borrow universal.Block, aliases: list[string], functions:
                             if root(operands[0]) in aliases:
                                 result = 2
                         case _:
-                        throw Error("Unimplemented")
+                            throw Error("unimplemented")
                 for nested in borrow bodies:
                     result = max(result, block_effect(nested, aliases, functions, active, owns_result, cache, visited))
             case FieldSet:
@@ -254,7 +254,7 @@ def block_effect(body: borrow universal.Block, aliases: list[string], functions:
                                 if mode == "move":
                                     result = 2
                             case _:
-                            throw Error("Unimplemented")
+                                throw Error("unimplemented")
             case Drop:
                 if root(value) in aliases:
                     result = 2
@@ -275,7 +275,7 @@ def block_effect(body: borrow universal.Block, aliases: list[string], functions:
             case Unsafe:
                 result = max(result, block_effect(body, aliases, functions, active, owns_result, cache, visited))
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
     return result
 
 

@@ -6,22 +6,20 @@
     "publish": false
   },
   "lib": {
+    "name": "compile",
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "artifact": {
-      "path": "../artifact"
-    },
     "mir": {
+      "package": "sev-compiler-mir",
       "path": "../transforms/mir"
     },
     "mlir": {
+      "package": "sev-compiler-mlir",
       "path": "../transforms/mlir"
     },
-    "target": {
-      "path": "../target"
-    },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../universal"
     }
   }

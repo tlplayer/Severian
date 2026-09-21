@@ -6,6 +6,7 @@
     "publish": false
   },
   "lib": {
+    "name": "driver",
     "path": "src/lib.sev"
   },
   "bin": [
@@ -15,6 +16,22 @@
     }
   ],
   "dependencies": {
+    "interface": {"package": "sev-compiler-interface", "path": "../interface"},
+    "environment": {
+        "path": "../../../library/system/environment"
+    },
+    "file": {
+        "path": "../../../library/system/file"
+    },
+    "os": {
+        "path": "../../../library/system/os"
+    },
+    "path": {
+        "path": "../../../library/system/path"
+    },
+    "process": {
+        "path": "../../../library/system/process"
+    },
     "time": {
       "path": "../../../library/core/time"
     },
@@ -22,54 +39,63 @@
       "path": "../../../library/package"
     },
     "abi": {
+      "package": "sev-compiler-abi",
       "path": "../abi"
     },
     "backend": {
+      "package": "sev-compiler-backend",
       "path": "../backend"
     },
-    "bootstrap": {
-      "path": "../../bootstrap"
-    },
     "compile": {
+      "package": "sev-compiler-compile",
       "path": "../../compile"
     },
     "diagnostics": {
+      "package": "sev-compiler-diagnostics",
       "path": "../../diagnostics"
     },
     "lexer": {
+      "package": "sev-compiler-lexer",
       "path": "../../frontend/lexer"
     },
     "modules": {
+      "package": "sev-compiler-modules",
       "path": "../../frontend/modules"
     },
     "lowering": {
+      "package": "sev-compiler-lowering",
       "path": "../../transforms/lowering"
     },
     "mir": {
+      "package": "sev-compiler-mir",
       "path": "../../transforms/mir"
     },
     "mlir": {
+      "package": "sev-compiler-mlir",
       "path": "../../transforms/mlir"
     },
     "ownership": {
+      "package": "sev-compiler-ownership",
       "path": "../../frontend/ownership"
     },
     "parser": {
+      "package": "sev-compiler-parser",
       "path": "../../frontend/parser"
     },
     "semantic": {
+      "package": "sev-compiler-semantic",
       "path": "../../frontend/semantic"
     },
     "source": {
-      "path": "../../source"
-    },
-    "target": {
-      "path": "../../target"
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     },
     "xxi": {
+      "package": "sev-compiler-xxi",
       "path": "../xxi"
     }
   }

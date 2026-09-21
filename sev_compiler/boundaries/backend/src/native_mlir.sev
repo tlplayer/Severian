@@ -1,4 +1,4 @@
-import * from "../../../universal/declaration/scalar.sev" as boundary
+import * from "package:universal/declaration/scalar.sev" as boundary
 import environment
 import file
 import path
@@ -34,7 +34,7 @@ def run_tool(arguments: list[string]):
 
 def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), incremental: bool = true):
     package.mkdir(path.dirname(output))
-    flow = package.CompilerPipeline(package.build_root() + "/cache/compiler", incremental)
+    flow = package.CompilerPipeline(package.compiler_cache_root(sysroot), incremental)
     initial = package.pipeline_text(flow, mlir, ".mlir")
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
@@ -91,9 +91,10 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
             preprocessing.append("-DSEV_QUALITY_TRACK_ALLOCATIONS")
         preprocessed = package.compiler_step(flow, "c-preprocess", "1", value, preprocessing, ".i", reusable=false)
         provider_arguments: list[string] = [clang, "-c", "-x", "cpp-output", "{input}", "-o", "{output}"]
+        provider_arguments.append("-fdebug-compilation-dir=" + package.canonical(sysroot))
         for flag in flags:
             provider_arguments.append(flag)
-        compiled = package.compiler_step(flow, "c-object", "1", preprocessed, provider_arguments, ".o")
+        compiled = package.compiler_step(flow, "c-object", "2", preprocessed, provider_arguments, ".o", directory_independent=true)
         objects.append(compiled.path)
         if library:
             package.copy_file(compiled.path, output + ".providers/provider-" + string(index) + ".o")

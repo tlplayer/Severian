@@ -1,7 +1,7 @@
 import package
 import universal
 import source
-import * from "../../../../transforms/mir/src/quality.sev" as quality
+import * from "package:mir/src/quality.sev" as quality
 
 def prepare_quality(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution):
     if len(resolution.packages) == 0:

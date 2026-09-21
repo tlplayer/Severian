@@ -35,7 +35,7 @@ class Result:
 class Report:
     results: list[Result]
     directory: string
-throw Error("Unimplemented")ed: int = 0
+    passed: int = 0
     failed: int = 0
     blocked: int = 0
     absent: int = 0

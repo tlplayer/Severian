@@ -54,6 +54,8 @@ impl Decorator {
 pub struct FunctionParameter {
     pub name: String,
     pub annotation: TypeAnnotation,
+    /// `view T` borrows the argument immutably; it is not an owned `T`.
+    pub immutable_reference: bool,
     pub variadic: bool,
     pub default: Option<Expression>,
     pub span: Span,

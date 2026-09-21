@@ -5,7 +5,7 @@ import source
 import os
 import path
 import * from "frontend_archive.sev" as archive
-import * from "../../../../frontend/semantic/src/callable.sev" as semantic
+import * from "package:semantic/src/callable.sev" as semantic
 
 
 class Prelude:

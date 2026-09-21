@@ -91,6 +91,13 @@ impl Analyzer<'_> {
         aliases: BTreeMap<String, TypeId>,
         constructor: Option<&ClassInstance>,
     ) -> Result<(), Diagnostic> {
+        for parameter in &mut function.parameters {
+            if ast_function.parameters.iter().any(|source| source.name == parameter.name && source.immutable_reference)
+                && !parameter.contract.modifiers.iter().any(|modifier| modifier.name == "view")
+            {
+                parameter.contract.modifiers.push(severian_hir::BoundaryModifier { name: "view".into() });
+            }
+        }
         let Some(ast_body) = &ast_function.body else {
             return Ok(());
         };

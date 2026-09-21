@@ -3,14 +3,15 @@
     "name": "sev-compiler-diagnostics",
     "version": "0.1.0",
     "edition": "2026",
-    "publish": false
+    "publish": true
   },
   "lib": {
+    "name": "diagnostics",
     "path": "src/lib.sev"
   },
   "dependencies": {
     "source": {
-      "path": "../source",
+      "path": "../frontend/source",
       "package": "sev-compiler-source"
     }
   }

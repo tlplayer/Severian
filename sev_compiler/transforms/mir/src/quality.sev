@@ -63,4 +63,4 @@ def quality_branches(module: universal.Module):
                         if measured != None:
                             block.operations.append(measured)
                     case _:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")

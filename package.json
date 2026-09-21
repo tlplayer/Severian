@@ -2,7 +2,8 @@
   "workspace": {
     "members": [
       "library",
-      "sev_compiler/boundaries/driver"
+      "sev_compiler/boundaries/driver",
+      "tools/compiler"
     ]
   },
   "build": {

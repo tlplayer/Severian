@@ -253,7 +253,7 @@ def lexical_binary(symbol: string, left: LexicalValue, right: LexicalValue, span
             if symbol == ">=":
                 return LexicalValue.Truth(lhs >= rhs)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return error(lexical_error("unsupported binary operation " + symbol, span))
 
 
@@ -309,7 +309,7 @@ def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: l
             case Category:
                 token_kind = kind
             case Nothing:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
             case _:
                 return error(lexical_error("LexemeMatch kind must be TokenKind or None", span))
         normalized: string | None := None
@@ -317,7 +317,7 @@ def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: l
             case Text:
                 normalized = text
             case Nothing:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
             case _:
                 return error(lexical_error("LexemeMatch value must be string or None", span))
         return LexicalValue.Result(LexemeMatch(lexical_number(slots[0], span), token_kind, lexical_truth(slots[2], span), normalized))
@@ -392,7 +392,7 @@ def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: l
                     if name == "join" and len(values) == 1:
                         return LexicalValue.Text(characters.join(lexical_text(values[0], span)))
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             return error(lexical_error("unsupported lexical method " + name, span))
         case _:
             return lexical_invoke(frame, path, values, span)
@@ -430,7 +430,7 @@ def lexical_expression(frame: LexicalFrame, expression: universal.Expression) ->
                     if name == "matched":
                         return LexicalValue.Truth(result.matched)
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             return error(lexical_error("unsupported member " + name, span))
         case Call:
             return lexical_call(frame, callee, arguments, span)

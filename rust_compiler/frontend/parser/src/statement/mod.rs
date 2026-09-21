@@ -356,8 +356,17 @@ impl Parser<'_> {
                     }
                     break;
                 }
+                let mut immutable_reference = false;
                 let (annotation, variadic) = if self.take(&TokenKind::Colon).is_some() {
-                    let annotation = self.type_annotation()?;
+                    let view = self.at_identifier("view").then(|| self.next().span);
+                    immutable_reference = view.is_some();
+                    if immutable_reference && (self.at_identifier("mut") || self.at_identifier("borrow") || self.at_identifier("move")) {
+                        return Err(self.error("`view` is an immutable reference; conflicting ownership modifiers are not allowed"));
+                    }
+                    let mut annotation = self.type_annotation()?;
+                    if let Some(start) = view {
+                        annotation.span = Span::new(start.source, start.start, annotation.span.end);
+                    }
                     let variadic = self.take(&TokenKind::Ellipsis).is_some();
                     (annotation, variadic)
                 } else if let Some(ellipsis) = self.take(&TokenKind::Ellipsis) {
@@ -386,6 +395,7 @@ impl Parser<'_> {
                 }
                 parameters.push(FunctionParameter {
                     name: parameter_name,
+                    immutable_reference,
                     variadic,
                     span: Span::new(
                         parameter_span.source,

@@ -1,0 +1,19 @@
+# Normalize explicit slice bounds in the compiler's character/element domain.
+def bound(position: int, size: int, reverse: bool) -> int:
+    value := position
+    if value < 0:
+        value += size
+    lower = -1 if reverse else 0
+    upper = size - 1 if reverse else size
+    return max(lower, min(value, upper))
+
+# Saturate at the stop before addition, including strides near integer limits.
+def next_position(position: int, stop: int, step: int) -> int | Error:
+    if step == 0:
+        throw Error("slice step cannot be zero")
+    if step > 0:
+        if position >= stop or step >= stop - position:
+            return stop
+    elif position <= stop or step <= stop - position:
+        return stop
+    return position + step

@@ -1,4 +1,5 @@
 {
-  "package": {"name": "sev-compiler-sentence", "version": "0.1.0", "edition": "2026", "publish": false},
-  "lib": {"path": "src/lib.sev"}
+  "package": {"name": "sev-compiler-sentence", "version": "0.1.1", "edition": "2026", "publish": true},
+  "lib": {
+    "name": "sentence","path": "src/lib.sev"}
 }

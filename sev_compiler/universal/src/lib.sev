@@ -1,4 +1,3 @@
-import * from "../type/conversion.sev"
 import * from "../type/type.sev"
 import * from "../primitive/primitive.sev"
 import * from "../operator/trait/logical.sev"

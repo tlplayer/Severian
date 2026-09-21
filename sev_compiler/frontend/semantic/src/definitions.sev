@@ -1,9 +1,9 @@
 import diagnostics
 import source
 import universal
-import * from "../../../universal/type/scalar.sev" as scalar
-import * from "../../../universal/type/storage.sev" as storage_types
-import * from "../../../universal/type/tagged.sev" as tagged
+import * from "package:universal/type/scalar.sev" as scalar
+import * from "package:universal/type/storage.sev" as storage_types
+import * from "package:universal/type/tagged.sev" as tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved
@@ -249,7 +249,7 @@ def replace_annotation(annotation: universal.TypeAnnotation, names: list[string]
                         case Named:
                             return universal.TypeAnnotation(universal.Named(name, applied), annotation.span, binding=annotation.binding)
                         case _:
-                        throw Error("Unimplemented")
+                            throw Error("unimplemented")
                 index += 1
             replaced: list[universal.TypeAnnotation] = []
             for argument in arguments:
@@ -311,7 +311,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
                 applied.bases = bases
                 return applied
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return error(diagnostics.diagnostic_at("E000212", "constraint must name a trait", annotation.span))
 
 
@@ -355,7 +355,7 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: un
                         if not known:
                             return error(diagnostics.diagnostic_at("E000212", "unknown operator constraint " + bound_name, span))
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
         if not grammar_bound:
             constraints.append(constraint)
     parameters: list[string] = []
@@ -441,7 +441,7 @@ def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: 
             for argument in arguments:
                 infer_extension_parameters(definitions, argument, declaration.lookup, parameters)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     declaration.type_parameters = parameters
     return declaration
 
@@ -534,7 +534,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                         names.append(declaration.name)
                 ordinal += 1
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
     # Resolve free extension parameters only after every concrete type and alias
     # is registered. list[string] is concrete; list[T] may bind an unknown T.
     implementation_index := 0
@@ -547,7 +547,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Record:
                 module.items[item_index] = universal.Record(resolve_extension_parameters(definitions, declaration))
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
         item_index += 1
     trait_index := 0
     for declaration in definitions.traits:

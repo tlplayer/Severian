@@ -1,6 +1,6 @@
 import * from "core.sev" as text
 import * from "format.sev" as format
-import * from "../slicing.sev" as slicing
+import * from "../../type/slice_bounds.sev" as slicing
 
 
 @mlir("memref.extract_aligned_pointer_as_index")

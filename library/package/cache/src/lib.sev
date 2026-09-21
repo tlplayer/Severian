@@ -74,7 +74,8 @@ def lookup(store: Store, location: string, suffix: string) -> list[CacheValue]:
         if text == receipt(value) and os.is_file(blob) and digest(blob) == checksum:
             return [value]
     catch damaged: Error:
-    throw Error("Unimplemented")
+        # A malformed or missing receipt is a cache miss, not a build failure.
+        return []
     return []
 
 def publish(location: string, value: CacheValue, stage: string) -> unit | Error:

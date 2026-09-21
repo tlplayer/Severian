@@ -1,5 +1,5 @@
-import * from "../../../../universal/cfg/availability.sev" as availability
-import * from "../../../../universal/cfg/dominance.sev" as graph
+import * from "package:universal/cfg/availability.sev" as availability
+import * from "package:universal/cfg/dominance.sev" as graph
 import * from "builder.sev"
 import * from "model.sev"
 

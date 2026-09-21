@@ -121,7 +121,7 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
                     if returned != None:
                         payload = ",\"value\":" + quoted(string(returned.index))
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("Unimplemented")
             edges: list[string] = []
             for edge in cfg.successors(terminal.exit):
                 edges.append("{\"target\":" + quoted(string(edge.target)) + ",\"arguments\":" + values_json(edge.arguments) + "}")
@@ -226,5 +226,5 @@ def operation_json(operation: universal.Operation) -> string:
         case Assert:
             operands.append(condition)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return "{\"kind\":" + quoted(operation_kind(operation)) + fields + ",\"operands\":" + values_json(operands) + ",\"results\":" + values_json(results) + "}"

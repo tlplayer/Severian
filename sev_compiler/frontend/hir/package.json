@@ -6,13 +6,16 @@
     "publish": false
   },
   "lib": {
+    "name": "hir",
     "path": "src/lib.sev"
   },
   "dependencies": {
     "source": {
-      "path": "../../source"
+      "path": "../source",
+      "package": "sev-compiler-source"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

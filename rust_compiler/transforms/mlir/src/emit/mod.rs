@@ -47,8 +47,17 @@ impl fmt::Display for MlirError {
 impl std::error::Error for MlirError {}
 
 pub fn render(module: &Module) -> Result<String, MlirError> {
+    render_unit(module, None)
+}
+
+/// A library compilation unit has no process entry point.
+pub fn render_library(module: &Module, initializer: &str) -> Result<String, MlirError> {
+    render_unit(module, Some(initializer))
+}
+
+fn render_unit(module: &Module, library: Option<&str>) -> Result<String, MlirError> {
     if module.initializer_cfg.is_some() {
-        return render_cfg_module(module);
+        return render_cfg_module(module, library);
     }
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
@@ -282,6 +291,13 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     {
         render_function_definition(&mut output, module, function)?;
     }
+    if let Some(initializer) = library {
+        output.push_str(&format!("  func.func @{initializer}() {{\n"));
+        let mut ordinal = 0;
+        render_block(&mut output, module, &module.initializer, 4, None, &mut ordinal)?;
+        output.push_str("    return\n  }\n}\n");
+        return Ok(output);
+    }
     output.push_str("  func.func @main() -> i32 {\n");
     let mut coverage_ordinal = 0;
     render_block(
@@ -309,7 +325,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     Ok(output)
 }
 
-fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
+fn render_cfg_module(module: &Module, library: Option<&str>) -> Result<String, MlirError> {
     let initializer = module
         .initializer_cfg
         .as_ref()
@@ -562,6 +578,11 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         .filter(|function| function.cfg.is_some())
     {
         render_cfg_function(&mut output, module, function)?;
+    }
+    if let Some(symbol) = library {
+        render_cfg_body_function(&mut output, module, symbol, &[], initializer)?;
+        output.push_str("}\n");
+        return Ok(output);
     }
     render_cfg_body_function(&mut output, module, "__sev_init", &[], initializer)?;
     output.push_str("  func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {\n");

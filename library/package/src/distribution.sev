@@ -33,8 +33,8 @@ def select(root: string, requirements: Requirements) -> Selection | Error:
         compatible = text_setting(provenance, "", "architecture") == capture(["uname", "-m"]) and text_setting(provenance, "", "os") == capture(["uname", "-s"]) and text_setting(provenance, "", "runtime-abi") == "severian-source-1"
     if os.is_file(native) and requirements.platform == "host" and compatible:
         return Selection("native", native, rejected)
-    if requirements.platform == "host" and compatible and os.is_dir(root + "/metadata/realizations"):
-        for location in files(root + "/metadata/realizations"):
+    if requirements.platform == "host" and compatible and os.is_dir(root + "/metadata/build-records"):
+        for location in files(root + "/metadata/build-records"):
             if not location.ends_with(".json") or location.ends_with(".inputs.json"):
                 continue
             realization = parse_document(read_text(location))
@@ -123,7 +123,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
             result = build(open(distribution + "/source"), compiler, Build("", request.platform, request.profile, "", "", true))
             artifacts = result.artifacts
         for artifact in artifacts:
-            for directory in ["package.pkgi", "metadata/realizations", "artifacts", "bin", "container"]:
+            for directory in ["package.pkgi", "metadata", "artifacts", "bin", "container"]:
                 selected = artifact.package_root + "/" + directory
                 if os.is_dir(selected):
                     for location in files(selected, true):

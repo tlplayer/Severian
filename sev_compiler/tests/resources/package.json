@@ -15,6 +15,9 @@
     }
   ],
   "dependencies": {
+    "environment": {
+        "path": "../../../library/system/environment"
+    },
     "process": {
       "path": "../../../library/system/process"
     },
@@ -22,9 +25,11 @@
       "path": "../../../library/package"
     },
     "source": {
-      "path": "../../source"
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "lexer": {
+      "package": "sev-compiler-lexer",
       "path": "../../frontend/lexer"
     }
   },

@@ -6,26 +6,48 @@
     "publish": false
   },
   "lib": {
+    "name": "modules",
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "interface": {
+      "package": "sev-compiler-interface",
+      "path": "../../boundaries/interface"
+    },
+    "semantic": {
+      "package": "sev-compiler-semantic",
+      "path": "../semantic"
+    },
+    "io": {
+      "package": "io",
+      "path": "../../../library/system/io"
+    },
     "package": {
       "path": "../../../library/package"
     },
     "diagnostics": {
+      "package": "sev-compiler-diagnostics",
       "path": "../../diagnostics"
     },
     "lexer": {
+      "package": "sev-compiler-lexer",
       "path": "../lexer"
     },
     "parser": {
+      "package": "sev-compiler-parser",
       "path": "../parser"
     },
     "source": {
-      "path": "../../source"
+      "path": "../source",
+      "package": "sev-compiler-source"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
+    },
+    "interfaces": {
+      "package": "package.interface",
+      "path": "../../../library/package/interface"
     }
   }
 }

@@ -1,8 +1,8 @@
 import package
 import source
 import universal
-import * from "../../../../universal/type/scalar.sev" as scalar
-import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
+import * from "package:universal/type/scalar.sev" as scalar
+import * from "package:mir/src/agent_ir.sev" as agent_ir
 
 class EditorIndex:
     definitions: list[string] = []
@@ -49,7 +49,7 @@ def editor_expression(state: EditorIndex, expression: universal.Expression, call
                 case FunctionValue:
                     editor_expression(state, expression, caller)
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             for argument in arguments:
                 editor_expression(state, argument.value, caller)
         case Binary:
@@ -83,7 +83,7 @@ def editor_expression(state: EditorIndex, expression: universal.Expression, call
             for element in elements:
                 editor_expression(state, element, caller)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
 
 def editor_block(index: EditorIndex, body: universal.Block, caller: string):
     for statement in body.statements:
@@ -105,7 +105,7 @@ def editor_block(index: EditorIndex, body: universal.Block, caller: string):
                 for body in bodies:
                     editor_block(index, body, caller)
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
 
 def editor_documentation(files: list[source.SourceFile], declared: source.Span) -> string:
     documentation := ""

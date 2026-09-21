@@ -1,2 +1,2 @@
 # Compatibility import: the ownership library owns loan authority.
-import * from "../../ownership/src/loans.sev"
+import * from "package:ownership/src/loans.sev"

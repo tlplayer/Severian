@@ -17,7 +17,7 @@ def retain_cross_native(owner: ResolvedPackage, root: string, profile: string, b
         if target not in ["x86_64-pc-windows-msvc", "aarch64-apple-macos11"]:
             throw Error("unsupported freestanding native provider target: " + target)
         windows = target.contains("windows")
-        prefix = "artifacts/" + target + "/" + profile + "/" + build_id
+        prefix = "artifacts/" + target + "/" + build_id
         name = safe_name(owner.identity.name) + "-native"
         static = prefix + "/archive/" + name + (".lib" if windows else ".a")
         dynamic = prefix + "/dynamic/" + name + (".dll" if windows else ".dylib")

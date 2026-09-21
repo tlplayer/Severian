@@ -1,12 +1,12 @@
-import * from "../../../universal/declaration/scalar.sev" as boundary
+import * from "package:universal/declaration/scalar.sev" as boundary
 import package
 import source
 import os
 import path
 import * from "pipeline/source.sev" as pipeline
-import * from "../../backend/src/native_mlir.sev" as backend
+import * from "package:backend/src/native_mlir.sev" as backend
 import * from "pipeline/frontend_archive.sev" as frontend_archive
-import * from "../../interface/src/package_metadata.sev" as metadata
+import * from "package:interface/src/package_metadata.sev" as metadata
 import * from "pipeline/mir_archive.sev" as mir_archive
 import * from "pipeline/package_interface.sev" as package_interface
 import diagnostics
@@ -34,7 +34,7 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
     for file in files:
         location = package.canonical(file.path)
         package.write_text(destination + ".source", file.text)
-        records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if location.ends_with("/interface.bin") else package.digest(destination + ".source")))
+        records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if location.ends_with("/interface.bin") or location.ends_with(".sevi") else package.digest(destination + ".source")))
         recorded.append(location)
     roots: list[string] = []
     for resolved in resolution.packages:
@@ -83,7 +83,7 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
             if location not in recorded:
                 records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
         quality_runtime = package.canonical(sysroot + "/sev_compiler/runtime/native/quality.c")
-        records.append(package.toml_quote(quality_runtime) + " = " + package.toml_quote(package.digest(quality_runtime)))
+        records.append(package.toml_quote(quality_runtime) + " = " + package.toml_quote(package.digest(quality_runtime) if os.is_file(quality_runtime) else "missing"))
         ownership_pipeline = package.canonical(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline")
         records.append(package.toml_quote(ownership_pipeline) + " = " + package.toml_quote(package.digest(ownership_pipeline)))
     package.write_text(destination + ".inputs", records.join("\n") + "\n")

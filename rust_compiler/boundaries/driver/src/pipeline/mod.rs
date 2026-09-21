@@ -185,6 +185,63 @@ impl Compiler {
         self.compile_plan(&plan)
     }
 
+    fn published_libraries(&self) -> Result<Vec<(PathBuf, serde_json::Value)>, CompileError> {
+        let mut result = Vec::new();
+        if let Some(packages) = &self.packages {
+            for (id, package) in &packages.packages {
+                if *id == packages.root { continue; }
+                let Some(root) = package.root.parent() else { continue; };
+                let index = root.join("metadata/native-library.json");
+                if !index.is_file() { continue; }
+                let load = |path: &Path| -> Result<serde_json::Value, CompileError> {
+                    serde_json::from_slice(&std::fs::read(path).map_err(|e| CompileError::NativeLink(e.to_string()))?)
+                        .map_err(|e| CompileError::NativeLink(e.to_string()))
+                };
+                let entry = load(&index)?;
+                if entry["target"].as_str() != Some(self.target.triple.as_str()) { continue; }
+                let relative = |key: &str| -> Result<&str, CompileError> {
+                    let value = entry[key].as_str().ok_or_else(|| CompileError::NativeLink(format!("missing published native {key}")))?;
+                    if Path::new(value).is_absolute() || Path::new(value).components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+                        return Err(CompileError::NativeLink("published native path escapes package".into()));
+                    }
+                    Ok(value)
+                };
+                let dynamic = root.join(relative("dynamic")?);
+                if !dynamic.is_file() { return Err(CompileError::NativeLink(format!("missing published native library {}", dynamic.display()))); }
+                let symbols_path = root.join("metadata").join(relative("symbols")?);
+                for (path, field) in [(&dynamic, "dynamic-sha256"), (&symbols_path, "symbols-sha256")] {
+                    let hash = Command::new("sha256sum").arg("--").arg(path).output().map_err(|error| CompileError::NativeLink(error.to_string()))?;
+                    let actual = String::from_utf8_lossy(&hash.stdout);
+                    if !hash.status.success() || actual.split_whitespace().next() != entry[field].as_str() {
+                        return Err(CompileError::NativeLink(format!("published native checksum mismatch: {}", path.display())));
+                    }
+                }
+                let symbols = load(&symbols_path)?;
+                result.push((dynamic, symbols));
+            }
+        }
+        Ok(result)
+    }
+
+    fn reuse_published_functions(&self, lir: &mut severian_backend::LoweredModule) -> Result<(), CompileError> {
+        for (_, metadata) in self.published_libraries()? {
+            let Some(symbols) = metadata["symbols"].as_array() else { return Err(CompileError::NativeLink("invalid published symbol metadata".into())); };
+            for function in &mut lir.functions {
+                let symbol = function.native_symbol();
+                let Some(contract) = symbols.iter().find(|row| row["id"].as_str() == Some(symbol.as_str())) else { continue; };
+                let parameters = function.parameter_types.iter().map(severian_mlir::type_spelling).collect::<Result<Vec<_>, _>>().map_err(CompileError::Mlir)?;
+                let result = severian_mlir::type_spelling(&function.result).map_err(CompileError::Mlir)?;
+                // Reuse only an exact physical ABI. Other specializations remain local.
+                if contract["parameters"] != serde_json::json!(parameters) || contract["result"] != result { continue; }
+                if result.starts_with("!sev_class_") { continue; }
+                function.linkage = severian_backend::FunctionLinkage::External { symbol };
+                function.body = None;
+                function.cfg = None;
+            }
+        }
+        Ok(())
+    }
+
     fn compile_plan(&self, plan: &CompilePlan) -> Result<RoutedProgram, CompileError> {
         let types = self.types_for(&plan.source);
         let target = crate::components::ensure_for_plan(plan, &self.target)
@@ -200,8 +257,9 @@ impl Compiler {
             )
             .map_err(CompileError::Compile)?;
         let resumed = plan.resumed_mir();
-        let lir =
+        let mut lir =
             severian_lowering::lower(&resumed, types, &target).map_err(CompileError::Lowering)?;
+        self.reuse_published_functions(&mut lir)?;
         let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
         compose_region_artifacts(&ordinary, artifacts, &target)
     }
@@ -259,6 +317,49 @@ impl Compiler {
 
     pub fn check_source(&self, source: &SourceFile) -> Result<(), CompileError> {
         self.check_source_to_mir(source).map(|_| ())
+    }
+
+    /// Compile the checked library implementation to a relocatable object.
+    pub fn compile_library_object(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
+        let mir = self.check_file_to_mir(source, CompileMode::Build)?;
+        let types = self.types_for(&mir);
+        let plan = severian_compile::plan(&mir, types).map_err(CompileError::Compile)?;
+        let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
+            .map_err(CompileError::Lowering)?;
+        let artifacts = self.compile_handlers.compile(&plan, &CompileContext { types, target: &self.target })
+            .map_err(CompileError::Compile)?;
+        let initializer = format!("__sev_package_init_{}", source.to_string_lossy().bytes().map(|byte| format!("{byte:02x}")).collect::<String>());
+        let symbols = lir.functions.iter().filter(|function| function.cfg.is_some() || function.body.is_some()).map(|function| {
+            let arguments = function.parameter_types.iter().map(severian_mlir::type_spelling).collect::<Result<Vec<_>, _>>()?;
+            let result = severian_mlir::type_spelling(&function.result)?;
+            Ok(serde_json::json!({"id": function.native_symbol(), "name": function.name, "parameters": arguments, "result": result}))
+        }).collect::<Result<Vec<_>, severian_mlir::MlirError>>().map_err(CompileError::Mlir)?;
+        let records = lir.classes.iter().map(|record| {
+            let fields = record.fields.iter().map(|field| Ok(serde_json::json!({"name": field.name, "type": severian_mlir::type_spelling(&field.ty)?})))
+                .collect::<Result<Vec<_>, severian_mlir::MlirError>>()?;
+            Ok(serde_json::json!({"id": format!("!sev_class_{}", record.id), "name": record.name, "fields": fields, "variants": record.variants}))
+        }).collect::<Result<Vec<_>, severian_mlir::MlirError>>().map_err(CompileError::Mlir)?;
+        let facts = serde_json::json!({"format": "severian.native-symbols", "version": 1, "target": self.target.triple, "initializer": initializer, "symbols": symbols, "records": records});
+        std::fs::write(output.with_extension("symbols.json"), serde_json::to_vec_pretty(&facts).map_err(|error| CompileError::NativeLink(error.to_string()))?).map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        let ordinary = severian_mlir::render_library(&lir, &initializer).map_err(CompileError::Mlir)?;
+        let program = compose_region_artifacts(&ordinary, artifacts, &self.target)?;
+        if !program.gpu_kernels.is_empty() || !program.tensor_jit_source.is_empty() {
+            return Err(CompileError::NativeLink("library object requires separate accelerator provider artifacts".into()));
+        }
+        let text = program.host_mlir;
+        std::fs::write(output.with_extension("mlir"), &text).map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        let artifact = severian_backend::emit_mlir_object(&text, &self.target.triple, output).map_err(CompileError::Backend)?;
+        let metadata = output.with_extension("symbols.json");
+        let result = Command::new(std::env::var("SEVERIAN_OBJCOPY").unwrap_or_else(|_| "llvm-objcopy-21".into()))
+            .arg("--add-section").arg(format!(".sev.metadata={}", metadata.display()))
+            .arg("--set-section-flags").arg(".sev.metadata=readonly").arg(output)
+            .output().map_err(|error| CompileError::NativeLink(error.to_string()))?;
+        if !result.status.success() {
+            return Err(CompileError::NativeLink(String::from_utf8_lossy(&result.stderr).into_owned()));
+        }
+        let arguments = self.native_linker_arguments(source, &output.with_extension("so"))?;
+        severian_backend::emit_mlir_shared_library_with_linker_arguments(&text, &self.target.triple, &output.with_extension("so"), &arguments).map_err(CompileError::Backend)?;
+        Ok(artifact)
     }
 
     pub fn compile_file(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
@@ -828,6 +929,10 @@ impl Compiler {
                 .map(|library| format!("-l{library}")),
         );
 
+        for (library, _) in self.published_libraries()? {
+            if let Some(directory) = library.parent() { arguments.push(format!("-Wl,-rpath,{}", directory.display())); }
+            arguments.push(library.to_string_lossy().into_owned());
+        }
         let mut plans = Vec::new();
         for module in self.resolve_modules(source)?.modules {
             let external = severian_xxi::resolve(
@@ -2676,8 +2781,8 @@ fn with_core_prelude(
     let prelude = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     module.items.extend(prelude.items);
     let mut boxed = SourceFile::virtual_source(
-        "universal/primitive/box.sev",
-        include_str!("../../../../../sev_compiler/universal/primitive/box.sev"),
+        "core/memory/src/box.sev",
+        include_str!("../../../../../library/core/memory/src/box.sev"),
     );
     boxed.id = SourceId(u32::MAX - 4);
     let tokens = severian_lexer::scan(&boxed).map_err(CompileError::Diagnostic)?;

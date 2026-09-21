@@ -547,7 +547,13 @@ pub(crate) fn analyze_with_package_functions(
             parameters.push(FunctionParameter {
                 binding,
                 name: parameter.name.clone(),
-                contract: universal_boundary(type_id),
+                contract: {
+                    let mut contract = universal_boundary(type_id);
+                    if parameter.immutable_reference {
+                        contract.modifiers.push(severian_hir::BoundaryModifier { name: "view".into() });
+                    }
+                    contract
+                },
             });
         }
         let mut result = analyzer.resolve_source_type(&ast_function.result)?;
@@ -960,6 +966,16 @@ pub(crate) fn analyze_with_package_functions(
                 .and_then(|effects| effects.get(index))
                 .copied()
                 .unwrap_or(ParameterEffect::Shared);
+            if parameter.contract.modifiers.iter().any(|modifier| modifier.name == "view") && effect != ParameterEffect::Shared {
+                return Err(Diagnostic::new(
+                    "E000240",
+                    format!("cannot mutate or move immutable `view` parameter `{}` in `{}`", parameter.name, function.name),
+                    ast.items.iter().find_map(|item| match item {
+                        severian_ast::Item::Function(declaration) if declaration.name == function.name => declaration.parameters.iter().find(|candidate| candidate.name == parameter.name).map(|candidate| candidate.span),
+                        _ => None,
+                    }),
+                ));
+            }
             if effect == ParameterEffect::Move {
                 parameter.contract.modifiers.push(severian_hir::BoundaryModifier { name: "move".into() });
             }

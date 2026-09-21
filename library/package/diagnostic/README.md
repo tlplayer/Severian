@@ -1,11 +1,15 @@
 # package.diagnostic
 
-Package-owned lint rules, source metrics, quality policy, coverage aggregation,
+Package-owned quality policy, coverage aggregation,
 and build-input reporting. Compiler instrumentation supplies `CoverageRegion`
 and `CoverageTest` records through `coverage_map`; this library validates runtime
 records and applies package thresholds. It never lowers or rewrites compiler IR.
 
-Lint and file contribution reports belong in `package.pkg/debug/quality`.
+[package.diagnostic.lint](lint/README.md) owns lint rules, source metrics,
+suppression, reporting and enforcement. The parent keeps compatibility exports.
+
+Lint reports belong in `package.pkg/debug/quality/lint`; file contribution
+reports belong in `package.pkg/debug/quality`.
 Coverage results belong in `package.pkg/debug/coverage`. Timing and resource
 measurements are owned by the sibling `package.profile` library.
 

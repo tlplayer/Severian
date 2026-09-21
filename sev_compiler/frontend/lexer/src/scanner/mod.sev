@@ -106,7 +106,7 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                     case FormattedString:
                         metadata = syntaxes
                     case _:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")
                 token = make_token(input, kind, start, cursor)
                 token.syntaxes = metadata
                 token.value = result.value

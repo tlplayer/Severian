@@ -28,7 +28,7 @@ import process
 import file
 
 def output_root(project: Project, platform: string, profile: string) -> string | Error:
-    return build_root() + "/bin"
+    return project.root + "/package.pkg/bin"
 
 def test_output_root(project: Project, platform: string, profile: string) -> string | Error:
     return build_root() + "/debug/test/" + safe_name(platform) + "/" + safe_name(profile)
@@ -100,6 +100,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
 
 # The compilation-unit protocol is the only compiler execution boundary.
 def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
+    reset_generators()
     enforce_lint(plan.project, plan.lint, plan.mode == "test")
     artifacts: list[Artifact] = []
     consumed: list[string] = []
@@ -134,7 +135,7 @@ def execute(plan: BuildPlan, compiler: Compiler) -> BuildResult | Error:
                 if source not in consumed:
                     consumed.append(source)
     if len(consumed) > 0:
-        diagnostic.report_contributions(plan.project.root, consumed, build_root() + "/debug/quality", plan.mode == "test")
+        diagnostic.report_contributions(plan.project.root, consumed, plan.project.root + "/package.pkg/debug/quality", plan.mode == "test")
     return BuildResult(plan, artifacts)
 
 def build(project: Project, compiler: Compiler, request: Build) -> BuildResult | Error:

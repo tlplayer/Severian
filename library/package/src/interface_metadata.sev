@@ -1,0 +1,54 @@
+import interface as interfaces
+import metadata
+import * from "host.sev"
+import * from "model.sev"
+import * from "document.sev"
+
+# Consume the compiler's checked scalar ABI declarations and actual link outputs.
+# Unsupported generic/aggregate ABIs remain source contracts until the compiler
+# supplies their semantic metadata; this adapter never invents native layouts.
+def retain_native_interface(owner: ResolvedPackage, unit: BuildUnit, compiler: Compiler, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string, resolution: Resolution) -> string | Error:
+    contract = read_text(cache + "/artifact.interface.sev")
+    identity = metadata.PackageIdentity(owner.identity.name, owner.identity.version, owner.checksum)
+    declarations: list[interfaces.Declaration] = []
+    symbols: list[metadata.SymbolRecord] = []
+    types: list[metadata.TypeRecord] = []
+    implementations: list[metadata.ImplementationRecord] = []
+    decorator := ""
+    symbol := ""
+    for line in contract.split("\n"):
+        if line.starts_with("@c(symbol="):
+            decorator = line
+            symbol = line.split("\"")[1]
+        elif line.starts_with("def "):
+            exported = line[4:].split("(")[0]
+            if symbol == "":
+                throw Error("compiler interface omitted native symbol: " + exported)
+            type_id = "callable:" + symbol
+            types.append(metadata.TypeRecord(type_id, "callable"))
+            symbols.append(metadata.SymbolRecord(symbol, exported, "function", type_id, true))
+            declarations.append(interfaces.Declaration(exported, symbol, "source/" + unit.target.path, decorator + "\n" + line))
+            implementations.append(metadata.ImplementationRecord(symbol, "", ["archive"], symbol))
+            symbol = ""
+    semantic_id = digest(cache + "/artifact.interface.sev")
+    public = interfaces.Interface(identity, build_id, semantic_id, declarations)
+    binding = interfaces.write(root, public)
+    # The unit build ID includes the complete resolved graph and options.
+    compatibility = metadata.Compatibility(digest(compiler.executable), "severian-scalar-c-1", triple, "llvm", unit.profile, build_id, build_id)
+    dependencies: list[metadata.DependencyRecord] = []
+    for edge in resolution.edges:
+        if edge.parent != 0:
+            continue
+        dependency = resolution.packages[edge.child]
+        if dependency.build_id != "" and dependency.interface_path.ends_with(".sevi"):
+            public_dependency = interfaces.decode(read_text(dependency.interface_path))
+            dependencies.append(metadata.DependencyRecord(edge.alias, dependency.identity.name, dependency.identity.version, dependency.checksum, dependency.build_id, public_dependency.semantic_id))
+    artifacts: list[metadata.ArtifactRecord] = []
+    for kind in ["object", "archive", "dynamic"]:
+        relative = prefix + "/" + kind + "/" + (name + ".o" if kind == "object" else "lib" + name + (".a" if kind == "archive" else ".so"))
+        artifacts.append(metadata.ArtifactRecord(kind, relative, kind, digest(root + "/" + relative), triple))
+    realization = metadata.Realization(identity, build_id, compatibility, binding, "complete", artifacts, symbols, types, [], dependencies, implementations)
+    interfaces.validate_binding(public, realization)
+    metadata.save(root, realization)
+    metadata.save_sections(root, realization)
+    return binding.path

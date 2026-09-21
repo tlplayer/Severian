@@ -1,0 +1,48 @@
+{
+  "package": {
+    "name": "package.diagnostic.lint",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {
+    "name": "lint",
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "file": {
+      "path": "../../../system/file"
+    },
+    "os": {
+      "path": "../../../system/os"
+    },
+    "path": {
+      "path": "../../../system/path"
+    },
+    "process": {
+      "path": "../../../system/process"
+    },
+    "cache": {
+      "package": "package.cache",
+      "path": "../../cache"
+    },
+    "time": {
+      "path": "../../../core/time"
+    },
+    "build_flow": {
+      "package": "package.build",
+      "path": "../../build"
+    },
+    "lexer": {
+      "package": "sev-compiler-lexer",
+      "path": "../../../../sev_compiler/frontend/lexer"
+    },
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../../../../sev_compiler/frontend/source"
+    },
+    "support": {
+      "package": "package.diagnostic.support",
+      "path": "../support"
+    }
+  }
+}

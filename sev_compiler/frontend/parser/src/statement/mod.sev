@@ -90,7 +90,7 @@ def parser_at_identifier(parser: Parser, expected: string) -> bool:
         case Identifier:
             return string(parser_peek(parser)) == expected
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return false
 
 def parser_at_simple(parser: Parser, expected: lexer.TokenKind) -> bool:
@@ -110,7 +110,7 @@ def parser_identifier(parser: Parser, message: string) -> tuple[string, source.S
         case Identifier:
             return (string(token), token.span)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return error(diagnostics.Diagnostic("E000120", message, token.span))
 
 def parser_expect(parser: Parser, expected: lexer.TokenKind, message: string) -> lexer.Token | diagnostics.Diagnostic:
@@ -638,7 +638,7 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
         case String:
             name = string(parser_next(parser))
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     contracts: list[universal.Expression] = []
     if parser_at_identifier(parser, "with"):
         if "profile" not in modes:
@@ -837,7 +837,7 @@ def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectat
 def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Block, u32] | diagnostics.Diagnostic:
     parser_expect(parser, Newline, "expected newline after " + owner)
     while parser_take(parser, Newline) != None:
-    throw Error("Unimplemented")
+        throw Error("unimplemented")
     parser_expect(parser, Indent, "expected indented " + owner + " body")
     statements: list[universal.Statement] = []
     parser_separators(parser)
@@ -1034,10 +1034,10 @@ def parser_looks_like_binding(parser: Parser) -> bool:
                     if parser.cursor[0] + 2 < len(parser.tokens):
                         return lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 2], "=")
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             return lexer.token_is_symbol(next, "=") or lexer.token_is_symbol(next, "?=") or lexer.token_is_symbol(next, ":=") or lexer.token_is_symbol(next, ":")
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     return false
 
 def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic:
@@ -1049,7 +1049,7 @@ def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic
             annotation = universal.named_type(name, [], start)
             name = parser_identifier(parser, "expected binding name after type")[0]
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     if parser_take_symbol(parser, ":") != None:
         annotation = parser_type_annotation(parser)
     inferred = parser_take_symbol(parser, ":=") != None
@@ -1197,7 +1197,7 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                     throws_call = name == "throws"
                     mock_call = name == "mock"
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
             if mock_call:
                 calls: list[universal.Expression] = []
                 results: list[universal.Expression] = []
@@ -1345,7 +1345,7 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             value = string(token)
             return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     if lexer.token_is_symbol(token, "["):
         elements: list[universal.Expression] = []
         parser_delimited_layout(parser)
@@ -1465,7 +1465,7 @@ def token_operator(token: lexer.Token, fixity: universal.Fixity) -> universal.Op
         case FormattedString:
             return None
         case _:
-        throw Error("Unimplemented")
+            throw Error("unimplemented")
     for syntax in token.syntaxes:
         if syntax.fixity == fixity and (syntax.grammar_form == "" or syntax.grammar_form == "Infix" or syntax.grammar_form == "Prefix" or syntax.grammar_form == "Postfix"):
             return syntax

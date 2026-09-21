@@ -818,6 +818,8 @@ dependencies = [
 name = "severian-modules"
 version = "0.1.0"
 dependencies = [
+ "json5",
+ "serde_json",
  "severian-ast",
  "severian-diagnostics",
  "severian-lexer",

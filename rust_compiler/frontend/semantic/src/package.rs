@@ -36,6 +36,8 @@ pub struct FunctionDecl {
     pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeAnnotation>,
     pub parameter_variadics: Vec<bool>,
+    /// Immutable reference contracts retained by package declaration metadata.
+    pub parameter_views: Vec<bool>,
     pub parameter_defaults: Vec<Option<severian_ast::Expression>>,
     pub result: TypeAnnotation,
     pub constraints: Vec<GenericConstraint>,
@@ -1837,6 +1839,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                                 .iter()
                                 .map(|parameter| parameter.variadic)
                                 .collect(),
+                            parameter_views: function.parameters.iter().map(|parameter| parameter.immutable_reference).collect(),
                             result: function.result.clone(),
                             constraints: function.constraints.clone(),
                             generic_body: function.body.clone(),
@@ -2229,7 +2232,8 @@ fn function_signature_id(function: &severian_ast::FunctionDeclaration) -> Signat
         .iter()
         .map(|parameter| {
             format!(
-                "{}{}",
+                "{}{}{}",
+                if parameter.immutable_reference { "view " } else { "" },
                 type_key(&parameter.annotation),
                 if parameter.variadic { "..." } else { "" }
             )
@@ -2307,8 +2311,8 @@ fn stable_instance_function_id(
         .collect::<Vec<_>>()
         .join(",");
     FunctionId(stable_hash(&format!(
-        "function:{}:{:032x}:{:032x}[{arguments}]",
-        definition.package, definition.module, definition.declaration.0,
+        "function:{:032x}:{:032x}[{arguments}]",
+        definition.module, definition.declaration.0,
     )))
 }
 

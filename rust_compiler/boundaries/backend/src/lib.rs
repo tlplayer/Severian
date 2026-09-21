@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 pub enum ArtifactKind {
     Executable,
     SharedLibrary,
+    Object,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -740,7 +741,7 @@ pub fn emit_mlir_executable_with_linker_arguments(
     output: &Path,
     linker_arguments: &[String],
 ) -> Result<Artifact, BackendError> {
-    emit_mlir_binary(module, target_triple, output, linker_arguments, false)
+    emit_mlir_binary(module, target_triple, output, linker_arguments, false, false)
 }
 
 /// Lowers a verified MLIR module to a process-loadable shared object. Extra
@@ -752,7 +753,12 @@ pub fn emit_mlir_shared_library_with_linker_arguments(
     output: &Path,
     linker_arguments: &[String],
 ) -> Result<Artifact, BackendError> {
-    emit_mlir_binary(module, target_triple, output, linker_arguments, true)
+    emit_mlir_binary(module, target_triple, output, linker_arguments, true, false)
+}
+
+/// Emits a relocatable compilation unit without linking runtime providers.
+pub fn emit_mlir_object(module: &str, target_triple: &str, output: &Path) -> Result<Artifact, BackendError> {
+    emit_mlir_binary(module, target_triple, output, &[], false, true)
 }
 
 fn emit_mlir_binary(
@@ -761,6 +767,7 @@ fn emit_mlir_binary(
     output: &Path,
     linker_arguments: &[String],
     shared: bool,
+    object: bool,
 ) -> Result<Artifact, BackendError> {
     let gpu_architecture = module
         .split_once("severian.gpu.architecture = \"")
@@ -860,6 +867,12 @@ fn emit_mlir_binary(
         &lowered,
     )?;
     let target = format!("--target={target_triple}");
+    if object {
+        let output_path = output.to_string_lossy();
+        run_tool("clang object", tool("SEVERIAN_CLANG", "clang-21"),
+            &[&target, "-g", "-fPIC", "-c", "-x", "ir", "-", "-o", &output_path], &llvm_ir)?;
+        return Ok(Artifact { path: output.to_owned(), kind: ArtifactKind::Object });
+    }
     let output_path = output.to_string_lossy().into_owned();
     let mut clang_arguments = vec![
         target,

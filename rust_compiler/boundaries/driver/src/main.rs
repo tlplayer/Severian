@@ -515,10 +515,13 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
                 }
             }
             DeclaredTarget::Library(library) => {
-                compiler
-                    .check_file(&library.path)
-                    .map_err(|error| error.to_string())?;
-                emit_library_package(library, &compiler, &output)?;
+                let roots = manifest.map(|m| m.package_graph.packages.values().map(|p| p.root.clone()).collect()).unwrap_or_else(|| vec![root.to_path_buf()]);
+                let configuration = format!("library-object-v2\n{config:?}\n{target:?}\n{:?}", manifest.map(|m| &m.package_graph));
+                let rebuilt = build_cache::compile_library(&compiler, &library.path, &output.with_extension("o"), root, configuration, roots)?;
+                if rebuilt || !output.is_file() {
+                    emit_library_package(library, &compiler, &output)?;
+                }
+                retain_library_object(root, library, &output, &config)?;
             }
         }
         println!("built {}", output.display());
@@ -646,6 +649,14 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         ))?)?,
     )
     .map_err(|error| format!("could not write published build metadata: {error}"))?;
+
+    if let Some(library) = &manifest.library {
+        let build = staging.join("build/native");
+        fs::create_dir_all(&build).map_err(|error| error.to_string())?;
+        let object = build.join(format!("{}.o", library.name));
+        compiler.compile_library_object(&library.path, &object).map_err(|error| error.to_string())?;
+        retain_library_payload(&staging, library, &object, &config)?;
+    }
 
     let binary_artifact_root = staging
         .join("artifacts")
@@ -1251,17 +1262,57 @@ fn input_root(input: &Input) -> &Path {
     }
 }
 
-fn artifact_path(_root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) -> PathBuf {
+fn artifact_path(root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) -> PathBuf {
     let base = env::current_dir().expect("invocation directory").join("package.pkg");
     match target {
         DeclaredTarget::Binary(binary) => base.join("bin").join(&binary.name),
-        DeclaredTarget::Library(library) => base
+        DeclaredTarget::Library(library) => root.join("package.pkg")
             .join("artifacts")
             .join(target_directory(&config.target))
             .join(&config.profile)
             .join("package")
             .join(format!("{}-{}.pkg", library.name, library.version)),
     }
+}
+
+// Retain bootstrap-produced native units in the owning package's SIP layout.
+// The source archive is retained until semantic .sevi loading replaces it.
+fn retain_library_object(root: &Path, library: &LibraryTarget, output: &Path, config: &ResolvedConfig) -> Result<(), String> {
+    retain_library_payload(&root.join("package.pkg"), library, output, config)
+}
+
+fn retain_library_payload(root: &Path, library: &LibraryTarget, output: &Path, config: &ResolvedConfig) -> Result<(), String> {
+    let mlir = output.with_extension("mlir");
+    let digest = Command::new("sha256sum").arg("--").arg(output.with_extension("o")).output().map_err(|error| error.to_string())?;
+    if !digest.status.success() { return Err(String::from_utf8_lossy(&digest.stderr).into_owned()); }
+    let digest = String::from_utf8(digest.stdout).map_err(|error| error.to_string())?;
+    let id = format!("sha256-{}", digest.split_whitespace().next().ok_or("missing IR digest")?);
+    let triple = if config.target == "host" { TargetSpec::host().triple } else { config.target.clone() };
+    let metadata = root.join("metadata/symbols");
+    fs::create_dir_all(&metadata).map_err(|error| error.to_string())?;
+    fs::copy(output.with_extension("symbols.json"), metadata.join(format!("{id}.json"))).map_err(|error| error.to_string())?;
+    let base = root.join("artifacts").join(&triple).join(&id);
+    for directory in ["object", "archive", "dynamic", "ir"] {
+        fs::create_dir_all(base.join(directory)).map_err(|error| error.to_string())?;
+    }
+    let object = base.join("object").join(format!("{}.o", library.name));
+    fs::copy(output.with_extension("o"), &object).map_err(|error| error.to_string())?;
+    fs::copy(mlir, base.join("ir").join(format!("{}.mlir", library.name))).map_err(|error| error.to_string())?;
+    let dynamic = base.join("dynamic").join(format!("lib{}.so", library.name));
+    fs::copy(output.with_extension("so"), &dynamic).map_err(|error| error.to_string())?;
+    let hash_file = |path: &Path| -> Result<String, String> {
+        let result = Command::new("sha256sum").arg("--").arg(path).output().map_err(|error| error.to_string())?;
+        if !result.status.success() { return Err(String::from_utf8_lossy(&result.stderr).into_owned()); }
+        Ok(String::from_utf8_lossy(&result.stdout).split_whitespace().next().ok_or("missing artifact digest")?.to_owned())
+    };
+    let native = serde_json::json!({"format": 1, "target": triple, "symbols": format!("symbols/{id}.json"), "symbols-sha256": hash_file(&metadata.join(format!("{id}.json")))?, "dynamic-sha256": hash_file(&dynamic)?, "dynamic": dynamic.strip_prefix(root).map_err(|error| error.to_string())?});
+    fs::write(root.join("metadata/native-library.json"), serde_json::to_vec_pretty(&native).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+    let archive = base.join("archive").join(format!("lib{}.a", library.name));
+    let result = Command::new(env::var("SEVERIAN_AR").unwrap_or_else(|_| "llvm-ar-21".into()))
+        .arg("rcsD").arg(&archive).arg(object).output().map_err(|error| error.to_string())?;
+    if !result.status.success() { return Err(String::from_utf8_lossy(&result.stderr).into_owned()); }
+    println!("built native library {}", archive.display());
+    Ok(())
 }
 
 fn emit_library_package(

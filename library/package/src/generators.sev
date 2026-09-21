@@ -2,11 +2,29 @@ import * from "document.sev"
 import * from "host.sev"
 import * from "manifest.sev"
 import * from "model.sev"
+import environment
 
-# Recipes are package-owned Python sources. They run before cache validation
-# and must preserve unchanged output and keep generated files in package.pkg.
+# A build session executes each package-owned recipe once before unit lookup.
+# Reset at the public build boundary so later builds can observe changed inputs.
+PreparedGenerators: list[string] = []
+
+def reset_generators():
+    PreparedGenerators.clear()
+
+# Severian recipes use the configured host compiler. Python remains a migration
+# compatibility path until its corresponding source recipe has been replaced.
 def prepare_generators(resolution: Resolution) -> unit | Error:
+    if environment.get("SEVERIAN_ACTIVE_GENERATOR", "") != "":
+        return
     for resolved in resolution.packages:
         for recipe in string_array(setting(resolved.manifest.entries, "build", "generators", "[]")):
             location = inside(resolved.root, recipe)
-            require_command(["python3", location])
+            if location in PreparedGenerators:
+                continue
+            if location.ends_with(".sev"):
+                require_command(["env", "SEVERIAN_ACTIVE_GENERATOR=" + location, environment.get("SEVERIAN_GENERATOR_COMPILER", "sev"), location])
+            elif location.ends_with(".py"):
+                require_command(["python3", location])
+            else:
+                throw Error("unsupported build recipe: " + recipe)
+            PreparedGenerators.append(location)

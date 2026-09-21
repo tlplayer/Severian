@@ -65,3 +65,8 @@ def empty_module() -> Module:
 
 def empty_program() -> Program:
     return Program([])
+
+
+# Shared graph data is independent of loading and semantic analysis.
+class ModuleGraph:
+    modules: list[Module]

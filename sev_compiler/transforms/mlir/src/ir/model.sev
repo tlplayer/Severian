@@ -172,6 +172,41 @@ class MlirAffineExpression:
     operands: list[MlirAffineExpression] = []
 
 
+def affine_dimension(position: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineDimension, position, 0, [])
+
+
+def affine_symbol(position: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineSymbol, position, 0, [])
+
+
+def affine_constant(value: int) -> MlirAffineExpression:
+    return MlirAffineExpression(AffineConstant, 0, value, [])
+
+
+def affine_binary(kind: MlirAffineExpressionKind, left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return MlirAffineExpression(kind, 0, 0, [left, right])
+
+
+def affine_add(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineAdd, left, right)
+
+
+def affine_multiply(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineMultiply, left, right)
+
+
+def affine_modulo(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineModulo, left, right)
+
+
+def affine_floor_divide(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineFloorDivide, left, right)
+
+
+def affine_ceil_divide(left: MlirAffineExpression, right: MlirAffineExpression) -> MlirAffineExpression:
+    return affine_binary(AffineCeilDivide, left, right)
+
 
 class MlirAffineMap:
     dimensions: int

@@ -25,12 +25,20 @@ Native providers referenced by the source declarations and their local headers
 are included in the release. When a consumer also imports the same provider
 from a local library, identical C/header inputs are linked once.
 
+The native backend stores compilation stages under the sysroot's
+`package.pkg/cache/compiler`, or `SEVERIAN_COMPILER_CACHE` when configured.
+Preprocessed C provider objects use the toolchain, flags, environment and input
+digest as their identity, with a fixed debug compilation directory, so consumers
+in different working directories can reuse the same `.o`. Preprocessing still
+runs to observe changed headers. This cache does not yet separate all Severian
+prelude bodies from consumer code generation.
+
 Publication validates the combined prelude before committing its frontend
 archive. The archive schema is generated from concrete compiler IR contracts by
 `sev_compiler/build/frontend_codec.py`. The compiler package declares this recipe
 in `build.generators`; builds regenerate it automatically before checking cached
 compilation results. The generated codec lives under
-`sev_compiler/package.pkg/build/<digest>/staging/`, with a generated import entry
+`sev_compiler/boundaries/driver/package.pkg/build/<digest>/staging/`, with a generated import entry
 in `package.pkg/build/frontend_archive.sev`. Its digest includes the recipe and
 concrete IR sources. Cleaning build output is safe; the next package build
 recreates it. After changing these contracts, rebuild the compiler and republish.

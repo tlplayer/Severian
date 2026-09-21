@@ -1,0 +1,117 @@
+from build_flow import
+{
+    Entry,
+    Project,
+    setting,
+    text_setting,
+    unquote,
+    string_array,
+    relative_path,
+    parse_document,
+    entries_json,
+    document_quote,
+    build_root,
+}
+from cache import
+{
+    capture,
+    canonical,
+    digest,
+    temporary,
+    mkdir,
+    write_text,
+    read_text,
+    copy_file,
+    replace_file,
+    remove_tree,
+}
+import file
+import os
+import path
+import process
+import time
+
+from build_flow import document_nodes
+
+class LintRule:
+    id: string
+    option: string
+    limit: int
+    level: string
+    message: string
+    remediation: string
+
+def lint_rules() -> list[LintRule]:
+    return [
+        LintRule("L0001", "file-lines", 999, "warning", "file has too many source lines", "Split the file into cohesive modules."),
+        LintRule("L0002", "function-lines", 399, "warning", "callable has too many source lines", "Extract a cohesive operation into a helper."),
+        LintRule("L0003", "parameters", 6, "warning", "callable has too many parameters", "Group related inputs or simplify the callable contract."),
+        LintRule("L0004", "unused-symbol", 0, "warning", "local symbol is never read", "Remove the unused binding, use it, or prefix its name with _. Preserve initializer effects."),
+        LintRule("L0005", "dead-code", 0, "warning", "code has no reachable use in this package", "Check external uses before removing or exporting the callable."),
+        LintRule("L0006", "class-methods", 20, "hint", "class has many methods", "Review the class responsibilities and split independent ones."),
+        LintRule("L0007", "match-arms", 9, "hint", "match has many cases", "Consider a map lookup for data dispatch or a trait for behavioral dispatch."),
+        LintRule("L0008", "conditional-branches", 9, "hint", "conditional dispatch has many branches", "Consider a map or a shared callable interface."),
+        LintRule("L0009", "ineffective-test", 0, "warning", "test has no production behavior check", "Assert an observable production result; replace placeholders and checks of constant stubs."),
+        LintRule("L0010", "constant-callable", 0, "warning", "callable only returns a constant", "Implement the operation or use a named value; explicitly suppress intentional constant APIs."),
+        LintRule("L0011", "function-documentation", 0, "warning", "public callable documentation is incomplete or stale", "Document purpose, each parameter, Returns, Errors, and Complexity with O(...) notation; remove stale parameter entries."),
+        LintRule("L0012", "class-documentation", 0, "warning", "public class documentation is incomplete", "Document purpose, Responsibilities, and Invariants immediately before the class."),
+        LintRule("L0013", "duplicate-callable", 0, "hint", "callable repeats an existing implementation", "Compare the implementations and extract their shared operation after preserving behavior."),
+        LintRule("L0014", "churn-commits", 6, "hint", "source changes repeatedly in the configured revision window", "Review the frequently changed module for independent responsibilities."),
+    ]
+
+def lint_entry(entries: list[Entry], table: string, key: string, fallback: string) -> string:
+    for entry in entries:
+        if entry.table == table and entry.key == key:
+            return entry.value
+    return fallback
+
+def lint_level(entries: list[Entry], rule: LintRule) -> string:
+    raw = lint_entry(entries, "lint.rules", rule.id, "\"" + rule.level + "\"")
+    return raw[1:int(len(raw)) - 1]
+
+def validate_lint(entries: list[Entry]) -> unit | Error:
+    for entry in entries:
+        if entry.table == "" and entry.key == "lint":
+            throw Error("lint policy requires an object")
+        if entry.table == "lint.rules":
+            found := false
+            for rule in lint_rules():
+                found = found or rule.id == entry.key
+            if not found:
+                throw Error("unknown lint rule: " + entry.key)
+            if entry.value not in ["\"off\"", "\"info\"", "\"hint\"", "\"warning\"", "\"error\""]:
+                throw Error("lint severity must be off, info, hint, warning, or error: " + entry.key)
+        elif entry.table == "lint":
+            if entry.key in ["enabled", "format"]:
+                if entry.value not in ["true", "false"]:
+                    throw Error("lint." + entry.key + " requires a boolean")
+            elif entry.key == "exclude":
+                if not entry.value.starts_with("[") or not entry.value.ends_with("]"):
+                    throw Error("lint.exclude requires an array of relative paths")
+                nodes = document_nodes(entry.value)
+                for node in nodes[1:]:
+                    if node.parent != 0 or node.kind != "string":
+                        throw Error("lint.exclude requires string paths")
+                    value = node.value
+                    relative = value[:int(len(value)) - 1] if value.ends_with("/") else value
+                    if relative == "" or relative.starts_with("/") or relative.contains("\\") or relative.contains(":"):
+                        throw Error("unsafe lint exclusion: " + value)
+                    for component in relative.split("/"):
+                        if component in ["", ".", ".."]:
+                            throw Error("unsafe lint exclusion: " + value)
+                    for byte in relative.bytes():
+                        if int(byte) < 32 or int(byte) == 127:
+                            throw Error("unsafe lint exclusion: " + value)
+            else:
+                found := false
+                for rule in lint_rules():
+                    found = found or rule.option == entry.key
+                if not found:
+                    throw Error("unknown lint option: " + entry.key)
+                if entry.value == "" or int(len(entry.value)) > 9:
+                    throw Error("lint limit requires an integer between 0 and 999999999")
+                for digit in entry.value.characters():
+                    if not "0123456789".contains(string(digit)):
+                        throw Error("lint limit requires a nonnegative integer: " + entry.key)
+        elif entry.table.starts_with("lint."):
+            throw Error("unknown lint policy table: " + entry.table)

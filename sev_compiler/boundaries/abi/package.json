@@ -6,13 +6,12 @@
     "publish": false
   },
   "lib": {
+    "name": "abi",
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "target": {
-      "path": "../../target"
-    },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

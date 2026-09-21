@@ -23,14 +23,14 @@ class FrontendCodec(unittest.TestCase):
         for entry in ['universal/src/lib.sev', 'frontend/lexer/src/lib.sev']:
             sources.update(codec.exported_sources(ROOT / 'sev_compiler' / entry))
         sources.update(ROOT / 'sev_compiler' / entry for entry in [
-            'source/src/lib.sev', 'frontend/semantic/src/callable.sev',
+            'universal/type/source/source.sev', 'frontend/semantic/src/callable.sev',
             'frontend/semantic/src/definitions.sev'])
         for source in sources:
             destination = self.root / source.relative_to(ROOT)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
         self.recipe = self.root / RECIPE.relative_to(ROOT)
-        self.entry = self.root / 'sev_compiler/package.pkg/build/frontend_archive.sev'
+        self.entry = self.root / 'sev_compiler/boundaries/driver/package.pkg/build/frontend_archive.sev'
 
     def generate(self):
         subprocess.run([sys.executable, self.recipe], cwd='/', check=True)
@@ -54,11 +54,13 @@ class FrontendCodec(unittest.TestCase):
         # Every generated relative import resolves, including semantic models.
         for path in files:
             for locator in re.findall(r'^import \* from "([^"]+)"', path.read_text(), re.M):
-                self.assertTrue((path.parent / locator).is_file(), (path, locator))
+                target = (self.root / 'sev_compiler/frontend/semantic' / locator[len('package:semantic/'):]
+                          if locator.startswith('package:semantic/') else path.parent / locator)
+                self.assertTrue(target.is_file(), (path, locator))
 
     def test_model_and_recipe_changes_select_new_builds(self):
         original = self.generate()
-        source = self.root / 'sev_compiler/source/src/lib.sev'
+        source = self.root / 'sev_compiler/frontend/source/source.sev'
         source.write_text(source.read_text().replace('class SourceId:',
                                                     'class SourceId:\n    generation: u32 = 0'))
         changed = self.generate()

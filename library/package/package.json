@@ -33,7 +33,7 @@
     },
     "source": {
       "package": "sev-compiler-source",
-      "path": "../../sev_compiler/source"
+      "path": "../../sev_compiler/frontend/source"
     },
     "dependency": {
       "package": "package.dependency",
@@ -58,6 +58,10 @@
     "metadata": {
       "package": "package.metadata",
       "path": "metadata"
+    },
+    "interface": {
+      "package": "package.interface",
+      "path": "interface"
     }
   }
 }

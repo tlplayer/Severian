@@ -6,13 +6,16 @@
     "publish": false
   },
   "lib": {
+    "name": "ffi",
     "path": "src/lib.sev"
   },
   "dependencies": {
     "abi": {
+      "package": "sev-compiler-abi",
       "path": "../abi"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

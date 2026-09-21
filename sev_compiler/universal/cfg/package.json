@@ -6,13 +6,16 @@
     "publish": false
   },
   "lib": {
+    "name": "cfg",
     "path": "cfg.sev"
   },
   "dependencies": {
     "source": {
-      "path": "../../source"
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "diagnostics": {
+      "package": "sev-compiler-diagnostics",
       "path": "../../diagnostics"
     }
   }

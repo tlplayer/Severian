@@ -1,5 +1,5 @@
-import * from "../../../../universal/declaration/scalar.sev" as boundary
-import * from "../../../../transforms/mir/src/agent_ir.sev" as agent_ir
+import * from "package:universal/declaration/scalar.sev" as boundary
+import * from "package:mir/src/agent_ir.sev" as agent_ir
 import source
 from source import SourceFile
 import process
@@ -10,14 +10,14 @@ import universal
 import diagnostics
 from diagnostics import Diagnostic
 from semantic import callable as semantic
-import * from "../../../../transforms/mir/src/callable.sev" as mir
-import * from "../../../../transforms/mlir/src/emit/callable.sev" as mlir
-import * from "../../../../transforms/mlir/src/ir/text.sev" as text
-import * from "../../../../frontend/modules/src/source.sev"
+import * from "package:mir/src/callable.sev" as mir
+import * from "package:mlir/src/emit/callable.sev" as mlir
+import * from "package:mlir/src/ir/text.sev" as text
+import * from "package:modules/src/source.sev"
 import * from "timing.sev" as timing
 import * from "package_interface.sev" as package_interface
 import * from "mir_archive.sev" as mir_archive
-import * from "../../../backend/src/native_mlir.sev" as native
+import * from "package:backend/src/native_mlir.sev" as native
 import * from "quality.sev" as quality
 import * from "editor.sev" as editor
 import * from "prelude_package.sev" as prelude_package
@@ -99,7 +99,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 case Locator:
                     source_provider = source_provider or normalized_path(parent_path(original_prelude.path) + "/" + locator) == subject_path
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
     if not prepare_only and len(files) == 0:
         for snapshot in PreludeSnapshots:
             eligible := snapshot.root == root and snapshot.owner != process.id() and not source_provider
@@ -263,7 +263,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     if "compiler" in declaration.source_modes:
                         prepared = []
                 case _:
-                throw Error("Unimplemented")
+                    throw Error("unimplemented")
     if len(prepared) > 0:
         parsed.items = parsed.items[provider_items:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
@@ -335,7 +335,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     case TypeLayout:
                         layout_query = true
                     case _:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")
     if layout_query:
         layout = native.hosted_layout()
         program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))

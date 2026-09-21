@@ -6,25 +6,24 @@
     "publish": false
   },
   "lib": {
+    "name": "mlir",
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "source": {"package": "sev-compiler-source", "path": "../../frontend/source"},
     "profiling": {
       "path": "../../../library/system/profiling"
     },
-    "artifact": {
-      "path": "../../artifact"
-    },
-    "target": {
-      "path": "../../target"
-    },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     },
     "mir": {
+      "package": "sev-compiler-mir",
       "path": "../mir"
     },
     "ownership": {
+      "package": "sev-compiler-ownership",
       "path": "../../frontend/ownership"
     }
   }

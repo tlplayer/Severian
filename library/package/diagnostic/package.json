@@ -37,7 +37,15 @@
     },
     "source": {
       "package": "sev-compiler-source",
-      "path": "../../../sev_compiler/source"
+      "path": "../../../sev_compiler/frontend/source"
+    },
+    "lint": {
+      "package": "package.diagnostic.lint",
+      "path": "lint"
+    },
+    "support": {
+      "package": "package.diagnostic.support",
+      "path": "support"
     }
   }
 }

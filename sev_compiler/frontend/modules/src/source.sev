@@ -1,17 +1,27 @@
-import * from "../../../boundaries/interface/src/package_metadata.sev" as metadata
+import * from "package:interface/src/package_metadata.sev" as metadata
 import lexer
 import diagnostics
 import source
 from source import SourceFile
 import universal
 import package
+import interfaces
 from io import IOError
-import * from "../../semantic/src/macros.sev" as macros
+import * from "package:semantic/src/macros.sev" as macros
 import * from "lexical.sev"
 
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
     # the IOError payload through that result gives render the wrong layout.
+    if path.ends_with(".sevi"):
+        try:
+            public = interfaces.decode(package.read_text(path))
+            declarations: list[string] = []
+            for declaration in public.declarations:
+                declarations.append(declaration.contract)
+            return source.SourceFile(source.SourceId(0), path, declarations.join("\n\n"))
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
     if path.ends_with("/interface.bin"):
         try:
             return source.SourceFile(source.SourceId(0), path, metadata.decode_interface(path))
@@ -157,7 +167,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                 subject += 2
                 match tokens[subject].kind:
                     case String:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")
                     case _:
                         return error(diagnostics.diagnostic("E000120", "expected a locator string after `import * from`"))
             elif tokens[subject].kind == lexer.TokenKind.String:
@@ -287,7 +297,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                             result.items.append(universal.BindingItem(imported))
                                             selected = true
                                     case _:
-                                    throw Error("Unimplemented")
+                                        throw Error("unimplemented")
                         if not selected:
                             return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
                         named_modules.append(module_key)
@@ -342,9 +352,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             case StringValue:
                                 continue
                             case _:
-                            throw Error("Unimplemented")
+                                throw Error("unimplemented")
                     case _:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")
                 if not root:
                     return error(diagnostics.diagnostic("E000120", "imported modules cannot execute module initializers"))
                 result.items.append(item)
@@ -371,7 +381,7 @@ def append_selected_import(result: universal.Module, child: universal.Module, na
                     append_imported_item(result, universal.BindingItem(imported))
                     selected = true
             case _:
-            throw Error("Unimplemented")
+                throw Error("unimplemented")
     if not selected:
         return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
 

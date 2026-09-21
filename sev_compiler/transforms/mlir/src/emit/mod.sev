@@ -211,7 +211,7 @@ def lower_block(builder: MlirOpBuilder, module: universal.Module, block: univers
                 result_values: list[MlirValue] = []
                 match value_type(module, result):
                     case Unit:
-                    throw Error("Unimplemented")
+                        throw Error("unimplemented")
                     case _:
                         result_values.append(mlir_value(builder, module, result))
                 target_name := ""

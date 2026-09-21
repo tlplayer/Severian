@@ -2,7 +2,7 @@ import diagnostics
 import * from "token/mod.sev"
 import * from "rule.sev"
 import * from "indentation.sev"
-import * from "../../../universal/primitive/char/encoding.sev" as utf8
+import * from "package:universal/primitive/char/encoding.sev"
 
 
 def literal_escape(value: string) -> string | None:
@@ -22,10 +22,10 @@ def literal_codepoint(value: string) -> u32:
     if len(bytes) == 1:
         return u32(bytes[0])
     if len(bytes) == 2:
-        return u32(utf8.decode_two(int(bytes[0]), int(bytes[1])))
+        return u32(decode_two(int(bytes[0]), int(bytes[1])))
     if len(bytes) == 3:
-        return u32(utf8.decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2])))
-    return u32(utf8.decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3])))
+        return u32(decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2])))
+    return u32(decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3])))
 
 def block_string(raw: string) -> string:
     content := raw

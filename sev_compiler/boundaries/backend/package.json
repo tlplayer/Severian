@@ -6,13 +6,25 @@
     "publish": false
   },
   "lib": {
+    "name": "backend",
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "runtime": {
-      "path": "../../runtime"
+    "package": {"path": "../../../library/package"},
+    "environment": {
+        "path": "../../../library/system/environment"
+    },
+    "file": {
+        "path": "../../../library/system/file"
+    },
+    "path": {
+        "path": "../../../library/system/path"
+    },
+    "process": {
+        "path": "../../../library/system/process"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

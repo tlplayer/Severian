@@ -6,6 +6,7 @@
     "publish": false
   },
   "lib": {
+    "name": "universal",
     "path": "src/lib.sev"
   },
   "dependencies": {
@@ -17,7 +18,7 @@
       "path": "../../library/system/profiling"
     },
     "source": {
-      "path": "../source",
+      "path": "../frontend/source",
       "package": "sev-compiler-source"
     },
     "diagnostics": {

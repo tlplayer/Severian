@@ -25,6 +25,8 @@ struct Record {
     roots: BTreeSet<PathBuf>,
     snapshot: Snapshot,
     output: Input,
+    #[serde(default)]
+    sidecars: Vec<Input>,
 }
 
 fn files(root: &Path, excluded: &Path, found: &mut BTreeSet<PathBuf>, seen: &mut BTreeSet<PathBuf>) -> Result<(), String> {
@@ -59,7 +61,7 @@ fn hashes(paths: &[PathBuf]) -> Result<Vec<Input>, String> {
 
 fn tools() -> Result<Vec<String>, String> {
     let mut identities = Vec::new();
-    for (variable, default) in [("SEVERIAN_CLANG", "clang-21"), ("SEVERIAN_MLIR_OPT", "mlir-opt-21"), ("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), ("SEVERIAN_LINKER", "ld.lld-21")] {
+    for (variable, default) in [("SEVERIAN_CLANG", "clang-21"), ("SEVERIAN_MLIR_OPT", "mlir-opt-21"), ("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), ("SEVERIAN_LINKER", "ld.lld-21"), ("SEVERIAN_OBJCOPY", "llvm-objcopy-21")] {
         let executable = std::env::var(variable).unwrap_or_else(|_| default.into());
         let output = Command::new(&executable).arg("--version").output().map_err(|e| format!("{executable}: {e}"))?;
         if !output.status.success() { return Err(format!("could not identify {executable}")); }
@@ -84,6 +86,14 @@ fn package_root(source: &Path) -> PathBuf {
 }
 
 pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &Path, configuration: String, declared: Vec<PathBuf>) -> Result<bool, String> {
+    compile_unit(compiler, source, output, root, configuration, declared, false)
+}
+
+pub(crate) fn compile_library(compiler: &Compiler, source: &Path, output: &Path, root: &Path, configuration: String, declared: Vec<PathBuf>) -> Result<bool, String> {
+    compile_unit(compiler, source, output, root, configuration, declared, true)
+}
+
+fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, configuration: String, declared: Vec<PathBuf>, library: bool) -> Result<bool, String> {
     let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let output = fs::canonicalize(parent).map_err(|e| e.to_string())?.join(output.file_name().ok_or("output has no filename")?);
@@ -95,7 +105,7 @@ pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &
     let lock = File::create(directory.join(format!("{key:016x}.lock"))).map_err(|e| e.to_string())?;
     lock.lock().map_err(|e| e.to_string())?;
     let record_path = directory.join(format!("{key:016x}.json"));
-    let previous = fs::read(&record_path).ok().and_then(|bytes| serde_json::from_slice::<Record>(&bytes).ok()).filter(|r| r.schema_version == 1);
+    let previous = fs::read(&record_path).ok().and_then(|bytes| serde_json::from_slice::<Record>(&bytes).ok()).filter(|r| r.schema_version == 2);
     let mut roots = declared.into_iter().map(|p| fs::canonicalize(p).map_err(|e| e.to_string())).collect::<Result<BTreeSet<_>, _>>()?;
     if let Some(record) = &previous { roots.extend(record.roots.iter().filter(|p| p.exists()).cloned()); }
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3).expect("driver repository");
@@ -104,7 +114,7 @@ pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &
     let force = std::env::var("SEVERIAN_FORCE_REBUILD").as_deref() == Ok("1");
     if !force && output.is_file() {
         if let Some(record) = previous {
-            if record.snapshot == before && hashes(std::slice::from_ref(&output))?[0] == record.output {
+            if record.snapshot == before && hashes(std::slice::from_ref(&output))?[0] == record.output && record.sidecars.iter().all(|item| item.path.is_file()) && hashes(&record.sidecars.iter().map(|item| item.path.clone()).collect::<Vec<_>>())? == record.sidecars {
                 println!("fresh {}", output.display());
                 return Ok(false);
             }
@@ -122,7 +132,8 @@ pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &
     }
     let before = snapshot(&configuration, &roots, &output)?;
     let staging = parent.join(format!(".sev-build-{}-{key:016x}", std::process::id()));
-    if let Err(error) = compiler.compile_file(source, &staging) {
+    let compiled = if library { compiler.compile_library_object(source, &staging) } else { compiler.compile_file(source, &staging) };
+    if let Err(error) = compiled {
         let _ = fs::remove_file(&staging);
         return Err(error.to_string());
     }
@@ -130,8 +141,16 @@ pub(crate) fn compile(compiler: &Compiler, source: &Path, output: &Path, root: &
         let _ = fs::remove_file(&staging);
         return Err("compiler inputs changed during compilation; no fresh result recorded".into());
     }
+    let mut sidecars = Vec::new();
+    if library {
+        for extension in ["mlir", "symbols.json", "so"] {
+            let destination = output.with_extension(extension);
+            fs::rename(staging.with_extension(extension), &destination).map_err(|e| e.to_string())?;
+            sidecars.push(destination);
+        }
+    }
     fs::rename(&staging, &output).map_err(|e| e.to_string())?;
-    let record = Record { schema_version: 1, roots, snapshot: before, output: hashes(std::slice::from_ref(&output))?.remove(0) };
+    let record = Record { schema_version: 2, roots, snapshot: before, output: hashes(std::slice::from_ref(&output))?.remove(0), sidecars: hashes(&sidecars)? };
     let staging = directory.join(format!(".sev-record-{}-{key:016x}.json", std::process::id()));
     fs::write(&staging, serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     fs::rename(staging, record_path).map_err(|e| e.to_string())?;

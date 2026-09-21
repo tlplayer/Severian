@@ -42,18 +42,16 @@ from diagnostic import
 def lint(project: Project, force: bool = false, testing: bool = false) -> list[LintDiagnostic] | Error:
     if not published_project(project.root):
         diagnostic.format_sources(project)
+    return diagnostic.lint(project, lint_identity(project, force, testing), force, testing, published_project(project.root))
+
+def lint_identity(project: Project, force: bool, testing: bool) -> string | Error:
     revision := ""
     if setting(project.manifest.entries, "quality", "revision-window", "0") != "0":
         revision = capture(["git", "-C", project.root, "rev-parse", "HEAD"])
     identity = "quality-2\n" + source_checksum(project.root) + "\n" + entries_json(project.manifest.entries) + "\n" + digest(process.executable()) + "\n" + revision + "\n" + string(force) + "\n" + string(testing)
-    return diagnostic.lint(project, identity, force, testing, published_project(project.root))
+    return identity
 
 def enforce_lint(project: Project, force: bool = false, testing: bool = false) -> unit | Error:
-    failed := false
-    json = text_setting(project.manifest.entries, "diagnostics", "message-format", "text") == "json"
-    for d in lint(project, force, testing):
-        message = lint_json(d) if json else d.file + ":" + string(d.line) + ":" + string(d.column) + ": " + d.level + "[" + d.rule + "]: " + d.message + " (" + string(d.measured) + " > " + string(d.threshold) + "). " + d.remediation
-        process.write_error(message + "\n")
-        failed = failed or d.level == "error" or (testing and d.rule in ["L0004", "L0005", "L0009", "L0010"])
-    if failed:
-        throw Error("package lint policy failed")
+    if not published_project(project.root):
+        diagnostic.format_sources(project)
+    diagnostic.enforce(project, lint_identity(project, force, testing), force, testing, published_project(project.root))

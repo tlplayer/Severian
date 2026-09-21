@@ -43,6 +43,27 @@
     }
   ],
   "dependencies": {
+    "backend": {"package": "sev-compiler-backend", "path": "boundaries/backend"},
+    "driver": {"package": "sev-compiler-driver", "path": "boundaries/driver"},
+    "semantic": {
+      "package": "sev-compiler-semantic",
+      "path": "frontend/semantic"
+    },
+    "environment": {
+        "path": "../library/system/environment"
+    },
+    "file": {
+        "path": "../library/system/file"
+    },
+    "os": {
+        "path": "../library/system/os"
+    },
+    "path": {
+        "path": "../library/system/path"
+    },
+    "process": {
+        "path": "../library/system/process"
+    },
     "profiling": {
       "path": "../library/system/profiling"
     },
@@ -53,18 +74,23 @@
       "path": "../library/package"
     },
     "diagnostics": {
+      "package": "sev-compiler-diagnostics",
       "path": "diagnostics"
     },
     "lexer": {
+      "package": "sev-compiler-lexer",
       "path": "frontend/lexer"
     },
     "parser": {
+      "package": "sev-compiler-parser",
       "path": "frontend/parser"
     },
     "source": {
-      "path": "source"
+      "path": "frontend/source",
+      "package": "sev-compiler-source"
     },
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "universal"
     }
   },

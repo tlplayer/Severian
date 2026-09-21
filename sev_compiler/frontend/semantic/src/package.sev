@@ -1,4 +1,3 @@
-import modules
 import universal
 
 enum Visibility:
@@ -75,7 +74,7 @@ def insert_resolution(bindings: map[string, Resolution], name: string, new_defin
             bindings[name] = Ambiguous([new_definition])
 
 
-def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
+def collect_declarations(graph: universal.ModuleGraph) -> ProgramIndex:
     index = ProgramIndex({}, {}, {}, {})
     for module in graph.modules:
         items: list[universal.DefId] = []
@@ -114,7 +113,7 @@ def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
     return index
 
 
-def resolve_imports(graph: modules.ModuleGraph, index: ProgramIndex):
+def resolve_imports(graph: universal.ModuleGraph, index: ProgramIndex):
     for module in graph.modules:
         scope = index.modules[module.id].scope
         for item in module.items:
@@ -136,7 +135,7 @@ def resolve_imports(graph: modules.ModuleGraph, index: ProgramIndex):
                             scope.bindings[declaration.alias if declaration.alias != None else name] = exported
 
 
-def analyze_package(graph: modules.ModuleGraph, context: universal.UniversalContext) -> TypedProgram:
+def analyze_package(graph: universal.ModuleGraph, context: universal.UniversalContext) -> TypedProgram:
     index = collect_declarations(graph)
     resolve_imports(graph, index)
     return TypedProgram(index, universal.empty_program())

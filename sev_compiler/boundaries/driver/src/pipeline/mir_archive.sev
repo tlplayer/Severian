@@ -1,5 +1,5 @@
-import * from "../../../../package.pkg/build/mir_archive.sev" as codec
-import * from "../../../interface/src/package_metadata.sev" as metadata
+import * from "../../package.pkg/build/mir_archive.sev" as codec
+import * from "package:interface/src/package_metadata.sev" as metadata
 import universal
 import package
 

@@ -30,6 +30,12 @@ class CompilerPipeline:
 def build_root() -> string:
     return process.current_directory() + "/package.pkg"
 
+def compiler_cache_root(sysroot: string) -> string | Error:
+    configured = environment.get("SEVERIAN_COMPILER_CACHE", "")
+    if configured != "":
+        return configured if configured.starts_with("/") else process.current_directory() + "/" + configured
+    return canonical(sysroot) + "/package.pkg/cache/compiler"
+
 def pipeline_blob(pipeline: CompilerPipeline, source: string, suffix: string) -> CompilerStepResult | Error:
     return cache.put_file(cache.Store(pipeline.root), source, suffix)
 
@@ -39,7 +45,7 @@ def pipeline_text(pipeline: CompilerPipeline, text: string, suffix: string) -> C
 def pipeline_event(pipeline: CompilerPipeline, name: string, key: string, output: CompilerStepResult, measurement: profile.ProcessMeasurement = profile.ProcessMeasurement(0, "", "", 0.0)) -> unit:
     pipeline.events.append("{\"stage\":" + document_quote(name) + ",\"key\":" + document_quote(key) + ",\"output\":" + document_quote(output.checksum) + ",\"reused\":" + string(output.reused) + ",\"resources\":" + profile.measurement_json(measurement) + "}")
 
-def compiler_step(pipeline: CompilerPipeline, name: string, version: string, input: CompilerStepResult, arguments: list[string], suffix: string, extra_inputs: list[string] = [], reusable: bool = true) -> CompilerStepResult | Error:
+def compiler_step(pipeline: CompilerPipeline, name: string, version: string, input: CompilerStepResult, arguments: list[string], suffix: string, extra_inputs: list[string] = [], reusable: bool = true, directory_independent: bool = false) -> CompilerStepResult | Error:
     cache.component(name)
     cache.component(suffix)
     if len(arguments) == 0 or "{output}" not in arguments:
@@ -52,7 +58,10 @@ def compiler_step(pipeline: CompilerPipeline, name: string, version: string, inp
             tool = process.current_directory() + "/" + tool
         tool_checksum = digest(tool)
         checksums: list[string] = []
-        identity := "compiler-step-1\n" + name + "\n" + version + "\n" + tool + "\n" + tool_checksum + "\n" + input.checksum + "\n" + suffix + "\n" + process.current_directory()
+        # Only fully materialized inputs with an explicit debug directory may
+        # share an object across working directories. Relative include and link
+        # searches keep the ordinary directory-sensitive identity.
+        identity := "compiler-step-2\n" + name + "\n" + version + "\n" + tool + "\n" + tool_checksum + "\n" + input.checksum + "\n" + suffix + "\n" + ("portable" if directory_independent else process.current_directory())
         for argument in arguments[1:]:
             identity += "\n" + document_quote(argument)
         for location in extra_inputs:

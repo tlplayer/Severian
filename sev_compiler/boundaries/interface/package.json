@@ -6,10 +6,13 @@
     "publish": false
   },
   "lib": {
+    "name": "interface",
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "package": {"package": "package", "path": "../../../library/package"},
     "universal": {
+      "package": "sev-compiler-universal",
       "path": "../../universal"
     }
   }

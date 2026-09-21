@@ -1,11 +1,15 @@
 # Severian packages
 
-Build outputs now belong to the invocation directory's `package.pkg`.
-Executables are delivered as `package.pkg/bin/<target-name>`; build identities
-and platform/profile variants remain in artifact storage. The independent
+Package build outputs belong to the owning package's `package.pkg`.
+Native objects, archives, `.sevi` bindings and metadata sections follow the
+[SIP-0003 implementation layout](SIP-0003-IMPLEMENTATION.md). Executables retain
+`package.pkg/bin/<target-name>` convenience copies alongside versioned paths.
+The independent
 [package.build](build/README.md), [package.cache](cache/README.md),
 [package.diagnostic](diagnostic/README.md), and [package.profile](profile/README.md)
 libraries define pipeline, storage, quality, and measurement boundaries.
+Lint analysis and enforcement are owned by
+[package.diagnostic.lint](diagnostic/lint/README.md).
 Their documents describe the current output and incremental-cache contract.
 
 This library owns package discovery, resolution, editing, builds, and
