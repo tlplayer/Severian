@@ -507,8 +507,6 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
                 methods.append(parser_function_declaration(parser, []))
             elif parser_at_identifier(parser, "operator"):
                 operators.append(parser_operator_declaration(parser))
-            elif parser_at_identifier(parser, "pass"):
-                parser_next(parser)
             elif parser_at_identifier(parser, "property") or (parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], ":")):
                 property_start = parser_peek(parser).span
                 if parser_at_identifier(parser, "property"):
@@ -842,10 +840,7 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     statements: list[universal.Statement] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
-        if parser_at_identifier(parser, "pass"):
-            parser_next(parser)
-        else:
-            statements.append(parser_block_statement(parser))
+        statements.append(parser_block_statement(parser))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
     return (universal.Block(statements, [], []), end)
@@ -1628,8 +1623,6 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
             elif parser_at_identifier(parser, "trait"):
                 parser_next(parser)
                 traits.append(parser_type_annotation(parser))
-            elif parser_at_identifier(parser, "pass"):
-                parser_next(parser)
             else:
                 field = parser_identifier(parser, "expected a field or method")
                 parser_expect_symbol(parser, ":", "expected field annotation")

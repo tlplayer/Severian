@@ -1009,61 +1009,57 @@ impl Parser<'_> {
                 || self.at_identifier("with")
                 || self.at_identifier("unsafe")
                 || self.at_identifier("try");
-            if self.at_identifier("pass") {
-                self.next();
-            } else {
-                let statement = self.block_statement()?;
-                if owner == "test" && self.take(&TokenKind::Colon).is_some() {
-                    let mut lookahead = self.cursor;
-                    while self
-                        .tokens
-                        .get(lookahead)
-                        .is_some_and(|token| token.kind == TokenKind::Newline)
-                    {
-                        lookahead += 1;
+            let statement = self.block_statement()?;
+            if owner == "test" && self.take(&TokenKind::Colon).is_some() {
+                let mut lookahead = self.cursor;
+                while self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Newline)
+                {
+                    lookahead += 1;
+                }
+                if self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Indent)
+                {
+                    if is_throws_call_statement(&statement) {
+                        statements.push(self.structured_throws_statement(statement)?);
+                        self.statement_separators();
+                        continue;
                     }
-                    if self
-                        .tokens
-                        .get(lookahead)
-                        .is_some_and(|token| token.kind == TokenKind::Indent)
+                    let (checks, end) = self.indented_block("test step")?;
+                    if let Statement::Expression(Expression {
+                        kind: ExpressionKind::Fallback { value, fallback },
+                        span,
+                    }) = statement
                     {
-                        if is_throws_call_statement(&statement) {
-                            statements.push(self.structured_throws_statement(statement)?);
-                            self.statement_separators();
-                            continue;
-                        }
-                        let (checks, end) = self.indented_block("test step")?;
-                        if let Statement::Expression(Expression {
-                            kind: ExpressionKind::Fallback { value, fallback },
-                            span,
-                        }) = statement
-                        {
-                            if let ExpressionKind::Name(error_binding) = fallback.kind {
-                                statements.push(Statement::FallibleElse {
-                                    value: *value,
-                                    error_binding,
-                                    body: checks,
-                                    span: Span::new(span.source, span.start, end),
-                                });
-                            } else {
-                                statements.push(Statement::Expression(Expression {
-                                    kind: ExpressionKind::Fallback { value, fallback },
-                                    span,
-                                }));
-                                statements.extend(checks);
-                            }
+                        if let ExpressionKind::Name(error_binding) = fallback.kind {
+                            statements.push(Statement::FallibleElse {
+                                value: *value,
+                                error_binding,
+                                body: checks,
+                                span: Span::new(span.source, span.start, end),
+                            });
                         } else {
-                            statements.push(statement);
+                            statements.push(Statement::Expression(Expression {
+                                kind: ExpressionKind::Fallback { value, fallback },
+                                span,
+                            }));
                             statements.extend(checks);
                         }
                     } else {
                         statements.push(statement);
+                        statements.extend(checks);
                     }
-                    self.statement_separators();
-                    continue;
+                } else {
+                    statements.push(statement);
                 }
-                statements.push(statement);
+                self.statement_separators();
+                continue;
             }
+            statements.push(statement);
             if !compound && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
                 return Err(self.error(&format!("expected a newline after {owner} statement")));
             }
@@ -2043,15 +2039,13 @@ impl Parser<'_> {
                 namespaces.extend(member_decorators);
             } else if self.at_identifier("property") {
                 properties.push(self.property()?);
-            } else if self.at_identifier("pass") {
-                self.next();
             } else if self.looks_like_member_property() {
                 properties.push(self.member_property()?);
             } else if matches!(self.peek().kind, TokenKind::Identifier(_)) {
                 bases.push(self.type_annotation()?);
             } else {
                 return Err(self.error(
-                    "expected a property, `def`, `operator`, composed trait, or `pass` in trait body",
+                    "expected a property, `def`, `operator`, or composed trait in trait body",
                 ));
             }
             if !member_has_body && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
@@ -2160,13 +2154,11 @@ impl Parser<'_> {
                 self.next();
                 self.next();
                 aliases.push(self.type_annotation()?);
-            } else if self.at_identifier("pass") {
-                self.next();
             } else if self.looks_like_member_property() {
                 fields.push(self.member_property()?);
             } else {
                 return Err(
-                    self.error("expected a field, method, constructor, or `pass` in class body")
+                    self.error("expected a field, method, or constructor in class body")
                 );
             }
             if !member_has_body && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
@@ -2236,10 +2228,8 @@ impl Parser<'_> {
                 return Err(
                     self.error("expected `def` or `operator` after extension member decorator")
                 );
-            } else if self.at_identifier("pass") {
-                self.next();
             } else {
-                return Err(self.error("expected a method, operator, or `pass` in extension body"));
+                return Err(self.error("expected a method or operator in extension body"));
             }
             self.separators();
         }

@@ -79,7 +79,7 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
                         property_cursor := cursor
                         # Trait bodies may inherit a contract by naming it on
                         # its own line, just as declaration headers do.
-                        if token_word(current) != "" and token_word(current) != "pass" and cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Newline:
+                        if token_word(current) != "" and cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Newline:
                             bases.append(token_word(current))
                         if token_word(current) == "property":
                             property_cursor += 1
