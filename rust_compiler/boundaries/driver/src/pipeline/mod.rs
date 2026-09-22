@@ -747,6 +747,7 @@ impl Compiler {
     > {
         let _timing = crate::timing::Stage::begin("semantic");
         severian_modules::order_packages(&mut graph).map_err(CompileError::Diagnostic)?;
+        crate::package_lint::explicit_imports(&graph).map_err(CompileError::Diagnostic)?;
         let root_package = graph
             .modules
             .last()

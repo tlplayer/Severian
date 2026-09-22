@@ -1158,12 +1158,25 @@ output = f"""module {{
                 "file imports require explicit",
             ),
             ("import * \"array.sev\"\n", "expected `from`"),
-            ("import * from array\n", "expected a locator string"),
-            ("import * from\n", "expected a locator string"),
+            ("import * from\n", "expected a package name or locator string"),
         ] {
             let source = SourceFile::virtual_source("imports.sev", text);
             let error = parse(&scan(&source).unwrap()).unwrap_err();
             assert!(error.message.contains(message), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn parses_mixed_named_and_wildcard_imports() {
+        for text in ["import X, * from dependency\n", "from dependency import { X, * }\n", "import X, * from \"types.sev\"\n", "from \"types.sev\" import { X, * }\n"] {
+            let source = SourceFile::virtual_source("imports.sev", text);
+            let module = parse(&scan(&source).unwrap()).unwrap();
+            let severian_ast::Item::Import(named) = &module.items[0] else {panic!("named import")};
+            let severian_ast::Item::Import(wildcard) = &module.items[1] else {panic!("wildcard import")};
+            assert_eq!(named.selected_name(),Some("X"));
+            assert!(!named.is_wildcard());
+            assert!(wildcard.is_wildcard());
+            assert_eq!(&text[wildcard.span.start as usize..wildcard.span.end as usize],"*");
         }
     }
 

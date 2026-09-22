@@ -20,7 +20,7 @@ pub struct Plan {
 }
 
 #[derive(Clone)]
-struct Word { text: String, start: usize, end: usize, identifier: bool }
+struct Word { text: String, start: usize, end: usize, identifier: bool, formatted: bool }
 
 fn words(module: &severian_modules::ResolvedModule) -> Result<Vec<Word>, String> {
     let tokens = severian_lexer::scan(&module.source).map_err(|e| e.to_string())?;
@@ -28,17 +28,14 @@ fn words(module: &severian_modules::ResolvedModule) -> Result<Vec<Word>, String>
         text: module.source.text[t.span.start as usize..t.span.end as usize].to_owned(),
         start: t.span.start as usize, end: t.span.end as usize,
         identifier: matches!(t.kind, severian_lexer::TokenKind::Identifier(_)),
+        formatted: matches!(t.kind, severian_lexer::TokenKind::FormattedString(_)),
     }).collect())
 }
 fn wildcard(import: &severian_ast::ImportDeclaration) -> bool {
-    matches!(import.subject, ImportSubject::Locator(_)) && import.source.is_none()
+    import.is_wildcard()
 }
 fn selected(import: &severian_ast::ImportDeclaration) -> Option<&str> {
-    import.source.as_ref()?;
-    Some(match &import.subject { ImportSubject::Name(n) => n, ImportSubject::Locator(_) => import.source.as_deref().unwrap() })
-}
-fn module_scope(index: &ProgramIndex, module: ModuleId, name: &str) -> Option<ModuleId> {
-    match index.modules[&module].scope.bindings.get(name) { Some(Resolution::Module(id)) => Some(*id), _ => None }
+    import.selected_name()
 }
 fn same_binding(index: &ProgramIndex, module: ModuleId, target: ModuleId, name: &str) -> bool {
     let value = index.modules[&module].scope.bindings.get(name);
@@ -48,6 +45,7 @@ fn same_binding(index: &ProgramIndex, module: ModuleId, target: ModuleId, name: 
 /// Plans all edits before writing. Dependencies outside `root` are read only;
 /// generated package.pkg sources are owned by their generators.
 pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
+    let build_plan = severian_semantic::import_plan(graph).map_err(|e|e.to_string())?;
     let index = severian_semantic::import_index(graph).map_err(|e| e.to_string())?;
     let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
     let mut result = Plan::default();
@@ -71,23 +69,13 @@ pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
     let mut lexed = BTreeMap::new();
     for module in &graph.modules {
         let tokens = words(module)?;
-        let imports: Vec<_> = module.ast.items.iter().filter_map(|i| if let Item::Import(i) = i { Some(i) } else { None }).collect();
-        let shadows = shadows(&module.ast);
-        for (position, token) in tokens.iter().enumerate() {
-            if !token.identifier || imports.iter().any(|i| token.start >= i.span.start as usize && token.start < i.span.end as usize) { continue; }
-            if position > 0 && tokens[position - 1].text == "." { continue; }
-            if shadows.iter().any(|(start,end,names)| token.start >= *start && token.start < *end && names.contains(&token.text)) { continue; }
-            if index.modules[&module.id].scope.bindings.contains_key(&token.text) {
-                required.get_mut(&module.id).unwrap().insert(token.text.clone());
-            }
-            let mut owner = module_scope(&index, module.id, &token.text);
-            let mut cursor = position + 1;
-            while let (Some(id), Some(dot), Some(member)) = (owner, tokens.get(cursor), tokens.get(cursor + 1)) {
-                if dot.text != "." || !member.identifier { break; }
-                required.get_mut(&id).unwrap().insert(member.text.clone());
-                owner = match index.exports[&id].get(&member.text) { Some(Resolution::Module(id)) => Some(*id), _ => None };
-                cursor += 2;
-            }
+        // Build and source conversion share AST-derived requirements. Include
+        // downstream requests that arrive through facade import edges too.
+        for name in build_plan.requirements.get(&module.id).into_iter().flatten() {
+            required.get_mut(&module.id).unwrap().insert(name.split('.').next().unwrap_or(name).to_owned());
+        }
+        for ((consumer,_),names) in &build_plan.selections {
+            if *consumer == module.id { required.get_mut(&module.id).unwrap().extend(names.iter().cloned()); }
         }
         // Preserve explicitly promised APIs even when this build has no consumers.
         for directory in module.path.ancestors().skip(1) {
@@ -137,7 +125,10 @@ pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
         for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
             if !wildcard(import) { continue; }
             let Some(edge) = module.imports.iter().find(|e|e.span==import.span) else {continue};
-            let ImportSubject::Locator(locator) = &import.subject else {unreachable!()};
+            let locator = match &import.subject {
+                ImportSubject::Locator(locator) => locator.as_str(),
+                ImportSubject::Name(_) => import.source.as_deref().expect("package wildcard source"),
+            };
             let mut members = Vec::new();
             let mut uses = Vec::new();
             if let Some(alias) = &import.alias {
@@ -146,7 +137,11 @@ pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
                     && !(*p>0 && tokens[*p-1].text==".")
                     && !(t.start>=import.span.start as usize && t.start<import.span.end as usize)
                     && !shadows.iter().any(|(s,e,n)|t.start>=*s && t.start<*e && n.contains(alias))).collect();
-                if occurrences.iter().any(|(p,_)|tokens.get(p+1).is_none_or(|t|t.text!=".")) {
+                let unseen = build_plan.requirements.get(&module.id).into_iter().flatten()
+                    .filter_map(|name|name.strip_prefix(&format!("{alias}.")))
+                    .any(|member| !occurrences.iter().any(|(p,_)|tokens.get(p+2).is_some_and(|t|t.text==member)));
+                let embedded = tokens.iter().any(|token|token.formatted && token.text.contains(&format!("{alias}.")));
+                if unseen || embedded || occurrences.iter().any(|(p,_)|tokens.get(p+1).is_none_or(|t|t.text!=".")) {
                     result.notes.push(format!("{}: retained module namespace `{alias}`; it is used as a value or re-export", module.path.display()));
                     continue;
                 }
@@ -178,8 +173,9 @@ pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
                 result.notes.push(format!("{}: no named uses of `{locator}`; retained for review of initialization/extension effects",module.path.display()));
                 continue;
             }
-            let source = serde_json::to_string(locator).map_err(|e|e.to_string())?;
-            let replacement = if members.len()==1 {format!("from {source} import {}",members[0])}
+            let source = if matches!(import.subject, ImportSubject::Locator(_)) {serde_json::to_string(locator).map_err(|e|e.to_string())?} else {locator.to_owned()};
+            let replacement = if module.source.text[import.span.start as usize..import.span.end as usize].trim()=="*" {members.join(", ")}
+                else if members.len()==1 {format!("from {source} import {}",members[0])}
                 else {format!("from {source} import {{ {} }}",members.join(", "))};
             edits.push((import.span.start as usize,import.span.end as usize,replacement));
             edits.extend(uses);
@@ -308,6 +304,30 @@ mod tests {
         assert!(index.modules[&graph.modules.last().unwrap().id].scope.bindings.contains_key("needed"));
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn interpolation_uses_the_build_plan_and_keeps_namespace_source_edits_safe() {
+        let root=fixture(&[("lib.sev","def needed() -> int:\n    return 1\ndef unused() -> int:\n    return 2\n"),
+            ("main.sev","import * from \"lib.sev\"\ndef run() -> string:\n    return f\"{needed()}\"\n")]);
+        let graph=severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let edits=plan(&graph,&root).unwrap();
+        assert!(edits.files[0].after.contains("import needed"));
+        std::fs::write(root.join("main.sev"),"import * from \"lib.sev\" as helpers\ndef run() -> string:\n    value = helpers.needed()\n    return f\"{helpers.needed()}\"\n").unwrap();
+        let graph=severian_modules::resolve(&root.join("main.sev")).unwrap();
+        assert!(plan(&graph,&root).unwrap().files.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ordinary_build_automatically_handles_wildcards_even_with_source_lint_errors() {
+        let root=fixture(&[("package.json",r#"{"lint":{"rules":{"L0015":"error"}}}"#),
+            ("lib.sev","def needed() -> int:\n    return 7\n"),
+            ("main.sev","import * from \"lib.sev\"\ndef main() -> int:\n    return needed()\n")]);
+        let before=std::fs::read_to_string(root.join("main.sev")).unwrap();
+        crate::Compiler::new(severian_target::TargetSpec::host()).unwrap().check_file(&root.join("main.sev")).unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("main.sev")).unwrap(),before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn stale_plan_leaves_other_sources_untouched() {
         let root=fixture(&[("lib.sev","def used() -> int:\n    return 1\n"),

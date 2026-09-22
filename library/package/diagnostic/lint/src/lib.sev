@@ -419,6 +419,8 @@ def lint_tests(input: LintSource, inputs: list[LintSource], entries: list[Entry]
             lint_measure(input, test.start, 1, 8, entries, output)
 
 def lint_imports(input: LintSource, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    if lint_entry(entries, "language", "explicit-imports", "true") != "false":
+        return
     active := false
     grouped := 0
     for index in range(int(len(input.tokens))):

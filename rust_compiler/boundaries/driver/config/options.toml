@@ -13,7 +13,14 @@ path = "language.explicit-imports"
 group = "Language"
 type = "bool"
 default = "true"
-description = "Require named imports across package boundaries; replace wildcards with sev build --explicit-imports. Public dependency names are declared in package.export."
+description = "Automatically narrow wildcard imports to required names before semantic analysis."
+
+[[option]]
+path = "lint.explicit-imports"
+group = "lint"
+type = "bool"
+default = "true"
+description = "Report wildcard imports with package.diagnostic.lint L0015; replace them with sev build --explicit-imports."
 
 [[option]]
 path = "build.profile"
@@ -467,3 +474,11 @@ group = "Quality"
 type = "paths"
 default = "[\"tests/\",\"test/\"]"
 description = "Package-relative coverage exclusions."
+
+[[option]]
+path = "lint.rules.L0015"
+group = "lint rules"
+type = "enum"
+default = "warning"
+values = ["off", "info", "hint", "warning", "error"]
+description = "Severity of L0015: explicit-imports"

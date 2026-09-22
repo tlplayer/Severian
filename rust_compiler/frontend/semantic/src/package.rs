@@ -13,6 +13,7 @@ use severian_universal::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod generic;
+pub mod imports;
 #[cfg(test)]
 mod tests;
 
@@ -169,6 +170,7 @@ pub type ExportMap = BTreeMap<String, Resolution>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProgramIndex {
+    pub import_requirements: Option<imports::ImportRequirements>,
     pub packages: BTreeMap<PackageId, Vec<ModuleId>>,
     pub modules: BTreeMap<ModuleId, ModuleScope>,
     pub definitions: BTreeMap<DefId, Definition>,
@@ -227,6 +229,12 @@ pub fn import_index(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnost
     Ok(index)
 }
 
+/// The same demand plan used by compilation, exposed for source tooling.
+pub fn import_plan(graph: &ModuleGraph) -> Result<imports::ImportPlan, Diagnostic> {
+    let index = collect_declarations(graph)?;
+    Ok(imports::resolve_required_imports(graph, &index, imports::collect_import_requirements(graph)))
+}
+
 pub fn analyze_package_with_context(
     module_graph: &ModuleGraph,
     universal: &UniversalContext,
@@ -238,7 +246,11 @@ pub fn analyze_package_with_context(
     let module_graph = &lowered_module_graph;
     let mut types = universal.types.clone();
     let mut index = collect_declarations(module_graph)?;
-    resolve_imports(module_graph, &mut index);
+    let plan = imports::resolve_required_imports(module_graph, &index, imports::collect_import_requirements(module_graph));
+    imports::apply_import_plan(&mut index, &plan);
+    if std::env::var("SEVERIAN_PROFILE_ACTIVE").as_deref() == Ok("1") {
+        eprintln!("  Imports: {} name requests, {} imported bindings, {} export entries", plan.requested_names, plan.imported_bindings, index.exports.values().map(|e|e.len()).sum::<usize>());
+    }
     let package_classes = collect_package_classes(module_graph, &index, &mut types)?;
     let package_enums = collect_package_enums(module_graph, &package_classes);
     install_primitive_class_operators(&mut types, &package_classes, &index)?;
@@ -551,6 +563,9 @@ pub fn analyze_package_with_context(
             &package_constants,
             Some(source_module.id),
             Some(&registry_ast),
+            &index.modules[&source_module.id].scope.bindings.iter()
+                .filter_map(|(name,resolution)|matches!(resolution,Resolution::Module(_)).then_some(name.clone()))
+                .collect(),
         )?
         .modules
         .pop()
@@ -1499,6 +1514,15 @@ struct FunctionBinding {
     substitution: GenericSubstitution,
 }
 
+fn namespace_member_needed(index: &ProgramIndex, module: ModuleId, namespace: &str, member: &str) -> bool {
+    let Some(requirements) = &index.import_requirements else { return true };
+    let Some(names) = requirements.get(&module) else { return false };
+    let path = format!("{namespace}.{member}");
+    names.contains("*") || names.contains(&path)
+        || names.iter().any(|name|name.starts_with(&(path.clone()+".")))
+        || (names.contains(namespace) && namespace == member)
+}
+
 fn imported_function_bindings(
     module: ModuleId,
     index: &ProgramIndex,
@@ -1511,6 +1535,7 @@ fn imported_function_bindings(
             Resolution::Module(target) => {
                 if let Some(exports) = index.exports.get(target) {
                     for (export, resolution) in exports {
+                        if !namespace_member_needed(index, module, name, export) { continue; }
                         for definition in resolution_definitions(resolution) {
                             for substitution in
                                 function_instances(definition, index, specializations)
@@ -1656,6 +1681,7 @@ fn imported_constant_bindings(
             Resolution::Module(target) => {
                 if let Some(exports) = index.exports.get(target) {
                     for (export, resolution) in exports {
+                        if !namespace_member_needed(index, module, name, export) { continue; }
                         for definition in resolution_definitions(resolution) {
                             add(format!("{name}.{export}"), definition);
                         }
@@ -2055,13 +2081,6 @@ fn annotation_matches(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
 }
 
 fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
-    let public: BTreeMap<_,_> = module_graph.modules.iter().filter_map(|module| {
-        module_graph.policies.get(&module.package).filter(|p|p.library == module.path)
-            .map(|p|(module.id,&p.exports))
-    }).collect();
-    for (id, names) in &public {
-        index.exports.get_mut(id).expect("module exports").retain(|name,_|names.contains(name));
-    }
     // Source modules may form declaration-only import cycles and package
     // facades commonly re-export declarations from files that appear later in
     // graph order. Resolve exports to a fixed point so visibility never
@@ -2076,7 +2095,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 let Some(edge) = module.imports.iter().find(|edge| edge.span == import.span) else {
                     continue;
                 };
-                if matches!(import.subject, ImportSubject::Locator(_)) && import.source.is_none() && import.alias.is_none() {
+                if import.is_wildcard() && import.alias.is_none() {
                     let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
                     for (name, resolution) in members {
                         insert_binding(
@@ -2090,7 +2109,6 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                             resolution.clone(),
                             &index.definitions,
                         );
-                        if public.get(&module.id).is_none_or(|names|names.contains(&name)) {
                         insert_binding(
                             index
                                 .exports
@@ -2100,15 +2118,10 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                             resolution,
                             &index.definitions,
                         );
-                        }
                     }
                     continue;
                 }
-                let (name, resolution) = if import.source.is_some() {
-                    let imported_name = match &import.subject {
-                        ImportSubject::Name(name) => name,
-                        ImportSubject::Locator(_) => import.source.as_ref().expect("selective source import has a name"),
-                    };
+                let (name, resolution) = if let Some(imported_name) = import.selected_name() {
                     let Some(resolution) = index
                         .exports
                         .get(&edge.module)
@@ -2123,7 +2136,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                         import
                             .alias
                             .clone()
-                            .unwrap_or_else(|| imported_name.clone()),
+                            .unwrap_or_else(|| imported_name.to_owned()),
                         resolution,
                     )
                 } else {
@@ -2143,8 +2156,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 // Selective imports are facade declarations too. Keep their
                 // original DefIds when re-exporting so downstream packages see
                 // the same nominal type and callable, not a copied definition.
-                if (import.source.is_some() || import.alias.is_some())
-                    && public.get(&module.id).is_none_or(|names|names.contains(&name)) {
+                if import.selected_name().is_some() || import.alias.is_some() {
                     insert_binding(
                         index
                             .exports

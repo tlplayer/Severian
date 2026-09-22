@@ -9,6 +9,23 @@ pub struct ImportDeclaration {
     pub span: Span,
 }
 
+impl ImportDeclaration {
+    pub fn is_wildcard(&self) -> bool {
+        match &self.subject {
+            ImportSubject::Locator(_) => self.source.is_none(),
+            ImportSubject::Name(name) => name == "*" && self.source.is_some(),
+        }
+    }
+
+    pub fn selected_name(&self) -> Option<&str> {
+        if self.is_wildcard() || self.source.is_none() { return None; }
+        match &self.subject {
+            ImportSubject::Name(name) => Some(name),
+            ImportSubject::Locator(_) => self.source.as_deref(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportSubject {
     Name(String),

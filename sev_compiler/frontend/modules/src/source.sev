@@ -9,6 +9,7 @@ import interfaces
 from io import IOError
 import * from "package:semantic/src/macros.sev" as macros
 import * from "lexical.sev"
+import * from "imports.sev" as import_selection
 
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
@@ -156,7 +157,11 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
         elif token.kind == lexer.TokenKind.Dedent:
             depth -= 1
         if depth == 0 and lexer.token_word(token) == "from" and index + 2 < len(tokens) and lexer.token_word(tokens[index + 2]) == "import":
-            child = dependency_source(resolution, file.path, lexer.token_word(tokens[index + 1]), sysroot)
+            child := ""
+            if tokens[index + 1].kind == lexer.TokenKind.String:
+                child = import_source(resolution, file.path, string(tokens[index + 1]), sysroot)
+            else:
+                child = dependency_source(resolution, file.path, lexer.token_word(tokens[index + 1]), sysroot)
             discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
         from_import = index >= 2 and lexer.token_word(tokens[index - 2]) == "from"
         if depth == 0 and lexer.token_word(token) == "import" and not from_import and index + 1 < len(tokens):
@@ -165,11 +170,8 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                 if subject + 2 >= len(tokens) or lexer.token_word(tokens[subject + 1]) != "from":
                     return error(diagnostics.diagnostic("E000120", "expected `from` after `import *`"))
                 subject += 2
-                match tokens[subject].kind:
-                    case String:
-                        throw diagnostics.diagnostic("E000124", "unimplemented")
-                    case _:
-                        return error(diagnostics.diagnostic("E000120", "expected a locator string after `import * from`"))
+                if tokens[subject].kind not in [lexer.TokenKind.String, lexer.TokenKind.Identifier]:
+                    return error(diagnostics.diagnostic("E000120", "expected a source or package after `import * from`"))
             elif tokens[subject].kind == lexer.TokenKind.String:
                 return error(diagnostics.diagnostic("E000120", "file imports require explicit `import * from` followed by a locator string"))
             elif subject + 2 < len(tokens) and lexer.token_word(tokens[subject + 1]) == "from" and tokens[subject + 2].kind == lexer.TokenKind.String:
@@ -190,7 +192,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
     registry.discovered.append(file.path)
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = [], required_imports: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path in active:
         for index in range(int(len(active))):
@@ -210,9 +212,19 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     discover_lexical_rules(files, registry)
     registered = registered_source(input, files)
     parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
+    required = required_imports[:]
+    narrow := import_selection.module_names(parsed, required) and "*" not in required
+    owner := ""
+    configured := true
+    for dependency in resolution.packages:
+        if path.starts_with(dependency.root + "/") and len(dependency.root) > len(owner):
+            owner = dependency.root
+            configured = package.setting(dependency.manifest.entries, "language", "explicit-imports", "true") != "false"
+    narrow = narrow and configured
+    if not narrow:
+        import_selection.require_name(required, "*")
     result = universal.empty_module()
     aliases: list[string] = []
-    named_modules: list[string] = []
     for item in parsed.items:
         match item:
             case Import:
@@ -231,8 +243,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             aliases.append(alias)
                             child_prefix += alias + "."
                         child_path = import_source(resolution, path, locator, sysroot)
-                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
-                        for child_item in child.items:
+                        requested = import_selection.imported_requirements(required, alias, selected_name)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes, requested)
+                        for child_item in import_selection.select_imported_items(child, child_prefix, requested, narrow):
                             append_imported_item(result, child_item)
                         if selected_name != None:
                             exposed := selected_name
@@ -252,13 +265,16 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_prefix := prefix + package_name + "."
                         if alias != None and source_name == None:
                             child_prefix = prefix + imported_name + "."
-                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes)
-                        selected := source_name == None
-                        module_key = child_path + ":" + child_prefix
-                        for child_item in child.items:
-                            if module_key not in named_modules:
-                                append_imported_item(result, child_item)
-                            if source_name != None:
+                        if name == "*":
+                            child_prefix = prefix
+                            if alias != None:
+                                child_prefix += alias + "."
+                        requested = import_selection.imported_requirements(required, imported_name if source_name == None else alias, name if source_name != None and name != "*" else None)
+                        child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes, requested)
+                        selected := source_name == None or name == "*"
+                        for child_item in import_selection.select_imported_items(child, child_prefix, requested, narrow):
+                            append_imported_item(result, child_item)
+                            if source_name != None and name != "*":
                                 match child_item:
                                     case Function:
                                         if declaration.name == child_prefix + name:
@@ -300,7 +316,6 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                         throw diagnostics.diagnostic("E000124", "unimplemented")
                         if not selected:
                             return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
-                        named_modules.append(module_key)
                     case _:
                         return error(diagnostics.diagnostic("E000120", "bootstrap imports require a relative source locator"))
             case Trait:

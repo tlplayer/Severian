@@ -1841,7 +1841,7 @@ impl Parser<'_> {
 
     fn import_declarations(&mut self) -> Result<Vec<ImportDeclaration>, Diagnostic> {
         if !self.at_identifier("from") {
-            return Ok(vec![self.import_declaration()?]);
+            return self.import_members();
         }
         self.next();
         let source_token = self.next();
@@ -1863,7 +1863,9 @@ impl Parser<'_> {
         if grouped { self.import_layout(); }
         let mut imports = Vec::new();
         loop {
-            let (name, start) = self.identifier("expected an import name")?;
+            let (name, start) = if let Some(star) = self.take(&TokenKind::Star) {
+                ("*".to_owned(), star.span)
+            } else { self.identifier("expected an import name or `*`")? };
             let (alias, end) = if self.at_identifier("as") {
                 self.next();
                 let (alias, span) = self.identifier("expected an import alias")?;
@@ -1871,7 +1873,7 @@ impl Parser<'_> {
             } else { (None, start.end) };
             imports.push(ImportDeclaration {
                 subject: if locator { ImportSubject::Locator(source.clone()) } else { ImportSubject::Name(name.clone()) },
-                source: Some(if locator { name } else { source.clone() }), alias,
+                source: if locator && name == "*" { None } else { Some(if locator { name } else { source.clone() }) }, alias,
                 span: Span::new(start.source, start.start, end),
             });
             if grouped { self.import_layout(); }
@@ -1885,6 +1887,55 @@ impl Parser<'_> {
             self.expect(&TokenKind::RightBrace, "expected `}` after import list")?;
         }
         Ok(imports)
+    }
+
+    fn import_members(&mut self) -> Result<Vec<ImportDeclaration>, Diagnostic> {
+        let start = self.next().span;
+        let mut members = Vec::new();
+        loop {
+            let token = self.next();
+            let name = match token.kind {
+                TokenKind::Identifier(name) => name,
+                TokenKind::Star => "*".to_owned(),
+                TokenKind::String(_) => return Err(self.error("file imports require explicit names or `import * from`")),
+                _ => return Err(self.error("expected an import name or `*`")),
+            };
+            let mut span = token.span;
+            let alias = if self.at_identifier("as") {
+                self.next();
+                let (alias,end) = self.identifier("expected an import alias")?;
+                span.end = end.end;
+                Some(alias)
+            } else {None};
+            members.push((name,alias,span));
+            if self.take(&TokenKind::Comma).is_none() {break;}
+        }
+        if !self.at_identifier("from") {
+            if members.len()!=1 || members[0].0=="*" {return Err(self.error("expected `from` after import list"));}
+            let (name,alias,end)=members.remove(0);
+            return Ok(vec![ImportDeclaration {subject:ImportSubject::Name(name),source:None,alias,span:Span::new(start.source,start.start,end.end)}]);
+        }
+        self.next();
+        let source = self.next();
+        let (path,locator) = match source.kind {
+            TokenKind::Identifier(name)=>(name,false),
+            TokenKind::String(path)=>(path,true),
+            _=>return Err(self.error("expected a package name or locator string after `from`")),
+        };
+        let mut end=source.span.end;
+        if self.at_identifier("as") {
+            if members.len()!=1 || members[0].1.is_some() {return Err(self.error("alias each named import before `from`"));}
+            self.next();
+            let (alias,span)=self.identifier("expected an import alias")?;
+            members[0].1=Some(alias);end=span.end;
+        }
+        let single=members.len()==1;
+        Ok(members.into_iter().map(|(name,alias,span)|ImportDeclaration {
+            subject:if locator {ImportSubject::Locator(path.clone())} else {ImportSubject::Name(name.clone())},
+            source:if locator && name=="*" {None} else {Some(if locator {name} else {path.clone()})},
+            alias,
+            span:if single {Span::new(start.source,start.start,end)} else {span},
+        }).collect())
     }
 
     fn import_layout(&mut self) {

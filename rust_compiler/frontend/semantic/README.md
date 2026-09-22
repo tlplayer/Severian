@@ -69,3 +69,42 @@ ConstraintFailure
 ```
 
 Error codes and spans remain frontend responsibilities.
+
+## Automatic wildcard narrowing
+
+Normal builds interpret `import * from X` as a request for the names actually
+used by the importing module. `analyze_package_with_context` collects local
+declarations, builds an `ImportPlan`, and installs that plan before type checking.
+It does not construct the complete wildcard-expanded export index first.
+
+`package/imports/uses.rs` walks the parsed AST, including interpolation,
+annotations, constraints, defaults, and nested lexical scopes. The resolver in
+`package/imports.rs` follows individual name requests through import edges;
+its work list handles cycles, diamonds, overloads and namespace aliases. Files
+and their initialization order remain in the graph. Trait registry namespaces
+are tracked independently of imported callable stubs.
+
+The package setting `language.explicit-imports` defaults to `true`. Setting it
+to `false` retains broad import visibility for that package. Automatic narrowing
+changes compilation inputs in memory, not source files. The optional
+`sev build --explicit-imports` source edit command consumes the same AST-derived
+requirements. Source wildcard linting is skipped while automatic narrowing is on.
+
+`import_plan` exposes selections and counts for inspection. `import_index`
+continues to provide the complete public surface for refactoring tools that
+explicitly request it. Compare counts without compiling function bodies:
+
+```sh
+cargo run -p severian-driver --example import_counts -- \
+  sev_compiler/package.json sev_compiler/src/main.sev
+```
+
+`SEVERIAN_PROFILE_ACTIVE=1` also reports request, binding and export counts during
+ordinary builds. Export entries measure symbol exposure; they are not a count
+of parsed files or proof of a proportional wall-time improvement.
+
+The source compiler's `frontend/modules/src/imports.sev` performs selection
+before appending imported declarations to a flattened module. It retains
+implementation dependencies, records, traits and operators. When an AST form's
+implicit requirements are not covered by its visitor, it conservatively retains
+the dependency instead of dropping potentially required declarations.

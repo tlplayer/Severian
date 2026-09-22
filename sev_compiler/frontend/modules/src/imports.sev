@@ -1,0 +1,508 @@
+import universal
+
+# Import requirements are collected from parsed expressions, including expanded
+# interpolation expressions. Unknown compiler terms fail conservatively: they
+# retain the dependency until that term has a complete reference visitor.
+def require_name(names: list[string], name: string):
+    if name not in names:
+        names.append(name)
+
+
+def annotation_names(annotation: universal.TypeAnnotation, names: list[string]):
+    match annotation.kind:
+        case Named:
+            require_name(names, name)
+            for argument in arguments:
+                annotation_names(argument, names)
+        case Union:
+            for member in members:
+                annotation_names(member, names)
+
+
+def optional_names(value: universal.Expression | None, names: list[string]) -> bool:
+    selected ?= value
+    if selected != None:
+        return expression_names(selected, names)
+    return true
+
+
+def expression_path(expression: universal.Expression) -> string:
+    match expression.kind:
+        case Name:
+            return name
+        case Member:
+            parent = expression_path(object)
+            if parent != "":
+                return parent + "." + name
+        case _:
+            return ""
+    return ""
+
+
+def expression_names(expression: universal.Expression, names: list[string]) -> bool:
+    match expression.kind:
+        case Name:
+            require_name(names, name)
+        case Member:
+            path = expression_path(expression)
+            if path != "":
+                require_name(names, path)
+            return expression_names(object, names)
+        case LiteralValue:
+            return true
+        case SourceSymbol:
+            return true
+        case Call:
+            complete := expression_names(callee, names)
+            for argument in arguments:
+                if not expression_names(argument.value, names):
+                    complete = false
+            return complete
+        case TypeApplication:
+            for argument in arguments:
+                annotation_names(argument, names)
+            return expression_names(target, names)
+        case CompilerTerm:
+            require_name(names, name)
+            for argument in arguments:
+                annotation_names(argument, names)
+        case Binary:
+            first = expression_names(left, names)
+            second = expression_names(right, names)
+            return first and second
+        case Unary:
+            return expression_names(operand, names)
+        case Ownership:
+            return expression_names(value, names)
+        case AddressOf:
+            return expression_names(value, names)
+        case Stringify:
+            return expression_names(value, names)
+        case ThrowValue:
+            return expression_names(value, names)
+        case ErrorExpectation:
+            first = optional_names(value, names)
+            second = optional_names(comparison, names)
+            return first and second
+        case MockValue:
+            complete := expression_names(fallback, names)
+            for call in calls:
+                if not expression_names(call, names):
+                    complete = false
+            for result in results:
+                if not expression_names(result, names):
+                    complete = false
+            return complete
+        case MatchExpression:
+            complete := expression_names(subject, names)
+            for arm in arms:
+                if not arm_names(arm, names):
+                    complete = false
+            return complete
+        case Lambda:
+            # Keeping locally bound names is conservative. It cannot erase an
+            # import needed before a binding or outside the lambda's scope.
+            return expression_names(body, names)
+        case ListLiteral:
+            complete := true
+            for element in elements:
+                if not expression_names(element, names):
+                    complete = false
+            return complete
+        case MapLiteral:
+            complete := true
+            for element in keys:
+                if not expression_names(element, names):
+                    complete = false
+            for element in values:
+                if not expression_names(element, names):
+                    complete = false
+            return complete
+        case Subscript:
+            first = expression_names(object, names)
+            second = expression_names(index, names)
+            return first and second
+        case Slice:
+            complete := expression_names(object, names)
+            if not optional_names(start, names):
+                complete = false
+            if not optional_names(stop, names):
+                complete = false
+            if not optional_names(step, names):
+                complete = false
+            return complete
+        case Conditional:
+            first = expression_names(condition, names)
+            second = expression_names(then_value, names)
+            third = expression_names(else_value, names)
+            return first and second and third
+        case ComparisonChain:
+            complete := true
+            for operand in operands:
+                if not expression_names(operand, names):
+                    complete = false
+            return complete
+        case Fallback:
+            first = expression_names(value, names)
+            second = expression_names(alternative, names)
+            return first and second
+        case BlockValue:
+            first = block_names(body, names)
+            second = expression_names(value, names)
+            return first and second
+        case Evaluate:
+            first = expression_names(value, names)
+            second = expression_names(body, names)
+            return first and second
+        case _:
+            return false
+    return true
+
+
+def binding_names(binding: universal.Binding, names: list[string]) -> bool:
+    annotation ?= binding.annotation
+    if annotation != None:
+        annotation_names(annotation, names)
+    return expression_names(binding.value, names)
+
+
+def statement_names(statement: universal.Statement, names: list[string]) -> bool:
+    match statement:
+        case BindingStatement:
+            return binding_names(binding, names)
+        case ExpressionStatement:
+            return expression_names(expression, names)
+        case Return:
+            return optional_names(value, names)
+        case Throw:
+            return expression_names(value, names)
+        case Defer:
+            return expression_names(value, names)
+        case Drop:
+            return expression_names(value, names)
+        case Unsafe:
+            return block_names(body, names)
+        case CompilerCheck:
+            return block_names(body, names)
+        case Assert:
+            first = expression_names(condition, names)
+            second = optional_names(message, names)
+            return first and second
+        case If:
+            first = expression_names(condition, names)
+            second = block_names(then_block, names)
+            third = block_names(else_block, names)
+            return first and second and third
+        case While:
+            first = expression_names(condition, names)
+            second = block_names(body, names)
+            return first and second
+        case ForEach:
+            first = expression_names(iterable, names)
+            second = block_names(body, names)
+            return first and second
+        case FieldSet:
+            first = expression_names(target, names)
+            second = expression_names(value, names)
+            return first and second
+        case Match:
+            complete := expression_names(subject, names)
+            for arm in arms:
+                if not arm_names(arm, names):
+                    complete = false
+            return complete
+        case GrammarApply:
+            complete := true
+            for operand in operands:
+                if not expression_names(operand, names):
+                    complete = false
+            for body in bodies:
+                if not block_names(body, names):
+                    complete = false
+            return complete
+        case Break:
+            return true
+        case Continue:
+            return true
+        case _:
+            return false
+
+
+def arm_names(arm: universal.MatchArm, names: list[string]) -> bool:
+    annotation ?= arm.annotation
+    if annotation != None:
+        annotation_names(annotation, names)
+    first = optional_names(arm.pattern, names)
+    second = block_names(arm.body, names)
+    return first and second
+
+
+def operator_names(operation: universal.OperatorDeclaration, names: list[string]) -> bool:
+    for parameter in operation.parameters:
+        annotation_names(parameter.annotation, names)
+    annotation_names(operation.result, names)
+    complete := constraints_names(operation.constraints, names)
+    body ?= operation.body
+    if body != None:
+        if not block_names(body, names):
+            complete = false
+    return complete
+
+
+def constraints_names(constraints: list[universal.GenericConstraint], names: list[string]) -> bool:
+    complete := true
+    for constraint in constraints:
+        match constraint:
+            case Parameter:
+                annotation_names(bound, names)
+            case Predicate:
+                if not expression_names(expression, names):
+                    complete = false
+    return complete
+
+
+def decorators_names(decorators: list[universal.Decorator], names: list[string]):
+    for decorator in decorators:
+        require_name(names, decorator.name)
+        for argument in decorator.arguments:
+            match argument.value:
+                case Name:
+                    require_name(names, value)
+                case _:
+                    continue
+
+
+def block_names(block: universal.Block, names: list[string]) -> bool:
+    complete := true
+    for statement in block.statements:
+        if not statement_names(statement, names):
+            complete = false
+    return complete
+
+
+def function_names(function: universal.FunctionDeclaration, names: list[string]) -> bool:
+    complete := true
+    for parameter in function.parameters:
+        annotation_names(parameter.annotation, names)
+        default ?= parameter.default
+        if default != absent:
+            if not expression_names(default, names):
+                complete = false
+        for constraint in parameter.field_constraints:
+            if not expression_names(constraint.condition, names):
+                complete = false
+            if not optional_names(constraint.failure, names):
+                complete = false
+    result ?= function.result
+    if result != None:
+        annotation_names(result, names)
+    for constraint in function.constraints:
+        match constraint:
+            case Parameter:
+                annotation_names(bound, names)
+            case Predicate:
+                if not expression_names(expression, names):
+                    complete = false
+    for decorator in function.decorators:
+        require_name(names, decorator.name)
+        for argument in decorator.arguments:
+            match argument.value:
+                case Name:
+                    require_name(names, value)
+                case _:
+                    continue
+    body ?= function.body
+    if body != None:
+        if not block_names(body, names):
+            complete = false
+    return complete
+
+
+def item_name(item: universal.Item) -> string:
+    match item:
+        case Function:
+            return declaration.name
+        case BindingItem:
+            return binding.name
+        case Type:
+            return declaration.name
+        case Record:
+            return declaration.name
+        case Trait:
+            return declaration.name
+        case _:
+            return ""
+
+
+def item_names(item: universal.Item, names: list[string]) -> bool:
+    match item:
+        case Function:
+            return function_names(declaration, names)
+        case BindingItem:
+            return binding_names(binding, names)
+        case ExpressionItem:
+            return expression_names(expression, names)
+        case Type:
+            definition ?= declaration.definition
+            if definition != None:
+                annotation_names(definition, names)
+            decorators_names(declaration.decorators, names)
+            return constraints_names(declaration.constraints, names)
+        case Record:
+            complete := constraints_names(declaration.constraints, names)
+            for trait in declaration.traits:
+                annotation_names(trait, names)
+            for default in declaration.type_defaults:
+                annotation_names(default, names)
+            for field in declaration.fields:
+                annotation_names(field.annotation, names)
+                value ?= field.default
+                if value != absent:
+                    if not expression_names(value, names):
+                        complete = false
+            for method in declaration.methods:
+                if not function_names(method, names):
+                    complete = false
+            for operation in declaration.operators:
+                if not operator_names(operation, names):
+                    complete = false
+            return complete
+        case Trait:
+            decorators_names(declaration.decorators, names)
+            complete := constraints_names(declaration.constraints, names)
+            for base in declaration.bases:
+                annotation_names(base, names)
+            for property in declaration.properties:
+                annotation_names(property.annotation, names)
+                if not optional_names(property.default, names):
+                    complete = false
+            for method in declaration.methods:
+                if not function_names(method, names):
+                    complete = false
+            for operation in declaration.operators:
+                if not operator_names(operation, names):
+                    complete = false
+            return complete
+        case Test:
+            complete := block_names(declaration.body, names)
+            for contract in declaration.contracts:
+                if not expression_names(contract, names):
+                    complete = false
+            for row in declaration.case_rows:
+                for value in row.values:
+                    if not expression_names(value, names):
+                        complete = false
+            for mode in declaration.mode_arguments:
+                for value in mode.values:
+                    if not expression_names(value, names):
+                        complete = false
+            for case in declaration.compiler_cases:
+                if not block_names(case.body, names):
+                    complete = false
+                for item in case.declarations:
+                    if not item_names(item, names):
+                        complete = false
+            return complete
+        case OperatorItem:
+            return operator_names(declaration, names)
+        case Import:
+            return true
+        case _:
+            return false
+
+
+def module_names(module: universal.Module, names: list[string]) -> bool:
+    complete := true
+    for item in module.items:
+        if not item_names(item, names):
+            complete = false
+    return complete
+
+
+# Keep the selected declarations and their implementation dependencies. Types,
+# extension registries and operators remain roots for implicit behavior. Unknown
+# terms retain the input until their reference contracts can be proved here.
+def select_imported_items(child: universal.Module, namespace: string, requested: list[string], enabled: bool) -> list[universal.Item]:
+    if not enabled or "*" in requested:
+        return child.items
+    needed = requested[:]
+    selected: list[int] = []
+    changed := true
+    while changed:
+        changed = false
+        for index in range(int(len(child.items))):
+            if index in selected:
+                continue
+            item = child.items[index]
+            name = item_name(item)
+            wanted := name in needed
+            match item:
+                case Record:
+                    # Registry installation and receiver methods can be implicit.
+                    wanted = true
+                case Trait:
+                    wanted = true
+                case OperatorItem:
+                    wanted = true
+                case _:
+                    if name == "":
+                        return child.items
+            for required in needed:
+                if namespace + required == name or required.starts_with(name + "."):
+                    wanted = true
+            if not wanted:
+                continue
+            selected.append(index)
+            dependencies: list[string] = []
+            if not item_names(item, dependencies):
+                return child.items
+            lookup := namespace
+            match item:
+                case Function:
+                    declared ?= declaration.lookup
+                    if declared != None:
+                        lookup = declared
+                case Type:
+                    lookup = declaration.lookup
+                case Record:
+                    lookup = declaration.lookup
+                case Trait:
+                    lookup = declaration.lookup
+                case _:
+                    lookup = namespace
+            for dependency in dependencies:
+                require_name(needed, lookup + dependency)
+                require_name(needed, dependency)
+            changed = true
+    result: list[universal.Item] = []
+    for index in range(int(len(child.items))):
+        if index in selected:
+            result.append(child.items[index])
+    return result
+
+
+def imported_requirements(required: list[string], alias: string | None, selected: string | None) -> list[string]:
+    if "*" in required:
+        return ["*"]
+    result: list[string] = []
+    name ?= selected
+    if name != None:
+        require_name(result, name)
+        local := name
+        renamed ?= alias
+        if renamed != None:
+            local = renamed
+        for requirement in required:
+            if requirement.starts_with(local + "."):
+                require_name(result, name + requirement[int(len(local)):])
+        return result
+    namespace ?= alias
+    if namespace == None:
+        return required[:]
+    for name in required:
+        if name.starts_with(namespace + "."):
+            require_name(result, name[int(len(namespace)) + 1:])
+    # Package namespaces may expose a same-named default callable.
+    if namespace in required:
+        require_name(result, namespace)
+    return result

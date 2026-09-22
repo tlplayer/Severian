@@ -7,7 +7,7 @@ mod package;
 mod queries;
 
 pub use package::{
-    analyze_package, analyze_package_with_context, import_index, DefKind, Definition, ExportMap, FunctionDecl,
+    analyze_package, analyze_package_with_context, import_index, import_plan, DefKind, Definition, ExportMap, FunctionDecl,
     ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, SignatureId, TraitDecl,
     TypedProgram, Visibility,
 };
@@ -84,6 +84,7 @@ pub fn analyze_with_context_and_types(
         &[],
         None,
         None,
+        &BTreeSet::new(),
     )?;
     Ok((program, types))
 }
@@ -149,6 +150,7 @@ pub(crate) fn analyze_with_package_functions(
     package_constants: &[PackageConstant],
     source_module: Option<severian_modules::ModuleId>,
     registry_ast: Option<&severian_ast::Module>,
+    package_namespaces: &BTreeSet<String>,
 ) -> Result<Program, Diagnostic> {
     let normalized_ast = normalize_extensions(ast)?;
     let ast = &normalized_ast;
@@ -255,6 +257,7 @@ pub(crate) fn analyze_with_package_functions(
         function_specificity: BTreeMap::new(),
         parameter_effects: BTreeMap::new(),
         namespace_methods,
+        package_namespaces: package_namespaces.clone(),
         namespace_operators,
         namespace_extension_operators,
         namespace_hooks,
@@ -1437,6 +1440,7 @@ struct Analyzer<'a> {
     function_specificity: BTreeMap<FunctionId, u8>,
     parameter_effects: BTreeMap<FunctionId, Vec<ParameterEffect>>,
     namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
+    package_namespaces: BTreeSet<String>,
     namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
     namespace_extension_operators: BTreeMap<String, NamespaceExtensionOperator>,
     namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
@@ -16519,7 +16523,8 @@ impl Analyzer<'_> {
         } else if let Some((package, member)) = path.split_once('.') {
             let prefix = format!("{package}.");
             if self.namespace_methods.contains_key(member)
-                && self.functions.keys().any(|name| name.starts_with(&prefix))
+                && (self.package_namespaces.contains(package)
+                    || self.functions.keys().any(|name| name.starts_with(&prefix)))
             {
                 member.to_owned()
             } else {

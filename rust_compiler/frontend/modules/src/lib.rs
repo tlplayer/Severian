@@ -30,9 +30,11 @@ pub struct ModuleGraph {
 
 #[derive(Debug, Clone)]
 pub struct PackagePolicy {
+    pub narrow_imports: bool,
     pub library: PathBuf,
     pub explicit_imports: bool,
-    pub exports: BTreeSet<String>,
+    pub lint_enabled: bool,
+    pub explicit_imports_level: String,
 }
 
 /// Collapse source-import edges to package edges. Distinct files in one package
@@ -90,17 +92,19 @@ fn package_policies(packages: &PackageGraph) -> Result<BTreeMap<PackageId, Packa
         if !path.is_file() { continue; }
         let text = std::fs::read_to_string(&path).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
         let value: serde_json::Value = json5::from_str(&text).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
-        let explicit_imports = match value.get("language").and_then(|v|v.get("explicit-imports")) {
+        let narrow_imports = match value.get("language").and_then(|v|v.get("explicit-imports")) {
             None => true,
             Some(serde_json::Value::Bool(enabled)) => *enabled,
             _ => return Err(Diagnostic::new("E000125", format!("{}: language.explicit-imports requires a boolean", path.display()), None)),
         };
-        let exports = match value.get("package").and_then(|v|v.get("export")) {
-            None => BTreeSet::new(),
-            Some(serde_json::Value::Array(names)) => names.iter().map(|v|v.as_str().map(str::to_owned).ok_or_else(|| Diagnostic::new("E000125", "package.export requires an array of names", None))).collect::<Result<_,_>>()?,
-            _ => return Err(Diagnostic::new("E000125", "package.export requires an array of names", None)),
+        let explicit_imports = match value.get("lint").and_then(|v|v.get("explicit-imports")) {
+            None => true,
+            Some(serde_json::Value::Bool(enabled)) => *enabled,
+            _ => return Err(Diagnostic::new("E000125", format!("{}: lint.explicit-imports requires a boolean", path.display()), None)),
         };
-        policies.insert(package.id, PackagePolicy { library: std::fs::canonicalize(&package.library).unwrap_or_else(|_|package.library.clone()), explicit_imports, exports });
+        let lint_enabled = value["lint"]["enabled"].as_bool().unwrap_or(true);
+        let explicit_imports_level = value["lint"]["rules"]["L0015"].as_str().unwrap_or("warning").to_owned();
+        policies.insert(package.id, PackagePolicy { narrow_imports, library: std::fs::canonicalize(&package.library).unwrap_or_else(|_|package.library.clone()), explicit_imports, lint_enabled, explicit_imports_level });
     }
     Ok(policies)
 }
@@ -109,34 +113,18 @@ fn package_policies(packages: &PackageGraph) -> Result<BTreeMap<PackageId, Packa
 /// have had an opportunity to inspect and replace legacy wildcard imports.
 pub fn validate_import_policy(graph: &ModuleGraph) -> Result<(), Diagnostic> {
     package_order(graph)?;
-    let modules: BTreeMap<_,_> = graph.modules.iter().map(|m|(m.id,m)).collect();
     for module in &graph.modules {
         let mut bindings = BTreeSet::new();
         for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
             let binding = import.alias.as_deref().or_else(||match &import.subject {
-                ImportSubject::Name(n)=>Some(n.as_str()),
+                ImportSubject::Name(n) if n != "*"=>Some(n.as_str()),
+                ImportSubject::Name(_)=>None,
                 ImportSubject::Locator(_)=>import.source.as_deref(),
             });
             if let Some(name) = binding {
                 if !bindings.insert(name) {return Err(Diagnostic::new("E000203",format!("duplicate import binding `{name}`"),Some(import.span)).with_source(module.source.clone()));}
             }
-            let Some(edge) = module.imports.iter().find(|e|e.span==import.span) else {continue};
-            let target = modules[&edge.module];
-            if target.package == module.package {continue;}
-            if graph.policies.get(&module.package).is_none_or(|p|p.explicit_imports)
-                && matches!(import.subject, ImportSubject::Locator(_)) && import.source.is_none() {
-                return Err(Diagnostic::new("E000126", "wildcard dependency imports are disabled by language.explicit-imports; name the symbols or run sev build --explicit-imports",Some(import.span)).with_source(module.source.clone()));
-            }
-            if let Some(policy) = graph.policies.get(&target.package) {
-                let name = match (&import.subject,&import.source) {
-                    (ImportSubject::Name(name),Some(_))=>Some(name),
-                    (ImportSubject::Locator(_),Some(name))=>Some(name),
-                    _=>None,
-                };
-                if let Some(name) = name {
-                    if !policy.exports.contains(name) {return Err(Diagnostic::new("E000127",format!("`{name}` is not listed in dependency package.export"),Some(import.span)).with_source(module.source.clone()));}
-                }
-            }
+
         }
     }
     Ok(())

@@ -1,0 +1,35 @@
+import universal
+import source
+import * from "../src/imports.sev" as imports
+
+
+test "automatic import selection retains function implementation dependencies":
+    span = source.Span(source.SourceId(0), 0, 1)
+    reference = universal.Expression(universal.Name("helper"), span)
+    call = universal.Expression(universal.Call(reference, []), span)
+    needed = universal.FunctionDeclaration(name="lib.needed", lookup="lib.", body=universal.Block([universal.ExpressionStatement(call)]))
+    helper = universal.FunctionDeclaration(name="lib.helper", lookup="lib.", body=universal.empty_block())
+    unused = universal.FunctionDeclaration(name="lib.unused", lookup="lib.", body=universal.empty_block())
+    child = universal.Module([universal.Function(needed), universal.Function(helper), universal.Function(unused)])
+    selected = imports.select_imported_items(child, "lib.", ["needed"], true)
+    assert(len(selected) == 2)
+    assert(imports.item_name(selected[0]) == "lib.needed")
+    assert(imports.item_name(selected[1]) == "lib.helper")
+    assert(len(imports.select_imported_items(child, "lib.", ["needed"], false)) == 3)
+
+
+test "downstream namespace requirements survive a selective alias":
+    required = imports.imported_requirements(["renamed.nested.run"], "renamed", "api")
+    assert("api" in required)
+    assert("api.nested.run" in required)
+    leaf = imports.imported_requirements(required, "api", None)
+    assert("nested.run" in leaf)
+
+
+test "unsupported reference forms retain the original dependency":
+    span = source.Span(source.SourceId(0), 0, 1)
+    unknown = universal.Expression(universal.UpdateOperand(0), span)
+    needed = universal.FunctionDeclaration(name="lib.needed", lookup="lib.", body=universal.Block([universal.ExpressionStatement(unknown)]))
+    unused = universal.FunctionDeclaration(name="lib.unused", lookup="lib.", body=universal.empty_block())
+    child = universal.Module([universal.Function(needed), universal.Function(unused)])
+    assert(len(imports.select_imported_items(child, "lib.", ["needed"], true)) == 2)
