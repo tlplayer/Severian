@@ -135,11 +135,11 @@ def expression(environment: definitions.SemanticDefinitions, input: universal.Ex
                                         return error(failure("expression pack index out of bounds", index.span))
                                     return elements[position]
                                 case _:
-                                    throw Error("unimplemented")
+                                    throw diagnostics.diagnostic("E000216", "unimplemented")
                         case _:
-                            throw Error("unimplemented")
+                            throw diagnostics.diagnostic("E000216", "unimplemented")
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.diagnostic("E000216", "unimplemented")
             return error(failure("expression pack selection requires a constant index", input.span))
         case Call:
             target = expression(environment, callee, names, values, namespace, budget, depth)
@@ -170,7 +170,7 @@ def expression(environment: definitions.SemanticDefinitions, input: universal.Ex
                                 target_namespace = lookup
                             return invoke(environment, function, actuals, target_namespace, input.span, budget, depth + 1)
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.diagnostic("E000216", "unimplemented")
             return universal.Expression(universal.Call(target, operands), input.span)
         case _:
             return error(failure("unsupported expression expansion", input.span))

@@ -60,4 +60,62 @@ module attributes {severian.library_id = "core.text.string", severian.abi_versio
   ^done:
     return
   }
+
+  // Byte-storage boundaries for the source-owned UTF-8 algorithms. These use
+  // the same managed, NUL-terminated ABI as the other v1 String exports.
+  func.func @__sev_text_codepoint(%value: i32) -> i64 {
+    %result = arith.extui %value : i32 to i64
+    return %result : i64
+  }
+
+  func.func @__sev_text_character(%value: i64) -> i32 {
+    %result = arith.trunci %value : i64 to i32
+    return %result : i32
+  }
+
+  func.func @__sev_text_size(%value: !llvm.ptr) -> i64 {
+    %size = func.call @strlen(%value) : (!llvm.ptr) -> i64
+    return %size : i64
+  }
+
+  func.func @__sev_text_load(%value: !llvm.ptr, %offset: i64) -> i8 {
+    %address = llvm.getelementptr %value[%offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+    %byte = llvm.load %address : !llvm.ptr -> i8
+    return %byte : i8
+  }
+
+  func.func @__sev_text_store(%byte: i8, %value: !llvm.ptr, %offset: i64) {
+    %address = llvm.getelementptr %value[%offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+    llvm.store %byte, %address : i8, !llvm.ptr
+    return
+  }
+
+  func.func @__sev_text_allocate(%size: i64) -> !llvm.ptr {
+    %zero = arith.constant 0 : i64
+    %one = arith.constant 1 : i64
+    %bytes = arith.addi %size, %one : i64
+    %valid = arith.cmpi sge, %size, %zero : i64
+    %room = arith.cmpi sgt, %bytes, %size : i64
+    %safe = arith.andi %valid, %room : i1
+    cf.assert %safe, "invalid string allocation size"
+    %null = llvm.mlir.zero : !llvm.ptr
+    %data = func.call @__sev_storage_new(%bytes, %null) : (i64, !llvm.ptr) -> !llvm.ptr
+    %allocated = llvm.icmp "ne" %data, %null : !llvm.ptr
+    cf.assert %allocated, "string allocation failed"
+    %end = llvm.getelementptr %data[%size] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+    %terminator = arith.constant 0 : i8
+    llvm.store %terminator, %end : i8, !llvm.ptr
+    cf.br ^fill(%zero : i64)
+  ^fill(%position: i64):
+    %more = arith.cmpi slt, %position, %size : i64
+    cf.cond_br %more, ^byte, ^done
+  ^byte:
+    %address = llvm.getelementptr %data[%position] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+    %initial = arith.constant 1 : i8
+    llvm.store %initial, %address : i8, !llvm.ptr
+    %next = arith.addi %position, %one : i64
+    cf.br ^fill(%next : i64)
+  ^done:
+    return %data : !llvm.ptr
+  }
 }

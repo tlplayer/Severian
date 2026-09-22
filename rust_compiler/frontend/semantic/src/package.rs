@@ -217,11 +217,22 @@ pub fn analyze_package(
     analyze_package_with_context(module_graph, universal, PackageAnalysisContext::default())
 }
 
+/// Resolve declaration identities and import visibility without checking bodies.
+/// Refactoring tools need this even while a package is being migrated.
+pub fn import_index(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnostic> {
+    let mut graph = module_graph.clone();
+    graph.policies.clear();
+    let mut index = collect_declarations(&graph)?;
+    resolve_imports(&graph, &mut index);
+    Ok(index)
+}
+
 pub fn analyze_package_with_context(
     module_graph: &ModuleGraph,
     universal: &UniversalContext,
     context: PackageAnalysisContext,
 ) -> Result<TypedProgram, Diagnostic> {
+    severian_modules::validate_import_policy(module_graph)?;
     let lowered_module_graph = lower_extensions(module_graph)?;
     let lowered_module_graph = lower_trait_typed_parameters(&lowered_module_graph);
     let module_graph = &lowered_module_graph;
@@ -2044,6 +2055,13 @@ fn annotation_matches(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
 }
 
 fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
+    let public: BTreeMap<_,_> = module_graph.modules.iter().filter_map(|module| {
+        module_graph.policies.get(&module.package).filter(|p|p.library == module.path)
+            .map(|p|(module.id,&p.exports))
+    }).collect();
+    for (id, names) in &public {
+        index.exports.get_mut(id).expect("module exports").retain(|name,_|names.contains(name));
+    }
     // Source modules may form declaration-only import cycles and package
     // facades commonly re-export declarations from files that appear later in
     // graph order. Resolve exports to a fixed point so visibility never
@@ -2058,7 +2076,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 let Some(edge) = module.imports.iter().find(|edge| edge.span == import.span) else {
                     continue;
                 };
-                if matches!(import.subject, ImportSubject::Locator(_)) && import.alias.is_none() {
+                if matches!(import.subject, ImportSubject::Locator(_)) && import.source.is_none() && import.alias.is_none() {
                     let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
                     for (name, resolution) in members {
                         insert_binding(
@@ -2072,6 +2090,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                             resolution.clone(),
                             &index.definitions,
                         );
+                        if public.get(&module.id).is_none_or(|names|names.contains(&name)) {
                         insert_binding(
                             index
                                 .exports
@@ -2081,19 +2100,25 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                             resolution,
                             &index.definitions,
                         );
+                        }
                     }
                     continue;
                 }
                 let (name, resolution) = if import.source.is_some() {
                     let imported_name = match &import.subject {
-                        ImportSubject::Name(name) | ImportSubject::Locator(name) => name,
+                        ImportSubject::Name(name) => name,
+                        ImportSubject::Locator(_) => import.source.as_ref().expect("selective source import has a name"),
                     };
-                    let resolution = index
+                    let Some(resolution) = index
                         .exports
                         .get(&edge.module)
                         .and_then(|exports| exports.get(imported_name))
                         .cloned()
-                        .unwrap_or_else(|| Resolution::Ambiguous(Vec::new()));
+                    else {
+                        // The facade can be visited before its own imports.
+                        // Defer this binding until the export fixed point.
+                        continue;
+                    };
                     (
                         import
                             .alias
@@ -2118,7 +2143,8 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 // Selective imports are facade declarations too. Keep their
                 // original DefIds when re-exporting so downstream packages see
                 // the same nominal type and callable, not a copied definition.
-                if import.source.is_some() {
+                if (import.source.is_some() || import.alias.is_some())
+                    && public.get(&module.id).is_none_or(|names|names.contains(&name)) {
                     insert_binding(
                         index
                             .exports
@@ -2157,6 +2183,10 @@ fn insert_binding(
         bindings.insert(name, new);
         return;
     };
+    if old == new {
+        bindings.insert(name, old);
+        return;
+    }
     let mut ids = resolution_definitions(&old);
     ids.extend(resolution_definitions(&new));
     ids.sort();

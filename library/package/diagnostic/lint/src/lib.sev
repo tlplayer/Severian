@@ -206,7 +206,12 @@ def lint_suppressed(input: LintSource, line: int, rule: string) -> bool:
 def lint_measure(input: LintSource, index: int, measured: int, rule_index: int, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
     rule = lint_rules()[rule_index]
     level = lint_level(entries, rule)
-    limit = int(lint_entry(entries, "lint", rule.option, string(rule.limit)))
+    limit := rule.limit
+    if rule.option == "explicit-imports":
+        if lint_entry(entries, "lint", "explicit-imports", "true") == "false":
+            return
+    else:
+        limit = int(lint_entry(entries, "lint", rule.option, string(rule.limit)))
     suppressed = lint_suppressed(input, input.lines[index], rule.id)
     if measured <= limit or level == "off" or suppressed:
         return
@@ -413,6 +418,28 @@ def lint_tests(input: LintSource, inputs: list[LintSource], entries: list[Entry]
         if not checked or not behavior:
             lint_measure(input, test.start, 1, 8, entries, output)
 
+def lint_imports(input: LintSource, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
+    active := false
+    grouped := 0
+    for index in range(int(len(input.tokens))):
+        token = input.tokens[index]
+        spelling = string(token)
+        if input.depths[index] == 0 and token.kind == lexer.TokenKind.Identifier and spelling == "import":
+            active = true
+        elif active:
+            if spelling == "{":
+                grouped += 1
+            elif spelling == "}":
+                grouped -= 1
+            elif lexer.token_is_symbol(token, "*"):
+                lint_measure(input, index, 1, 14, entries, output)
+            elif token.kind == lexer.TokenKind.Newline and grouped == 0:
+                # Source-first lists may put the opening brace on the next line.
+                next := index + 1
+                while next < int(len(input.tokens)) and input.tokens[next].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]:
+                    next += 1
+                active = next < int(len(input.tokens)) and string(input.tokens[next]) == "{"
+
 def lint_uncached(project: Project, force: bool = false, testing: bool = false) -> list[LintDiagnostic] | Error:
     entries = project.manifest.entries[:]
     if testing:
@@ -443,6 +470,7 @@ def lint_uncached(project: Project, force: bool = false, testing: bool = false) 
         input = lint_source(relative, read_text(location))
         lint_declarations(input, library, exports)
         lint_metrics(input, entries, output)
+        lint_imports(input, entries, output)
         inputs.append(input)
     for input in inputs:
         lint_top_level(input, library, entries, output, inputs)

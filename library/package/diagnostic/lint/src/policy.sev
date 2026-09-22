@@ -57,6 +57,7 @@ def lint_rules() -> list[LintRule]:
         LintRule("L0012", "class-documentation", 0, "warning", "public class documentation is incomplete", "Document purpose, Responsibilities, and Invariants immediately before the class."),
         LintRule("L0013", "duplicate-callable", 0, "hint", "callable repeats an existing implementation", "Compare the implementations and extract their shared operation after preserving behavior."),
         LintRule("L0014", "churn-commits", 6, "hint", "source changes repeatedly in the configured revision window", "Review the frequently changed module for independent responsibilities."),
+        LintRule("L0015", "explicit-imports", 0, "warning", "wildcard import hides the names used by this module", "Run sev build --explicit-imports or use Make Imports Explicit in VS Code to replace * with the names used."),
     ]
 
 def lint_entry(entries: list[Entry], table: string, key: string, fallback: string) -> string:
@@ -82,7 +83,7 @@ def validate_lint(entries: list[Entry]) -> unit | Error:
             if entry.value not in ["\"off\"", "\"info\"", "\"hint\"", "\"warning\"", "\"error\""]:
                 throw Error("lint severity must be off, info, hint, warning, or error: " + entry.key)
         elif entry.table == "lint":
-            if entry.key in ["enabled", "format"]:
+            if entry.key in ["enabled", "format", "explicit-imports"]:
                 if entry.value not in ["true", "false"]:
                     throw Error("lint." + entry.key + " requires a boolean")
             elif entry.key == "exclude":

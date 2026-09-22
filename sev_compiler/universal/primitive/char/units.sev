@@ -1,0 +1,27 @@
+import * from "encoding.sev"
+
+# char[T] is transparent over T; validation belongs to the character constructor.
+def char[T: u8 | u32 = u32](value: int) -> char[T]:
+    assert(value >= 0)
+    if bytes(T).amount == 8.0:
+        assert(value <= 255)
+    else:
+        assert(valid(value))
+    return T(value)
+
+
+def codepoint(value: char[u8]) -> int:
+    return int(value)
+
+
+def codepoint(value: char[u32]) -> int:
+    return int(value)
+
+
+extend char[u8]:
+    def codepoint() -> int:
+        return int(self)
+
+extend char[u32]:
+    def codepoint() -> int:
+        return int(self)

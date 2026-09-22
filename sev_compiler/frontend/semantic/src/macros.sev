@@ -4,9 +4,9 @@ from lexer import TokenKind
 import parser
 import source
 import universal
-import * from "package:universal/type/scalar.sev" as scalar
-import * from "package:universal/type/scalar_conversion.sev" as conversions
-import * from "package:universal/type/integer_spelling.sev" as integer_spelling
+from universal import scalar
+from universal import scalar_conversion as conversions
+from universal import integer_spelling
 import * from "definitions.sev" as family_definitions
 
 
@@ -346,7 +346,7 @@ def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Di
             case Type:
                 environment.aliases.append(declaration)
             case _:
-                throw Error("unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented")
     for name in invoked:
         for definition in definitions:
             if definition.name == name:

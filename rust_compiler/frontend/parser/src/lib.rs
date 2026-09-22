@@ -10,6 +10,29 @@ mod tests {
     use severian_source::SourceFile;
 
     #[test]
+    fn parses_nested_field_assignment_targets() {
+        let source = SourceFile::virtual_source(
+            "nested-fields.sev",
+            "def update():\n    result.storage.used = 3\n    result.storage.used += 2\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function");
+        };
+        for statement in function.body.as_ref().unwrap() {
+            let severian_ast::Statement::FieldAssignment { object, field, .. } = statement else {
+                panic!("expected field assignment");
+            };
+            assert_eq!(field, "used");
+            let severian_ast::ExpressionKind::Member { object, name } = &object.kind else {
+                panic!("expected the containing field projection");
+            };
+            assert_eq!(name, "storage");
+            assert!(matches!(&object.kind, severian_ast::ExpressionKind::Name(name) if name == "result"));
+        }
+    }
+
+    #[test]
     fn parses_alias_declarations_with_as() {
         let source = SourceFile::virtual_source(
             "aliases.sev",

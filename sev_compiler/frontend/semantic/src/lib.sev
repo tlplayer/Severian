@@ -30,7 +30,7 @@ def analyze_with_package_functions(
         case Test:
             include_tests = true
         case Build:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented")
     typed = callable.analyze_registered_callables(module_ast, include_tests, visible, own_ids, test_ids, types)
     typed.path = context.module_name
     return universal.Program([typed])
@@ -50,3 +50,6 @@ def analyze_tests(module: universal.Module) -> universal.Program | diagnostics.D
 import * from "macros.sev"
 import * from "callable.sev"
 import * from "definitions.sev"
+
+# Public module interfaces.
+import * from "macros.sev" as macros

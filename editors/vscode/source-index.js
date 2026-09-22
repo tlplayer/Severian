@@ -90,8 +90,12 @@ function sourceSnapshot(sources, manifests = []) {
       }
       const scope = scopes.at(-1).scope;
       for (const token of line) token.scope = scope;
-      if (first.value === 'import') {
-        imports.push(line);
+      if (first.value === 'import' || first.value === 'from') {
+        // Normalize source-first lists to the same representation as import N from X.
+        const at = line.findIndex(token => token.value === 'import');
+        imports.push(first.value === 'from'
+          ? [line[at], ...line.slice(at + 1).filter(token => !['{', '}'].includes(token.value)), line[0], line[1]]
+          : line);
         for (const token of line) ignored.add(token);
         continue;
       }
@@ -188,12 +192,25 @@ function sourceSnapshot(sources, manifests = []) {
       if (!target) continue;
       const other = importTarget(module, target);
       if (!other) continue;
-      const as = line.findIndex(token => token.value === 'as');
-      const alias = as >= 0 ? line[as + 1]?.value : undefined;
-      if (alias === name || (from < 0 && (alias || target.value) === name)) matches.push({ module: other });
-      else if (!alias && from >= 0 && (line[1].value === '*' || line.slice(1, from).some(token => token.value === name))) {
-        const definition = exported(other, name, seen);
-        if (definition) matches.push(definition);
+      if (from < 0 || line[1]?.value === '*') {
+        const as = line.findIndex(token => token.value === 'as');
+        const alias = as >= 0 ? line[as + 1]?.value : undefined;
+        if ((alias || (from < 0 ? target.value : undefined)) === name) matches.push({ module: other });
+        else if (!alias && from >= 0) {
+          const definition = exported(other, name, seen);
+          if (definition) matches.push(definition);
+        }
+      } else {
+        for (let i = 1; i < from; i++) {
+          const token = line[i];
+          if (token.kind !== 'identifier') continue;
+          const alias = line[i + 1]?.value === 'as' ? line[i + 2]?.value : undefined;
+          if ((alias || token.value) === name) {
+            const definition = exported(other, token.value, seen);
+            if (definition) matches.push(definition);
+          }
+          if (alias) i += 2;
+        }
       }
     }
     return unique(matches);
@@ -248,12 +265,20 @@ function sourceSnapshot(sources, manifests = []) {
   for (const module of modules.values()) {
     for (const line of module.imports) {
       const from = line.findIndex(token => token.value === 'from');
-      if (from < 0 || line.some(token => token.value === 'as')) continue;
+      if (from < 0) continue;
       const other = line[from + 1] && importTarget(module, line[from + 1]);
       if (!other) continue;
-      for (const token of line.slice(1, from).filter(token => token.kind === 'identifier')) {
+      for (let i = 1; i < from; i++) {
+        const token = line[i];
+        if (token.kind !== 'identifier') continue;
         const definition = exported(other, token.value, new Set());
-        if (definition?.id) references.push({ symbol: definition.id, caller: '', source: span(module.file, token), kind: 'read' });
+        if (definition?.id) {
+          references.push({ symbol: definition.id, caller: '', source: span(module.file, token), kind: 'read' });
+          if (line[i + 1]?.value === 'as' && line[i + 2]) {
+            references.push({ symbol: definition.id, caller: '', source: span(module.file, line[i + 2]), kind: 'read' });
+          }
+        }
+        if (line[i + 1]?.value === 'as') i += 2;
       }
     }
     const resolved = new Map();

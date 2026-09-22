@@ -2,7 +2,7 @@ import diagnostics
 import source
 import universal
 import * from "definitions.sev" as definitions
-import * from "package:universal/type/tagged.sev" as tagged
+from universal import tagged
 
 
 def literal_pattern(expression: universal.Expression) -> bool:
@@ -145,7 +145,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                         constructor = callee
                         destructure = true
                     case _:
-                        throw Error("unimplemented")
+                        throw diagnostics.diagnostic("E000206", "unimplemented")
                 arguments = pattern_arguments(pattern)
                 index := 0
                 for alternative in alternatives:

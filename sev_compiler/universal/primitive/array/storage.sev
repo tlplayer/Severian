@@ -1,0 +1,41 @@
+import * from "../../../../library/core/storage/src/buffer.sev" as storage
+
+# Typed rank-one arrays use the shared storage/memory allocation boundary.
+# char[T] is an ordinary element type here, with the same loans and ownership
+# as every other typed array. There is no character-specific allocator.
+def allocate[T](count: int) -> array[T]:
+    return storage.allocate[T](count)
+
+
+def copy[T](value: view array[T]) -> array[T]:
+    return storage.copy(value)
+
+
+@mlir("arith.index_cast")
+def __index(value: int) -> index
+
+@mlir("arith.index_cast")
+def __size(value: index) -> int
+
+@mlir("memref.dim")
+def __dimension[T](value: view array[T], axis: index) -> index
+
+@mlir("memref.load")
+def __load[T](value: view array[T], position: index) -> T
+
+@mlir("memref.store")
+def __store[T](item: T, value: borrow array[T], position: index)
+
+
+def length[T](value: view array[T]) -> int:
+    return __size(__dimension(value, __index(0)))
+
+
+def read[T](value: view array[T], position: int) -> T:
+    assert(position >= 0 and position < length(value))
+    return __load(value, __index(position))
+
+
+def write[T](value: borrow array[T], position: int, item: T):
+    assert(position >= 0 and position < length(value))
+    __store(item, value, __index(position))

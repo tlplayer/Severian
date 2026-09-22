@@ -87,7 +87,7 @@ def save(root: string, value: Realization) -> string | Error:
     verify(value, root)
     base = os.canonical(root)
     relative = realization_path(value.build_id)
-    directory = base + "/metadata"
+    directory := base + "/metadata"
     if not os.make_directories(directory):
         throw Error("could not create metadata directory")
     resolve_path(base, "metadata")

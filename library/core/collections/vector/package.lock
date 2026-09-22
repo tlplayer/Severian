@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "package": [{"name": "collections.traits", "version": "0.1.0", "source": "path:/home/tplayer/Documents/Severian/library/core/collections/traits", "dependencies": []}, {"name": "collections.vector", "version": "0.1.0", "source": "root", "dependencies": ["collections.traits 0.1.0 path:/home/tplayer/Documents/Severian/library/core/collections/traits", "core.storage 0.1.0 path:/home/tplayer/Documents/Severian/library/core/storage"]}, {"name": "core.memory", "version": "0.1.0", "source": "path:/home/tplayer/Documents/Severian/library/core/memory", "dependencies": []}, {"name": "core.storage", "version": "0.1.0", "source": "path:/home/tplayer/Documents/Severian/library/core/storage", "dependencies": ["core.memory 0.1.0 path:/home/tplayer/Documents/Severian/library/core/memory"]}]
+}

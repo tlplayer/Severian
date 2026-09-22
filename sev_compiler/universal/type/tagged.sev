@@ -1,6 +1,6 @@
 import diagnostics
 import source
-import universal
+import * from "../src/lib.sev" as universal
 
 
 class VariantSelection:

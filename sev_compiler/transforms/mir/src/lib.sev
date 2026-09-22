@@ -14,3 +14,8 @@ def empty_module() -> universal.Module:
 import * from "agent_ir.sev"
 import * from "callable.sev"
 import * from "quality.sev"
+
+# Public module interfaces.
+import * from "agent_ir.sev" as agent_ir
+import * from "callable.sev" as callable
+import * from "quality.sev" as quality

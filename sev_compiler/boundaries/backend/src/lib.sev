@@ -188,3 +188,6 @@ def emit_executable(module: universal.Module, output_path: string) -> Artifact |
     return Artifact(output_path, Executable)
 
 import * from "native_mlir.sev"
+
+# Public module interfaces.
+import * from "native_mlir.sev" as native_mlir

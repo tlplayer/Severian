@@ -1844,7 +1844,12 @@ impl Parser<'_> {
             return Ok(vec![self.import_declaration()?]);
         }
         self.next();
-        let (source, _) = self.identifier("expected an import source after `from`")?;
+        let source_token = self.next();
+        let (source, locator) = match source_token.kind {
+            TokenKind::Identifier(name) => (name, false),
+            TokenKind::String(path) => (path, true),
+            _ => return Err(self.error("expected a package name or source locator after `from`")),
+        };
         if !self.at_identifier("import") {
             return Err(self.error("expected `import` after import source"));
         }
@@ -1865,7 +1870,8 @@ impl Parser<'_> {
                 (Some(alias), span.end)
             } else { (None, start.end) };
             imports.push(ImportDeclaration {
-                subject: ImportSubject::Name(name), source: Some(source.clone()), alias,
+                subject: if locator { ImportSubject::Locator(source.clone()) } else { ImportSubject::Name(name.clone()) },
+                source: Some(if locator { name } else { source.clone() }), alias,
                 span: Span::new(start.source, start.start, end),
             });
             if grouped { self.import_layout(); }
@@ -1932,7 +1938,7 @@ impl Parser<'_> {
             self.next();
         }
         let subject_token = self.next();
-        let subject = match subject_token.kind {
+        let mut subject = match subject_token.kind {
             TokenKind::Identifier(name) if !wildcard => ImportSubject::Name(name),
             TokenKind::String(locator) if wildcard => ImportSubject::Locator(locator),
             TokenKind::String(_) => {
@@ -1957,9 +1963,17 @@ impl Parser<'_> {
         let mut end = subject_token.span.end;
         let source = if !wildcard && self.at_identifier("from") {
             self.next();
-            let (source, span) = self.identifier("expected an import source after `from`")?;
-            end = span.end;
-            Some(source)
+            let token = self.next();
+            end = token.span.end;
+            match token.kind {
+                TokenKind::Identifier(source) => Some(source),
+                TokenKind::String(locator) => {
+                    let ImportSubject::Name(name) = subject else { unreachable!() };
+                    subject = ImportSubject::Locator(locator);
+                    Some(name)
+                }
+                _ => return Err(self.error("expected a package name or source locator after `from`")),
+            }
         } else {
             None
         };
@@ -3096,6 +3110,16 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
+        // A field target may have several projections (object.storage.used).
+        // Keep the final field separate, as required by FieldAssignment.
+        let mut field_end = self.cursor;
+        if matches!(self.peek().kind, TokenKind::Identifier(_)) {
+            while self.tokens.get(field_end + 1).is_some_and(|token| token.kind == TokenKind::Dot)
+                && matches!(self.tokens.get(field_end + 2).map(|token| &token.kind), Some(TokenKind::Identifier(_)))
+            {
+                field_end += 2;
+            }
+        }
         let field_assignment = matches!(self.peek().kind, TokenKind::Identifier(_))
             && self
                 .tokens
@@ -3105,7 +3129,7 @@ impl Parser<'_> {
                 self.tokens.get(self.cursor + 2).map(|token| &token.kind),
                 Some(TokenKind::Identifier(_))
             )
-            && self.tokens.get(self.cursor + 3).is_some_and(|token| {
+            && self.tokens.get(field_end + 1).is_some_and(|token| {
                 matches!(
                     token.kind,
                     TokenKind::Equal
@@ -3118,14 +3142,22 @@ impl Parser<'_> {
             });
         if field_assignment {
             let (object, object_span) = self.identifier("expected an assignment object")?;
+            let mut object_expression = Expression {
+                kind: ExpressionKind::Name(object),
+                span: object_span,
+            };
+            while self.cursor < field_end - 1 {
+                self.next();
+                let (name, span) = self.identifier("expected a field name")?;
+                object_expression = Expression {
+                    span: Span::new(object_span.source, object_span.start, span.end),
+                    kind: ExpressionKind::Member { object: Box::new(object_expression), name },
+                };
+            }
             self.next();
             let (field, field_span) = self.identifier("expected an assigned field")?;
             let assignment = self.next();
             let right = self.expression(0)?;
-            let object_expression = Expression {
-                kind: ExpressionKind::Name(object),
-                span: object_span,
-            };
             let operator = match assignment.kind {
                 TokenKind::Equal => None,
                 TokenKind::PlusEqual => Some(BinaryOperator::Add),

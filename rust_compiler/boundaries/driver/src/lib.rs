@@ -4,6 +4,7 @@
 //! compiler-owned boundaries; source transforms exchange typed IR objects.
 
 mod agent_ir;
+pub mod explicit_imports;
 mod components;
 pub mod config;
 mod pipeline;

@@ -32,7 +32,7 @@ def analyze_ownership(module: universal.Module, body: universal.CfgBody, paramet
                 case FieldAddress:
                     report.aliases.append(ValueAlias(object, result))
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.Diagnostic("E000303", "unsupported operation during ownership analysis", None)
         terminal ?= block.terminator
         if terminal != None:
             for edge in cfg.successors(terminal.exit):
@@ -72,7 +72,7 @@ def verify_escapes(body: borrow universal.CfgBody, plan: borrow OwnershipPlan) -
                 case FinishFields:
                     returned_values = values[:]
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.Diagnostic("E000303", "unsupported exit during escape analysis", terminal.span)
             for value in returned_values:
                 if stack_owner(plan, value):
                     return error(diagnostics.Diagnostic("E000303", "returned view outlives its local storage owner", terminal.span))

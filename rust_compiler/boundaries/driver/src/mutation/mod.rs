@@ -20,6 +20,7 @@ mod tests {
         let tokens = severian_lexer::scan(&source).unwrap();
         let ast = severian_parser::parse(&tokens).unwrap();
         ModuleGraph {
+            policies: Default::default(),
             modules: vec![ResolvedModule {
                 id: ModuleId(1),
                 path: PathBuf::from("fixture.sev"),

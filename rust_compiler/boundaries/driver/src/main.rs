@@ -81,7 +81,9 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
         }
         "build" | "compile" => {
             let options = parse_common(arguments)?;
-            if options.emit.is_some() {
+            if options.explicit_imports.is_some() {
+                make_imports_explicit(options, &catalog)
+            } else if options.emit.is_some() {
                 emit_ir(options, &catalog)
             } else {
                 build(options, &catalog).map(|_| ())
@@ -197,6 +199,7 @@ struct CommonOptions {
     bin: Option<String>,
     output: Option<PathBuf>,
     emit: Option<EmitStage>,
+    explicit_imports: Option<bool>,
     application_args: Vec<String>,
 }
 
@@ -222,6 +225,11 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
         if argument == "--" {
             options.application_args = arguments[cursor + 1..].to_vec();
             break;
+        }
+        if argument == "--explicit-imports" || argument == "--explicit-imports=json" {
+            options.explicit_imports = Some(argument.ends_with("=json"));
+            cursor += 1;
+            continue;
         }
         if let Some(value) = argument.strip_prefix("--emit=") {
             options.emit = Some(parse_emit_stage(value)?);
@@ -475,6 +483,38 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         compiler
             .check_file(target.path())
             .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn make_imports_explicit(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+    if options.emit.is_some() || options.output.is_some() || !options.application_args.is_empty() {
+        return Err("--explicit-imports cannot be combined with --emit, --output, or application arguments".into());
+    }
+    let input = discover(options.path.as_deref(), catalog)?;
+    let manifest = match &input { Input::Package(manifest) => Some(manifest.as_ref()), _ => None };
+    let config = resolve_config(catalog, manifest, &options)?;
+    let compiler = compiler(&config, manifest, false)?;
+    let targets = selected_targets(&input, options.bin.as_deref())?;
+    let mut plan = severian_driver::explicit_imports::Plan::default();
+    for target in targets {
+        let graph = compiler.resolve_test_graph(target.path()).map_err(|e|e.to_string())?;
+        let next = severian_driver::explicit_imports::plan(&graph, input_root(&input))?;
+        for file in next.files {
+            if let Some(previous) = plan.files.iter().find(|f| f.path == file.path) {
+                if previous.after != file.after { return Err("select one target with --bin before rewriting shared imports".into()); }
+            } else { plan.files.push(file); }
+        }
+        plan.notes.extend(next.notes);
+    }
+    plan.notes.sort(); plan.notes.dedup();
+    if options.explicit_imports == Some(true) {
+        println!("{}", serde_json::to_string_pretty(&plan).map_err(|e|e.to_string())?);
+    } else {
+        severian_driver::explicit_imports::apply(&plan)?;
+        for file in &plan.files { println!("made {} imports explicit in {}", file.imports, file.path.display()); }
+        for note in &plan.notes { eprintln!("note: {note}"); }
+        println!("updated {} files", plan.files.len());
     }
     Ok(())
 }

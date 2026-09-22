@@ -2,6 +2,7 @@
 # Ordinary library functions expose only the selected public declarations.
 import * from "grammar/contracts.sev"
 import * from "primitive/error.sev"
+import char from "primitive/char/units.sev"
 import * from "primitive/string/storage.sev"
 import * from "primitive/tuple.sev"
 import * from "primitive/enum.sev"

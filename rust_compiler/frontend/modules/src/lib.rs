@@ -25,6 +25,121 @@ pub struct ResolvedModule {
 pub struct ModuleGraph {
     /// Dependency-first initialization order; the root is always last.
     pub modules: Vec<ResolvedModule>,
+    pub policies: BTreeMap<PackageId, PackagePolicy>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackagePolicy {
+    pub library: PathBuf,
+    pub explicit_imports: bool,
+    pub exports: BTreeSet<String>,
+}
+
+/// Collapse source-import edges to package edges. Distinct files in one package
+/// may form cycles; a path back into another package may not. Checking only
+/// cycles between source files misses A/a -> B/b -> A/c.
+pub fn package_order(graph: &ModuleGraph) -> Result<Vec<PackageId>, Diagnostic> {
+    let modules: BTreeMap<_,_> = graph.modules.iter().map(|m|(m.id,m)).collect();
+    let mut edges: BTreeMap<PackageId, BTreeMap<PackageId, (&ResolvedModule, severian_source::Span)>> = BTreeMap::new();
+    for module in &graph.modules {
+        edges.entry(module.package).or_default();
+        for import in &module.imports {
+            let target = modules[&import.module];
+            if module.package != target.package {
+                edges.entry(module.package).or_default().entry(target.package).or_insert((module,import.span));
+            }
+        }
+    }
+    fn visit<'a>(package: PackageId,
+        edges: &BTreeMap<PackageId, BTreeMap<PackageId, (&'a ResolvedModule, severian_source::Span)>>,
+        active: &mut Vec<PackageId>, done: &mut BTreeSet<PackageId>, order: &mut Vec<PackageId>,
+        graph: &ModuleGraph,
+    ) -> Result<(), Diagnostic> {
+        if done.contains(&package) { return Ok(()); }
+        active.push(package);
+        for (target,(module,span)) in &edges[&package] {
+            if let Some(start) = active.iter().position(|p|p==target) {
+                let names = active[start..].iter().chain(std::iter::once(target)).map(|p| {
+                    graph.policies.get(p).map(|policy|policy.library.display().to_string())
+                        .unwrap_or_else(|| format!("package {}",p.0))
+                }).collect::<Vec<_>>();
+                return Err(Diagnostic::new("E000128",format!("package import cycle: {}; cycles are permitted only between modules of the same package",names.join(" -> ")),Some(*span)).with_source(module.source.clone()));
+            }
+            visit(*target,edges,active,done,order,graph)?;
+        }
+        active.pop(); done.insert(package); order.push(package);
+        Ok(())
+    }
+    let mut order=Vec::new(); let mut done=BTreeSet::new();
+    for package in edges.keys() {visit(*package,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;}
+    Ok(order)
+}
+
+pub fn order_packages(graph: &mut ModuleGraph) -> Result<(), Diagnostic> {
+    let order = package_order(graph)?;
+    let positions: BTreeMap<_,_> = order.into_iter().enumerate().map(|(i,p)|(p,i)).collect();
+    // Stable sort retains each package's existing module initialization order.
+    graph.modules.sort_by_key(|m|positions[&m.package]);
+    Ok(())
+}
+
+fn package_policies(packages: &PackageGraph) -> Result<BTreeMap<PackageId, PackagePolicy>, Diagnostic> {
+    let mut policies = BTreeMap::new();
+    for package in packages.packages.values() {
+        let path = package.root.join("package.json");
+        if !path.is_file() { continue; }
+        let text = std::fs::read_to_string(&path).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
+        let value: serde_json::Value = json5::from_str(&text).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
+        let explicit_imports = match value.get("language").and_then(|v|v.get("explicit-imports")) {
+            None => true,
+            Some(serde_json::Value::Bool(enabled)) => *enabled,
+            _ => return Err(Diagnostic::new("E000125", format!("{}: language.explicit-imports requires a boolean", path.display()), None)),
+        };
+        let exports = match value.get("package").and_then(|v|v.get("export")) {
+            None => BTreeSet::new(),
+            Some(serde_json::Value::Array(names)) => names.iter().map(|v|v.as_str().map(str::to_owned).ok_or_else(|| Diagnostic::new("E000125", "package.export requires an array of names", None))).collect::<Result<_,_>>()?,
+            _ => return Err(Diagnostic::new("E000125", "package.export requires an array of names", None)),
+        };
+        policies.insert(package.id, PackagePolicy { library: std::fs::canonicalize(&package.library).unwrap_or_else(|_|package.library.clone()), explicit_imports, exports });
+    }
+    Ok(policies)
+}
+
+/// Package boundaries are enforced during compilation, after refactoring tools
+/// have had an opportunity to inspect and replace legacy wildcard imports.
+pub fn validate_import_policy(graph: &ModuleGraph) -> Result<(), Diagnostic> {
+    package_order(graph)?;
+    let modules: BTreeMap<_,_> = graph.modules.iter().map(|m|(m.id,m)).collect();
+    for module in &graph.modules {
+        let mut bindings = BTreeSet::new();
+        for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
+            let binding = import.alias.as_deref().or_else(||match &import.subject {
+                ImportSubject::Name(n)=>Some(n.as_str()),
+                ImportSubject::Locator(_)=>import.source.as_deref(),
+            });
+            if let Some(name) = binding {
+                if !bindings.insert(name) {return Err(Diagnostic::new("E000203",format!("duplicate import binding `{name}`"),Some(import.span)).with_source(module.source.clone()));}
+            }
+            let Some(edge) = module.imports.iter().find(|e|e.span==import.span) else {continue};
+            let target = modules[&edge.module];
+            if target.package == module.package {continue;}
+            if graph.policies.get(&module.package).is_none_or(|p|p.explicit_imports)
+                && matches!(import.subject, ImportSubject::Locator(_)) && import.source.is_none() {
+                return Err(Diagnostic::new("E000126", "wildcard dependency imports are disabled by language.explicit-imports; name the symbols or run sev build --explicit-imports",Some(import.span)).with_source(module.source.clone()));
+            }
+            if let Some(policy) = graph.policies.get(&target.package) {
+                let name = match (&import.subject,&import.source) {
+                    (ImportSubject::Name(name),Some(_))=>Some(name),
+                    (ImportSubject::Locator(_),Some(name))=>Some(name),
+                    _=>None,
+                };
+                if let Some(name) = name {
+                    if !policy.exports.contains(name) {return Err(Diagnostic::new("E000127",format!("`{name}` is not listed in dependency package.export"),Some(import.span)).with_source(module.source.clone()));}
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -119,6 +234,7 @@ pub fn resolve_with_packages_and_additional_roots(
     }
     Ok(ModuleGraph {
         modules: resolver.order,
+        policies: package_policies(packages)?,
     })
 }
 
@@ -300,10 +416,10 @@ fn source_import(
     import: &ImportDeclaration,
     packages: &PackageGraph,
 ) -> Result<Option<(PathBuf, PackageId)>, Diagnostic> {
-    if import.source.as_deref() == Some("xxi") {
+    if matches!(import.subject, ImportSubject::Name(_)) && import.source.as_deref() == Some("xxi") {
         return Ok(None);
     }
-    if let Some(package) = &import.source {
+    if let (ImportSubject::Name(_), Some(package)) = (&import.subject, &import.source) {
         return package_source(importer_package, import, package, packages).map(Some);
     }
     let locator = match &import.subject {

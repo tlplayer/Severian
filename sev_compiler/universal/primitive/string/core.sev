@@ -1,35 +1,47 @@
 import * from "../char/utf8.sev" as character
 
-# Text algorithms view the initialized part of the shared vector backend.
-# Allocation and capacity belong to vector; ownership follows its typed buffer.
-def __dimension(value: string, dimension: index) -> index:
-    assert(__size(dimension) == 0)
-    return __index(value.storage.used)
+# Strings expose their vector's initialized character units. Allocation and
+# release remain in the shared storage/memory and checked ownership pipeline.
+def __dimension(value: string, dimension: int) -> int:
+    assert(dimension == 0)
+    return value.storage.used
 
-@mlir("arith.index_cast")
-def __size(value: index) -> int
 
-@mlir("arith.index_cast")
-def __index(value: int) -> index
+def __size[T](value: T) -> int:
+    return int(value)
 
-def __load(value: string, position: index) -> u8:
-    return __buffer_load(value.storage.data, position)
 
-@mlir("arith.extui")
-def __byte_value(value: u8) -> int
+def __index(value: int) -> int:
+    return value
 
-@mlir("arith.trunci")
-def __character(value: int) -> char
 
-def __allocate(size: index) -> string:
+def __load(value: string, position: int) -> u8:
+    return u8(value.storage.get(position))
+
+
+def __byte_value(value: u8) -> int:
+    return int(value)
+
+
+def __character(value: int) -> char:
+    return character.from_codepoint(value)
+
+
+def __allocate(size: int) -> string:
+    assert(size >= 0)
     result = string()
-    result.reserve(__size(size))
-    result.storage.used = __size(size)
+    result.reserve(size)
+    # Initialize the requested range before publishing its logical length.
+    position := 0
+    while position < size:
+        result.storage.append(u8(0))
+        position += 1
     return result
 
 
-def __store(value: u8, destination: borrow string, position: index):
-    __buffer_store(value, destination.storage.data, position)
+def __store(value: u8, destination: borrow string, position: int):
+    assert(position >= 0 and position < destination.storage.used)
+    destination.storage.set(position, value)
 
 
 def byte_count(value: string) -> int:
@@ -177,9 +189,8 @@ def __copy(source: string, destination: borrow string, offset: int, position: in
 def concat(left: string, right: string) -> string:
     left_size = byte_count(left)
     right_size = byte_count(right)
+    assert(left_size <= 9223372036854775807 - right_size)
     size = left_size + right_size
-    assert(size >= left_size)
-    assert(size >= right_size)
     result = __allocate(__index(size))
     __copy(left, result, 0, 0)
     __copy(right, result, left_size, 0)

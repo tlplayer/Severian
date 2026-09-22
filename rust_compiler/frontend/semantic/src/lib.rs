@@ -7,7 +7,7 @@ mod package;
 mod queries;
 
 pub use package::{
-    analyze_package, analyze_package_with_context, DefKind, Definition, ExportMap, FunctionDecl,
+    analyze_package, analyze_package_with_context, import_index, DefKind, Definition, ExportMap, FunctionDecl,
     ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, SignatureId, TraitDecl,
     TypedProgram, Visibility,
 };
@@ -6466,6 +6466,12 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Name(name) => {
+                if name == "unit" && !self.names.contains_key(name) {
+                    return self.expression(&AstExpression {
+                        kind: AstExpressionKind::Literal(AstLiteral::Unit),
+                        span: ast.span,
+                    }, expected);
+                }
                 if let Some(field) = self.receiver_field_expression(name, expected, ast.span)? {
                     return Ok(field);
                 }

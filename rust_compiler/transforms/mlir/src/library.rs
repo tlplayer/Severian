@@ -12,6 +12,12 @@ const STRING_EXPORTS: &[&str] = &[
     "__sev_string_concat",
     "__sev_string_compare",
     "__sev_string_release",
+    "__sev_text_size",
+    "__sev_text_load",
+    "__sev_text_store",
+    "__sev_text_allocate",
+    "__sev_text_codepoint",
+    "__sev_text_character",
 ];
 
 const STRING_DEPENDENCIES: &[&str] = &["abort", "__sev_storage_new", "__sev_storage_release", "memcpy", "strcmp", "strlen"];
@@ -40,6 +46,6 @@ mod tests {
         assert_eq!(library.abi_version, 1);
         assert_eq!(library.pointer_bits, Some(64));
         assert!(library.module.contains("severian.abi_version = 1"));
-        assert_eq!(library.exports.len(), 3);
+        assert_eq!(library.exports.len(), 9);
     }
 }

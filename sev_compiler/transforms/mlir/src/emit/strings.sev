@@ -1,5 +1,5 @@
 import * from "../ir/lib.sev"
-import * from "package:universal/primitive/char/encoding.sev" as encoding
+from universal import encoding
 
 
 def utf8_view_type() -> MlirType:
@@ -53,4 +53,6 @@ def string_literal(builder: MlirOpBuilder, value: string, output: MlirValue):
     builder.program.operations.append(global)
     storage = builder_new_value(builder, storage_type)
     builder_create_operation(builder, operation_name("memref", "get_global"), [], [storage], [MlirNamedAttribute("name", symbol_attribute(symbol))])
+    # This operation exposes read-only constant storage. Allocation belongs to
+    # array's source implementation and the memory library, never this emitter.
     builder_create_operation(builder, operation_name("memref", "cast"), [storage], [output])

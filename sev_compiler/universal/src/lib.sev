@@ -39,3 +39,16 @@ import * from "../type/scalar_conversion.sev"
 import * from "../type/slice_bounds.sev"
 import * from "../type/storage.sev"
 import * from "../type/tagged.sev"
+
+# Public module interfaces.
+import * from "../primitive/string/core.sev" as string_core
+import * from "../cfg/availability.sev" as availability
+import * from "../cfg/dominance.sev" as dominance
+import * from "../primitive/char/encoding.sev" as encoding
+import * from "../type/integer_spelling.sev" as integer_spelling
+import * from "../type/scalar.sev" as scalar
+import * from "../type/scalar_conversion.sev" as scalar_conversion
+import * from "../declaration/scalar.sev" as scalar_declarations
+import * from "../type/slice_bounds.sev" as slice_bounds
+import * from "../type/storage.sev" as storage
+import * from "../type/tagged.sev" as tagged

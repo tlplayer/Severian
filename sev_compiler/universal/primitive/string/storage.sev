@@ -1,26 +1,25 @@
 import * from "../../../../library/core/collections/vector/src/vector.sev" as vectors
 import * from "../char/utf8.sev" as encoding
 
-trait String:
-    def append(value: string | char)
+trait StringOperations:
     def encode()
     def ends_with(sub_string:string|char) -> bool
     def starts_with(sub_string:string|char) -> bool
     # Finds the index of sub_string within start/end
     def find(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
     # ",".join(["a","b","c"]) -> "a,b,c"
-    def join(iterable,conjunctor:string) -> string
+    def join(iterable: list[string], conjunctor: string) -> string
 
     #Split a string by a substring "a,b,c".split(",")-> ["a","b","c"]
     def split[C=list]() -> C
     def strip() -> string
-    def append(borrow self, addition:string|char) -> self 
-    def remove(borrow self, removed:string|char) -> self
+    def append(self: borrow Self, addition: string | char) -> borrow Self 
+    def remove(self: borrow Self, removed: string | char) -> borrow Self
     # Without indices [] or int "abc".without(1) -> "ac"
     def without(indices: int | list[int]) -> string
     # Returns if an object is in the string "a"|'a' in "apple"-> true
-    operator in(self,right:string) -> bool
-    operator +(self,right:string) -> string
+    operator in(self: Self, right: string) -> bool
+    operator +(self: Self, right: string) -> string
 
 
 # Some strings for ctype-style character classification
@@ -37,14 +36,25 @@ PRINTABLE = digits + ascii_letters + punctuation + whitespace
 
 # Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
 # N is the initial vector capacity and does not limit the string's length.
-class string[T: u8 | u32 = u8, N = 64]: Container + String + Iterable:
-    storage: vectors.vector[T, N]
+trait String: Container:
+    def length() -> int
+    def capacity() -> int
+    def reserve(self: borrow Self, required: int)
+
+
+class string[T: u8 | u32 = u8, N = 64]: String+ StringOperations:
+    storage: vectors.vector[char[T], N]
 
     def string():
-        storage = vectors.vector[T, N]()
+        storage = vectors.vector[char[T], N]()
 
-    def string(storage: move vectors.vector[T, N]):
-        throw Error("Unimplemented")
+    def string(buffer: move vectors.vector[char[T], N]):
+        storage = move buffer
+        position := 0
+        while position < storage.used:
+            codepoint = __decode(position)
+            assert(encoding.valid(codepoint))
+            position += __width(position)
 
     def capacity() -> int:
         return storage.capacity()
@@ -113,18 +123,23 @@ class string[T: u8 | u32 = u8, N = 64]: Container + String + Iterable:
         if bytes(T).amount == 32.0:
             return 1
         first = __unit(position)
+        width := 0
         if first < 128:
-            return 1
-        if first < 224:
-            return 2
-        if first < 240:
-            return 3
-        return 4
+            width = 1
+        elif first >= 194 and first <= 223:
+            width = 2
+        elif first >= 224 and first <= 239:
+            width = 3
+        elif first >= 240 and first <= 244:
+            width = 4
+        assert(width > 0 and width <= storage.used - position)
+        return width
 
     def __decode(position: int) -> int:
         first = __unit(position)
         width = __width(position)
         if width == 1:
+            assert(encoding.valid(first))
             return first
         second = __unit(position + 1)
         if width == 2:
@@ -166,9 +181,8 @@ class string[T: u8 | u32 = u8, N = 64]: Container + String + Iterable:
             reserve(storage.used + count)
             position := 0
             while position < count:
-                storage.data[storage.used + position] = T(value.storage.get(position))
+                storage.append(T(value.storage.get(position)))
                 position += 1
-            storage.used += count
             return self
         position := 0
         while position < count:

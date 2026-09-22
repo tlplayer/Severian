@@ -1,0 +1,76 @@
+import * from "../storage.sev" as arrays
+import * from "../../char/units.sev" as characters
+import * from "../../../../../library/core/collections/vector/src/vector.sev" as vectors
+
+
+def make_characters() -> array[char[u32]]:
+    values = arrays.allocate[char[u32]](3)
+    arrays.write(values, 0, characters.char[u32](955))
+    arrays.write(values, 1, characters.char[u32](128512))
+    arrays.write(values, 2, characters.char[u32](0))
+    return values
+
+
+test "character arrays use typed memory for each storage width":
+    narrow = arrays.allocate[char[u8]](2)
+    arrays.write(narrow, 0, characters.char[u8](0))
+    arrays.write(narrow, 1, characters.char[u8](255))
+    assert(arrays.length(narrow) == 2)
+    assert(characters.codepoint(arrays.read(narrow, 0)) == 0)
+    assert(characters.codepoint(arrays.read(narrow, 1)) == 255)
+
+    wide = make_characters()
+    assert(arrays.length(wide) == 3)
+    assert(characters.codepoint(arrays.read(wide, 0)) == 955)
+    assert(characters.codepoint(arrays.read(wide, 1)) == 128512)
+    assert(characters.codepoint(arrays.read(wide, 2)) == 0)
+
+
+test "copying character arrays creates independent owned storage":
+    original = make_characters()
+    duplicate = arrays.copy(original)
+    arrays.write(duplicate, 0, characters.char[u32](97))
+    assert(characters.codepoint(arrays.read(original, 0)) == 955)
+    assert(characters.codepoint(arrays.read(duplicate, 0)) == 97)
+    drop original
+    assert(characters.codepoint(arrays.read(duplicate, 1)) == 128512)
+
+
+test "vector adopts a character array and grows through the same memory path":
+    values = make_characters()
+    value = vectors.vector[char[u32], 0](move values, 3)
+    assert(value.len() == 3)
+    assert(value.capacity() == 3)
+    value.append(characters.char[u32](20013))
+    assert(value.len() == 4)
+    assert(value.capacity() >= 4)
+    assert(characters.codepoint(value.get(0)) == 955)
+    assert(characters.codepoint(value.get(3)) == 20013)
+
+
+test "zero length character arrays retain the ordinary drop contract":
+    values = arrays.allocate[char[u8]](0)
+    assert(arrays.length(values) == 0)
+    drop values
+
+
+test with compiler "moving an array into a vector consumes its owner":
+    values = make_characters()
+    value = vectors.vector[char[u32], 0](move values, 3)
+    reject:
+        arrays.read(values, 0)
+
+
+test with compiler "a character array view cannot mutate its owner's storage":
+    values = make_characters()
+    observed = view values
+    reject:
+        arrays.write(observed, 0, characters.char[u32](97))
+
+
+test with compiler "a live character array loan prevents dropping its owner":
+    values = make_characters()
+    observed = view values
+    reject:
+        drop values
+        arrays.read(observed, 0)

@@ -1,9 +1,9 @@
 import diagnostics
 import source
 import universal
-import * from "package:universal/type/scalar.sev" as scalar
-import * from "package:universal/type/storage.sev" as storage_types
-import * from "package:universal/type/tagged.sev" as tagged
+from universal import scalar
+from universal import storage as storage_types
+from universal import tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved
@@ -111,6 +111,13 @@ def bootstrap_storage_type(definitions: SemanticDefinitions, name: string, names
 def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
+            if name == "char" and len(arguments) != 0:
+                if len(arguments) != 1:
+                    return error(diagnostics.diagnostic_at("E000205", "char requires one storage type", annotation.span))
+                unit = type_annotation(definitions, arguments[0], records, namespace, active)
+                if int(unit.index) not in [108, 532]:
+                    return error(diagnostics.diagnostic_at("E000205", "char storage must be u8 or u32", annotation.span))
+                return unit
             if bootstrap_storage_type(definitions, name, namespace) and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
                 if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
@@ -311,7 +318,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
                 applied.bases = bases
                 return applied
         case _:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000205", "unimplemented")
     return error(diagnostics.diagnostic_at("E000212", "constraint must name a trait", annotation.span))
 
 
@@ -355,7 +362,7 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: un
                         if not known:
                             return error(diagnostics.diagnostic_at("E000212", "unknown operator constraint " + bound_name, span))
             case _:
-                throw Error("unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented")
         if not grammar_bound:
             constraints.append(constraint)
     parameters: list[string] = []
@@ -534,7 +541,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                         names.append(declaration.name)
                 ordinal += 1
             case _:
-                throw Error("unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented")
     # Resolve free extension parameters only after every concrete type and alias
     # is registered. list[string] is concrete; list[T] may bind an unknown T.
     implementation_index := 0
@@ -547,7 +554,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Record:
                 module.items[item_index] = universal.Record(resolve_extension_parameters(definitions, declaration))
             case _:
-                throw Error("unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented")
         item_index += 1
     trait_index := 0
     for declaration in definitions.traits:

@@ -1,7 +1,7 @@
 import package
 import source
 import universal
-import * from "package:universal/type/scalar.sev" as scalar
+from universal import scalar
 import * from "package:mir/src/agent_ir.sev" as agent_ir
 
 class EditorIndex:

@@ -110,7 +110,7 @@ def parser_identifier(parser: Parser, message: string) -> tuple[string, source.S
         case Identifier:
             return (string(token), token.span)
         case _:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000113", "unimplemented")
     return error(diagnostics.Diagnostic("E000120", message, token.span))
 
 def parser_expect(parser: Parser, expected: lexer.TokenKind, message: string) -> lexer.Token | diagnostics.Diagnostic:
@@ -164,7 +164,8 @@ def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
             for declaration in parser_selective_imports(parser):
                 result.items.append(universal.Import(declaration))
         elif parser_at_identifier(parser, "import"):
-            result.items.append(universal.Import(parser_import_declaration(parser)))
+            for declaration in parser_import_members(parser):
+                result.items.append(universal.Import(declaration))
         elif parser_at_identifier(parser, "trait"):
             result.items.append(universal.Trait(parser_trait_declaration(parser, [])))
         elif parser_at_identifier(parser, "grammar"):
@@ -225,7 +226,12 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
 
 def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
     parser_next(parser)
-    package_name = parser_identifier(parser, "expected an import source")[0]
+    locator = parser_at_simple(parser, String)
+    package_name := ""
+    if locator:
+        package_name = string(parser_next(parser))
+    else:
+        package_name = parser_identifier(parser, "expected an import source")[0]
     if not parser_at_identifier(parser, "import"):
         return error(parser_fail(parser, "expected import after source package"))
     parser_next(parser)
@@ -239,12 +245,23 @@ def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration
         parser_delimited_layout(parser)
     result: list[universal.ImportDeclaration] = []
     while true:
-        member = parser_identifier(parser, "expected an import name")
+        member := ("", parser_peek(parser).span)
+        if parser_at_symbol(parser, "*"):
+            token = parser_next(parser)
+            member = ("*", token.span)
+        else:
+            member = parser_identifier(parser, "expected an import name")
         alias: string | None := None
         if parser_at_identifier(parser, "as"):
             parser_next(parser)
             alias = parser_identifier(parser, "expected an import alias")[0]
-        result.append(universal.ImportDeclaration(universal.Name(member[0]), package_name, alias, member[1]))
+        if locator:
+            selected: string | None := member[0]
+            if member[0] == "*":
+                selected = None
+            result.append(universal.ImportDeclaration(universal.Locator(package_name), selected, alias, member[1]))
+        else:
+            result.append(universal.ImportDeclaration(universal.Name(member[0]), package_name, alias, member[1]))
         if grouped:
             parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None:
@@ -255,6 +272,59 @@ def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration
                 break
     if grouped:
         parser_expect_symbol(parser, "}", "expected } after import list")
+    return result
+
+
+def parser_import_members(parser: Parser) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    names: list[string] = []
+    aliases: list[string | None] = []
+    spans: list[source.Span] = []
+    while true:
+        span = parser_peek(parser).span
+        name := ""
+        if parser_take_symbol(parser, "*") != None:
+            name = "*"
+        else:
+            name = parser_identifier(parser, "expected an import name or *")[0]
+        alias: string | None := None
+        if parser_at_identifier(parser, "as"):
+            parser_next(parser)
+            alias = parser_identifier(parser, "expected an import alias")[0]
+        names.append(name)
+        aliases.append(alias)
+        spans.append(span)
+        if parser_take_symbol(parser, ",") == None:
+            break
+    result: list[universal.ImportDeclaration] = []
+    if not parser_at_identifier(parser, "from"):
+        if len(names) != 1 or names[0] == "*":
+            return error(parser_fail(parser, "expected from after import list"))
+        result.append(universal.ImportDeclaration(universal.Name(names[0]), None, aliases[0], source.Span(start.source, start.start, parser_peek(parser).span.start)))
+        return result
+    parser_next(parser)
+    locator = parser_at_simple(parser, String)
+    origin := ""
+    if locator:
+        origin = string(parser_next(parser))
+    else:
+        origin = parser_identifier(parser, "expected an import source")[0]
+    if parser_at_identifier(parser, "as"):
+        if len(names) != 1:
+            return error(parser_fail(parser, "alias each named import before from"))
+        parser_next(parser)
+        aliases[0] = parser_identifier(parser, "expected an import alias")[0]
+    for index in range(int(len(names))):
+        span := spans[index]
+        if len(names) == 1:
+            span = source.Span(start.source, start.start, parser_peek(parser).span.start)
+        if locator:
+            selected: string | None := names[index]
+            if names[index] == "*":
+                selected = None
+            result.append(universal.ImportDeclaration(universal.Locator(origin), selected, aliases[index], span))
+        else:
+            result.append(universal.ImportDeclaration(universal.Name(names[index]), origin, aliases[index], span))
     return result
 
 
@@ -636,7 +706,7 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
         case String:
             name = string(parser_next(parser))
         case _:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000113", "unimplemented")
     contracts: list[universal.Expression] = []
     if parser_at_identifier(parser, "with"):
         if "profile" not in modes:
@@ -835,7 +905,7 @@ def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectat
 def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Block, u32] | diagnostics.Diagnostic:
     parser_expect(parser, Newline, "expected newline after " + owner)
     while parser_take(parser, Newline) != None:
-        throw Error("unimplemented")
+        throw diagnostics.diagnostic("E000113", "unimplemented")
     parser_expect(parser, Indent, "expected indented " + owner + " body")
     statements: list[universal.Statement] = []
     parser_separators(parser)
@@ -1044,7 +1114,7 @@ def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic
             annotation = universal.named_type(name, [], start)
             name = parser_identifier(parser, "expected binding name after type")[0]
         case _:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000113", "unimplemented")
     if parser_take_symbol(parser, ":") != None:
         annotation = parser_type_annotation(parser)
     inferred = parser_take_symbol(parser, ":=") != None
@@ -1192,7 +1262,7 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                     throws_call = name == "throws"
                     mock_call = name == "mock"
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.diagnostic("E000113", "unimplemented")
             if mock_call:
                 calls: list[universal.Expression] = []
                 results: list[universal.Expression] = []
@@ -1340,7 +1410,7 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             value = string(token)
             return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
         case _:
-            throw Error("unimplemented")
+            throw diagnostics.diagnostic("E000113", "unimplemented")
     if lexer.token_is_symbol(token, "["):
         elements: list[universal.Expression] = []
         parser_delimited_layout(parser)

@@ -19,6 +19,7 @@ class Option:
 def default_catalog() -> list[Option]:
     return [
         Option("language.type-safe", "bool", "true", []),
+        Option("language.explicit-imports", "bool", "true", []),
         Option("build.profile", "enum", "dev", ["dev", "release"]),
         Option("build.target", "string", "host", []),
         Option("build.incremental", "bool", "true", []),

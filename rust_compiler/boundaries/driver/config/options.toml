@@ -9,6 +9,13 @@ default = "true"
 description = "Require statically verified source types."
 
 [[option]]
+path = "language.explicit-imports"
+group = "Language"
+type = "bool"
+default = "true"
+description = "Require named imports across package boundaries; replace wildcards with sev build --explicit-imports. Public dependency names are declared in package.export."
+
+[[option]]
 path = "build.profile"
 group = "Build"
 type = "enum"

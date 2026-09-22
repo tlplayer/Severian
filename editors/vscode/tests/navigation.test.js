@@ -227,3 +227,11 @@ test('in-flight compiler results are discarded after an edit', async () => {
   assert.equal(await result, undefined);
   assert.equal((await h.providers.Definition.provideDefinition(...selection)).uri.fsPath, '/workspace/lib.sev');
 });
+
+test('canonical source-first import lists resolve aliases, types and definitions', () => {
+  const source = 'from "./lib.sev" import { doubled as twice, Point }\ndef main():\n    point = Point()\n    return twice(3)\n';
+  const index = indexOf({ ...files, '/workspace/main.sev': source });
+  assert.equal(at(index, '/workspace/main.sev', source, 'twice(3)').name, 'doubled');
+  assert.equal(at(index, '/workspace/main.sev', source, 'twice,').name, 'doubled');
+  assert.equal(at(index, '/workspace/main.sev', source, 'Point()').name, 'Point');
+});

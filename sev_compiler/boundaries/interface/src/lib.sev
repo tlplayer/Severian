@@ -139,3 +139,6 @@ def encode_representation(representation: RepresentationRecord) -> list[u8]:
             return [9]
 
 import * from "package_metadata.sev"
+
+# Public module interfaces.
+import * from "package_metadata.sev" as package_metadata

@@ -29,7 +29,8 @@
     "onCommand:severian.buildWith",
     "onCommand:severian.coverage.run",
     "onCommand:severian.coverage.load",
-    "onCommand:severian.coverage.clear"
+    "onCommand:severian.coverage.clear",
+    "onCommand:severian.explicitImports"
   ],
   "categories": [
     "Programming Languages"
@@ -127,6 +128,11 @@
         "command": "severian.coverage.clear",
         "title": "Clear Coverage Gutters",
         "category": "Severian"
+      },
+      {
+        "command": "severian.explicitImports",
+        "title": "Make Imports Explicit",
+        "category": "Severian"
       }
     ],
     "menus": {
@@ -170,6 +176,11 @@
           "command": "severian.coverage.run",
           "when": "editorLangId == severian",
           "group": "navigation@10"
+        },
+        {
+          "command": "severian.explicitImports",
+          "when": "editorLangId == severian",
+          "group": "navigation@5.2"
         }
       ]
     },

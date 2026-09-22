@@ -1,7 +1,7 @@
 import universal
 import diagnostics
 import * from "cfg.sev" as cfg
-import * from "package:universal/type/storage.sev" as storage
+from universal import storage
 
 
 class AggregatePlace:

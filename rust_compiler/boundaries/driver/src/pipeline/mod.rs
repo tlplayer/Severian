@@ -303,6 +303,7 @@ impl Compiler {
     ) -> Result<MirModule, CompileError> {
         let source = SourceFile::virtual_source(format!("{module_name}.sev"), "");
         let graph = severian_modules::ModuleGraph {
+            policies: Default::default(),
             modules: vec![severian_modules::ResolvedModule {
                 id: severian_modules::ModuleId(1),
                 path: PathBuf::from(format!("{module_name}.sev")),
@@ -745,6 +746,7 @@ impl Compiler {
         CompileError,
     > {
         let _timing = crate::timing::Stage::begin("semantic");
+        severian_modules::order_packages(&mut graph).map_err(CompileError::Diagnostic)?;
         let root_package = graph
             .modules
             .last()
@@ -908,8 +910,21 @@ impl Compiler {
         source: &Path,
         output: &Path,
     ) -> Result<Vec<String>, CompileError> {
+        let mut native_packages = self.standard_package_graph(source)?;
+        // Published native libraries already contain their provider objects.
+        // Validate those artifacts before omitting their source build inputs.
+        self.published_libraries()?;
+        native_packages.packages.retain(|id, package| {
+            if *id == native_packages.root { return true; }
+            let Some(root) = package.root.parent() else { return true; };
+            let metadata = root.join("metadata/native-library.json");
+            let compatible = std::fs::read(&metadata).ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|value| value["target"].as_str() == Some(self.target.triple.as_str()));
+            !compatible
+        });
         let providers =
-            NativeProviderSources::discover(source, Some(&self.standard_package_graph(source)?))?
+            NativeProviderSources::discover(source, Some(&native_packages))?
                 .unwrap_or_default();
         let mut arguments = providers
             .c

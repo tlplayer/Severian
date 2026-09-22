@@ -47,6 +47,42 @@ fn temporary() -> PathBuf {
 }
 
 #[test]
+fn package_facade_exports_named_modules_with_nominal_types() {
+    let root = temporary();
+    let dependency = root.join("ownership");
+    std::fs::create_dir_all(&dependency).unwrap();
+    std::fs::write(dependency.join("model.sev"), "class Loan:\n    value: int\n").unwrap();
+    std::fs::write(dependency.join("facade.sev"), "import * from \"model.sev\" as loans\n").unwrap();
+    std::fs::write(root.join("entry.sev"), "from ownership import loans\ndef retain(value: loans.Loan) -> loans.Loan:\n    return value\n").unwrap();
+    let packages = severian_modules::PackageGraph {
+        root: PackageId(0),
+        packages: BTreeMap::from([
+            (PackageId(0), severian_modules::ResolvedPackage {
+                id: PackageId(0), root: root.clone(), library: root.join("entry.sev"),
+                dependencies: BTreeMap::from([("ownership".into(), PackageId(1))]),
+            }),
+            (PackageId(1), severian_modules::ResolvedPackage {
+                id: PackageId(1), root: dependency.clone(), library: dependency.join("facade.sev"),
+                dependencies: BTreeMap::new(),
+            }),
+        ]),
+    };
+    let graph = severian_modules::resolve_with_packages(&root.join("entry.sev"), &packages).unwrap();
+    analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn unit_value_does_not_reserve_local_binding_names() {
+    let root = temporary();
+    let source = root.join("unit.sev");
+    std::fs::write(&source, "def empty() -> unit:\n    return unit\ndef echo(unit: string) -> string:\n    return unit\n").unwrap();
+    let graph = severian_modules::resolve(&source).unwrap();
+    analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn class_origin_helpers_do_not_compete_with_local_or_imported_callables() {
     let root = temporary();
     std::fs::write(
@@ -112,6 +148,7 @@ fn primitive_class_collapses_to_the_universal_identity_and_installs_operators() 
     );
     let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
     let graph = severian_modules::ModuleGraph {
+        policies: Default::default(),
         modules: vec![severian_modules::ResolvedModule {
             id: severian_modules::ModuleId(1),
             path: PathBuf::from("bool.sev"),
@@ -296,6 +333,7 @@ fn injected_prelude_declarations_are_local_and_not_reexported() {
     let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
     let module = severian_modules::ModuleId(1);
     let graph = severian_modules::ModuleGraph {
+        policies: Default::default(),
         modules: vec![severian_modules::ResolvedModule {
             id: module,
             path: PathBuf::from("bootstrap-prelude.sev"),

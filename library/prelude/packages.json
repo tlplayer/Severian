@@ -11,6 +11,12 @@
         "source": "sev_compiler/universal/primitive/error.sev"
       },
       {
+        "source": "sev_compiler/universal/primitive/char/units.sev",
+        "names": [
+          "char"
+        ]
+      },
+      {
         "source": "sev_compiler/universal/primitive/string/storage.sev"
       },
       {
@@ -21,11 +27,15 @@
       },
       {
         "source": "sev_compiler/universal/primitive/string/format.sev",
-        "names": ["string"]
+        "names": [
+          "string"
+        ]
       },
       {
         "source": "library/system/io/src/text.sev",
-        "names": ["print"]
+        "names": [
+          "print"
+        ]
       },
       {
         "source": "sev_compiler/universal/primitive/numeric/conversion.sev",
@@ -71,7 +81,9 @@
     "math": [
       {
         "source": "library/core/math/src/lib.sev",
-        "names": ["round"]
+        "names": [
+          "round"
+        ]
       }
     ]
   }

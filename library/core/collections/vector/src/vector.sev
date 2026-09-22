@@ -1,5 +1,5 @@
-import storage
-import Container from traits
+import * from "../../traits/src/container.sev"
+import * from "../../../../../sev_compiler/universal/primitive/array/storage.sev" as arrays
 
 # The vector owns its buffer directly. N is the initial capacity; reserve
 # chooses growth and core.storage checks allocations through core.memory. Replacing or
@@ -12,8 +12,13 @@ class vector[T, N = 256]: Container:
         width = int(bytes(T).amount / 8.0)
         assert(N >= 0 and width > 0)
         assert(N <= 9223372036854775807 / width)
-        data: array[T] = storage.allocate(N)
+        data = arrays.allocate[T](N)
         used = 0
+
+    def vector(buffer: move array[T], count: int):
+        assert(count >= 0 and count <= arrays.length(buffer))
+        data = move buffer
+        used = count
 
     def len(self: view Self) -> int:
         return used
@@ -28,30 +33,34 @@ class vector[T, N = 256]: Container:
     #len() as size()
 
     def capacity() -> int:
-        return len(data)
+        return arrays.length(data)
 
     def reserve(self: borrow Self, required: int):
         assert(required >= 0)
-        if required <= len(data):
+        if required <= arrays.length(data):
             return
         data = __vector_grow(data, used, required, N)
 
     def append(self: borrow Self, value: T):
         assert(used < 9223372036854775807)
         reserve(used + 1)
-        data[used] = value
+        arrays.write(data, used, value)
         used += 1
 
     # Callers with a byte-based allocation policy can request an exact
     # capacity without changing the general vector growth policy.
     def reserve_exact(self: borrow Self, required: int):
         assert(required >= used)
-        if required > len(data):
+        if required > arrays.length(data):
             data = __vector_resize(data, used, required)
 
     def get(position: int) -> T:
         assert(position >= 0 and position < used)
-        return data[position]
+        return arrays.read(data, position)
+
+    def set(self: borrow Self, position: int, value: T):
+        assert(position >= 0 and position < used)
+        arrays.write(data, position, value)
 
     def clear(self: borrow Self):
         used = 0
@@ -64,7 +73,7 @@ class vector[T, N = 256]: Container:
         result.reserve(used)
         position := 0
         while position < used:
-            result.append(data[position])
+            result.append(arrays.read(data, position))
             position += 1
         return result
 
@@ -73,7 +82,7 @@ class vector[T, N = 256]: Container:
 # Keep the vector's growth loop in one function across append call sites.
 def __vector_grow[T](data: view array[T], used: int, required: int, initial: int) -> array[T]:
     assert(required >= 0)
-    current = len(data)
+    current = arrays.length(data)
     capacity := current if current > initial else initial
     if capacity == 0:
         capacity = 1
@@ -89,10 +98,10 @@ def __vector_resize[T](data: view array[T], used: int, capacity: int) -> array[T
     width = int(bytes(T).amount / 8.0)
     assert(width > 0)
     assert(capacity <= 9223372036854775807 / width)
-    replacement: array[T] = storage.allocate(capacity)
+    replacement: array[T] = arrays.allocate[T](capacity)
     position := 0
     while position < used:
-        replacement[position] = data[position]
+        arrays.write(replacement, position, arrays.read(data, position))
         position += 1
     return replacement
 

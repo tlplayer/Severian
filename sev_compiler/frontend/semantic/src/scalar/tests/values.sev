@@ -1,4 +1,4 @@
-import * from "package:universal/primitive/string/core.sev" as utf8
+from universal import string_core as utf8
 
 GREETING = "hello"
 

@@ -12,6 +12,13 @@ String lowering:
 - `__sev_string_compare`
 - `__sev_string_release`
 
+The source UTF-8 algorithms in `primitive/string/core.sev` use this library's
+`__sev_text_size`, `__sev_text_load`, `__sev_text_store`, and
+`__sev_text_allocate` byte-storage exports. Scalar representation conversions
+use `__sev_text_codepoint` and `__sev_text_character`. Decoding, character
+counting, equality, and copying remain Severian functions. These boundaries
+share the v1 NUL-terminated ABI; they do not assume a vector field layout.
+
 These names adapt the current NUL-terminated pointer representation. Allocation
 and release go through `__sev_storage_new` and `__sev_storage_release`; they no
 longer inspect a fixed prefix before a string pointer. The storage provider

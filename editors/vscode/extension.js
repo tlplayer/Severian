@@ -6,6 +6,7 @@ const path = require('path');
 const vscode = require('vscode');
 const { registerSemantic } = require('./semantic');
 const { registerDebugger } = require('./debugger');
+const { makeImportsExplicit } = require('./explicit-imports');
 const {
   latestReports,
   buildFileCoverage,
@@ -324,6 +325,12 @@ function activate(context) {
     vscode.commands.registerCommand('severian.debug', debugTool),
     vscode.commands.registerCommand('severian.build', () => runTool('build')),
     vscode.commands.registerCommand('severian.buildWith', buildWith),
+    vscode.commands.registerCommand('severian.explicitImports', async () => {
+      const run = resolveToolRun();
+      if (!run) return;
+      try { await makeImportsExplicit(vscode, run, toolingOutput); }
+      catch (error) { void vscode.window.showErrorMessage(`Could not make imports explicit: ${messageFor(error)}`); }
+    }),
     vscode.window.onDidChangeVisibleTextEditors(render),
     vscode.window.onDidChangeActiveTextEditor(render),
     vscode.workspace.onDidChangeConfiguration((event) => {

@@ -1,4 +1,4 @@
-import * from "package:universal/declaration/scalar.sev" as boundary
+from universal import scalar_declarations as boundary
 import package
 import source
 import os

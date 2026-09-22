@@ -1,8 +1,8 @@
 import universal
 import source
 import diagnostics
-import * from "package:universal/cfg/availability.sev" as availability
-import * from "package:universal/cfg/dominance.sev" as graph
+from universal import availability
+from universal import dominance as graph
 
 def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
     match exit:
@@ -164,7 +164,7 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
                     if returned != None:
                         inputs.append(returned)
                 case _:
-                    throw Error("unimplemented")
+                    throw diagnostics.Diagnostic("E000230", "unsupported CFG exit during SSA verification", terminal.span)
             for edge in successors(terminal.exit):
                 for argument in edge.arguments:
                     inputs.append(argument)

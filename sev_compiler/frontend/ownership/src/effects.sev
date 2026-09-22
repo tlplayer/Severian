@@ -1,6 +1,6 @@
 import universal
-import * from "package:universal/type/scalar.sev" as scalar
-import * from "package:universal/declaration/scalar.sev" as boundary
+from universal import scalar
+from universal import scalar_declarations as boundary
 
 
 class CachedEffect:

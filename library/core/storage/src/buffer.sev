@@ -1,4 +1,4 @@
-import memory
+import * from "../../memory/src/buffer_intrinsics.sev" as memory
 
 # Safe owning allocations. Collection capacity and growth are deliberately
 # absent: vector owns those policies and uses these same memory primitives.
