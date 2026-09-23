@@ -1,0 +1,29 @@
+import * from "variants.sev" as imported
+
+
+def binding_value(statement: imported.Statement) -> int:
+    match statement:
+        case BindingStatement:
+            return value
+        case Empty:
+            return 0
+
+
+test "module qualified variants infer a local type":
+    inferred = imported.BindingStatement(42)
+    assert(binding_value(inferred) == 42)
+    nested = [imported.BindingStatement(7)]
+    assert(binding_value(nested[0]) == 7)
+    empty = imported.Empty
+    assert(binding_value(empty) == 0)
+    explicit = imported.Statement.BindingStatement(9)
+    assert(binding_value(explicit) == 9)
+
+
+test with compiler "ambiguous shorthand requires enum context":
+    reject:
+        ambiguous = imported.Shared(1)
+    accept:
+        selected: imported.First = imported.Shared(1)
+    accept:
+        selected = imported.Second.Shared(1)

@@ -1,0 +1,47 @@
+import * from "../src/lib.sev" as diagnostic
+
+
+test "long calls wrap at eighty columns and formatting is stable":
+    input = "    result = foobar(first_argument, second_argument, third_argument, fourth_argument)\n"
+    expected = "    result = foobar(\n        first_argument,\n        second_argument,\n        third_argument,\n        fourth_argument,\n    )\n"
+    formatted = diagnostic.format_calls(input)
+    assert(formatted == expected)
+    assert(diagnostic.format_calls(formatted) == formatted)
+    for line in formatted.split("\n"):
+        assert(len(line.characters()) <= 80)
+
+
+test "nested calls wrap without splitting container arguments or literals":
+    input = "result = outer(inner(first_argument, second_argument, third_argument, fourth_argument), [1, 2], \"comma, and parens()\")\n"
+    formatted = diagnostic.format_calls(input)
+    assert(formatted.contains("outer(\n"))
+    assert(formatted.contains("inner(\n"))
+    assert(formatted.contains("[1, 2],\n"))
+    assert(formatted.contains("\"comma, and parens()\",\n"))
+    assert(diagnostic.format_calls(formatted) == formatted)
+
+
+test "formatting keeps short calls declarations comments and invalid syntax":
+    for input in ["foo(a, b)\n", "value = \"foo(a, b)\"\n", "def function(first_parameter: string, second_parameter: string, third_parameter: string):\n    return\n", "foo(first_argument, # attached comment\n    second_argument)\n", "foo(a,,b)\n"]:
+        assert(diagnostic.format_calls(input) == input)
+    assert(diagnostic.format_calls("call(first_argument, second_argument,)\n", 20) == "call(\n    first_argument,\n    second_argument,\n)\n")
+
+
+test "calls of eighty columns stay on one line":
+    argument = "a" * 77
+    input = "f(" + argument + ")\n"
+    assert(diagnostic.format_calls(input) == input)
+    assert(diagnostic.format_calls("f(" + argument + "a)\n").contains("f(\n"))
+
+
+test "conditional grouping remains an expression rather than a tuple":
+    input = "result = first_very_long_argument if condition else (second_very_long_argument if other_condition else third_very_long_argument)\n"
+    assert(diagnostic.format_calls(input) == input)
+
+
+test "packed arguments in an existing multiline call are expanded":
+    input = "foo(\n    first_very_long_argument, second_very_long_argument, third_very_long_argument, fourth_argument\n)\n"
+    formatted = diagnostic.format_calls(input)
+    assert(formatted.contains("first_very_long_argument,\n"))
+    assert(formatted.contains("second_very_long_argument,\n"))
+    assert(diagnostic.format_calls(formatted) == formatted)

@@ -93,7 +93,7 @@ def decode(text: string, location: string, files: list[source.SourceFile]) -> Se
         if found < 0:
             found = int(len(files))
             files.append(source.SourceFile(source.SourceId(u32(found)), path, file.text))
-        input.source_ids.append(u32(found))
+        input.source_ids.append(found)
         index += 1
     module = codec.get_universal_Module(input)
     registry = codec.get_lexer_SyntaxRegistry(input)

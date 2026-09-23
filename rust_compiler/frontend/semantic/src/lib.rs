@@ -6575,7 +6575,7 @@ impl Analyzer<'_> {
                     }
                 }
                 if let Some(path) = callable_path(ast) {
-                    if self.enum_variants.contains_key(&path) {
+                    if self.enum_constructor_candidate(&path, expected) {
                         return self.enum_constructor(&path, &[], expected, ast.span);
                     }
                     if let Some(mut value) = self.value_substitutions.get(&path).cloned() {
@@ -12042,9 +12042,29 @@ impl Analyzer<'_> {
                     .map(|ordinal| (enum_name.clone(), ordinal))
             })
         });
-        let (enum_name, ordinal) = selected
-            .or_else(|| self.enum_variants.get(path).cloned())
-            .expect("caller checked that the enum variant is visible");
+        let selected = selected.or_else(|| self.enum_variants.get(path).cloned());
+        let (enum_name, ordinal) = if let Some(selected) = selected {
+            selected
+        } else {
+            // An imported module exposes its variants as module.Variant as
+            // well as module.Enum.Variant. This lookup cannot depend on an
+            // expected type: inferred locals have no such context yet.
+            let mut candidates = self.enums.iter().flat_map(|(enum_name, instance)| {
+                instance.variants.iter().enumerate().filter_map(move |(ordinal, variant)| {
+                    enum_variant_path_matches(path, enum_name, &variant.name)
+                        .then(|| (enum_name.clone(), ordinal))
+                })
+            });
+            let selected = candidates.next().ok_or_else(|| Diagnostic::new(
+                "E000201", format!("unknown enum variant `{path}`"), Some(span),
+            ))?;
+            if candidates.next().is_some() {
+                return Err(Diagnostic::new(
+                    "E000221", format!("ambiguous enum variant `{path}`"), Some(span),
+                ).with_help("qualify the variant with its enum name or supply an expected enum type"));
+            }
+            selected
+        };
         let instance = self.enums[&enum_name].clone();
         let variant = &instance.variants[ordinal];
         if arguments.len() != variant.fields.len() {
@@ -12099,6 +12119,11 @@ impl Analyzer<'_> {
                         })
                 })
             })
+            || (path.contains('.') && self.enums.iter().any(|(enum_name, instance)| {
+                instance.variants.iter().any(|variant| {
+                    enum_variant_path_matches(path, enum_name, &variant.name)
+                })
+            }))
     }
 
     fn enum_value_constructor(

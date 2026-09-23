@@ -49,10 +49,14 @@ def select(records: list[universal.RecordDeclaration], namespace: string, path: 
             ordinal += 1
             continue
         index := 0
+        components = record.name.split(".")
+        module_name = components[:int(len(components)) - 1].join(".")
         for variant in record.alternatives:
             qualified = record.name + "." + variant.name
+            exported = module_name + "." + variant.name
             visible = record.name == namespace + record.name.split(".")[-1] or record.lookup == ""
-            if path == qualified or namespace + path == qualified or (path == variant.name and visible):
+            module_variant = module_name != "" and (path == exported or namespace + path == exported)
+            if path == qualified or namespace + path == qualified or module_variant or (path == variant.name and visible):
                 if result.record != -1:
                     return error(diagnostics.diagnostic_at("E000206", "ambiguous tagged variant " + path, span))
                 result = VariantSelection(ordinal, index)

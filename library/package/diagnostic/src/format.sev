@@ -6,7 +6,9 @@ import source
 # token ranges are rewritten; malformed input remains for parser diagnostics.
 def format_import_list(package_name: string, members: list[string], grouped: bool) -> string:
     if grouped:
-        return "from " + package_name + " import\n{\n    " + members.join(",\n    ") + ",\n}"
+        return "from " + package_name + " import\n{\n    " + members.join(
+            ",\n    ",
+        ) + ",\n}"
     line := "from " + package_name + " import"
     lines: list[string] = []
     for index in range(int(len(members))):
@@ -22,7 +24,9 @@ def format_import_list(package_name: string, members: list[string], grouped: boo
 
 def import_layout(tokens: list[lexer.Token], start: int) -> int:
     cursor := start
-    while cursor < len(tokens) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]:
+    while cursor < len(
+        tokens,
+    ) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]:
         cursor += 1
     return cursor
 
@@ -35,10 +39,14 @@ def format_imports(text: string) -> string | Error:
     while index + 3 < len(tokens):
         token = tokens[index]
         start = int(token.span.start)
-        if token.kind != lexer.TokenKind.Identifier or string(token) != "from" or (start > 0 and text[start - 1:start] != "\n"):
+        if token.kind != lexer.TokenKind.Identifier or string(
+            token,
+        ) != "from" or (start > 0 and text[start - 1:start] != "\n"):
             index += 1
             continue
-        if tokens[index + 1].kind != lexer.TokenKind.Identifier or string(tokens[index + 2]) != "import":
+        if tokens[index + 1].kind != lexer.TokenKind.Identifier or string(
+            tokens[index + 2],
+        ) != "import":
             index += 1
             continue
         package_name = string(tokens[index + 1])
@@ -61,7 +69,9 @@ def format_imports(text: string) -> string | Error:
             cursor += 1
             if cursor < len(tokens) and string(tokens[cursor]) == "as":
                 cursor += 1
-                if cursor >= len(tokens) or tokens[cursor].kind != lexer.TokenKind.Identifier:
+                if cursor >= len(
+                    tokens,
+                ) or tokens[cursor].kind != lexer.TokenKind.Identifier:
                     valid = false
                     break
                 member += " as " + string(tokens[cursor])
@@ -78,12 +88,16 @@ def format_imports(text: string) -> string | Error:
                 if cursor < len(tokens) and string(tokens[cursor]) == "}":
                     break
         if grouped:
-            valid = valid and cursor < len(tokens) and string(tokens[cursor]) == "}"
+            valid = valid and cursor < len(
+                tokens,
+            ) and string(tokens[cursor]) == "}"
             if valid:
                 end = int(tokens[cursor].span.end)
                 cursor += 1
         else:
-            valid = valid and cursor < len(tokens) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]
+            valid = valid and cursor < len(
+                tokens,
+            ) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]
         if valid and len(members) > 0 and not text[start:end].contains("#"):
             parts.append(text[retained:start])
             parts.append(format_import_list(package_name, members, grouped))
@@ -93,12 +107,159 @@ def format_imports(text: string) -> string | Error:
     return parts.join("")
 
 def format_sources(project: Project) -> unit | Error:
-    if setting(project.manifest.entries, "lint", "enabled", "true") == "false" or setting(project.manifest.entries, "lint", "format", "true") == "false":
+    if setting(
+        project.manifest.entries,
+        "lint",
+        "enabled",
+        "true",
+    ) == "false" or setting(
+        project.manifest.entries,
+        "lint",
+        "format",
+        "true",
+    ) == "false":
         return
     for location in files(project.root):
         if not location.ends_with(".sev"):
             continue
         before = read_text(location)
-        after = format_imports(before)
+        after = format_calls(format_imports(before))
         if after != before:
             write_text(location, after)
+
+
+# Calls are identified from tokens, so parentheses/commas inside strings do not
+# participate in layout. Each pass expands disjoint calls; later passes handle
+# nested calls whose argument lines still exceed the configured width.
+def format_call_open(tokens: list[lexer.Token], index: int) -> bool:
+    if index == 0 or string(tokens[index]) != "(":
+        return false
+    previous = tokens[index - 1]
+    spelling = string(previous)
+    if previous.kind != lexer.TokenKind.Identifier and spelling not in [")", "]"]:
+        return false
+    if spelling in ["if", "elif", "else", "while", "for", "with", "match", "case", "return", "throw", "yield", "not", "and", "or", "in", "is", "as"]:
+        return false
+    cursor := index - 1
+    if spelling == "]":
+        depth := 1
+        cursor -= 1
+        while cursor >= 0 and depth > 0:
+            if string(tokens[cursor]) == "]":
+                depth += 1
+            elif string(tokens[cursor]) == "[":
+                depth -= 1
+            cursor -= 1
+    if cursor > 0 and string(tokens[cursor - 1]) in ["def", "operator"]:
+        return false
+    return true
+
+
+def format_call_pass(text: string, width: int) -> string | Error:
+    input = source.virtual_source("calls.sev", text)
+    tokens = lexer.scan_bootstrap(input)
+    parts: list[string] = []
+    retained := 0
+    index := 0
+    while index < len(tokens):
+        if not format_call_open(tokens, index):
+            index += 1
+            continue
+        opening = int(tokens[index].span.end)
+        line_start := int(tokens[index].span.start)
+        while line_start > 0 and text[line_start - 1:line_start] != "\n":
+            line_start -= 1
+        line_end := opening
+        while line_end < len(
+            input.characters,
+        ) and text[line_end:line_end + 1] != "\n":
+            line_end += 1
+        stack: list[string] = [")"]
+        arguments: list[string] = []
+        argument_start := opening
+        cursor := index + 1
+        valid := true
+        while cursor < len(tokens) and len(stack) > 0:
+            token = tokens[cursor]
+            spelling = string(token)
+            # Literal spelling is opaque, even when it is exactly a delimiter.
+            if token.kind in [lexer.TokenKind.String, lexer.TokenKind.FormattedString, lexer.TokenKind.Character]:
+                cursor += 1
+                continue
+            if spelling in ["(", "[", "{"]:
+                closer := "}"
+                if spelling == "(":
+                    closer = ")"
+                elif spelling == "[":
+                    closer = "]"
+                stack.append(closer)
+            elif spelling in [")", "]", "}"]:
+                if spelling != stack[-1]:
+                    valid = false
+                    break
+                stack.pop()
+                if len(stack) == 0:
+                    break
+            elif spelling == "," and len(stack) == 1:
+                argument = text[argument_start:int(token.span.start)].strip()
+                if argument == "":
+                    valid = false
+                    break
+                arguments.append(argument)
+                argument_start = int(token.span.end)
+            cursor += 1
+        if not valid or cursor >= len(tokens) or len(stack) != 0:
+            index += 1
+            continue
+        closing = int(tokens[cursor].span.start)
+        body = text[opening:closing]
+        line_end = max(line_end, closing)
+        while line_end < len(input.characters) and text[line_end:line_end + 1] != "\n":
+            line_end += 1
+        oversized := false
+        for line in text[line_start:line_end].split("\n"):
+            oversized = oversized or len(line.characters()) > width
+        # Preserve comments. Already multiline child expressions are visited
+        # independently so reflowing a parent never damages their indentation.
+        if not oversized or body.contains("#"):
+            index += 1
+            continue
+        last = text[argument_start:closing].strip()
+        if last != "":
+            arguments.append(last)
+        if len(arguments) == 0:
+            index += 1
+            continue
+        multiline := false
+        for argument in arguments:
+            multiline = multiline or argument.contains("\n")
+        if multiline:
+            index += 1
+            continue
+        indent_end := line_start
+        while indent_end < opening and text[indent_end:indent_end + 1] in [" ", "\t"]:
+            indent_end += 1
+        indent = text[line_start:indent_end]
+        replacement = "\n" + indent + "    " + arguments.join(
+            ",\n" + indent + "    ",
+        ) + ",\n" + indent
+        if replacement == body:
+            index += 1
+            continue
+        parts.append(text[retained:opening])
+        parts.append(replacement)
+        retained = closing
+        index = cursor + 1
+    parts.append(text[retained:])
+    return parts.join("")
+
+
+def format_calls(text: string, width: int = 80) -> string | Error:
+    if width < 1:
+        throw Error("call formatting width must be positive")
+    current := text
+    formatted := format_call_pass(current, width)
+    while formatted != current:
+        current = formatted
+        formatted = format_call_pass(current, width)
+    return current

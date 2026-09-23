@@ -1,0 +1,11 @@
+enum Statement:
+    BindingStatement(value: int)
+    Empty
+
+
+enum First:
+    Shared(value: int)
+
+
+enum Second:
+    Shared(value: int)

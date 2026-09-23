@@ -160,7 +160,7 @@ def generate(root=ROOT, mir=False, interface=False):
                     decode += ['    if len(input.source_ids) > 0:',
                                '        if field_0 >= len(input.source_ids):',
                                '            throw Error("semantic interface has a dangling source identity")',
-                               '        return source.SourceId(index=input.source_ids[field_0])']
+                               '        return source.SourceId(index=u32(input.source_ids[field_0]))']
                 decode += [f'    return {type}({args})']
             else:
                 encode += ['    match value:']
@@ -191,7 +191,7 @@ import * from "package:semantic/src/definitions.sev" as definitions
 class ArchiveInput:
     lines: list[string]
     cursor: int = 0
-    source_ids: list[u32] = []
+    source_ids: list[int] = []
 
 
 def take(input: ArchiveInput) -> string | Error:
