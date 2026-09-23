@@ -56,7 +56,7 @@ def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) ->
 
 
 def callable_key(function: FunctionDeclaration, owner: string) -> string:
-    name = function.name
+    name := function.name
     namespace ?= function.lookup
     if namespace != None:
         if namespace != "" and name.starts_with(namespace):

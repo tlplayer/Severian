@@ -1,0 +1,81 @@
+# Numeric comparison keeps both operand domains and evaluates operands once.
+class Counts:
+    small: u32
+    large: int
+
+
+test "numeric fields compare without user conversions":
+    counts = Counts(0, 0)
+    assert(not (counts.small != counts.large))
+    assert(not (counts.large != counts.small))
+    assert(counts.small == counts.large)
+    assert(counts.small <= counts.large)
+    assert(counts.large >= counts.small)
+
+
+test "signed and unsigned boundaries are not narrowed":
+    negative: i8 = -1
+    byte: u8 = 255
+    assert(negative != byte)
+    assert(negative < byte)
+    assert(byte > negative)
+    signed: i128 = -170141183460469231731687303715884105728
+    unsigned: u128 = 340282366920938463463374607431768211455
+    assert(signed < unsigned)
+    assert(unsigned > signed)
+    assert(unsigned != signed)
+    assert(i128(0) == u128(0))
+
+
+test "integer float comparisons retain precision and fractional order":
+    whole: i64 = 9007199254740993
+    rounded: f64 = 9007199254740992.0
+    assert(whole != rounded)
+    assert(whole > rounded)
+    assert(rounded < whole)
+    assert(i64(0) < f64(0.5))
+    assert(i64(0) > f64(-0.5))
+    assert(i64(-1) < f64(-0.5))
+    assert(f64(-0.5) > i64(-1))
+    assert(i64(0) == f64(-0.0))
+    assert(u128(340282366920938463463374607431768211455) < f64(340282366920938463463374607431768211456.0))
+
+
+-> zero_comparisons[T: number]() with number in int:
+    test "integer zero compares across numeric representations":
+        zero: number = 0
+        assert(not (zero != i8(0)))
+        assert(not (zero != i16(0)))
+        assert(not (zero != i32(0)))
+        assert(not (zero != i64(0)))
+        assert(not (zero != i128(0)))
+        assert(not (zero != u8(0)))
+        assert(not (zero != u16(0)))
+        assert(not (zero != u32(0)))
+        assert(not (zero != u64(0)))
+        assert(not (zero != u128(0)))
+        assert(not (zero != f8e4m3fn(0.0)))
+        assert(not (zero != f8e5m2(0.0)))
+        assert(not (zero != bf16(0.0)))
+        assert(not (zero != f16(0.0)))
+        assert(not (zero != f32(0.0)))
+        assert(not (zero != f64(0.0)))
+        assert(not (zero != f128(0.0)))
+
+zero_comparisons[int]()
+
+
+-> float_zero_comparisons[T: number]() with number in float:
+    test "floating zero compares across numeric representations":
+        zero: number = 0.0
+        assert(zero == i128(0))
+        assert(zero == u128(0))
+        assert(zero == f8e4m3fn(0.0))
+        assert(zero == f8e5m2(0.0))
+        assert(zero == bf16(0.0))
+        assert(zero == f16(0.0))
+        assert(zero == f32(0.0))
+        assert(zero == f64(0.0))
+        assert(zero == f128(0.0))
+
+float_zero_comparisons[float]()

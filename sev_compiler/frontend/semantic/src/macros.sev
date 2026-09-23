@@ -115,7 +115,9 @@ def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) 
     lower = scalar.integer_minimum(type)
     maximum = scalar.integer_maximum(type)
     upper := ""
-    if type.bits == 64:
+    if type.bits == 128:
+        upper = "170141183460469231731687303715884105728" if type.signed else "340282366920938463463374607431768211456"
+    elif type.bits == 64:
         upper = "9223372036854775808" if type.signed else "18446744073709551616"
     else:
         upper = string(1 << (int(type.bits) - (1 if type.signed else 0)))

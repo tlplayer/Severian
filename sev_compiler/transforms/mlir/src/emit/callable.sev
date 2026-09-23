@@ -5,6 +5,7 @@ from universal import scalar
 import * from "../ir/lib.sev"
 import * from "strings.sev"
 import * from "debug.sev" as debug
+import * from "numeric_comparison.sev" as numeric_comparison
 from universal import scalar_declarations as boundary
 
 
@@ -29,6 +30,10 @@ def callable_mlir_type(id: universal.TypeId, records: borrow list[universal.Reco
         if known.representation == "index":
             return index_type()
         if known.representation == "float":
+            if known.name == "bf16":
+                return bf16_type()
+            if known.bits == 8:
+                return float8_type(known.name == "f8e5m2")
             return float_type(known.bits)
         if known.representation == "pointer":
             return pointer_type()
@@ -193,13 +198,21 @@ def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module,
                 rhs = callable_mlir_value(module, right)
                 output = callable_mlir_value(module, result)
                 selected ?= operator.scalar_operation
-                if selected != None:
-                    attributes: list[MlirNamedAttribute] = []
-                    if selected.predicate >= 0:
-                        attributes.append(MlirNamedAttribute("predicate", integer_attribute(selected.predicate, integer_type(64))))
-                    builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
-                else:
-                    throw Error("scalar MIR has an unregistered binary operation")
+                numeric ?= scalar.scalar_type(module.values[left.index].type_id)
+                numeric_right ?= scalar.scalar_type(module.values[right.index].type_id)
+                handled := false
+                if numeric != None:
+                    if numeric_right != None:
+                        if not numeric.boolean and not numeric_right.boolean:
+                            handled = numeric_comparison.emit(builder, operator.symbol, lhs, rhs, output)
+                if not handled:
+                    if selected != None:
+                        attributes: list[MlirNamedAttribute] = []
+                        if selected.predicate >= 0:
+                            attributes.append(MlirNamedAttribute("predicate", integer_attribute(selected.predicate, integer_type(64))))
+                        builder_binary(builder, output, operation_name("arith", selected.mnemonic), lhs, rhs, attributes)
+                    else:
+                        throw Error("scalar MIR has an unregistered binary operation")
             case CallFields:
                 inputs: list[MlirValue] = []
                 returned: list[MlirValue] = []

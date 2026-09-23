@@ -1284,6 +1284,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             operand_type := universal.TypeId(0) if comparison else expected
             left_hint = callable_hint(state, left)
             right_hint = callable_hint(state, right)
+            if operator.symbol in ["==", "!=", "<", "<=", ">", ">="] and conversions.scalar_numeric(left_hint) and conversions.scalar_numeric(right_hint):
+                lhs = callable_success(state, callable_operand(state, left, universal.TypeId(0)))
+                rhs = callable_success(state, callable_operand(state, right, universal.TypeId(0)))
+                return universal.Expression(universal.Binary(operator, lhs, rhs), expression.span, type_id=universal.TypeId(1))
             # Resolve heterogeneous operands independently so operator lookup
             # can select signatures such as +(string, char).
             common_type = conversions.scalar_common_numeric(left_hint, right_hint)

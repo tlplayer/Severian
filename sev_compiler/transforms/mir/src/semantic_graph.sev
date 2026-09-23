@@ -47,15 +47,16 @@ def source_owner(owners: list[universal.SourceUnit], span: source.Span | None, f
 
 def build(module: universal.Module, owners: list[universal.SourceUnit], root: int) -> universal.DefinitionGraph | Error:
     graph = universal.DefinitionGraph()
-    module.hierarchy.regions = []
-    module.hierarchy.sentences = []
+    hierarchy = module.hierarchy
+    hierarchy.regions = []
+    hierarchy.sentences = []
     module.obligations = []
     for declaration in module.traits:
         kind = universal.DefinitionKind.GrammarDefinition if declaration.grammar else universal.DefinitionKind.TraitDefinition
         universal.add_definition(graph, declaration.definition, kind, declaration.name, declaration.span, alias=true, submodule=source_owner(owners, declaration.span, root))
     executable_ids: list[string] = []
     for declaration in module.functions:
-        key = string(declaration.id.value)
+        key := string(declaration.id.value)
         if key in executable_ids:
             throw Error("duplicate executable function identity: " + key)
         executable_ids.append(key)
@@ -69,7 +70,9 @@ def build(module: universal.Module, owners: list[universal.SourceUnit], root: in
         key = universal.callable_key(declaration, owner_key)
         if declaration.semantic_key != "":
             key = declaration.semantic_key
-        graph.nodes[node.index].semantic_key = key
+        definition_node = graph.nodes[node.index]
+        definition_node.semantic_key = key
+        graph.nodes[node.index] = definition_node
         body ?= declaration.body
         if body != None:
             region = universal.hierarchy_region(module.hierarchy, declaration.definition, body, origin=declaration.span)

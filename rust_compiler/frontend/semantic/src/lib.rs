@@ -9800,27 +9800,7 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
-                    let right_value = self.expression(right, None)?;
-                    if left_value.type_id != right_value.type_id
-                        && self.integer_primitive(left_value.type_id)
-                        && self.integer_primitive(right_value.type_id)
-                    {
-                        let right_value = self.coerce(right_value, left_value.type_id, true)?;
-                        let boolean = self
-                            .types
-                            .resolve_name("bool")
-                            .expect("bootstrap defines bool");
-                        return Ok(Expression {
-                            id: self.next_id(),
-                            type_id: boolean,
-                            kind: ExpressionKind::Binary {
-                                operator: universal_binary(*operator),
-                                left: Box::new(left_value),
-                                right: Box::new(right_value),
-                            },
-                            span: ast.span,
-                        });
-                    }
+
                 }
                 if *operator == AstBinaryOperator::Remainder {
                     let left = self.expression(left, None)?;

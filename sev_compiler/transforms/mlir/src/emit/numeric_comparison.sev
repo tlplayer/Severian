@@ -1,0 +1,151 @@
+import * from "../ir/lib.sev"
+
+
+# Numeric operands retain their own types through MIR. All conversions here are
+# internal to comparison; they neither change a binding nor narrow its domain.
+def operation(builder: MlirOpBuilder, name: string, inputs: list[MlirValue], type: MlirType, predicate: int = -1) -> MlirValue:
+    result = builder_new_value(builder, type)
+    attributes: list[MlirNamedAttribute] = []
+    if predicate >= 0:
+        attributes.append(MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64))))
+    builder_create_operation(builder, operation_name("arith", name), inputs, [result], attributes)
+    return result
+
+
+def compare(builder: MlirOpBuilder, left: MlirValue, right: MlirValue, predicate: int) -> MlirValue:
+    return operation(builder, "cmpf" if is_float(left.type_id) else "cmpi", [left, right], integer_type(1, false), predicate)
+
+
+def select(builder: MlirOpBuilder, condition: MlirValue, yes: MlirValue, no: MlirValue) -> MlirValue:
+    return operation(builder, "select", [condition, yes, no], yes.type_id)
+
+
+def widen_integer(builder: MlirOpBuilder, value: MlirValue, bits: u16, signed: bool) -> MlirValue:
+    if value.type_id.scalar.bits == bits:
+        return value
+    return operation(builder, "extsi" if value.type_id.scalar.signed else "extui", [value], integer_type(bits, signed))
+
+
+def widen_float(builder: MlirOpBuilder, value: MlirValue, bits: u16) -> MlirValue:
+    if value.type_id.scalar.bits == bits and scalar_kind_name(value.type_id.scalar.kind) == "ieee_float":
+        return value
+    return operation(builder, "extf", [value], float_type(bits))
+
+
+def floating_constant(builder: MlirOpBuilder, spelling: string, type: MlirType) -> MlirValue:
+    value = builder_new_value(builder, type)
+    builder_constant(builder, value, MlirAttributeValue(FloatLiteralAttributeKind, spelling, 0, false, type, []))
+    return value
+
+
+def emit(builder: MlirOpBuilder, symbol: string, left: MlirValue, right: MlirValue, result: MlirValue) -> bool:
+    if symbol not in ["==", "!=", "<", "<=", ">", ">="]:
+        return false
+    if not (is_integer(left.type_id) or is_float(left.type_id)) or not (is_integer(right.type_id) or is_float(right.type_id)):
+        return false
+    boolean = integer_type(1, false)
+    if is_integer(left.type_id) and is_integer(right.type_id):
+        signed = left.type_id.scalar.signed or right.type_id.scalar.signed
+        left_bits = int(left.type_id.scalar.bits) + (1 if signed and not left.type_id.scalar.signed else 0)
+        right_bits = int(right.type_id.scalar.bits) + (1 if signed and not right.type_id.scalar.signed else 0)
+        bits = u16(max(left_bits, right_bits))
+        lhs = widen_integer(builder, left, bits, signed)
+        rhs = widen_integer(builder, right, bits, signed)
+        predicate := 0
+        if symbol == "!=":
+            predicate = 1
+        elif symbol == "<":
+            predicate = 2 if signed else 6
+        elif symbol == "<=":
+            predicate = 3 if signed else 7
+        elif symbol == ">":
+            predicate = 4 if signed else 8
+        elif symbol == ">=":
+            predicate = 5 if signed else 9
+        builder_binary(builder, result, operation_name("arith", "cmpi"), lhs, rhs, [MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64)))])
+        return true
+    if is_float(left.type_id) and is_float(right.type_id):
+        bits = u16(max(32, max(int(left.type_id.scalar.bits), int(right.type_id.scalar.bits))))
+        lhs = widen_float(builder, left, bits)
+        rhs = widen_float(builder, right, bits)
+        predicate := 1
+        if symbol == "!=":
+            predicate = 13
+        elif symbol == "<":
+            predicate = 4
+        elif symbol == "<=":
+            predicate = 5
+        elif symbol == ">":
+            predicate = 2
+        elif symbol == ">=":
+            predicate = 3
+        builder_binary(builder, result, operation_name("arith", "cmpf"), lhs, rhs, [MlirNamedAttribute("predicate", integer_attribute(predicate, integer_type(64)))])
+        return true
+    reverse = is_float(left.type_id)
+    integer = right if reverse else left
+    floating = left if reverse else right
+    integer_value = widen_integer(builder, integer, 128, integer.type_id.scalar.signed)
+    float_value = widen_float(builder, floating, u16(max(64, int(floating.type_id.scalar.bits))))
+    zero = builder_new_value(builder, integer_type(128, false))
+    builder_constant(builder, zero, integer_attribute(0, zero.type_id))
+    float_zero = floating_constant(builder, "0.0", float_value.type_id)
+    int_negative := builder_new_value(builder, boolean)
+    if integer.type_id.scalar.signed:
+        int_negative = compare(builder, integer_value, zero, 2)
+    else:
+        builder_constant(builder, int_negative, boolean_attribute(false))
+    float_negative = compare(builder, float_value, float_zero, 4)
+    negated = operation(builder, "subi", [zero, integer_value], zero.type_id)
+    magnitude = select(builder, int_negative, negated, integer_value)
+    float_negated = operation(builder, "negf", [float_value], float_value.type_id)
+    float_magnitude = select(builder, float_negative, float_negated, float_value)
+    upper = floating_constant(builder, "340282366920938463463374607431768211456.0", float_value.type_id)
+    in_range = compare(builder, float_magnitude, upper, 4)
+    # Never execute FP-to-int on an out-of-range value, infinity or NaN.
+    safe = select(builder, in_range, float_magnitude, float_zero)
+    truncated = operation(builder, "fptoui", [safe], zero.type_id)
+    restored = operation(builder, "uitofp", [truncated], float_value.type_id)
+    integral_equal = compare(builder, magnitude, truncated, 0)
+    fractional_equal = compare(builder, restored, float_magnitude, 1)
+    magnitude_equal = operation(builder, "andi", [integral_equal, fractional_equal], boolean)
+    range_equal = operation(builder, "andi", [in_range, magnitude_equal], boolean)
+    fraction = compare(builder, restored, float_magnitude, 4)
+    fraction_less = operation(builder, "andi", [integral_equal, fraction], boolean)
+    integral_less = compare(builder, magnitude, truncated, 6)
+    magnitude_less = operation(builder, "ori", [integral_less, fraction_less], boolean)
+    range_less = operation(builder, "andi", [in_range, magnitude_less], boolean)
+    above = compare(builder, float_magnitude, upper, 3)
+    less_or_above = operation(builder, "ori", [above, range_less], boolean)
+    integral_greater = compare(builder, magnitude, truncated, 8)
+    range_greater = operation(builder, "andi", [in_range, integral_greater], boolean)
+    different = operation(builder, "xori", [int_negative, float_negative], boolean)
+    same = compare(builder, int_negative, float_negative, 0)
+    equal = operation(builder, "andi", [same, range_equal], boolean)
+    ordered = compare(builder, float_value, float_value, 7)
+    signed_less = select(builder, int_negative, range_greater, less_or_above)
+    signed_greater = select(builder, int_negative, less_or_above, range_greater)
+    sign_less = select(builder, different, int_negative, signed_less)
+    sign_greater = select(builder, different, float_negative, signed_greater)
+    integer_less = operation(builder, "andi", [ordered, sign_less], boolean)
+    integer_greater = operation(builder, "andi", [ordered, sign_greater], boolean)
+    less = integer_greater if reverse else integer_less
+    greater = integer_less if reverse else integer_greater
+    mnemonic := "andi"
+    inputs := [equal, equal]
+    if symbol == "!=":
+        one = builder_new_value(builder, boolean)
+        builder_constant(builder, one, boolean_attribute(true))
+        mnemonic = "xori"
+        inputs = [equal, one]
+    elif symbol == "<":
+        inputs = [less, less]
+    elif symbol == ">":
+        inputs = [greater, greater]
+    elif symbol == "<=":
+        mnemonic = "ori"
+        inputs = [less, equal]
+    elif symbol == ">=":
+        mnemonic = "ori"
+        inputs = [greater, equal]
+    builder_create_operation(builder, operation_name("arith", mnemonic), inputs, [result])
+    return true

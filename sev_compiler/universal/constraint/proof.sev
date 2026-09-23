@@ -11,24 +11,30 @@ def prove_interval(actual: IntegerInterval, required: IntegerInterval) -> ProofR
     high ?= actual.upper
     minimum ?= required.lower
     maximum ?= required.upper
-    if low != None and high != None:
-        if low > high:
-            return ProofResult.Unknown
-    if minimum != None and maximum != None:
-        if minimum > maximum:
-            return ProofResult.Refuted
-    if high != None and minimum != None:
-        if high < minimum:
-            return ProofResult.Refuted
-    if low != None and maximum != None:
-        if low > maximum:
-            return ProofResult.Refuted
+    if low != None:
+        if high != None:
+            if low > high:
+                return ProofResult.Unknown
+    if minimum != None:
+        if maximum != None:
+            if minimum > maximum:
+                return ProofResult.Refuted
+    if high != None:
+        if minimum != None:
+            if high < minimum:
+                return ProofResult.Refuted
+    if low != None:
+        if maximum != None:
+            if low > maximum:
+                return ProofResult.Refuted
     lower_proven := minimum == None
     upper_proven := maximum == None
-    if low != None and minimum != None:
-        lower_proven = low >= minimum
-    if high != None and maximum != None:
-        upper_proven = high <= maximum
+    if low != None:
+        if minimum != None:
+            lower_proven = low >= minimum
+    if high != None:
+        if maximum != None:
+            upper_proven = high <= maximum
     return ProofResult.Proven if lower_proven and upper_proven else ProofResult.Unknown
 
 

@@ -23,6 +23,13 @@ enum ScalarIdentities:
     I16 {16}
     I32 {32}
     I64 {64}
+    I128 {128}
+    U128 {628}
+    F16 {162}
+    F128 {168}
+    F8E4M3Fn {180}
+    F8E5M2 {181}
+    BF16 {182}
 
 
 def scalar_identities() -> list[int]:
@@ -45,6 +52,13 @@ def scalar_identities() -> list[int]:
         int(ScalarIdentities.I16),
         int(ScalarIdentities.I32),
         int(ScalarIdentities.I64),
+        int(ScalarIdentities.I128),
+        int(ScalarIdentities.U128),
+        int(ScalarIdentities.F16),
+        int(ScalarIdentities.F128),
+        int(ScalarIdentities.F8E4M3Fn),
+        int(ScalarIdentities.F8E5M2),
+        int(ScalarIdentities.BF16),
     ]
 
 
@@ -71,6 +85,8 @@ def scalar_types() -> list[ScalarType]:
 def scalar_type_name(name: string) -> TypeId | None:
     if name == "usize":
         return TypeId(564)
+    if name == "isize":
+        return TypeId(64)
     if name == "int":
         return TypeId(64)
     if name == "float":
@@ -124,6 +140,20 @@ def make_scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
         return ScalarType(TypeId(32), "i32", 32, false)
     if id.index == 64 or name == "i64":
         return ScalarType(TypeId(64), "i64", 64, false)
+    if id.index == 128 or name == "i128":
+        return ScalarType(TypeId(128), "i128", 128, false, "integer", signed=true)
+    if id.index == 628 or name == "u128":
+        return ScalarType(TypeId(628), "u128", 128, false, "integer", signed=false)
+    if id.index == 162 or name == "f16":
+        return ScalarType(TypeId(162), "f16", 16, false, "float", signed=true)
+    if id.index == 168 or name == "f128":
+        return ScalarType(TypeId(168), "f128", 128, false, "float", signed=true)
+    if id.index == 180 or name == "f8e4m3fn":
+        return ScalarType(TypeId(180), "f8e4m3fn", 8, false, "float", signed=true)
+    if id.index == 181 or name == "f8e5m2":
+        return ScalarType(TypeId(181), "f8e5m2", 8, false, "float", signed=true)
+    if id.index == 182 or name == "bf16":
+        return ScalarType(TypeId(182), "bf16", 16, false, "float", signed=true)
     return None
 
 
@@ -185,12 +215,16 @@ def scalar_representation(id: TypeId) -> string:
 def integer_minimum(type: ScalarType) -> string:
     if not type.signed:
         return "0"
+    if type.bits == 128:
+        return "-170141183460469231731687303715884105728"
     if type.bits == 64:
         return "-9223372036854775808"
     return "-" + string(1 << (int(type.bits) - 1))
 
 
 def integer_maximum(type: ScalarType) -> string:
+    if type.bits == 128:
+        return "170141183460469231731687303715884105727" if type.signed else "340282366920938463463374607431768211455"
     if type.bits == 64:
         return "9223372036854775807" if type.signed else "18446744073709551615"
     return string((1 << (int(type.bits) - (1 if type.signed else 0))) - 1)

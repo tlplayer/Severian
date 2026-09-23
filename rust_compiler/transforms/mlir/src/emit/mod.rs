@@ -1,3 +1,6 @@
+mod numeric_comparison;
+use numeric_comparison::render_numeric_comparison;
+
 use severian_artifact::ArtifactId;
 use severian_lir::{
     BinaryOperation, Block, Constant, Function, FunctionId, FunctionLinkage, LoweredFloatFormat,
@@ -1775,7 +1778,8 @@ fn render_cfg_operation(
             right,
             result,
         } => {
-            if !render_integer_power(output, module, *operator, *left, *right, *result, indent)? {
+            if !render_numeric_comparison(output, module, *operator, *left, *right, *result, indent)?
+                && !render_integer_power(output, module, *operator, *left, *right, *result, indent)? {
                 let input = value_type(module, *left)?;
                 output.push_str(&format!(
                     "{indentation}%v{} = {} %v{}, %v{} : {}\n",
@@ -2968,7 +2972,8 @@ fn render_block(
                 right,
                 result,
             } => {
-                if !render_integer_power(output, module, *operator, *left, *right, *result, indent)?
+                if !render_numeric_comparison(output, module, *operator, *left, *right, *result, indent)?
+                && !render_integer_power(output, module, *operator, *left, *right, *result, indent)?
                 {
                     let input_type = value_type(module, *left)?;
                     let spelling = mlir_type(&input_type)?;

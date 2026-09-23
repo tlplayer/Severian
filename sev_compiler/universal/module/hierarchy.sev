@@ -60,7 +60,7 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
     for statement in body.statements:
         sentence = SentenceId(u32(len(hierarchy.sentences)))
         location: source.Span | None := None
-        children: list[Block] = []
+        children: list[Block] := []
         match statement:
             case BindingStatement:
                 location = binding.span

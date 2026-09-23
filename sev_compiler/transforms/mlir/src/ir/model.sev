@@ -2,6 +2,8 @@ enum MlirScalarKind:
     IntegerScalar
     IeeeFloatScalar
     BrainFloatScalar
+    Float8E4M3FnScalar
+    Float8E5M2Scalar
     IndexScalar
     PointerScalar
 
@@ -45,6 +47,10 @@ def integer_type(bits: u16, signed: bool = true) -> MlirType:
 
 def float_type(bits: u16) -> MlirType:
     return MlirType(ScalarType, MlirScalarType(IeeeFloatScalar, bits, true, 0), [])
+
+
+def float8_type(e5m2: bool) -> MlirType:
+    return MlirType(ScalarType, MlirScalarType(Float8E5M2Scalar if e5m2 else Float8E4M3FnScalar, 8, true, 0), [])
 
 
 def bf16_type() -> MlirType:
@@ -472,6 +478,10 @@ def scalar_kind_name(kind: MlirScalarKind) -> string:
             return "ieee_float"
         case BrainFloatScalar:
             return "brain_float"
+        case Float8E4M3FnScalar:
+            return "f8e4m3fn"
+        case Float8E5M2Scalar:
+            return "f8e5m2"
         case IndexScalar:
             return "index"
         case PointerScalar:
@@ -550,7 +560,7 @@ def is_float(type_id: MlirType) -> bool:
     if type_kind_name(type_id.kind) != "scalar":
         return false
     kind = scalar_kind_name(type_id.scalar.kind)
-    return kind == "ieee_float" or kind == "brain_float"
+    return kind in ["ieee_float", "brain_float", "f8e4m3fn", "f8e5m2"]
 
 
 def is_boolean(type_id: MlirType) -> bool:

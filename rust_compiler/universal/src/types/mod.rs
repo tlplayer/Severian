@@ -827,6 +827,34 @@ impl TypeContext {
         expected: Option<TypeId>,
         policy: ConversionPolicy,
     ) -> Result<ResolvedBinary, TypeError> {
+        // Comparisons preserve the operands' numeric domains. Lowering widens
+        // integers or compares integer/float values exactly; overload ranking
+        // must not choose a checked narrowing conversion for a Boolean result.
+        if matches!(operator, BinaryOperator::Equal | BinaryOperator::NotEqual
+            | BinaryOperator::Less | BinaryOperator::LessEqual
+            | BinaryOperator::Greater | BinaryOperator::GreaterEqual)
+        {
+            if let (TypeConstraint::Known(left), TypeConstraint::Known(right)) = (left, right) {
+                let numeric = |ty| self.primitive(ty).is_some_and(|primitive| matches!(
+                    primitive.category, PrimitiveCategory::Integer | PrimitiveCategory::Float
+                ));
+                if numeric(left) && numeric(right) {
+                    if let Some(result) = self.resolve_name("bool") {
+                        if expected.is_none_or(|expected| self.implicitly_convertible(result, expected, policy)) {
+                            return Ok(ResolvedBinary {
+                                left, right, result,
+                                signature: OperatorSignature {
+                                    operator,
+                                    left: TypePattern::Exact(left),
+                                    right: TypePattern::Exact(right),
+                                    result: TypePattern::Exact(result),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+        }
         let mut matches = Vec::new();
         for signature in self.binary.iter().filter(|item| item.operator == operator) {
             let Some(left_type) = exact(signature.left) else {

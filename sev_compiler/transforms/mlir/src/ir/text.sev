@@ -11,6 +11,10 @@ def scalar_type_text(type_id: MlirScalarType) -> string:
         return "i" + string(i64(type_id.bits))
     if kind == "ieee_float":
         return "f" + string(i64(type_id.bits))
+    if kind == "f8e4m3fn":
+        return "f8E4M3FN"
+    if kind == "f8e5m2":
+        return "f8E5M2"
     if kind == "brain_float":
         return "bf16"
     if kind == "index":

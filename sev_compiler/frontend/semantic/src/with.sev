@@ -56,7 +56,7 @@ def binary(symbol: string, left: universal.Expression, right: universal.Expressi
 
 
 def guard(function: universal.FunctionDeclaration, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
-    condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+    condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
     for attachment in function.attachments:
         if attachment.role == universal.AttachmentRole.Dispatch:
             predicate_key(attachment.condition)
@@ -130,9 +130,10 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                             return error(diagnostics.diagnostic_at("E000219", "dispatch candidates have incompatible contracts", origin))
                         result ?= candidate.result
                         first_result ?= first.result
-                        if result != None and first_result != None:
-                            if universal.annotation_key(result) != universal.annotation_key(first_result):
-                                return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
+                        if result != None:
+                            if first_result != None:
+                                if universal.annotation_key(result) != universal.annotation_key(first_result):
+                                    return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
                         arguments: list[universal.CallArgument] = []
                         cursor := 0
                         for parameter in candidate.parameters:
@@ -165,7 +166,7 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                         index += 1
                     message = universal.Expression(universal.LiteralValue(universal.StringValue("dispatch requires exactly one matching implementation")), origin)
                     statements.append(universal.Assert(binary("==", named("$dispatch$count", origin), literal_integer("1", origin), origin), message, origin, origin))
-                    tail = universal.empty_block()
+                    tail := universal.empty_block()
                     index = int(len(calls))
                     result ?= first.result
                     is_unit := result == None
