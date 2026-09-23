@@ -1,4 +1,4 @@
-SIP-0000: Semantic Compilation Hierarchy
+SIP-0000: Semantic Compilation Hierarchy and Constraint Graph
 
 Status: Draft
 
@@ -16,7 +16,7 @@ Superseded by:
 
 **## Summary**
 
-Severian should organize source and compilation semantics using the following hierarchy:
+Severian should organize source semantics using:
 
 ```text
 Library
@@ -27,16 +27,56 @@ Library
                   └─ Symbol / Operator / Operation
 ```
 
-These levels describe semantic organization rather than filesystem organization.
+This hierarchy describes containment, not the complete compiler representation.
 
-The hierarchy has distinct responsibilities:
+The complete representation is a typed Universal graph containing these entities and relationships between them.
+
+```text
+                       Universal Graph
+
+   containment       dependencies       constraints
+       │                  │                  │
+       ▼                  ▼                  ▼
+Library→Module       Operation DAG        with DAG
+      →Submodule          │                  │
+      →Block              │                  │
+      →Sentence           ▼                  ▼
+                     scheduling          refinement
+                          │                  │
+                          └──────┬───────────┘
+                                 ▼
+                              lowering
+                                 │
+                                MIR
+                                 │
+                               MLIR
+```
+
+The hierarchy answers:
+
+```text
+where does this belong?
+```
+
+Graph edges answer:
+
+```text
+what does this depend on?
+what does it require?
+what does it know?
+what does it own?
+what does it produce?
+what implementation applies?
+```
+
+The levels have distinct responsibilities:
 
 ```text
 Library
-    Published package or standard-library boundary.
+    Package/library boundary.
 
 Module
-    Public namespace and dependency boundary.
+    Namespace and major dependency boundary.
 
 Submodule
     Semantic compilation unit and default object-generation boundary.
@@ -45,92 +85,15 @@ Block
     Scope, control-flow, ownership, and lifetime region.
 
 Sentence
-    Complete grammar-resolved expression or statement.
+    Complete grammar-resolved unit.
 
 Symbol / Operator / Operation
-    Atomic semantic components used to construct sentences.
+    Semantic components of a sentence.
 ```
 
-The compiler should not treat this structure as a strict syntax tree. It is the containment projection of Severian's Universal graph.
+`Sentence` and `Block` remain separate.
 
-Other graph edges represent:
-
-```text
-dependency
-type
-value refinement
-control flow
-ownership
-borrow
-constraint
-implementation
-artifact realization
-```
-
-A submodule is the primary boundary between package semantics and backend compilation.
-
-A submodule should commonly produce one object file:
-
-```text
-Submodule
-    ↓ resolution
-    ↓ specialization
-    ↓ lowering
-ObjectUnit
-    ↓ serialization
-.o
-```
-
-However:
-
-```text
-Submodule != .o
-```
-
-The compiler may split one submodule into several object units or merge multiple submodules into one object unit.
-
-Examples include:
-
-```text
-list
-  ├─ list.core.o
-  ├─ list.int.o
-  └─ list.string.o
-```
-
-or:
-
-```text
-small_a ─┐
-small_b ─┼→ utilities.o
-small_c ─┘
-```
-
-This keeps semantic organization independent from backend and linker requirements.
-
-Files remain source-storage objects rather than compiler semantic boundaries.
-
-```text
-File
-    path
-    text
-    source ranges
-
-Submodule
-    semantic identity
-    dependencies
-    exports
-    implementations
-    compilation state
-```
-
-One file may provide several submodules, and multiple files may contribute to one submodule.
-
-A `Sentence` is retained separately from `Block`.
-
-A sentence represents a complete grammar-resolved unit that may contain complex internal structure without introducing a new scope.
-
-For example:
+A sentence may contain complex syntax and operations without introducing a nested scope.
 
 ```sev
 task = async foobar() with self
@@ -138,183 +101,253 @@ task = async foobar() with self
 
 is one sentence.
 
-Conceptually:
-
-```text
-Sentence
-├─ assignment
-│  └─ task
-└─ async call
-   ├─ foobar
-   └─ with
-      └─ self
-```
-
-By contrast:
+A block is introduced when execution creates a nested region:
 
 ```sev
 if ready:
     task = async foobar() with self
 ```
 
-contains a nested block:
+which becomes:
 
 ```text
-Sentence: if
-├─ condition: ready
+Sentence If
+├─ ready
 └─ Block
-   └─ Sentence
-      └─ task = async foobar() with self
+   └─ Sentence Assignment
 ```
 
-The defining distinction is:
+The distinction is:
 
 ```text
 Sentence
-    grammatical and evaluation boundary
+    grammar and evaluation boundary
 
 Block
-    nested execution, scope, CFG, and ownership boundary
+    scope, lifetime, CFG, and ownership boundary
 ```
 
-The hierarchy therefore gives Severian structural organization normally associated with AST/HIR systems without requiring a conventional AST/HIR pipeline.
+`with` is a first-class semantic interface.
 
-The expected pipeline is:
+It associates constraints, conditions, declarations, invariants, ownership requirements, and dispatch requirements with any compatible graph node.
+
+For example:
+
+```sev
+def increment(x, view y) with {
+    entry x > 0
+    fix x < 100
+    exit x >= 10
+    defer unchanged(y)
+}:
+```
+
+where:
 
 ```text
-source
-  ↓
-symbols
-  ↓
-grammar matching
-  ↓
-sentences
-  ↓
-blocks
-  ↓
-submodules
-  ↓
-Universal graph
-  ↓
-semantic / constraint / ownership / CFG projections
-  ↓
-MIR
-  ↓
-MLIR
-  ↓
-ObjectUnit
-  ↓
-.o / .a / .so
+entry
+    checked when entering the region
+
+fix
+    invariant maintained across the region
+
+exit
+    checked when leaving the region
+
+defer
+    alias/convenience form of fix
 ```
 
-The package system operates primarily on modules and submodules rather than files.
+These conditions should not remain arbitrary syntax attached to a function.
 
-Compiled package interfaces can therefore expose semantic units independently of original source layout.
+They become nodes in the constraint graph:
+
+```text
+                   Function increment
+                          │
+          ┌───────────────┼───────────────┐
+          │               │               │
+          ▼               ▼               ▼
+      x > 0            x < 100          x >= 10
+       entry              fix             exit
+          │               │               │
+          └───────────────┼───────────────┘
+                          ▼
+                     Function CFG
+```
+
+The compiler can then construct a dependency DAG for evaluating constraints.
+
+Checks should be ordered by dependency and cost rather than merely by declaration order.
+
+For dispatch this may produce:
+
+```text
+Type
+ ↓
+Trait / subtype
+ ↓
+Static shape
+ ↓
+Static value
+ ↓
+Cheap runtime condition
+ ↓
+Expensive runtime condition
+ ↓
+Implementation
+```
+
+This allows Severian to cheaply eliminate candidates before performing expensive checks.
+
+Submodules are the boundary between language/package semantics and backend realization.
+
+The normal mapping is:
+
+```text
+Submodule
+    ↓
+semantic resolution
+    ↓
+with / constraint resolution
+    ↓
+specialization
+    ↓
+ObjectUnit
+    ↓
+.o
+```
+
+but:
+
+```text
+Submodule != .o
+```
+
+A submodule may generate several ObjectUnits, and multiple submodules may be merged into one ObjectUnit.
+
+`ObjectUnit` is therefore the backend emission boundary.
+
+Files remain source-storage boundaries.
+
+```text
+File
+    path
+    text
+    source positions
+```
+
+They are not required to correspond to modules, submodules, or object files.
 
 ---
 
 **## Appendix**
 
-| Term           | Kind                   | Definition                                                                            |
-| -------------- | ---------------------- | ------------------------------------------------------------------------------------- |
-| `Library`      | semantic/package unit  | Published collection of modules.                                                      |
-| `Module`       | semantic/package unit  | Public namespace and dependency grouping within a library.                            |
-| `Submodule`    | semantic/compiler unit | Smallest package-addressable compilation unit and default object-generation boundary. |
-| `Block`        | semantic region        | Scope, CFG, lifetime, ownership, and nested execution region.                         |
-| `Sentence`     | grammar unit           | Complete grammar-resolved expression or statement.                                    |
-| `Symbol`       | semantic atom          | Named or literal entity participating in a sentence.                                  |
-| `Operator`     | grammar/semantic atom  | Operation syntax used to relate symbols or other operations.                          |
-| `Operation`    | semantic atom          | Resolved computation produced from symbols/operators.                                 |
-| `Universal`    | graph IR               | Shared semantic graph containing language entities and typed relationships.           |
-| `ObjectUnit`   | backend unit           | Group of lowered definitions selected for emission into an object artifact.           |
-| `File`         | source unit            | Physical source text and source-location information.                                 |
-| `LibraryId`    | identifier             | Stable identity for a library.                                                        |
-| `ModuleId`     | identifier             | Stable identity for a module.                                                         |
-| `SubmoduleId`  | identifier             | Stable semantic identity independent of file path.                                    |
-| `BlockId`      | identifier             | Stable identity for a block within a submodule.                                       |
-| `SentenceId`   | identifier             | Stable identity for a grammar-resolved sentence.                                      |
-| `SymbolId`     | identifier             | Identity of a symbol in the Universal graph.                                          |
-| `ObjectUnitId` | identifier             | Identity of an emitted backend partition.                                             |
-| `Contains`     | graph edge             | Hierarchical containment relationship.                                                |
-| `Depends`      | graph edge             | Semantic or compilation dependency.                                                   |
-| `TypeOf`       | graph edge             | Associates a value or symbol with a type.                                             |
-| `Requires`     | graph edge             | Associates an entity with a constraint.                                               |
-| `Refines`      | graph edge             | Records value/type-domain refinement.                                                 |
-| `Reads`        | graph edge             | Operation reads a value.                                                              |
-| `Writes`       | graph edge             | Operation mutates a value.                                                            |
-| `Produces`     | graph edge             | Operation produces a value.                                                           |
-| `Owns`         | graph edge             | Block/value ownership relationship.                                                   |
-| `Borrows`      | graph edge             | Temporary ownership/access relationship.                                              |
-| `ControlFlow`  | graph edge             | CFG transition between operations or regions.                                         |
-| `Realizes`     | graph edge             | Semantic entity maps to a backend implementation/artifact.                            |
-| `.sev`         | source file            | Human-authored Severian source.                                                       |
-| `.sevi`        | interface artifact     | Serialized semantic/package interface required by consumers.                          |
-| `.o`           | object artifact        | Relocatable native object emitted from one ObjectUnit.                                |
-| `.a`           | archive artifact       | Static archive containing object files.                                               |
-| `.so`          | shared artifact        | Dynamically linkable shared library on ELF platforms.                                 |
-| `.dll`         | shared artifact        | Dynamically linkable library on Windows.                                              |
-| `.dylib`       | shared artifact        | Dynamically linkable library on macOS.                                                |
+| Term          | Kind                | Definition                                                                              |
+| ------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| `Library`     | package node        | Published collection of modules.                                                        |
+| `Module`      | namespace node      | Public namespace containing submodules.                                                 |
+| `Submodule`   | compilation node    | Semantic compilation and dependency unit.                                               |
+| `Block`       | execution node      | Scope, CFG, ownership, and lifetime region.                                             |
+| `Sentence`    | grammar node        | Complete grammar-resolved operation or statement.                                       |
+| `Symbol`      | semantic node       | Named, literal, type, value, or other language symbol.                                  |
+| `Operator`    | semantic node       | Grammar-defined relation or operation over symbols.                                     |
+| `Operation`   | execution node      | Resolved computation produced from a sentence.                                          |
+| `With`        | interface           | Attaches declarations, constraints, invariants, refinements, or requirements to a node. |
+| `Constraint`  | graph node          | Predicate required for validity, dispatch, refinement, or execution.                    |
+| `Entry`       | constraint phase    | Constraint evaluated when entering a region.                                            |
+| `Fix`         | constraint phase    | Constraint maintained throughout a region.                                              |
+| `Exit`        | constraint phase    | Constraint evaluated when leaving a region.                                             |
+| `Defer`       | constraint form     | Alias/convenience form for a fixed invariant.                                           |
+| `ValueDomain` | analysis node       | Known subset/range/properties of possible values.                                       |
+| `Universal`   | graph IR            | Typed semantic graph containing compiler-visible entities.                              |
+| `ObjectUnit`  | backend node        | Unit selected for native/backend emission.                                              |
+| `File`        | source object       | Physical source text and source positions.                                              |
+| `Contains`    | graph edge          | Hierarchical containment.                                                               |
+| `Depends`     | graph edge          | One node depends on another.                                                            |
+| `Requires`    | graph edge          | Node requires a constraint/fact.                                                        |
+| `Refines`     | graph edge          | Constraint narrows a type/value domain.                                                 |
+| `TypeOf`      | graph edge          | Value or symbol has a type.                                                             |
+| `Reads`       | graph edge          | Operation reads a value.                                                                |
+| `Writes`      | graph edge          | Operation writes a value.                                                               |
+| `Produces`    | graph edge          | Operation produces a value.                                                             |
+| `Owns`        | graph edge          | Region owns a value/resource.                                                           |
+| `Borrows`     | graph edge          | Region temporarily accesses a value/resource.                                           |
+| `ControlFlow` | graph edge          | Runtime CFG transition.                                                                 |
+| `Implements`  | graph edge          | Implementation satisfies an interface/trait.                                            |
+| `Realizes`    | graph edge          | Semantic entity maps to compiled realization.                                           |
+| `Complexity`  | constraint metadata | Asymptotic or relative evaluation cost.                                                 |
+| `Phase`       | constraint metadata | Static, specialization, runtime, entry, fix, or exit.                                   |
+| `.sev`        | source format       | Severian source file.                                                                   |
+| `.sevi`       | interface format    | Serialized package/compiler semantic interface.                                         |
+| `.o`          | artifact            | Relocatable object file.                                                                |
+| `.a`          | artifact            | Static object archive.                                                                  |
+| `.so`         | artifact            | ELF shared library.                                                                     |
 
-Proposed conceptual interfaces:
+Conceptual interfaces:
 
 ```sev
-trait SemanticNode:
+trait Node:
     id: Symbol
 
-trait ContainerNode: SemanticNode:
-    children: list[SemanticNode]
+trait Container: Node:
+    children: list[Node]
 
-class Library: ContainerNode:
+class Library: Container:
     modules: list[Module]
 
-class Module: ContainerNode:
+class Module: Container:
     submodules: list[Submodule]
 
-class Submodule: ContainerNode:
+class Submodule: Container:
     blocks: list[Block]
     imports: list[Submodule]
     exports: list[Symbol]
-    dependencies: list[Submodule]
+    dependencies: list[Node]
 
-class Block: ContainerNode:
+class Block: Container:
     sentences: list[Sentence]
     symbols: list[Symbol]
-    children: list[Block]
+    blocks: list[Block]
 
-class Sentence: SemanticNode:
+class Sentence: Node:
     symbols: list[Symbol]
     operators: list[Operator]
     operations: list[Operation]
 
+trait With:
+    requirements: list[Constraint]
+
+trait Constraint: Node:
+    dependencies: list[Node]
+    phase: ConstraintPhase
+    complexity: Complexity
+    cost: number | unknown
+
+enum ConstraintPhase:
+    Static
+    Specialization
+    Entry
+    Fix
+    Runtime
+    Exit
+
 class ObjectUnit:
-    source: list[Submodule | Block | Operation]
+    realizations: list[Node]
     target: Target
-    symbols: list[Symbol]
 ```
 
-These interfaces are conceptual and do not prescribe final syntax.
+The syntax is illustrative rather than normative.
 
 ---
 
 **## Context**
 
-Severian does not need to reproduce the conventional compiler structure:
+Severian already has concepts that conventional AST/HIR pipelines usually introduce later:
 
 ```text
-parser
-  ↓
-AST
-  ↓
-HIR
-  ↓
-MIR
-```
-
-The language already has higher-level semantic concepts:
-
-```text
-grammar
 symbols
+grammar
 operators
 sentences
 constraints
@@ -324,422 +357,584 @@ Universal
 MIR
 ```
 
-A conventional AST would duplicate much of the information already represented by grammar matching and Universal lowering.
-
-However, Severian still requires explicit answers to several structural questions:
+A conventional:
 
 ```text
-What constitutes a namespace?
-
-What constitutes a compilation unit?
-
-Where does scope begin and end?
-
-Where does ownership analysis operate?
-
-Where does CFG construction occur?
-
-What unit is cached?
-
-What unit is invalidated when source changes?
-
-What unit is exposed through a package interface?
-
-What unit maps to native artifacts?
+AST → HIR → MIR
 ```
 
-Using files for these responsibilities couples filesystem layout to compiler architecture.
+pipeline would duplicate some of those responsibilities.
+
+However, Severian still needs stable structural units for:
+
+```text
+scope
+dependency tracking
+ownership
+CFG construction
+incremental compilation
+package interfaces
+artifact generation
+```
+
+The hierarchy supplies those structural boundaries.
+
+The graph supplies cross-hierarchy relationships.
 
 For example:
-
-```text
-src/list.sev
-```
-
-should not imply:
-
-```text
-namespace == compilation unit == cache unit == object file
-```
-
-The language needs semantic boundaries independent of storage layout.
-
-The hierarchy provides those boundaries.
 
 ```text
 Library
-    package distribution
-
-Module
-    namespace
-
-Submodule
-    semantic compilation
-
-Block
-    scope and execution region
-
-Sentence
-    grammar-resolved computation
-
-Symbol/Operator
-    atomic semantics
+  Module
+    Submodule Tensor
+      Block matmul
+        Sentence result = lhs @ rhs
 ```
 
-The hierarchy is also only one view of Universal.
-
-Containment forms:
+may simultaneously have:
 
 ```text
-Library → Module → Submodule → Block → Sentence
+lhs ─TypeOf→ Tensor[bf16]
+rhs ─TypeOf→ Tensor[bf16]
+
+matmul ─Requires→ rank(lhs) == 2
+matmul ─Requires→ rank(rhs) == 2
+matmul ─Requires→ lhs.cols == rhs.rows
+
+matmul ─Depends→ AMDGPU implementation
+matmul ─Realizes→ matmul-amdgpu.o
 ```
 
-while semantic relationships may cross that hierarchy:
+Containment is therefore only one projection.
+
+The compiler should be able to derive graph views such as:
 
 ```text
-Submodule A ─depends→ Submodule B
+Universal.subgraph(Contains)
+    → source/package hierarchy
 
-Operation X ─reads→ Value Y
+Universal.subgraph(Depends)
+    → compilation DAG
 
-Value Y ─type→ Tensor
+Universal.subgraph(Requires)
+    → with/constraint DAG
 
-Sentence S ─requires→ Constraint C
+Universal.subgraph(ControlFlow)
+    → CFG
 
-Block F ─owns→ Value Y
+Universal.subgraph(Owns, Borrows)
+    → memory graph
+
+Universal.subgraph(TypeOf, Refines)
+    → type/value-domain graph
+
+Universal.subgraph(Realizes)
+    → package/artifact graph
 ```
 
-This allows containment to remain simple while dependency resolution, ownership, CFG construction, and dispatch use graph/DAG representations.
+### `with` as an interface
 
----
+`with` should provide a common mechanism for associating additional semantic information with a construct.
 
-**## Problem(s)**
+Examples:
 
-### Files are not semantic compilation boundaries
-
-A physical file exists for editing and storage.
-
-It should not determine:
-
-```text
-incremental invalidation
-package visibility
-linker partitioning
-semantic identity
+```sev
+def foo(x) with x > 0:
 ```
 
-Moving a declaration between source files should not necessarily change its semantic identity or invalidate consumers.
-
-### Modules are too large as object-generation units
-
-A module may contain many independent implementations.
-
-Generating one object file for an entire module can increase:
-
-```text
-recompilation
-linking work
-artifact size
-dependency fan-out
+```sev
+for x in values with i := 0:
 ```
 
-A smaller semantic boundary is needed.
-
-`Submodule` fills this role.
-
-### Object files are too low-level as language units
-
-An object file contains target-specific linker information.
-
-A `.o` cannot adequately represent:
-
-```text
-generic definitions
-grammar definitions
-traits
-constraints
-ownership contracts
-unrealized implementations
-target-independent types
+```sev
+foo(x) with x > 5:
 ```
-
-Therefore `.o` must remain below the semantic model.
-
-### Blocks and sentences have different responsibilities
-
-Collapsing `Sentence` into `Block` makes simple expressions appear to create scopes.
-
-For example:
 
 ```sev
 task = async foobar() with self
 ```
 
-contains several operators and semantic relationships but no nested scope.
+These do not necessarily mean the same thing operationally.
 
-Calling this a block would make block semantics ambiguous.
+The grammar/interface implementing the construct determines how the attached `with` information is interpreted.
 
-Conversely:
+Conceptually:
+
+```text
+Sentence
+   │
+   ├─ primary grammar
+   │
+   └─ With interface
+        │
+        ├─ declaration
+        ├─ constraint
+        ├─ invariant
+        ├─ execution context
+        └─ ownership/context requirement
+```
+
+This keeps `with` extensible rather than hard-coding every possible use into parser/compiler logic.
+
+---
+
+**## Problem(s)**
+
+### Hierarchy alone is insufficient
+
+A simple hierarchy:
+
+```text
+Library
+→ Module
+→ Submodule
+→ Block
+→ Sentence
+```
+
+cannot represent cross-cutting relationships such as:
+
+```text
+operation dependency
+type refinement
+ownership
+implementation selection
+constraints
+artifact realization
+```
+
+These require graph edges.
+
+### A single undifferentiated graph is also insufficient
+
+Containment, CFG, dependency resolution, and constraint evaluation have different invariants.
+
+The solution should therefore be:
+
+```text
+one typed Universal graph
++
+multiple graph/DAG projections
+```
+
+rather than completely independent IRs.
+
+### `with` constraints need ordering
+
+Consider candidate dispatch requiring:
+
+```text
+type(x) == Tensor
+dtype(x) == bf16
+rank(x) == 2
+len(x) > 1024
+sorted(x)
+arbitrary_runtime_test(x)
+```
+
+These checks do not have equal cost.
+
+The compiler should avoid:
+
+```text
+expensive predicate
+↓
+discover wrong type
+```
+
+and instead schedule:
+
+```text
+type
+↓
+dtype
+↓
+rank
+↓
+length
+↓
+sorted
+↓
+expensive predicate
+```
+
+### Constraints depend on other constraints
+
+A constraint may only become meaningful after another fact is established.
+
+For example:
+
+```text
+x has Tensor type
+    ↓
+rank(x) is defined
+    ↓
+shape(x)[1] is defined
+    ↓
+shape(x)[1] == y.shape[0]
+```
+
+The constraints therefore naturally form a DAG.
+
+### Conditions refine values
+
+Given:
+
+```sev
+if x > 0:
+    foo(x)
+```
+
+the true branch knows more than merely `x: int`.
+
+```text
+before:
+    x : int
+
+true branch:
+    x : int
+    domain = Positive
+
+false branch:
+    x : int
+    domain = NonPositive
+```
+
+The compiler should record this through `Refines` relationships.
+
+### Files are not semantic units
+
+A physical file should not determine package or incremental compilation boundaries.
+
+### Submodules must not equal object files
+
+Submodules are target-independent semantic objects.
+
+`.o` files are target-specific linker artifacts.
+
+Specialization can require:
+
+```text
+Submodule List
+    ├─ list-base.o
+    ├─ list-int.o
+    └─ list-string.o
+```
+
+### Sentences and blocks cannot be fully collapsed
+
+This:
+
+```sev
+task = async foobar() with self
+```
+
+is structurally complex but introduces no child execution region.
+
+A `Sentence` is therefore required independently of `Block`.
+
+---
+
+**## Examples**
+
+### Containment
+
+```text
+Library collections
+└─ Module sequence
+   └─ Submodule list
+      ├─ Block List
+      ├─ Block Iterator
+      └─ Block algorithms
+         ├─ Sentence sort(...)
+         └─ Sentence reverse(...)
+```
+
+### Complex sentence
+
+```sev
+task = async foobar() with self
+```
+
+may form:
+
+```text
+Sentence Assignment
+├─ Symbol task
+├─ Operator =
+└─ Operation AsyncCall
+   ├─ Operator async
+   ├─ Symbol foobar
+   ├─ Operator call
+   └─ With
+      └─ Symbol self
+```
+
+No nested block is required.
+
+### Block-producing sentence
 
 ```sev
 if ready:
     foo()
 ```
 
-does introduce a nested execution region.
-
-The language therefore needs both concepts.
-
-### Package artifacts must not depend on source layout
-
-Published packages should expose:
-
-```text
-modules
-submodules
-symbols
-types
-implementations
-artifacts
-```
-
-rather than requiring consumers to understand:
-
-```text
-src/foo.sev
-src/internal/bar.sev
-```
-
-The package interface should point from semantic definitions to realizations.
-
-### Incremental compilation requires stable units
-
-The compiler must distinguish:
-
-```text
-source changed
-
-implementation changed
-
-semantic interface changed
-
-target realization changed
-```
-
-A stable `SubmoduleId` provides a useful unit for semantic hashing and invalidation.
-
-### Backend partitioning must remain flexible
-
-A one-to-one mapping:
-
-```text
-submodule → .o
-```
-
-would fail for generics, target specialization, GPU kernels, or linker optimization.
-
-The compiler therefore requires an explicit `ObjectUnit` boundary.
-
----
-
-**## Examples**
-
-### Basic hierarchy
-
-```text
-library collections
-│
-└─ module sequence
-   │
-   ├─ submodule list
-   │  │
-   │  ├─ block List
-   │  │
-   │  ├─ block Iterator
-   │  │
-   │  └─ block algorithms
-   │  │     ├─ sentence sort(...)
-   │  │     └─ sentence reverse(...)
-   │  │
-   │  └─ object realization
-   │        └─ list.o
-   │
-   └─ submodule vector
-      └─ ...
-```
-
-### Sentence without nested block
-
-```sev
-task = async foobar() with self
-```
-
-Representation:
-
-```text
-Sentence Assignment
-│
-├─ Symbol task
-├─ Operator =
-└─ Operation AsyncCall
-   ├─ Symbol foobar
-   ├─ Operator async
-   ├─ Operator call
-   └─ Operator with
-      └─ Symbol self
-```
-
-No nested scope is created.
-
-### Sentence containing a block
-
-```sev
-if ready:
-    task = async foobar() with self
-```
-
-Representation:
+becomes:
 
 ```text
 Sentence If
-├─ Symbol ready
+├─ ready
 └─ Block
-   └─ Sentence Assignment
-      ├─ task
-      └─ AsyncCall
+   └─ Sentence Call(foo)
 ```
 
-### Function block
+### `with` contract
 
 ```sev
-def increment(x: int) -> int:
-    y = x + 1
-    return y
+def increment(x, view y) with {
+    entry x > 0
+    fix x < 100
+    exit x >= 10
+    defer unchanged(y)
+}:
+    x += 10
+    return x
 ```
 
-Representation:
+Constraint graph:
 
 ```text
-Block Function increment
-│
-├─ symbols
-│  ├─ x:int
-│  └─ y:int
-│
-├─ Sentence Assignment
-│  └─ y = x + 1
-│
-└─ Sentence Return
-   └─ y
+                    increment
+                        │
+         ┌──────────────┼──────────────┐
+         │              │              │
+         ▼              ▼              ▼
+      x > 0          x < 100        x >= 10
+       entry            fix            exit
+                         │
+                  unchanged(y)
+                       fix
 ```
 
-The block owns:
+These constraints then connect to the CFG locations at which they must hold.
+
+### Constraint DAG
+
+Suppose an implementation requires:
 
 ```text
-scope
-CFG
-ownership state
-lifetime state
-effects
+x : Tensor
+x.dtype == bf16
+x.rank == 2
+x.contiguous
+x.shape[1] == y.shape[0]
 ```
 
-The sentences describe the computations contributing to that CFG.
-
-### One file containing several submodules
+Dependencies become:
 
 ```text
-math.sev
+Tensor(x)
+   │
+   ├──→ dtype(x)
+   │      └──→ bf16?
+   │
+   └──→ shape(x)
+          │
+          ├──→ rank(x) == 2
+          │
+          └──→ x.shape[1]
+                    │
+                    └──→ compare y.shape[0]
+
+Tensor(x)
+   └──→ contiguous(x)
 ```
 
-may produce:
+The compiler topologically orders the required checks.
+
+### Cost-aware dispatch
+
+Consider implementations:
+
+```sev
+def process(x: Tensor) with x.rank == 2:
+    ...
+
+def process(x: Tensor) with expensive_check(x):
+    ...
+```
+
+The dispatch DAG should favor cheap discrimination:
 
 ```text
-Module math
-├─ Submodule vector
-├─ Submodule matrix
-└─ Submodule scalar
+input x
+  │
+  ▼
+Tensor?
+  │
+  ▼
+rank == 2?
+  │
+  ├─ matching candidate
+  │
+  └─ unresolved
+       │
+       ▼
+ expensive_check(x)
 ```
 
-Changing `matrix` does not automatically invalidate `vector`.
-
-### Multiple files contributing to one submodule
+Each constraint can expose:
 
 ```text
-vector.sev
-vector-arithmetic.sev
-vector-conversions.sev
+phase
+dependencies
+complexity
+estimated cost
 ```
 
-may all contribute to:
+For example:
 
 ```text
-Submodule vector
+type(x) == Tensor
+    static
+    O(1)
+
+rank(x) == 2
+    shape/runtime
+    O(1)
+
+len(x) > 1000
+    runtime
+    O(1)
+
+sorted(x)
+    runtime
+    O(n)
 ```
 
-especially when extensions are used.
+### Value refinement
 
-### Default object mapping
+```sev
+if x > 0:
+    foo(x)
+else:
+    bar(x)
+```
+
+produces:
 
 ```text
-Submodule vector
-    ↓
-ObjectUnit vector/native/x86_64
-    ↓
-vector.o
+                       x : int
+                          │
+                        x > 0
+                       /     \
+                    true     false
+                     │         │
+                     ▼         ▼
+                 Positive   NonPositive
+                     │         │
+                   foo()     bar()
+                     \         /
+                      \       /
+                         join
+                          │
+                          ▼
+                        int
 ```
 
-### Split object mapping
+The branch constraint refines the value domain.
 
-Generic or specialized code may require:
+### Type → value → operation selection
+
+The same mechanism can dispatch from coarse facts toward increasingly specific facts:
 
 ```text
-Submodule list
-│
-├─ ObjectUnit list.core
-│    └─ list.core.o
-│
-├─ ObjectUnit list[int]
-│    └─ list.int.o
-│
-└─ ObjectUnit list[string]
-     └─ list.string.o
+Type
+ ↓
+Subtype / Trait
+ ↓
+Shape
+ ↓
+Value domain
+ ↓
+Exact value
+ ↓
+Runtime predicate
+ ↓
+Operation implementation
 ```
 
-### Target-dependent mapping
+For example:
+
+```text
+number
+ ├─ int
+ │   ├─ Negative
+ │   ├─ Zero
+ │   ├─ Range(1..255)
+ │   └─ Dynamic
+ │
+ └─ float
+```
+
+The compiler does not create nodes for every possible integer.
+
+It records useful abstract value domains.
+
+### Package compilation
+
+```text
+Library
+  ↓
+Module
+  ↓
+Submodule
+  ↓
+dependency DAG
+  ↓
+constraint resolution
+  ↓
+specialization
+  ↓
+ObjectUnit
+  ↓
+.o
+```
+
+Example:
 
 ```text
 Submodule tensor.matmul
-│
-├─ ObjectUnit host
-│    └─ matmul-host.o
-│
-├─ ObjectUnit AMDGPU
-│    └─ matmul-amdgpu.o
-│
-└─ MLIR/XLA realization
-     └─ matmul.mlir
+    │
+    ├─ requires Tensor
+    ├─ requires bf16
+    ├─ requires rank=2
+    ├─ requires AMDGPU
+    │
+    └─ realization
+          ↓
+      matmul-amdgpu.o
 ```
 
-### Merged object mapping
-
-Small submodules may be combined:
+### Object splitting
 
 ```text
-Submodule math.constants ─┐
-Submodule math.scalar    ─┼→ math-support.o
-Submodule math.compare   ─┘
+Submodule list
+├─ ObjectUnit list.core
+│  └─ list.core.o
+├─ ObjectUnit List[int]
+│  └─ list.int.o
+└─ ObjectUnit List[string]
+   └─ list.string.o
 ```
 
-The semantic hierarchy remains unchanged.
-
-### Package consumption
-
-A consumer writes:
+### Package consumer
 
 ```sev
 import collections.sequence.list
 ```
 
-Resolution becomes:
+can resolve:
 
 ```text
 Library collections
@@ -748,59 +943,53 @@ Module sequence
     ↓
 Submodule list
     ↓
-exported symbol List
+required symbols
     ↓
-required realizations
+required constraints
     ↓
-ObjectUnit(s)
+required realization
     ↓
-.o / .a / .so
+ObjectUnit
 ```
 
-The consumer does not need the original `.sev` source layout.
+without loading the original source hierarchy.
 
 ---
 
 **## Testing**
 
-Testing should validate structural semantics, incremental compilation, graph integrity, and artifact realization.
+### Containment tests
 
-### Hierarchy tests
-
-Verify:
+Validate:
 
 ```text
-Library contains Module
-Module contains Submodule
-Submodule contains Block
-Block contains Sentence
-Sentence references Symbols/Operators
+Library → Module
+Module → Submodule
+Submodule → Block
+Block → Sentence
+Sentence → Symbol / Operator / Operation
 ```
-
-Reject illegal ownership or containment relationships.
 
 ### Sentence tests
 
-Test sentences with no nested blocks:
+Ensure the following remain single sentences:
 
 ```sev
 x = 1
 x = a + b * c
 task = async foobar() with self
-result = foo(x) with x > 0
+foo(x) with x > 5
 ```
-
-Verify they remain single sentences despite nested expression structure.
 
 ### Block tests
 
-Test structures introducing execution regions:
+Ensure nested execution creates blocks:
 
 ```sev
 if x:
     ...
 
-for x in values:
+for x in y:
     ...
 
 while x:
@@ -808,297 +997,384 @@ while x:
 
 def foo():
     ...
-
-class Foo:
-    ...
 ```
 
-Verify correct block creation, parentage, scope, and CFG ownership.
+### `with` parsing tests
 
-### Source-layout independence
+Test:
 
-Compile:
-
-```text
-a.sev
+```sev
+foo(a) with a > 5:
 ```
 
-then move an unchanged declaration to:
-
-```text
-b.sev
+```sev
+for i in values with j := 1:
 ```
 
-while preserving semantic identity.
+```sev
+task = async foo() with self
+```
 
-Verify that semantic hashes and dependent submodules do not change solely because the source path changed.
+```sev
+def foo(x) with {
+    entry x > 0
+    fix x < 10
+    exit x >= 1
+}:
+```
 
-### Multi-file submodule
+Verify that grammar-specific implementations receive the appropriate attached `With` structure.
 
-Provide declarations across multiple source files that contribute to one submodule.
+### Constraint DAG tests
+
+Construct constraints with explicit dependencies.
 
 Verify:
 
 ```text
-one semantic Submodule
-multiple source origins
-correct source diagnostics
-correct final artifact
+acyclic graph accepted
+cycle diagnosed
+topological ordering deterministic
 ```
 
-### Multi-submodule file
-
-Place multiple submodules in one `.sev` file.
-
-Change one.
-
-Verify unrelated submodules remain cached.
-
-### Incremental invalidation
+### Constraint cost tests
 
 Given:
 
 ```text
-A → B → C
-D
+TypeCheck cost=1
+ShapeCheck cost=2
+LinearScan cost=n
 ```
 
-change B's implementation without changing its interface.
+verify that independent predicates are scheduled by appropriate cost while preserving dependency ordering.
 
-Expected:
-
-```text
-rebuild B ObjectUnit
-preserve dependent semantic state where valid
-do not rebuild D
-```
-
-Then change B's exported interface.
-
-Expected:
-
-```text
-invalidate A
-invalidate relevant dependents
-do not invalidate unrelated D
-```
-
-### Object splitting
-
-Compile one submodule into several ObjectUnits.
-
-Verify all emitted symbols resolve correctly during linking.
-
-### Object merging
-
-Compile several submodules into one ObjectUnit.
-
-Verify semantic dependency information remains available even though backend artifacts were merged.
-
-### Generic realization
+### Refinement tests
 
 Compile:
 
 ```sev
-List[int]
-List[string]
+if x > 0:
+    foo(x)
 ```
+
+Verify that the true branch receives a refined positive domain.
+
+At the CFG join, verify correct domain widening.
+
+### Dispatch tests
+
+Provide several implementations differentiated by:
+
+```text
+type
+trait
+shape
+value
+runtime predicate
+```
+
+Verify that cheap/static discrimination occurs before expensive runtime predicates.
+
+### Ambiguity tests
+
+If multiple implementations remain valid after all constraints:
+
+```text
+candidate A matches
+candidate B matches
+```
+
+the compiler must diagnose ambiguity rather than select by incidental ordering.
+
+### Entry/fix/exit tests
 
 Verify:
 
 ```text
-shared generic semantic definition
-distinct realization when required
-no unnecessary recompilation
+entry
+    checked at region entry
+
+fix
+    maintained at relevant mutation/control boundaries
+
+exit
+    checked for each valid exit
+
+defer
+    behaves as fix
 ```
 
-### Ownership tests
+### Ownership integration
 
-For every executable block verify:
+A `with` constraint referencing ownership state must be represented in the same graph as:
 
 ```text
-values owned on entry
-borrows introduced
-moves performed
-values live on CFG edges
-drops generated at exits
+Owns
+Borrows
+Moves
 ```
 
-Nested block exits must preserve parent-block ownership invariants.
+Verify constraints remain valid across CFG edges.
 
-### CFG tests
+### Incremental compilation
 
-Verify sentences contribute operations to the containing block's CFG rather than constructing independent CFGs unnecessarily.
+Changing an implementation without changing a submodule interface should not invalidate unrelated dependents.
 
-### Package interface round-trip
+Changing exported constraints must invalidate consumers that depend on those constraints.
 
-Compile a library.
+### Source independence
 
-Delete or hide its source.
+Move a declaration between physical files while retaining semantic identity.
 
-Compile a consumer using only:
+Verify no unnecessary package-level invalidation.
+
+### Object realization
+
+Test:
+
+```text
+one Submodule → one ObjectUnit
+one Submodule → multiple ObjectUnits
+multiple Submodules → one ObjectUnit
+```
+
+### Package interface round trip
+
+Compile a package and consume it using only:
 
 ```text
 .sevi
-.o/.a/.so
+object artifacts
 metadata
 ```
 
-Verify the consumer can resolve:
+Verify that constraints and `with` interfaces required for downstream dispatch remain available.
 
-```text
-types
-symbols
-implementations
-ownership contracts
-ABI
-required artifacts
-```
+### Universal graph projections
 
-### Determinism
-
-Identical semantic inputs must produce identical:
-
-```text
-SubmoduleId
-semantic hash
-dependency graph
-ObjectUnit partition before nondeterministic linker metadata
-```
-
-### Graph integrity
-
-Validate that projections of Universal remain consistent:
+Verify consistency between:
 
 ```text
 Contains
 Depends
-TypeOf
 Requires
+Refines
+TypeOf
 Owns
 Borrows
 ControlFlow
 Realizes
 ```
 
-A semantic node must not become unreachable solely because it appears in a different source file.
-
 ---
 
 **## Performance**
 
-The hierarchy is intended to reduce compilation work rather than add a new heavyweight IR.
+The graph representation should improve compilation and runtime dispatch by exposing dependency structure explicitly.
 
-The primary performance unit is the `Submodule`.
+### Constraint scheduling
 
-Each submodule should support a semantic hash derived from information that affects consumers:
+Constraints should carry enough metadata to permit ordering by:
 
 ```text
-exports
-types
-constraints
-layouts
-ownership contracts
-ABI
-implementation requirements
+dependency
+phase
+cost
+complexity
+selectivity where known
 ```
 
-Implementation-only information should be hashed separately where possible.
+Dependency ordering always takes priority.
 
-This allows the compiler to distinguish:
+Within independent constraints, cheaper checks should generally occur first.
+
+Instead of:
+
+```text
+O(n) predicate
+↓
+type check
+↓
+shape check
+```
+
+the compiler can produce:
+
+```text
+type check       O(1)
+↓
+shape check      O(1)
+↓
+runtime predicate O(n)
+```
+
+This is particularly important for overloaded operators and multiple implementers.
+
+### Static elimination
+
+Constraints resolvable during compilation should be removed from runtime execution.
+
+```text
+Static
+    ↓ resolved during compile
+
+Specialization
+    ↓ resolved when realization is selected
+
+Runtime
+    ↓ emitted only when still unknown
+```
+
+Therefore:
+
+```text
+with x: int
+```
+
+should not generate runtime checking if type resolution already guarantees it.
+
+### Refinement reuse
+
+Once a condition establishes:
+
+```text
+x ∈ Range(1..255)
+```
+
+downstream operations should reuse that fact rather than re-evaluate equivalent constraints.
+
+The value-domain graph acts as cached semantic knowledge.
+
+### Dispatch DAG reuse
+
+A dispatch family such as `+` should construct a reusable decision DAG rather than linearly testing every implementation.
+
+Instead of:
+
+```text
+candidate1?
+candidate2?
+candidate3?
+...
+candidateN?
+```
+
+use shared prefixes:
+
+```text
+                   Type
+                 /      \
+               int      tensor
+              /            \
+           value           dtype
+           /   \             |
+        small large         bf16
+```
+
+Multiple implementations can reuse the same type, trait, shape, and value checks.
+
+### Incremental compilation
+
+Submodules should maintain separate hashes where useful:
 
 ```text
 source hash
-semantic/interface hash
+interface hash
+constraint hash
 implementation hash
 ObjectUnit hash
 ```
 
-A source edit therefore does not necessarily imply recompilation of every dependent unit.
+A local source change should therefore not automatically invalidate every consumer.
 
-Expected invalidation model:
+### Package-level DAG
 
-```text
-source changed
-    ↓
-recompute affected sentence/block
-    ↓
-recompute affected submodule
-    ↓
-interface unchanged?
-    ├─ yes → preserve dependents
-    └─ no  → invalidate dependent submodules
-```
-
-Compilation complexity should primarily scale with the changed dependency closure rather than the complete package.
-
-The package dependency graph operates at submodule granularity:
+Compilation follows the changed dependency closure:
 
 ```text
-Submodule A ─depends→ Submodule B
+changed Submodule
+      │
+      ▼
+changed interface?
+   /          \
+ no            yes
+ │              │
+ ▼              ▼
+local       dependent
+ObjectUnit  submodules
 ```
 
-rather than merely:
+### Object generation
+
+The default remains:
 
 ```text
-Module A ─depends→ Module B
+Submodule → ObjectUnit → .o
 ```
 
-This allows unused submodules to remain uncompiled and unlinked.
-
-Backend partitioning remains independent.
-
-The compiler may choose ObjectUnits based on:
+but backend optimization may split or merge ObjectUnits according to:
 
 ```text
 target
-generic realization
+generic specialization
+device
 linkage
 visibility
-optimization
-device
+LTO
 code size
-LTO policy
 ```
 
-without modifying semantic organization.
+without affecting semantic identity.
 
-The default should remain simple:
+### Overall architecture
+
+The resulting compiler model is:
 
 ```text
-one used Submodule
-    ↓
-one ObjectUnit
-    ↓
-one .o
+                         Universal
+                            │
+      ┌─────────────┬───────┼────────┬─────────────┐
+      │             │       │        │             │
+      ▼             ▼       ▼        ▼             ▼
+ containment    dependency  with   ownership       CFG
+ hierarchy         DAG      DAG      graph          graph
+      │             │       │        │             │
+      └─────────────┴───────┼────────┴─────────────┘
+                            ▼
+                        resolution
+                            │
+                            ▼
+                           MIR
+                            │
+                            ▼
+                          MLIR
+                            │
+                            ▼
+                       ObjectUnits
+                            │
+                            ▼
+                      .o / .a / .so
 ```
 
-and only split or merge when required.
-
-`Sentence` and `Block` should also avoid unnecessary compiler-node expansion.
-
-Expression structure belongs within a sentence unless execution introduces a nested region.
-
-This prevents simple code such as:
-
-```sev
-x = a + b * c
-```
-
-from producing artificial block structures while still preserving its operator dependency graph.
-
-The intended result is:
+The key invariants are:
 
 ```text
-stable semantic units
-+
-fine-grained dependency invalidation
-+
-package-driven artifact selection
-+
-flexible backend partitioning
-+
-no dependency on physical file organization
-```
+Hierarchy defines where a semantic entity belongs.
 
-The compiler's containment hierarchy remains simple while Universal provides the graph relationships required by dispatch, ownership, CFG analysis, constraints, and package linking.
+Grammar defines how symbols form sentences.
+
+Sentence defines a complete grammar/evaluation unit.
+
+Block defines nested execution, scope, CFG, and lifetime.
+
+with defines requirements and refinements over semantic entities.
+
+The constraint DAG defines what must be known and in what order.
+
+Submodule defines the semantic compilation/package unit.
+
+ObjectUnit defines what is emitted together.
+
+Universal connects all of these through typed graph relationships.
+```
