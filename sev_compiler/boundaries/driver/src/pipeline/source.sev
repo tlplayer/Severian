@@ -41,7 +41,8 @@ def prepare_prelude(sysroot: string) -> unit | Error:
     subject = source.SourceFile(source.SourceId(0), "/__severian_prelude_snapshot__.sev", "")
     result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
     if result is Diagnostic:
-        throw Error(diagnostics.render(diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "prepare_prelude", subject.path)), files))
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "prepare_prelude", subject.path))
+        throw Error(diagnostics.render(framed, files))
 
 
 def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
@@ -62,7 +63,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     if result is SourceFile:
         return result
     if result is Diagnostic:
-        throw Error(diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "load_input", path)).display())
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "load_input", path))
+        throw Error(framed.display())
     throw Error("could not read source file: " + path)
 
 
@@ -71,7 +73,8 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     if result is string:
         return result
     if result is Diagnostic:
-        throw Error(diagnostics.render(diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "compile_to_mlir", input.path)), files))
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "compile_to_mlir", input.path))
+        throw Error(diagnostics.render(framed, files))
     if result is Error:
         throw Error(result.message)
     throw Error("source compilation returned no MLIR")
@@ -99,7 +102,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 case Locator:
                     source_provider = source_provider or normalized_path(parent_path(original_prelude.path) + "/" + locator) == subject_path
                 case _:
-                    throw diagnostics.diagnostic("E000120", "unimplemented")
+                    throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
     if not prepare_only and len(files) == 0:
         for snapshot in PreludeSnapshots:
             eligible := snapshot.root == root and snapshot.owner != process.id() and not source_provider
@@ -263,7 +266,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     if "compiler" in declaration.source_modes:
                         prepared = []
                 case _:
-                    throw diagnostics.diagnostic("E000120", "unimplemented")
+                    throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
     if len(prepared) > 0:
         parsed.items = parsed.items[provider_items:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
@@ -335,7 +338,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     case TypeLayout:
                         layout_query = true
                     case _:
-                        throw diagnostics.diagnostic("E000120", "unimplemented")
+                        throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
     if layout_query:
         layout = native.hosted_layout()
         program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))

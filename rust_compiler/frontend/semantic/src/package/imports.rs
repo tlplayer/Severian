@@ -52,6 +52,34 @@ pub fn resolve_required_imports(
     index: &ProgramIndex,
     mut requirements: ImportRequirements,
 ) -> ImportPlan {
+    // Enum variants are available through their enum's imported declaration,
+    // even when source spells only the variant (or namespace.Variant). They
+    // are not separate entries in the export index. Retain the owner rather
+    // than silently dropping the declaration that supplies the value.
+    let mut variant_owners: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for module in &graph.modules {
+        for item in &module.ast.items {
+            if let Item::Enum(enumeration) = item {
+                for variant in &enumeration.variants {
+                    variant_owners.entry(&variant.name).or_default().insert(&enumeration.name);
+                }
+            }
+        }
+    }
+    for names in requirements.values_mut() {
+        let mut owners = BTreeSet::new();
+        for name in names.iter() {
+            let (prefix, variant) = name.rsplit_once('.').map_or(("", name.as_str()), |(prefix, variant)| (prefix, variant));
+            for owner in variant_owners.get(variant).into_iter().flatten() {
+                if prefix.is_empty() {
+                    owners.insert((*owner).to_owned());
+                } else if prefix.rsplit('.').next() != Some(owner) {
+                    owners.insert(format!("{prefix}.{owner}"));
+                }
+            }
+        }
+        names.extend(owners);
+    }
     let namespace_uses = requirements.clone();
     let mut edges: BTreeMap<ModuleId, Vec<Edge>> = BTreeMap::new();
     let mut private_namespaces = BTreeSet::new();

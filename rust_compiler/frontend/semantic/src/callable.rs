@@ -91,6 +91,9 @@ impl Analyzer<'_> {
         aliases: BTreeMap<String, TypeId>,
         constructor: Option<&ClassInstance>,
     ) -> Result<(), Diagnostic> {
+        if self.lower_mlir_boundary(ast_function, function)? {
+            return Ok(());
+        }
         for parameter in &mut function.parameters {
             if ast_function.parameters.iter().any(|source| source.name == parameter.name && source.immutable_reference)
                 && !parameter.contract.modifiers.iter().any(|modifier| modifier.name == "view")

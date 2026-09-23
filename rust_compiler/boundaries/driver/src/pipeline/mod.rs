@@ -325,9 +325,11 @@ impl Compiler {
         let mir = self.check_file_to_mir(source, CompileMode::Build)?;
         let types = self.types_for(&mir);
         let plan = severian_compile::plan(&mir, types).map_err(CompileError::Compile)?;
-        let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
+        let target = crate::components::ensure_for_plan(&plan, &self.target)
+            .map_err(CompileError::Component)?;
+        let lir = severian_lowering::lower(&plan.resumed_mir(), types, &target)
             .map_err(CompileError::Lowering)?;
-        let artifacts = self.compile_handlers.compile(&plan, &CompileContext { types, target: &self.target })
+        let artifacts = self.compile_handlers.compile(&plan, &CompileContext { types, target: &target })
             .map_err(CompileError::Compile)?;
         let initializer = format!("__sev_package_init_{}", source.to_string_lossy().bytes().map(|byte| format!("{byte:02x}")).collect::<String>());
         let symbols = lir.functions.iter().filter(|function| function.cfg.is_some() || function.body.is_some()).map(|function| {
@@ -343,7 +345,7 @@ impl Compiler {
         let facts = serde_json::json!({"format": "severian.native-symbols", "version": 1, "target": self.target.triple, "initializer": initializer, "symbols": symbols, "records": records});
         std::fs::write(output.with_extension("symbols.json"), serde_json::to_vec_pretty(&facts).map_err(|error| CompileError::NativeLink(error.to_string()))?).map_err(|error| CompileError::NativeLink(error.to_string()))?;
         let ordinary = severian_mlir::render_library(&lir, &initializer).map_err(CompileError::Mlir)?;
-        let program = compose_region_artifacts(&ordinary, artifacts, &self.target)?;
+        let program = compose_region_artifacts(&ordinary, artifacts, &target)?;
         if !program.gpu_kernels.is_empty() || !program.tensor_jit_source.is_empty() {
             return Err(CompileError::NativeLink("library object requires separate accelerator provider artifacts".into()));
         }
@@ -405,20 +407,22 @@ impl Compiler {
                 let mir = self.check_file_to_mir(source, CompileMode::Build)?;
                 let types = self.types_for(&mir);
                 let plan = severian_compile::plan(&mir, types).map_err(CompileError::Compile)?;
+                let target = crate::components::ensure_for_plan(&plan, &self.target)
+                    .map_err(CompileError::Component)?;
                 let artifacts = self
                     .compile_handlers
                     .compile(
                         &plan,
                         &CompileContext {
                             types,
-                            target: &self.target,
+                            target: &target,
                         },
                     )
                     .map_err(CompileError::Compile)?;
-                let lir = severian_lowering::lower(&plan.resumed_mir(), types, &self.target)
+                let lir = severian_lowering::lower(&plan.resumed_mir(), types, &target)
                     .map_err(CompileError::Lowering)?;
                 let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
-                let text = compose_region_artifacts(&ordinary, artifacts, &self.target)?.host_mlir;
+                let text = compose_region_artifacts(&ordinary, artifacts, &target)?.host_mlir;
                 Ok(format!("{}\n", text.trim_end()))
             }
             EmitStage::AgentIr => Err(CompileError::AgentIr(

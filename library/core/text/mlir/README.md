@@ -14,8 +14,9 @@ String lowering:
 
 The source UTF-8 algorithms in `primitive/string/core.sev` use this library's
 `__sev_text_size`, `__sev_text_load`, `__sev_text_store`, and
-`__sev_text_allocate` byte-storage exports. Scalar representation conversions
-use `__sev_text_codepoint` and `__sev_text_character`. Decoding, character
+`__sev_text_allocate` byte-storage exports through typed `@mlir("func.call")`
+declarations. Character conversions emit `arith.extui` and `arith.trunci`
+directly from their `@mlir` declarations. Decoding, character
 counting, equality, and copying remain Severian functions. These boundaries
 share the v1 NUL-terminated ABI; they do not assume a vector field layout.
 

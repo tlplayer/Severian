@@ -119,7 +119,7 @@ def rename_expression(expression: universal.Expression, names: list[string], rep
         case Stringify:
             kind = universal.Stringify(rename_expression(value, names, replacements))
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/packs.sev)")
     return universal.Expression(kind, expression.span, type_id=expression.type_id, grammar=expression.grammar)
 
 
@@ -149,7 +149,7 @@ def expand_block(block: universal.Block, pack: string, count: int, names: list[s
                                 result.statements.append(expanded_statement)
                             index += 1
                     case _:
-                        throw Error("unimplemented")
+                        throw Error("unimplemented (sev_compiler/frontend/semantic/src/packs.sev)")
             case BindingStatement:
                 value = rename_expression(binding.value, names, replacements)
                 if binding.name not in names:

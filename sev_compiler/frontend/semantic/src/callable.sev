@@ -109,7 +109,7 @@ def callable_parameter_value(state: CallableAnalysis, parameter: universal.Funct
                     if mode == "clone":
                         return callable_expression(state, expression, expected)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             return callable_expression(state, universal.Expression(universal.Ownership("clone", expression), expression.span), expected)
         if modifier.name in ["move", "borrow", "borrow mut"]:
             match expression.kind:
@@ -118,7 +118,7 @@ def callable_parameter_value(state: CallableAnalysis, parameter: universal.Funct
                         return error(callable_diagnostic("ownership argument does not match parameter mode " + modifier.name, expression.span))
                     return callable_expression(state, expression, expected)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             wrapped = universal.Expression(universal.Ownership(modifier.name, expression), expression.span)
             return callable_expression(state, wrapped, expected)
     return callable_expression(state, expression, expected)
@@ -216,9 +216,9 @@ def callable_none_literal(expression: universal.Expression) -> bool:
                 case NoneValue:
                     return true
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return false
 
 
@@ -297,7 +297,7 @@ def callable_type_operand(state: CallableAnalysis, expression: universal.Express
         case SourceSymbol:
             return callable_constructor_type(state, expression).index != 0
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     application = callable_application_target(expression)
     name = callable_path(expression) if application == "" else application
     if name == "":
@@ -364,7 +364,7 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                     if callable_path(object) in ["bytes", "alignment"]:
                         return callable_expression(state, expression, universal.TypeId(0)).type_id
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             variant = callable_tagged_selection(state, callee)
             if variant.record != -1:
                 return state.records[variant.record].type_id
@@ -372,7 +372,7 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                 case SourceSymbol:
                     return callable_expression(state, expression, universal.TypeId(0)).type_id
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             name = callable_path(callee)
             for function in state.functions:
                 syntax ?= function.operator_syntax
@@ -445,14 +445,14 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                 case CharacterValue:
                     return universal.TypeId(132)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         case Conditional:
             hint = callable_hint(state, then_value)
             if hint.index != 0:
                 return hint
             return callable_hint(state, else_value)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return universal.TypeId(0)
 
 
@@ -645,14 +645,14 @@ def callable_expression(state: CallableAnalysis, expression: universal.Expressio
         case Call:
             state.loans = loans.retained(state.loans, loan_start)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     # Operators and conversions can also resolve to calls. Their automatic
     # argument loans end with that expression, just like a spelled-out call.
     match resolved.kind:
         case ResolvedCall:
             state.loans = loans.retained(state.loans, loan_start)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return resolved
 
 
@@ -804,7 +804,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         case BindingReference:
                             return error(callable_diagnostic("a destructor cannot move or resurrect self", expression.span))
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 loans.access(state.loans, binding_index, true, expression.span)
                 if binding_index in state.borrowed_parameters or loans.owner(state.loans, binding_index) != binding_index:
                     return error(callable_diagnostic("cannot move a borrowed value", expression.span))
@@ -990,7 +990,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         native = callable_raw_call(state, "__raw_pointer", [integer], expression.span, universal.TypeId(5))
                         address = callable_pointer_offset(state, native, index, resolved.type_id, expression.span)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             native ?= address
             if native != None:
                 annotation = universal.named_type("pointer", [universal.named_type(definitions.type_name(resolved.type_id, state.records), [], expression.span)], expression.span)
@@ -1168,9 +1168,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                 literal = universal.Expression(universal.LiteralValue(universal.IntegerValue("-" + spelling)), expression.span)
                                 return callable_expression(state, literal, expected)
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             resolved = callable_expression(state, source_operand, expected)
             result_type = resolved.type_id
             implementation = callable_operator(state, operator.symbol, [result_type], expression.span)
@@ -1228,9 +1228,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             case AbsentValue:
                                 tested_name = "absent"
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 annotation = universal.named_type(tested_name, [], right.span)
                 tested = callable_annotation(annotation, state.records, state.namespace, state.declarations)
                 for record in state.records:
@@ -1255,9 +1255,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                             case BooleanValue:
                                                 lazy = value
                                             case _:
-                                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                                     case _:
-                                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     if lazy:
                         for method in definition.methods:
                             if method.name == "semantic":
@@ -1273,7 +1273,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                                     expanded.grammar = definition.definition
                                                     return callable_expression(state, expanded, expected)
                                             case _:
-                                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                         return error(callable_diagnostic("lazy grammar requires an expression semantic body", expression.span))
             comparison = grammar_scalar.comparison(state.declarations, operator.symbol) or operator.symbol == "in"
             operand_type := universal.TypeId(0) if comparison else expected
@@ -1349,7 +1349,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         quantity = universal.Expression(universal.Name("data_size"), expression.span)
                         return callable_expression(state, universal.Expression(universal.Call(quantity, [universal.CallArgument(None, layout, expression.span)]), expression.span), expected)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             variant = callable_tagged_selection(state, callee)
             if variant.record != -1:
                 return callable_tagged_value(state, variant, arguments, expression.span, expected)
@@ -1384,7 +1384,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     case BindingReference:
                         state.dead.append(int(binding.index))
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 return result
             if name in ["view", "borrow", "move", "copy", "clone", "mirror"]:
                 if len(arguments) != 1 or arguments[0].name != None:
@@ -1484,7 +1484,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                                         case FieldReference:
                                             return error(callable_diagnostic("owned resource fields require move", argument.span))
                                         case _:
-                                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                                 checked = callable_field_value(state, record, field, typed, argument.span)
                                 resolved.append(universal.CallArgument(field.name, checked, argument.span))
                     if expected.index != 0 and expected.index != record.type_id.index:
@@ -1712,7 +1712,7 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
                             state.uninitialized.append((int(id.index), field_index))
                         field_index += 1
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     match value.kind:
         case Ownership:
             if mode in ["borrow", "borrow mut"]:
@@ -1722,7 +1722,7 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
                 if mode == "borrow":
                     state.readonly.append(int(id.index))
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     if value.loan_mode in ["borrow", "borrow mut"] and value.loan_root >= 0:
         root = loans.owner(state.loans, value.loan_root)
         state.loans.append(loans.Loan(root, int(id.index), value.loan_mode == "borrow mut"))
@@ -1792,11 +1792,11 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
                             message = arguments[1].value
                         return callable_assertion(state, arguments[0].value, message, expression.span, arguments[0].value.span)
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             value = callable_expression(state, expression, universal.TypeId(0))
             return universal.ExpressionStatement(value)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return error(callable_diagnostic("expected a scalar binding, call, or assertion", expression.span))
 
 
@@ -1891,7 +1891,7 @@ def callable_install_mock(state: CallableAnalysis, calls: list[universal.Express
                 if not exhaustive:
                     body.statements.append(universal.Throw(value, span))
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         function.body = body
         state.functions.append(function)
         state.mock_functions.append(universal.MockFunction(original.name, function.name))
@@ -1985,7 +1985,7 @@ def callable_field_key(state: CallableAnalysis, record: universal.RecordDeclarat
                     if field.name == name:
                         return universal.Expression(universal.LiteralValue(universal.StringValue(name)), value.span)
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return value
 
 
@@ -1996,9 +1996,9 @@ def callable_literal_field(value: universal.Expression) -> string:
                 case StringValue:
                     return value
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return ""
 
 
@@ -2036,7 +2036,7 @@ def callable_field_access(state: CallableAnalysis, object: universal.Expression,
                         empty = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
                         receiver = callable_saved_field_operand(local, body, universal.Expression(universal.Evaluate(empty, storage), span, type_id=record.type_id), span)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     if receiver == None:
         receiver = callable_expression(local, object, universal.TypeId(0))
     selected ?= receiver
@@ -2146,7 +2146,7 @@ def callable_checked_assignment(state: CallableAnalysis, target: universal.Expre
                 if record.type_id.index == object.type_id.index:
                     return callable_field_value(state, record, record.fields[index], value, span)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return value
 
 
@@ -2231,7 +2231,7 @@ def callable_field_transfer(state: CallableAnalysis, object: universal.Expressio
     root = loans.binding(object)
     match object.kind:
         case BindingReference:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         case _:
             return error(callable_diagnostic("nested partial resource moves require initialized-place tracking", span))
     places.require_initialized(state.uninitialized, root, index, "use after drop or move of field", span)
@@ -2257,7 +2257,7 @@ def callable_transfer_result(state: CallableAnalysis, value: universal.Expressio
             if not explicit:
                 return error(callable_diagnostic("returning an owned field requires move", span))
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
 
 
 def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression, output: universal.Block, span: source.Span, run_hook: bool = true) -> unit | diagnostics.Diagnostic:
@@ -2297,7 +2297,7 @@ def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression
             case BindingReference:
                 initialized = places.initialized(state.uninitialized, int(binding.index), cursor)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         if initialized and callable_has_drop(state, field.type_id):
             member = universal.Expression(universal.FieldReference(value, cursor), span, type_id=field.type_id)
             callable_destroy_fields(state, member, output, span)
@@ -2421,7 +2421,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                             case FieldReference:
                                 return error(callable_diagnostic("resource field transfers are not supported", binding.span))
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                         if typed_binding.update:
                             saved = callable_binding(state, universal.Binding("$replacement$" + string(len(state.names)), None, typed_binding.value, false, true, binding.span))
                             output.statements.append(universal.BindingStatement(saved))
@@ -2479,12 +2479,12 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                                 remaining.append(moved)
                         state.moved_elements = remaining
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 match resolved.kind:
                     case BindingReference:
                         callable_transition(state, int(binding.index), typed, span, true)
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 syntax ?= update
                 if syntax != None:
                     operation := ""
@@ -2500,9 +2500,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                                                 case StringValue:
                                                     operation = value
                                                 case _:
-                                                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                                                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                                         case _:
-                                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     if operation == "":
                         return error(callable_diagnostic("assignment grammar requires an update operation", span))
                     previous = universal.Expression(universal.UpdateOperand(0), span, type_id=resolved.type_id)
@@ -2530,9 +2530,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                                     callable_drop(state, object, output, expression.span)
                                     dropped = true
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 if not dropped:
                     output.statements.append(callable_expression_statement(state, expression))
             case Assert:
@@ -2609,9 +2609,9 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                             case BindingReference:
                                 then_state.refinements.append((int(binding.index), variant))
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 then_typed = callable_block(then_state, then_block.statements, result_type, false)
                 else_typed = callable_block(else_state, else_block.statements, result_type, false)
                 callable_join_transitions(state, then_state, else_state)
@@ -2779,7 +2779,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
                 if operation != "" and argument_name != "":
                     match argument.value:
                         case String:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                         case _:
                             return error(callable_diagnostic("MLIR operation attributes require string literals", declaration.span))
         try:
@@ -2810,7 +2810,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
         if default_value != None:
             match default_value.kind:
                 case LiteralValue:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 case _:
                     return error(callable_diagnostic("bootstrap parameter defaults must be literals", parameter.span))
         type_id = callable_annotation(parameter.annotation, records, namespace, declarations)
@@ -2937,7 +2937,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         record_declaration.definition = known.definition
                 state.records.append(record_declaration)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     tagged.layouts(state.records, existing_records)
     callable_register_aliases(state)
     for implementation in state.declarations.implementations[int(len(prepared[0].declarations.implementations)) if len(prepared) > 0 else 0:]:
@@ -3095,7 +3095,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                     function_names.append(function_declaration.name)
                 state.functions.append(signature)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     callable_validate_implementations(state)
     measured = semantic_stage(measured, "signatures")
     # Immutable literal globals are safe to materialize in each function. Other
@@ -3114,11 +3114,11 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                             global_value = callable_expression(CallableAnalysis(), binding.value, expected)
                             state.constants.append(universal.Binding(binding.name, binding.annotation, global_value, false, false, binding.span, type_id=global_value.type_id))
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 if binding.name not in global_names:
                     global_names.append(binding.name)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     callable_validate_generics(state, module, existing_generics)
     measured = semantic_stage(measured, "generic contracts")
     for item in module.items:
@@ -3134,7 +3134,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         case LiteralValue:
                             continue
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 resolved = callable_binding(state, binding)
                 if callable_has_drop(state, resolved.type_id):
                     return error(callable_diagnostic("global resource cleanup is not supported", binding.span))
@@ -3145,15 +3145,15 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
             case OperatorItem:
                 # Top-level operators were registered with their callable
                 # bodies above; they do not execute as module initializers.
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Function:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Record:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Trait:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Type:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Test:
                 if include_tests:
                     runtime_test := declaration
@@ -3180,7 +3180,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                                 case Reject:
                                     expect_rejection = true
                                 case Accept:
-                                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                             if expect_rejection != rejected:
                                 detail = "expected rejection, but compilation succeeded" if expect_rejection else "expected acceptance, but compilation failed: " + reason
                                 return error(callable_diagnostic("compiler test expectation failed in " + test_modes.label(declaration, source_files) + ": " + detail, compiler_case.span))
@@ -3265,7 +3265,7 @@ def callable_method(state: CallableAnalysis, callee: universal.Expression, argum
         case Name:
             implicit = true
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return callable_owner_method(state, owner, member, argument_count, implicit, callee.span)
 
 
@@ -3336,13 +3336,13 @@ def callable_terminates(block: universal.Block) -> bool:
                                 if not value and callable_terminates(else_block):
                                     return true
                             case _:
-                                throw Error("unimplemented")
+                                throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
-                        throw Error("unimplemented")
+                        throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 if callable_terminates(then_block) and callable_terminates(else_block):
                     return true
             case _:
-                throw Error("unimplemented")
+                throw Error("unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return false
 
 
@@ -3523,7 +3523,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                                     if lookup != None:
                                         namespace = lookup
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 operation = definitions.resolve_operator_constraints(state.declarations, declaration, namespace)
                 operation.definition = definitions.definition_id(operation.syntax.symbol, 10000 + ordinal)
                 ordinal += 1
@@ -3639,7 +3639,7 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                             function.parameters = parameters
                             state.functions.append(callable_signature(function, int(len(state.functions)), state.records, state.declarations))
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
 
 
 def callable_requirement_signature(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
@@ -3685,7 +3685,7 @@ def callable_parameter_traits(state: CallableAnalysis, type_id: universal.TypeId
                                 for inherited in definitions.inherited_traits(state.declarations, trait):
                                     result.append(inherited)
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             index += 1
     return result
 
@@ -4035,7 +4035,7 @@ def callable_specialize_generic(state: CallableAnalysis, template: universal.Fun
                             return error(diagnostics.diagnostic_at("E000219", "type does not satisfy trait " + trait.name, span))
                     constraint_index += 1
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     instance_name = template.name + "$generic" + suffix
     for function in state.functions:
         if function.name == instance_name:
@@ -4160,7 +4160,7 @@ def callable_semantic_expression(expression: universal.Expression, names: list[s
             otherwise = callable_semantic_expression(else_value, names, operands)
             return universal.Expression(universal.Conditional(test, taken,otherwise), expression.span)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return error(callable_diagnostic("unsupported lazy semantic expression", expression.span))
 
 
@@ -4186,9 +4186,9 @@ def callable_protocol_name(state: CallableAnalysis, contract: string, property_n
                                 case StringValue:
                                     return value
                                 case _:
-                                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                         case _:
-                            throw diagnostics.diagnostic("E000200", "unimplemented")
+                            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return error(callable_diagnostic("missing source protocol " + contract + "." + property_name, span))
 
 
@@ -4242,7 +4242,7 @@ def callable_explicit_generic(state: CallableAnalysis, callee: universal.Express
                         actuals.append(callable_annotation(argument, state.records, state.namespace, state.declarations))
                     return CallableOptionalFunction(callable_specialize_generic(state, template, actuals))
                 case _:
-                    throw diagnostics.diagnostic("E000200", "unimplemented")
+                    throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return CallableOptionalFunction(None)
 
 
@@ -4320,7 +4320,7 @@ def callable_constructor_type(state: CallableAnalysis, callee: universal.Express
                 if len(alias.type_parameters) == 0:
                     return callable_annotation(universal.named_type(name, [], callee.span), state.records, state.namespace, state.declarations)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return universal.TypeId(0)
 
 
@@ -4484,7 +4484,7 @@ def callable_infer_annotation(state: CallableAnalysis, annotation: universal.Typ
                                 return
                 return error(callable_diagnostic("generic argument has the wrong record type", annotation.span))
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
 
 
 
@@ -4511,7 +4511,7 @@ def callable_validate_record_arguments(state: CallableAnalysis, record: universa
                             case Union:
                                 family = definitions.family_members(local.declarations, bound, local.records, template.lookup)
                             case _:
-                                throw diagnostics.diagnostic("E000200", "unimplemented")
+                                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                         if len(family) != 0:
                             parameter_index := 0
                             for name in template.type_parameters:
@@ -4582,14 +4582,14 @@ def callable_constant_integer(expression: universal.Expression | None, fallback:
                     case IntegerValue:
                         return int(spelling)
                     case _:
-                        throw diagnostics.diagnostic("E000200", "unimplemented")
+                        throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
             case Unary:
                 if operator.symbol == "-":
                     return 0 - callable_constant_integer(operand, 0)
                 if operator.symbol == "+":
                     return callable_constant_integer(operand, 0)
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         return error(callable_diagnostic("indices and slice bounds require constant integers", value.span))
     return fallback
 
@@ -4624,7 +4624,7 @@ def callable_field_pack(state: CallableAnalysis, expression: universal.Expressio
                     index += 1
                 return CallableFieldPack(true, fields, receiver)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return CallableFieldPack()
 
 
@@ -4637,7 +4637,7 @@ def callable_infer_field_pack(state: CallableAnalysis, callee: universal.Express
                 if expansion.same(candidate.definition, definition):
                     selected = candidate
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     template ?= selected
     if template != None:
         if name in state.names:
@@ -4738,7 +4738,7 @@ def callable_expand_grammar(state: CallableAnalysis, callee: universal.Expressio
                         return CallableExpansion(result)
                 return error(callable_diagnostic("expression grammar requires a semantic method", span))
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return CallableExpansion()
 
 
@@ -4801,7 +4801,7 @@ def callable_type_method(state: CallableAnalysis, callee: universal.Expression) 
                 state.functions.append(function)
                 return CallableOptionalFunction(function)
         case _:
-            throw diagnostics.diagnostic("E000200", "unimplemented")
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
     return CallableOptionalFunction()
 
 
@@ -4825,7 +4825,7 @@ def callable_match_expression(state: CallableAnalysis, subject: universal.Expres
             case Match:
                 last = universal.ExpressionStatement(universal.Expression(universal.MatchExpression(subject, arms), span))
             case _:
-                throw diagnostics.diagnostic("E000200", "unimplemented")
+                throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         match last:
             case ExpressionStatement:
                 value = callable_expression(scoped, expression, result_type)

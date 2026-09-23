@@ -1,8 +1,8 @@
 # CompileType is an ordinary core protocol. Universal only receives its
 # resolved stable declaration identities during bootstrap.
 trait Compiler:
-throw Error("Unimplemented")
+    throw Error("Unimplemented (library/core/compile/src/mod.sev)")
 
 
 trait CompileType[C]:
-throw Error("Unimplemented")
+    throw Error("Unimplemented (library/core/compile/src/mod.sev)")

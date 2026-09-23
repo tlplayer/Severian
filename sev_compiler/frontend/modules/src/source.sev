@@ -313,7 +313,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                             result.items.append(universal.BindingItem(imported))
                                             selected = true
                                     case _:
-                                        throw diagnostics.diagnostic("E000124", "unimplemented")
+                                        throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/src/source.sev)")
                         if not selected:
                             return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
                     case _:
@@ -367,9 +367,9 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                             case StringValue:
                                 continue
                             case _:
-                                throw diagnostics.diagnostic("E000124", "unimplemented")
+                                throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/src/source.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000124", "unimplemented")
+                        throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/src/source.sev)")
                 if not root:
                     return error(diagnostics.diagnostic("E000120", "imported modules cannot execute module initializers"))
                 result.items.append(item)
@@ -396,7 +396,7 @@ def append_selected_import(result: universal.Module, child: universal.Module, na
                     append_imported_item(result, universal.BindingItem(imported))
                     selected = true
             case _:
-                throw diagnostics.diagnostic("E000124", "unimplemented")
+                throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/src/source.sev)")
     if not selected:
         return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
 

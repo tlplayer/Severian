@@ -74,7 +74,7 @@ def control_surface(value: int):
     locked = lock copied
     try:
         always pending > 0:
-            throw Error("Unimplemented")
+            throw Error("Unimplemented (editors/vscode/tests/highlighting.sev)")
     catch Error:
         pending = 0
     select:

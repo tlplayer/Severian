@@ -841,6 +841,7 @@ fn emit_mlir_binary(
         // intentionally leaves integer power in the Math dialect.
         "--convert-math-to-funcs".to_owned(),
         "--convert-math-to-llvm".to_owned(),
+        "--convert-vector-to-llvm".to_owned(),
         "--convert-arith-to-llvm".to_owned(),
         "--convert-func-to-llvm".to_owned(),
         "--convert-cf-to-llvm".to_owned(),

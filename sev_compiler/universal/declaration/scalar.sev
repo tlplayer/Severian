@@ -12,7 +12,7 @@ def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
                         case String:
                             return value
                         case _:
-                            throw Error("unimplemented")
+                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
     return ""
 
 
@@ -36,7 +36,7 @@ def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
                                 segments.append(size)
                             return segments
                         case _:
-                            throw Error("unimplemented")
+                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
     return []
 
 

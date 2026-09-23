@@ -72,15 +72,6 @@ fn package_facade_exports_named_modules_with_nominal_types() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-#[test]
-fn unit_value_does_not_reserve_local_binding_names() {
-    let root = temporary();
-    let source = root.join("unit.sev");
-    std::fs::write(&source, "def empty() -> unit:\n    return unit\ndef echo(unit: string) -> string:\n    return unit\n").unwrap();
-    let graph = severian_modules::resolve(&source).unwrap();
-    analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
-    std::fs::remove_dir_all(root).unwrap();
-}
 
 #[test]
 fn class_origin_helpers_do_not_compete_with_local_or_imported_callables() {

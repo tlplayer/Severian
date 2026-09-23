@@ -3,8 +3,8 @@ import * from "../declaration/function.sev"
 import * from "../operator/syntax.sev"
 
 
+# Marker shared by grammar declarations; it has no module initializer.
 trait G:
-throw Error("Unimplemented")
 
 
 enum GrammarPrimitive:

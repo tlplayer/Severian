@@ -85,7 +85,7 @@ def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnost
                     elif body.return_type.index != 2:
                         return error(diagnostics.Diagnostic("E000230", "CFG return requires a value", terminator.span))
                 case _:
-                    throw diagnostics.diagnostic("E000230", "unimplemented")
+                    throw diagnostics.diagnostic("E000230", "unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
             for edge in successors(terminator.exit):
                 if edge.target < 0 or edge.target >= len(body.blocks):
                     return error(diagnostics.Diagnostic("E000230", "CFG successor does not exist", terminator.span))
@@ -126,7 +126,7 @@ def simplify_storage(module: universal.Module, body: universal.CfgBody):
                         positions.append(-1)
                         direct.append(true)
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for block in body.blocks:
         position := 0
         for operation in block.operations:
@@ -141,7 +141,7 @@ def simplify_storage(module: universal.Module, body: universal.CfgBody):
                             positions[index] = position
                         index += 1
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
             position += 1
     parents = dominators(body)
     for block in body.blocks:
@@ -158,7 +158,7 @@ def simplify_storage(module: universal.Module, body: universal.CfgBody):
                                 direct[index] = false
                         index += 1
                 case Store:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
                 case _:
                     for input in operation_inputs(operation):
                         index := 0
@@ -196,7 +196,7 @@ def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.Va
                         retained = false
                     index += 1
             case _:
-                throw Error("unimplemented")
+                throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
         if retained:
             operations.append(operation)
     block.operations = operations
@@ -220,7 +220,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
                     else:
                         prefix.append(operation)
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for selected in body.blocks:
         body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix)
 
@@ -256,7 +256,7 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
                         retained = false
                     index += 1
             case _:
-                throw Error("unimplemented")
+                throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
         if retained:
             operations.append(operation)
     selected.operations = operations
@@ -308,9 +308,9 @@ def prune_unreachable(body: universal.CfgBody):
                             constants.append(int(result.index))
                             booleans.append(value)
                         case _:
-                            throw Error("unimplemented")
+                            throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for block in body.blocks:
         terminal ?= block.terminator
         if terminal != None:
@@ -324,7 +324,7 @@ def prune_unreachable(body: universal.CfgBody):
                             body.blocks[block.id] = block
                         index += 1
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     reachable = [body.entry]
     cursor := 0
     while cursor < len(reachable):
@@ -355,7 +355,7 @@ def prune_unreachable(body: universal.CfgBody):
                     right = universal.CfgEdge(mapping[otherwise.target], otherwise.arguments)
                     exit = universal.CfgExit.Conditional(condition, left, right)
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
             block.terminator = universal.CfgTerminator(exit, terminal.grammar, terminal.span)
         block.id = mapping[block.id]
         retained.append(block)

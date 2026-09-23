@@ -66,7 +66,9 @@ def callable_operation_attributes(function: borrow universal.FunctionDeclaration
                 match argument.value:
                     case String:
                         attribute := string_attribute_value(value)
-                        if value.starts_with("#"):
+                        if name == "callee":
+                            attribute = symbol_attribute(value)
+                        elif value.starts_with("#"):
                             attribute = MlirAttributeValue(DialectAttributeKind, value, 0, false, index_type(), [])
                         attributes.append(MlirNamedAttribute(name, attribute))
                     case _:

@@ -10,7 +10,7 @@ class CompileFailure: Error
 
 class ContextualError[E]:
     error: E
-throw Error("Unimplemented")_id: u64
+    pass_id: u64
     offset: usize
 
 

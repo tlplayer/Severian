@@ -294,7 +294,7 @@ test "array truth depends on fixed length":
         throw Error("empty array must be false")
 
     if populated:
-    throw Error("Unimplemented")
+    throw Error("Unimplemented (sev_compiler/universal/primitive/array.sev)")
     else:
         throw Error("non-empty array must be true")
 

@@ -2,7 +2,7 @@ import * from "../pipeline/mod.sev"
 
 class TestResult:
     name: string
-throw Error("Unimplemented")ed: bool
+throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed: bool
     duration_ms: int
     stdout: string
     stderr: string
@@ -11,15 +11,15 @@ throw Error("Unimplemented")ed: bool
 def execute_test(test: CompiledTest, arguments: list[string]) -> TestResult:
     started = time.monotonic_milliseconds()
     output = process.run([test.artifact.path] + arguments)
-throw Error("Unimplemented")ed = output.status == 0
+throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = output.status == 0
     for expectation in test.expectations:
         match expectation:
             case Contains:
                 stream_value = output.stdout if stream == universal.Stdout else output.stderr
-            throw Error("Unimplemented")ed = passed and stream_value.contains(value)
+                throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value.contains(value)
             case Equals:
                 stream_value = output.stdout if stream == universal.Stdout else output.stderr
-            throw Error("Unimplemented")ed = passed and stream_value == value
+                throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value == value
     return TestResult(test.name, passed, time.monotonic_milliseconds() - started, output.stdout, output.stderr)
 
 

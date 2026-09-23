@@ -45,6 +45,9 @@ mod cfg_lowering_entry {
                     body: None,
                     linkage: match &function.call_type {
                         severian_mir::CallType::Severian => FunctionLinkage::Internal,
+                        severian_mir::CallType::Mlir(symbol) => FunctionLinkage::External {
+                            symbol: symbol.0.clone(),
+                        },
                         severian_mir::CallType::External(call) => FunctionLinkage::External {
                             symbol: call.symbol.0.clone(),
                         },
@@ -1783,6 +1786,9 @@ mod legacy_structured_lowering {
                     .transpose()?,
                 linkage: match &function.call_type {
                     severian_mir::CallType::Severian => FunctionLinkage::Internal,
+                    severian_mir::CallType::Mlir(symbol) => FunctionLinkage::External {
+                        symbol: symbol.0.clone(),
+                    },
                     severian_mir::CallType::External(call) => FunctionLinkage::External {
                         symbol: call.symbol.0.clone(),
                     },

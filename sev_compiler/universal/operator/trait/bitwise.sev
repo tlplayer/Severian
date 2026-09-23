@@ -7,5 +7,5 @@ trait BitOr:
 trait BitXor:
     operator ^(right: Self) -> Self
 
+# This contract combines the three operator traits without a runtime body.
 trait Bitwise: BitAnd + BitOr + BitXor
-throw Error("Unimplemented")

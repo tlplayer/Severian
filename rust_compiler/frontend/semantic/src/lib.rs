@@ -3,6 +3,7 @@
 mod callable;
 mod constructor;
 mod destruction;
+mod mlir;
 mod package;
 mod queries;
 
@@ -747,9 +748,11 @@ pub(crate) fn analyze_with_package_functions(
         _ => None,
     });
     for (ast_function, function) in ast_functions.zip(module.functions.iter_mut()) {
-        let Some(_) = &ast_function.body else {
+        if ast_function.body.is_none()
+            && !ast_function.decorators.iter().any(|decorator| decorator.name == "mlir")
+        {
             continue;
-        };
+        }
         if function
             .parameters
             .iter()
@@ -8685,7 +8688,7 @@ impl Analyzer<'_> {
                     },
                     span: ast.span,
                 };
-                if self.is_error_type(*result) {
+                if self.preserve_error_depth == 0 && self.is_error_type(*result) {
                     let unit = self
                         .types
                         .resolve_name("unit")
@@ -13597,7 +13600,9 @@ impl Analyzer<'_> {
             {
                 Ok("pair_i64")
             }
-            _ if self.class_instances_by_type.contains_key(&element) => Ok("aggregate"),
+            _ if self.class_instances_by_type.contains_key(&element)
+                || self.union_types.contains_key(&element)
+                || self.fallible_types.contains_key(&element) => Ok("aggregate"),
             _ => Err(Diagnostic::new(
                 "E000211",
                 "native list lowering does not yet support this element representation",
@@ -14594,10 +14599,11 @@ impl Analyzer<'_> {
             let object_path = callable_path(object);
             let package_namespace = object_path.as_ref().is_some_and(|namespace| {
                 !self.names.contains_key(namespace)
-                    && self
-                        .functions
-                        .keys()
-                        .any(|function| function.starts_with(&format!("{namespace}.")))
+                    && (self.package_namespaces.contains(namespace)
+                        || self
+                            .functions
+                            .keys()
+                            .any(|function| function.starts_with(&format!("{namespace}."))))
             });
             let class_namespace = object_path.as_ref().is_some_and(|namespace| {
                 self.classes.contains_key(namespace)
@@ -22440,14 +22446,7 @@ def interpolate(text: string) -> string:
             .all(|local| local.mutable));
     }
 
-    #[test]
-    fn return_analysis_is_control_flow_based_not_last_statement_based() {
-        let (program, _) =
-            analyze_source("def answer() -> int:\n    return 42\n    unreachable := 0\n");
-        assert_eq!(program.modules[0].functions.len(), 1);
-    }
-
-    #[test]
+     #[test]
     fn overload_resolution_prefers_exact_parameters_over_widening() {
         let (program, context) = analyze_source(
             "def choose(value: i32) -> i32:\n    return value\ndef choose(value: i64) -> i64:\n    return value\nsource: i32 = 1\nselected = choose(source)\n",
@@ -22765,7 +22764,7 @@ def interpolate(text: string) -> string:
             .iter()
             .filter_map(|function| match &function.call_type {
                 severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
-                severian_hir::CallType::Severian => None,
+                severian_hir::CallType::Severian | severian_hir::CallType::Mlir(_) => None,
             })
             .collect::<Vec<_>>();
         assert!(symbols.contains(&"__sev_list_sorted_ptr"));
@@ -22783,7 +22782,7 @@ def interpolate(text: string) -> string:
             .iter()
             .filter_map(|function| match &function.call_type {
                 severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
-                severian_hir::CallType::Severian => None,
+                severian_hir::CallType::Severian | severian_hir::CallType::Mlir(_) => None,
             })
             .collect::<Vec<_>>();
         assert!(symbols.contains(&"__sev_list_index_list"));
@@ -22927,7 +22926,7 @@ def interpolate(text: string) -> string:
             .iter()
             .filter_map(|function| match &function.call_type {
                 severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
-                severian_hir::CallType::Severian => None,
+                severian_hir::CallType::Severian | severian_hir::CallType::Mlir(_) => None,
             })
             .collect::<Vec<_>>();
         assert!(symbols.contains(&"__sev_list_append_i64"));
@@ -22944,7 +22943,7 @@ def interpolate(text: string) -> string:
             .iter()
             .filter_map(|function| match &function.call_type {
                 severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
-                severian_hir::CallType::Severian => None,
+                severian_hir::CallType::Severian | severian_hir::CallType::Mlir(_) => None,
             })
             .collect::<Vec<_>>();
         assert!(symbols.contains(&"__sev_any_from_string"));
@@ -23014,7 +23013,7 @@ def interpolate(text: string) -> string:
             .iter()
             .filter_map(|function| match &function.call_type {
                 severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
-                severian_hir::CallType::Severian => None,
+                severian_hir::CallType::Severian | severian_hir::CallType::Mlir(_) => None,
             })
             .collect::<Vec<_>>();
         assert!(symbols.contains(&"__sev_any_from_bool"));

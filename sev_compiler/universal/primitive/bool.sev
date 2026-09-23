@@ -112,11 +112,10 @@ trait Truth:
     operator if(self) -> bool
     operator else(self) -> bool
 
+# Marker contracts are declarations; importing them performs no operation.
 trait View:
-throw Error("Unimplemented")
 
 trait Copy:
-throw Error("Unimplemented")
 
 
 trait Borrow:
@@ -136,11 +135,9 @@ trait Print:
 
 
 trait ConstParam:
-throw Error("Unimplemented")
 
 
 trait Structural:
-throw Error("Unimplemented")
 
 
 trait BitwiseAssign:

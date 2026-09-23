@@ -1,0 +1,14 @@
+# The seed compiler represents string values with the managed v1 text ABI.
+# These symbols are implemented by core.text's registered MLIR library, not
+# by a source vector layout. Keep UTF-8 algorithms independent of that ABI.
+@mlir("func.call", callee="__sev_text_size")
+def __text_size(value: view string) -> int
+
+@mlir("func.call", callee="__sev_text_load")
+def __text_load(value: view string, position: int) -> u8
+
+@mlir("func.call", callee="__sev_text_allocate")
+def __text_allocate(size: int) -> string
+
+@mlir("func.call", callee="__sev_text_store")
+def __text_store(value: u8, destination: borrow string, position: int)

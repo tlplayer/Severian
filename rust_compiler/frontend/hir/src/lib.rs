@@ -49,6 +49,8 @@ pub struct ProviderId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallType {
     Severian,
+    /// A symbol implemented by a composed MLIR library, without a foreign ABI.
+    Mlir(SymbolId),
     External(ExternalCall),
 }
 

@@ -106,7 +106,7 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                     case FormattedString:
                         metadata = syntaxes
                     case _:
-                        throw diagnostics.diagnostic("E000102", "unimplemented")
+                        throw diagnostics.diagnostic("E000102", "unimplemented (sev_compiler/frontend/lexer/src/scanner/mod.sev)")
                 token = make_token(input, kind, start, cursor)
                 token.syntaxes = metadata
                 token.value = result.value

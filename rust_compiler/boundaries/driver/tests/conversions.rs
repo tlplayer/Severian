@@ -5,6 +5,42 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
+fn preserving_a_concrete_error_call_keeps_its_value() {
+    test_source(r#"
+class Failure: Error
+    message: string
+def failure() -> Failure:
+    return Failure("preserved")
+test:
+    saved ?= failure()
+    assert(saved.message == "preserved")
+"#);
+}
+
+#[test]
+fn optional_strings_survive_list_append_and_retrieval() {
+    test_source(r#"
+test:
+    aliases: list[string | None] = []
+    missing: string | None = None
+    rendered = "alias-" + string(42)
+    present: string | None = rendered
+    aliases.append(missing)
+    aliases.append(present)
+    aliases.append(None)
+    assert(len(aliases) == 3)
+    first ?= aliases[0]
+    second ?= aliases[1]
+    last ?= aliases[2]
+    assert(first == None)
+    assert(last == None)
+    assert(second != None)
+    if second != None:
+        assert(second == "alias-42")
+"#);
+}
+
+#[test]
 fn converted_strings_survive_later_conversions_and_enum_storage() {
     test_source(
         r#"

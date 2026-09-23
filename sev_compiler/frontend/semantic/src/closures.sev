@@ -37,4 +37,4 @@ def names(value: universal.Expression, result: list[string]):
             for element in elements:
                 names(element, result)
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/closures.sev)")

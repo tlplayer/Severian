@@ -70,6 +70,21 @@ ConstraintFailure
 
 Error codes and spans remain frontend responsibilities.
 
+## Typed MLIR declarations
+
+`mlir.rs` lowers bodyless `@mlir("dialect.operation")` declarations into typed
+HIR operation bodies. They follow the ordinary MIR, LIR and MLIR pipeline,
+including zero-result operations such as `cf.assert` and `vector.print`.
+Named string arguments become MLIR attributes; dialect attributes beginning
+with `#` retain their MLIR spelling.
+
+`@mlir("func.call", callee="symbol")` binds a typed declaration to an MLIR
+library symbol using `CallType::Mlir`. Registered library composition supplies
+the implementation before native lowering. This does not create a C boundary.
+`Compiler::compile_library_object` retains the composed `.mlir`, relocatable
+`.o`, and `.symbols.json` in the package build output, alongside its shared
+library. Unsupported lowering requirements are diagnosed explicitly.
+
 ## Automatic wildcard narrowing
 
 Normal builds interpret `import * from X` as a request for the names actually
@@ -83,6 +98,8 @@ annotations, constraints, defaults, and nested lexical scopes. The resolver in
 its work list handles cycles, diamonds, overloads and namespace aliases. Files
 and their initialization order remain in the graph. Trait registry namespaces
 are tracked independently of imported callable stubs.
+Bare enum-variant references retain their enum declaration through the same
+import edges, including reexports.
 
 The package setting `language.explicit-imports` defaults to `true`. Setting it
 to `false` retains broad import visibility for that package. Automatic narrowing

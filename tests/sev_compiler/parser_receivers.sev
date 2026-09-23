@@ -23,17 +23,17 @@ test "bare self leaves receiver type and ownership inference to semantics":
 
 
 test "bare self preserves following parameters and delimited layout":
-    function = parse_function("def append(\n    self,\n    value: int,\n) -> unit:\n    throw Error("Unimplemented")")
+    function = parse_function("def append(\n    self,\n    value: int,\n) -> unit:\n    throw Error("Unimplemented (tests/sev_compiler/parser_receivers.sev)")")
     assert(len(function.parameters) == 1)
     assert(function.parameters[0].name == "value")
     assert(universal.simple_type_name(function.parameters[0].annotation) == "int")
-    trailing = parse_function("def clear(self,):\n    throw Error("Unimplemented")")
+    trailing = parse_function("def clear(self,):\n    throw Error("Unimplemented (tests/sev_compiler/parser_receivers.sev)")")
     assert(len(trailing.parameters) == 0)
 
 
 test "explicit receiver ownership annotations are retained":
     for mode in ["view", "borrow", "move"]:
-        function = parse_function("def method(self: " + mode + " Self, value: int):\n    throw Error("Unimplemented")")
+        function = parse_function("def method(self: " + mode + " Self, value: int):\n    throw Error("Unimplemented (tests/sev_compiler/parser_receivers.sev)")")
         assert(len(function.parameters) == 2)
         assert(function.parameters[0].name == "self")
         assert(universal.simple_type_name(function.parameters[0].annotation) == "Self")
@@ -42,7 +42,7 @@ test "explicit receiver ownership annotations are retained":
 
 
 test "ordinary untyped parameters still require annotations":
-    result ?= parse_function("def method(value):\n    throw Error("Unimplemented")")
+    result ?= parse_function("def method(value):\n    throw Error("Unimplemented (tests/sev_compiler/parser_receivers.sev)")")
     if result is Diagnostic:
         assert(result.message == "expected colon after parameter")
     else:

@@ -256,7 +256,7 @@ def replace_annotation(annotation: universal.TypeAnnotation, names: list[string]
                         case Named:
                             return universal.TypeAnnotation(universal.Named(name, applied), annotation.span, binding=annotation.binding)
                         case _:
-                            throw Error("unimplemented")
+                            throw Error("unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
                 index += 1
             replaced: list[universal.TypeAnnotation] = []
             for argument in arguments:
@@ -318,7 +318,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
                 applied.bases = bases
                 return applied
         case _:
-            throw diagnostics.diagnostic("E000205", "unimplemented")
+            throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
     return error(diagnostics.diagnostic_at("E000212", "constraint must name a trait", annotation.span))
 
 
@@ -362,7 +362,7 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: un
                         if not known:
                             return error(diagnostics.diagnostic_at("E000212", "unknown operator constraint " + bound_name, span))
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
         if not grammar_bound:
             constraints.append(constraint)
     parameters: list[string] = []
@@ -448,7 +448,7 @@ def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: 
             for argument in arguments:
                 infer_extension_parameters(definitions, argument, declaration.lookup, parameters)
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
     declaration.type_parameters = parameters
     return declaration
 
@@ -541,7 +541,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                         names.append(declaration.name)
                 ordinal += 1
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
     # Resolve free extension parameters only after every concrete type and alias
     # is registered. list[string] is concrete; list[T] may bind an unknown T.
     implementation_index := 0
@@ -554,7 +554,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Record:
                 module.items[item_index] = universal.Record(resolve_extension_parameters(definitions, declaration))
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/src/definitions.sev)")
         item_index += 1
     trait_index := 0
     for declaration in definitions.traits:

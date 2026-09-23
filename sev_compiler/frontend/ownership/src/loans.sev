@@ -16,9 +16,9 @@ def constant_index(expression: universal.Expression) -> int:
                 case IntegerValue:
                     return int(spelling)
                 case _:
-                    throw Error("unimplemented")
+                    throw Error("unimplemented (sev_compiler/frontend/ownership/src/loans.sev)")
         case _:
-            throw Error("unimplemented")
+            throw Error("unimplemented (sev_compiler/frontend/ownership/src/loans.sev)")
     return -1
 
 

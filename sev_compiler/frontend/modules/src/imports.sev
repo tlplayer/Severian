@@ -497,12 +497,12 @@ def imported_requirements(required: list[string], alias: string | None, selected
                 require_name(result, name + requirement[int(len(local)):])
         return result
     namespace ?= alias
-    if namespace == None:
-        return required[:]
-    for name in required:
-        if name.starts_with(namespace + "."):
-            require_name(result, name[int(len(namespace)) + 1:])
-    # Package namespaces may expose a same-named default callable.
-    if namespace in required:
-        require_name(result, namespace)
-    return result
+    if namespace != None:
+        for name in required:
+            if name.starts_with(namespace + "."):
+                require_name(result, name[int(len(namespace)) + 1:])
+        # Package namespaces may expose a same-named default callable.
+        if namespace in required:
+            require_name(result, namespace)
+        return result
+    return required[:]

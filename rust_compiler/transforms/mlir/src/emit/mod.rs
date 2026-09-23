@@ -1302,6 +1302,60 @@ fn render_gpu_terminator(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn render_mlir_operation(
+    output: &mut String,
+    module: &Module,
+    mnemonic: &str,
+    parameters: Option<&str>,
+    operands: &[ValueId],
+    result: ValueId,
+    indentation: &str,
+) -> Result<(), MlirError> {
+    let operand_values = operands
+        .iter()
+        .map(|value| format!("%v{}", value.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let operand_types = operands
+        .iter()
+        .map(|value| mlir_type(&value_type(module, *value)?))
+        .collect::<Result<Vec<_>, _>>()?;
+    let ty = value_type(module, result)?;
+    let unit = ty == LoweredType::Unit;
+    let assignment = if unit {
+        String::new()
+    } else {
+        format!("%v{} = ", result.0)
+    };
+    let result_type = if unit { "()".into() } else { mlir_type(&ty)? };
+    if let Some(attributes) = parameters.filter(|value| value.trim_start().starts_with("<{")) {
+        output.push_str(&format!("{indentation}{assignment}\"{mnemonic}\"({operand_values}) {attributes} : ({}) -> {result_type}\n", operand_types.join(", ")));
+    } else if let Some(parameters) = parameters {
+        let input_type = operand_types.first().ok_or_else(|| {
+            MlirError::UnsupportedOperation(format!(
+                "parameterized MLIR operation `{mnemonic}` requires an operand"
+            ))
+        })?;
+        output.push_str(&format!(
+            "{indentation}{assignment}{mnemonic} {parameters}, {operand_values} : {input_type}\n"
+        ));
+    } else {
+        output.push_str(&format!(
+            "{indentation}{assignment}\"{mnemonic}\"({operand_values}) : ({}) -> {result_type}\n",
+            operand_types.join(", ")
+        ));
+    }
+    if unit {
+        // MIR expressions carry an internal unit value. The actual MLIR
+        // operation has zero results (for example cf.assert or vector.print).
+        output.push_str(&format!(
+            "{indentation}%v{} = arith.constant 0 : i8\n",
+            result.0
+        ));
+    }
+    Ok(())
+}
+
 fn render_cfg_operation(
     output: &mut String,
     module: &Module,
@@ -1739,42 +1793,7 @@ fn render_cfg_operation(
             operands,
             result,
         } => {
-            let operand_values = operands
-                .iter()
-                .map(|value| format!("%v{}", value.0))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let operand_types = operands
-                .iter()
-                .map(|value| mlir_type(&value_type(module, *value)?))
-                .collect::<Result<Vec<_>, _>>()?;
-            let result_type = mlir_type(&value_type(module, *result)?)?;
-            if let Some(attributes) = parameters
-                .as_deref()
-                .filter(|parameters| parameters.trim_start().starts_with("<{"))
-            {
-                output.push_str(&format!(
-                    "{indentation}%v{} = \"{mnemonic}\"({operand_values}) {attributes} : ({}) -> {result_type}\n",
-                    result.0,
-                    operand_types.join(", ")
-                ));
-            } else if let Some(parameters) = parameters {
-                let input_type = operand_types.first().ok_or_else(|| {
-                    MlirError::UnsupportedOperation(format!(
-                        "parameterized MLIR operation `{mnemonic}` requires an operand"
-                    ))
-                })?;
-                output.push_str(&format!(
-                    "{indentation}%v{} = {mnemonic} {parameters}, {operand_values} : {input_type}\n",
-                    result.0
-                ));
-            } else {
-                output.push_str(&format!(
-                    "{indentation}%v{} = \"{mnemonic}\"({operand_values}) : ({}) -> {result_type}\n",
-                    result.0,
-                    operand_types.join(", ")
-                ));
-            }
+            render_mlir_operation(output, module, mnemonic, parameters.as_deref(), operands, *result, &indentation)?;
         }
         Operation::Call { .. } => {
             render_block(output, module, &Block { operations: vec![operation.clone()] }, indent, None, &mut 0)?;
@@ -2966,42 +2985,7 @@ fn render_block(
                 operands,
                 result,
             } => {
-                let operand_values = operands
-                    .iter()
-                    .map(|value| format!("%v{}", value.0))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let operand_types = operands
-                    .iter()
-                    .map(|value| mlir_type(&value_type(module, *value)?))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let result_type = mlir_type(&value_type(module, *result)?)?;
-                if let Some(attributes) = parameters
-                    .as_deref()
-                    .filter(|parameters| parameters.trim_start().starts_with("<{"))
-                {
-                    output.push_str(&format!(
-                        "{indentation}%v{} = \"{mnemonic}\"({operand_values}) {attributes} : ({}) -> {result_type}\n",
-                        result.0,
-                        operand_types.join(", ")
-                    ));
-                } else if let Some(parameters) = parameters {
-                    let input_type = operand_types.first().ok_or_else(|| {
-                        MlirError::UnsupportedOperation(format!(
-                            "parameterized MLIR operation `{mnemonic}` requires an operand"
-                        ))
-                    })?;
-                    output.push_str(&format!(
-                        "{indentation}%v{} = {mnemonic} {parameters}, {operand_values} : {input_type}\n",
-                        result.0
-                    ));
-                } else {
-                    output.push_str(&format!(
-                        "{indentation}%v{} = \"{mnemonic}\"({operand_values}) : ({}) -> {result_type}\n",
-                        result.0,
-                        operand_types.join(", ")
-                    ));
-                }
+                render_mlir_operation(output, module, mnemonic, parameters.as_deref(), operands, *result, &indentation)?;
             }
             Operation::Aggregate {
                 class,

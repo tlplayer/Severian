@@ -1,10 +1,11 @@
 import * from "../char/utf8.sev" as character
+import * from "intrinsics.sev" as text_storage
 
-# Strings expose their vector's initialized character units. Allocation and
-# release remain in the shared storage/memory and checked ownership pipeline.
+# The seed representation uses the package's MLIR text-storage implementation.
+# Keep UTF-8 algorithms independent of its physical storage layout.
 def __dimension(value: string, dimension: int) -> int:
     assert(dimension == 0)
-    return value.storage.used
+    return text_storage.__text_size(value)
 
 
 def __size[T](value: T) -> int:
@@ -16,7 +17,7 @@ def __index(value: int) -> int:
 
 
 def __load(value: string, position: int) -> u8:
-    return u8(value.storage.get(position))
+    return text_storage.__text_load(value, position)
 
 
 def __byte_value(value: u8) -> int:
@@ -29,19 +30,12 @@ def __character(value: int) -> char:
 
 def __allocate(size: int) -> string:
     assert(size >= 0)
-    result = string()
-    result.reserve(size)
-    # Initialize the requested range before publishing its logical length.
-    position := 0
-    while position < size:
-        result.storage.append(u8(0))
-        position += 1
-    return result
+    return text_storage.__text_allocate(size)
 
 
 def __store(value: u8, destination: borrow string, position: int):
-    assert(position >= 0 and position < destination.storage.used)
-    destination.storage.set(position, value)
+    assert(position >= 0 and position < text_storage.__text_size(destination))
+    text_storage.__text_store(value, destination, position)
 
 
 def byte_count(value: string) -> int:

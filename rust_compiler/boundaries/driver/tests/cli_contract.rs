@@ -33,6 +33,115 @@ fn mutation_fixture(name: &str) -> PathBuf {
 }
 
 #[test]
+fn seed_text_abi_and_custom_print_ending_execute() {
+    let root = temporary("seed-text-abi");
+    let repository = repository_root();
+    let source = root.join("main.sev");
+    let binary = root.join("main");
+    fs::write(
+        &source,
+        format!(
+            r#"import * from "{}/sev_compiler/universal/primitive/string/core.sev" as text
+import * from "{}/library/system/io/src/lib.sev" as io
+import * from "{}/sev_compiler/universal/primitive/char/utf8.sev" as character
+def main():
+    value = "aλ😀z"
+    assert(text.byte_count(value) == 8)
+    assert(text.length(value) == 4)
+    assert(text.byte_at(value, 1) == 206)
+    assert(character.codepoint(text.character_at(value, 1)) == 955)
+    assert(character.codepoint(text.character_at(value, 2)) == 128512)
+    assert(text.equal(text.concat("aλ", "😀z"), value))
+    assert(text.equal(text.concat("", ""), ""))
+    io.print(value, end="")
+    io.print("", end="!")
+    io.print("", end="")
+"#,
+            repository.display(),
+            repository.display(),
+            repository.display(),
+        ),
+    )
+    .unwrap();
+    let build = sev()
+        .arg("build")
+        .arg(&source)
+        .args(["--build-profile", "release", "-o"])
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(&binary).output().unwrap();
+    assert!(run.status.success(), "{:?}", run);
+    assert_eq!(String::from_utf8(run.stdout).unwrap(), "aλ😀z!");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn mlir_boundaries_are_emitted_in_package_ir_and_objects() {
+    let root = temporary("mlir-boundary-package");
+    let source = root.join("lib.sev");
+    let artifacts = root.join("package.pkg");
+    fs::create_dir_all(&artifacts).unwrap();
+    fs::write(&source, r##"
+@mlir("arith.extui")
+def codepoint(value: char) -> int
+@mlir("arith.trunci")
+def scalar(value: int) -> char
+@mlir("cf.assert", msg="expected a positive number")
+def positive(condition: bool)
+@mlir("vector.print", lowering="convert-vector-to-llvm", libraries="mlir_c_runner_utils", punctuation="#vector.punctuation<no_punctuation>")
+def show(value: int)
+def roundtrip(value: int) -> int:
+    positive(value > 0)
+    return codepoint(scalar(value))
+"##).unwrap();
+    let compiler = severian_driver::Compiler::new(severian_target::TargetSpec::host()).unwrap();
+    let object = artifacts.join("library.o");
+    compiler.compile_library_object(&source, &object).unwrap();
+    assert!(object.metadata().unwrap().len() > 0);
+    let ir = fs::read_to_string(object.with_extension("mlir")).unwrap();
+    for operation in ["arith.extui", "arith.trunci", "cf.assert", "vector.print"] {
+        assert!(
+            ir.contains(operation),
+            "missing {operation} in package MLIR"
+        );
+    }
+    let symbols: serde_json::Value =
+        serde_json::from_slice(&fs::read(object.with_extension("symbols.json")).unwrap()).unwrap();
+    let symbol = symbols["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|symbol| symbol["name"] == "roundtrip")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let show = symbols["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|symbol| symbol["name"] == "show")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let run = Command::new("python3").args(["-c", "import ctypes,sys; lib=ctypes.CDLL(sys.argv[1]); f=getattr(lib,sys.argv[2]); f.argtypes=[ctypes.c_int64]; f.restype=ctypes.c_int64; assert f(128512)==128512; show=getattr(lib,sys.argv[3]); show.argtypes=[ctypes.c_int64]; show.restype=None; show(7)"])
+        .arg(object.with_extension("so")).arg(symbol).arg(show).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(run.stdout, b"7");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn mutation_testing_kills_a_file_mutant_and_leaves_normal_tests_unchanged() {
     let root = temporary("mutation-killed-file");
     let source = root.join("killed.sev");

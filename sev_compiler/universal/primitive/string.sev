@@ -1010,7 +1010,7 @@ test "non-empty string is true":
     value := "hello"
 
     if value:
-    throw Error("Unimplemented")ror("Unimplemented")
+        throw Error("Unimplemented (sev_compiler/universal/primitive/string.sev)")ror("Unimplemented (sev_compiler/universal/primitive/string.sev)")
     else:
         throw Error("non-empty string must be true")
 

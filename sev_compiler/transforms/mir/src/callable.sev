@@ -65,16 +65,17 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
-    value = mir_expression_value(module, context, scope, expression)
+    lowered = mir_expression_value(module, context, scope, expression)
     if len(module.quality_files) > 0 and expression.type_id.index == 1:
         match expression.kind:
             case LiteralValue:
-                throw Error("Unimplemented")
+                # Constants do not represent a runtime coverage decision.
+                return lowered
             case _:
-                measured ?= quality.quality_decision(module, expression.span, "Condition", value)
+                measured ?= quality.quality_decision(module, expression.span, "Condition", lowered)
                 if measured != None:
                     cfg.append(context, measured)
-    return value
+    return lowered
 
 def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
     match expression.kind:
@@ -86,7 +87,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                         if int(binding.index) < len(scope.debug_names):
                             cfg.append(context, universal.Operation.DebugOwnership(scope.debug_names[binding.index], "moved", expression.span))
                     case _:
-                        throw diagnostics.diagnostic("E000231", "unimplemented")
+                        throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
             return result
         case AddressOf:
             return callable_mir_place(module, context, scope, value)
@@ -183,7 +184,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                     if storage_types.string_element(expression.type_id, module.records).index != 0:
                         return callable_string_literal(module, context, scope, value, expression.type_id)
                 case _:
-                    throw diagnostics.diagnostic("E000231", "unimplemented")
+                    throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
             result = mir_value(module, expression.type_id)
             cfg.append(context, universal.Operation.Constant(value, result))
             return result
@@ -294,9 +295,9 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                     cfg.append(context, universal.Operation.Call(universal.FunctionId(function.declaration.value), inputs, result))
                     return result
                 case _:
-                    throw Error("Unimplemented")
+                    return error(diagnostics.Diagnostic("E000230", "semantic analysis admitted an unresolved call", expression.span))
         case _:
-            throw diagnostics.diagnostic("E000231", "unimplemented")
+            throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
     return error(diagnostics.Diagnostic("E000230", "semantic analysis admitted an unresolved expression", expression.span))
 
 
@@ -399,7 +400,7 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                         case Ownership:
                             debug_mode = mode
                         case _:
-                            throw diagnostics.diagnostic("E000231", "unimplemented")
+                            throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                     cfg.append(context, universal.Operation.DebugOwnership(binding.name, debug_mode, binding.span))
                 quality.quality_hit(module, context, binding.span, "Statement")
                 if binding.value.loan_mode == "borrow mut" and not binding.update:
@@ -411,7 +412,7 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                             scope.bindings.append(callable_mir_place(module, context, scope, value))
                             continue
                     case _:
-                        throw diagnostics.diagnostic("E000231", "unimplemented")
+                        throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                 value := mir_expression(module, context, scope, binding.value)
                 if quality.debug_source(module, binding.span):
                     cfg.append(context, universal.Operation.DebugValue(binding.name, value, binding.span, 0, binding.value.loan_mode, false, binding.type_id))
@@ -476,7 +477,7 @@ def required_calls(body: borrow universal.CfgBody, required: list[universal.Func
                 case Call:
                     require_function(required, function)
                 case _:
-                    throw Error("unimplemented")
+                    continue
 
 
 def build_callables(module: universal.Module, library_sources: list[int] = [], export_names: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
@@ -579,7 +580,7 @@ def build_callables(module: universal.Module, library_sources: list[int] = [], e
                                 if address.index == local.bindings[parameter_cursor].index:
                                     function.values.append(value)
                             case _:
-                                throw diagnostics.diagnostic("E000231", "unimplemented")
+                                throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                 parameter_cursor += 1
         body ?= function.body
         if body != None:
@@ -706,13 +707,13 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                                         offset = mir_expression(module, frame.context, scope, index)
                                         return IndexedHandle(receiver, offset, access, storage)
                                     case _:
-                                        throw diagnostics.diagnostic("E000231", "unimplemented")
+                                        throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                                 address = callable_mir_place(module, frame.context, scope, expression)
                                 return PlaceHandle(address, expression.type_id)
                             case _:
-                                throw diagnostics.diagnostic("E000231", "unimplemented")
+                                throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000231", "unimplemented")
+                        throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                 return error(diagnostics.Diagnostic("E000231", "place requires a resolved destination", expression.span))
             if name == "load" and len(inputs) == 1:
                 match inputs[0]:
@@ -750,9 +751,9 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                                 local = CallableMirScope(scope.bindings, scope.loops, [previous, right], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
                                 return RuntimeValue(mir_expression(module, frame.context, local, expression))
                             case _:
-                                throw diagnostics.diagnostic("E000231", "unimplemented")
+                                throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000231", "unimplemented")
+                        throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                 return error(diagnostics.Diagnostic("E000231", "apply requires a resolved update", expression.span))
             if name == "cfg.block" and len(inputs) == 0:
                 return BlockHandle(cfg.block(frame.context))
@@ -871,7 +872,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                             for returned_field in aggregate.values(module, frame.context, scope.aggregates, value):
                                 inline_arguments.append(returned_field)
                         case Nothing:
-                            throw diagnostics.diagnostic("E000231", "unimplemented")
+                            throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                         case _:
                             return error(diagnostics.Diagnostic("E000231", "CFG return requires a lowered value", expression.span))
                 if scope.return_target >= 0:
@@ -915,7 +916,7 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                             case Member:
                                 capable = name in ["Branch", "Loop", "Return", "Error", "Mutation"]
                             case _:
-                                throw diagnostics.diagnostic("E000231", "unimplemented")
+                                throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
             if not capable:
                 return error(diagnostics.Diagnostic("E000231", "compiler context requires a control-flow grammar capability", span))
             for method in definition.methods:
@@ -939,7 +940,7 @@ def execute_grammar(module: universal.Module, context: cfg.ExecutionContext, sco
                                 case Union:
                                     annotations = members
                                 case _:
-                                    throw diagnostics.diagnostic("E000231", "unimplemented")
+                                    throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                             for annotation in annotations:
                                 name ?= universal.simple_type_name(annotation)
                                 if name == required:
@@ -991,7 +992,7 @@ def callable_parameter_fields(body: universal.CfgBody, state: aggregate.Aggregat
                 if address.index == slot.index:
                     values.append(value)
             case _:
-                throw Error("unimplemented")
+                continue
     return values
 
 

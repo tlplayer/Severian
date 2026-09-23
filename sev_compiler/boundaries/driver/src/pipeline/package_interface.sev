@@ -32,7 +32,7 @@ def scalar_interface(module: borrow universal.Module, resolution: package.Resolu
                 if int(expression.span.source.index) not in module.prelude_sources:
                     return ""
             case _:
-                throw Error("unimplemented")
+                throw Error("unimplemented (sev_compiler/boundaries/driver/src/pipeline/package_interface.sev)")
     owner = resolution.packages[0]
     exports = package.string_array(package.setting(owner.manifest.entries, "package", "export", "[]"))
     lines: list[string] = []

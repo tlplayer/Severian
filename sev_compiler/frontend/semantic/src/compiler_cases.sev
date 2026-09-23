@@ -8,7 +8,7 @@ def module(subject: universal.Module, case: universal.CompilerTestCase, namespac
     for item in subject.items:
         match item:
             case Test:
-                throw Error("unimplemented")
+                throw Error("unimplemented (sev_compiler/frontend/semantic/src/compiler_cases.sev)")
             case _:
                 result.items.append(item)
     for item in case.declarations:

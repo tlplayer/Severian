@@ -126,6 +126,27 @@ def print(value: bool) -> i32
 @c(symbol = "__sev_print_char")
 def print(value: char) -> i32
 
+@mlir("func.call", callee="__sev_text_size")
+def __print_size(value: string) -> int
+
+@mlir("func.call", callee="__sev_text_load")
+def __print_byte(value: string, position: int) -> u8
+
+@c(symbol = "putchar")
+def __putchar(value: i32) -> i32
+
+# The seed IO provider also supports forwarding captured output verbatim.
+# Write bytes so a custom ending preserves UTF-8 and adds no implicit newline.
+def print(value: string, end: string) -> i32:
+    for part in [value, end]:
+        position := 0
+        while position < __print_size(part):
+            result = __putchar(i32(__print_byte(part, position)))
+            if result < 0:
+                return result
+            position += 1
+    return 0
+
 def print(values: Any...) -> i32:
     first := true
     rendered := ""

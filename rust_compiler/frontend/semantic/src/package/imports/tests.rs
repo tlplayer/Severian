@@ -33,6 +33,20 @@ fn narrowed(graph: &ModuleGraph) -> (ProgramIndex, ImportPlan) {
     (index, plan)
 }
 #[test]
+fn wildcard_variant_use_retains_its_enum_through_reexports() {
+    let f = Fixture::new(&[
+        ("types.sev", "enum Kind:\n    IntegerKind\n    FloatKind\nenum Unused:\n    NotUsed\nclass Scalar:\n    kind: Kind\ndef accept(value: Scalar) -> Scalar:\n    return value\n"),
+        ("lib.sev", "import * from \"types.sev\"\n"),
+        ("main.sev", "import * from \"lib.sev\"\ndef run() -> Scalar:\n    return accept(Scalar(IntegerKind))\n"),
+    ]);
+    let graph = f.graph();
+    let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    let scope = &typed.index.modules[&graph.modules.last().unwrap().id].scope.bindings;
+    assert!(scope.contains_key("Kind"));
+    assert!(!scope.contains_key("Unused"));
+}
+
+#[test]
 fn automatic_build_narrows_wildcards_and_keeps_overloads() {
     let f=Fixture::new(&[("lib.sev","def needed(value: int) -> int:\n    return value\ndef needed(value: string) -> string:\n    return value\ndef unused() -> int:\n    return 9\n"),
         ("main.sev","import * from \"lib.sev\"\ndef run() -> int:\n    return needed(3)\n")]);
@@ -200,4 +214,15 @@ fn package_opt_out_restores_broad_bindings() {
         .scope
         .bindings
         .contains_key("unused"));
+}
+
+#[test]
+fn narrowed_namespace_with_only_a_constructor_is_not_a_tensor_receiver() {
+    let f = Fixture::new(&[
+        ("lib.sev", "class Problem:\n    code: int\ndef unused() -> int:\n    return 9\n"),
+        ("main.sev", "import * from \"lib.sev\" as diagnostics\ndef run() -> diagnostics.Problem:\n    return diagnostics.Problem(7)\n"),
+    ]);
+    let graph = f.graph();
+    let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
 }

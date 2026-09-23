@@ -39,7 +39,7 @@ pub(crate) fn ensure_for_plan(
     let placements = requested_placements(plan);
     let catalog = catalog()?;
     let mut resolved = target.clone();
-    if placements.contains(&ExecutionPlacement::Simd) {
+    if placements.contains(&ExecutionPlacement::Simd) || requests_mlir_dialect(plan, "vector") {
         ensure_component(&catalog, "compiler", "mlir.vector")?;
         resolved.capabilities.insert("mlir.dialect.vector");
     }
@@ -58,6 +58,20 @@ pub(crate) fn ensure_for_plan(
         .capabilities
         .insert(format!("compiler.severian.gpu.{architecture}"));
     Ok(resolved)
+}
+
+fn requests_mlir_dialect(plan: &CompilePlan, dialect: &str) -> bool {
+    std::iter::once(&plan.source.initializer)
+        .chain(plan.source.functions.iter().filter_map(|function| function.body.as_ref()))
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| &block.statements)
+        .any(|statement| {
+            let severian_mir::CfgStatement::Operation { attributes, .. } = statement else {
+                return false;
+            };
+            matches!(attributes.get(&severian_universal::MLIR_OPERATION_NAME_ATTRIBUTE),
+                Some(AttrValue::String(name)) if name.split_once('.').is_some_and(|(prefix, _)| prefix == dialect))
+        })
 }
 
 fn ensure_component<'a>(
