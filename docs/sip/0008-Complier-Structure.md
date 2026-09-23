@@ -2,6 +2,11 @@ SIP-0000: Semantic Compilation Hierarchy and Constraint Graph
 
 Status: Draft
 
+Repository review (2026-09-22): see [V2 implementation and retirement plan](0008-v2-implementation-review.md)
+for proposed semantic corrections, concrete files to edit/add, ordered migration
+gates, and the conditional purge list. The draft below remains the proposal;
+the review identifies claims that need revision before implementation.
+
 Type: Language | Compiler | Package
 
 Authors:
