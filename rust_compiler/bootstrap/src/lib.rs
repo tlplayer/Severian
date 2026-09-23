@@ -31,8 +31,10 @@ fn build_from_packages<'a>(
             path: format!("{package}/{path}").into(),
             text: text.to_owned(),
         };
-        let tokens = severian_lexer::scan(&source).map_err(BootstrapError::Parse)?;
-        let module = severian_parser::parse(&tokens).map_err(BootstrapError::Parse)?;
+        let tokens = severian_lexer::scan(&source)
+            .map_err(|error| BootstrapError::Parse(error.with_source(source.clone())))?;
+        let module = severian_parser::parse(&tokens)
+            .map_err(|error| BootstrapError::Parse(error.with_source(source.clone())))?;
         for declaration in module.items.into_iter().filter_map(|item| match item {
             severian_ast::Item::Trait(declaration) => Some(declaration),
             _ => None,
@@ -349,6 +351,19 @@ mod tests {
     };
 
     #[test]
+    fn bootstrap_parse_errors_preserve_the_source_file() {
+        let text = "trait Compiler:\n    throw Error(\"invalid trait member\")\n";
+        let Err(BootstrapError::Parse(diagnostic)) =
+            build_from_packages([("core.compile", "src/mod.sev", text)])
+        else {
+            panic!("expected a bootstrap parse error");
+        };
+        assert_eq!(diagnostic.sources.len(), 1);
+        assert_eq!(diagnostic.sources[0].path.to_str(), Some("core.compile/src/mod.sev"));
+        assert_eq!(diagnostic.sources[0].text, text);
+    }
+
+    #[test]
     fn loads_compiler_owned_primitives() {
         let context = load().unwrap();
         let i32 = context.types.resolve_name("i32").unwrap();
@@ -447,7 +462,7 @@ mod tests {
 
     #[test]
     fn core_compile_protocol_resolves_to_stable_universal_routes() {
-        const SPECIAL: &str = "trait TestCompiler: Compiler\n    pass\n\ntrait TestIR[T]: CompileType[TestCompiler]\n    pass\n";
+        const SPECIAL: &str = "trait TestCompiler: Compiler\n\ntrait TestIR[T]: CompileType[TestCompiler]\n";
         let context = build_from_packages(
             severian_compile_protocol::SOURCES
                 .iter()

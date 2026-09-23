@@ -33,6 +33,32 @@ fn mutation_fixture(name: &str) -> PathBuf {
 }
 
 #[test]
+fn marker_protocol_imports_do_not_abort_before_main() {
+    let root = temporary("marker-protocol-startup");
+    let repository = repository_root();
+    let source = root.join("main.sev");
+    fs::write(
+        &source,
+        format!(
+            "import * from \"{0}/library/core/compile/src/mod.sev\"\n\
+             import * from \"{0}/library/compute/tensor/src/lib.sev\"\n\
+             def main():\n    print(\"marker startup ok\")\n",
+            repository.display(),
+        ),
+    )
+    .unwrap();
+    let run = sev().arg("run").arg(&source).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8(run.stdout).unwrap(), "marker startup ok\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn seed_text_abi_and_custom_print_ending_execute() {
     let root = temporary("seed-text-abi");
     let repository = repository_root();
