@@ -1,0 +1,101 @@
+import source
+import * from "../id/compiler.sev"
+
+
+# Revision-local indices are deliberately distinct from semantic identities.
+class DefinitionIndex:
+    index: u32
+
+
+class SourceUnit:
+    source: source.SourceId
+    submodule: int
+    key: string = ""
+
+
+enum DefinitionKind:
+    Callable
+    TraitDefinition
+    GrammarDefinition
+
+
+enum DependencyKind:
+    Invocation
+    Inheritance
+
+
+class DefinitionNode:
+    definition: DefId
+    kind: DefinitionKind
+    names: list[string]
+    span: source.Span | None
+    submodule: int = 0
+    semantic_key: string = ""
+
+
+class DefinitionDependency:
+    dependent: DefinitionIndex
+    requirement: DefinitionIndex
+    kind: DependencyKind
+
+
+# A checked projection of the authoritative declaration and CFG tables. It
+# never stores another executable body. Construct once, verify, then freeze.
+class DefinitionGraph:
+    nodes: list[DefinitionNode] = []
+    dependencies: list[DefinitionDependency] = []
+    identities: list[string] = []
+    frozen: bool = false
+
+
+def definition_identity(definition: DefId) -> string:
+    return string(definition.package) + ":" + string(definition.module) + ":" + string(definition.declaration.value)
+
+
+def same_origin(left: source.Span | None, right: source.Span | None) -> bool:
+    first ?= left
+    second ?= right
+    if first != None:
+        if second != None:
+            return first.source.index == second.source.index and first.start == second.start and first.end == second.end
+        return false
+    return first == None and second == None
+
+
+def definition_index(graph: DefinitionGraph, definition: DefId) -> DefinitionIndex | Error:
+    key = definition_identity(definition)
+    index := 0
+    for candidate in graph.identities:
+        if candidate == key:
+            return DefinitionIndex(u32(index))
+        index += 1
+    throw Error("semantic graph refers to an unknown definition: " + key)
+
+
+def add_definition(graph: DefinitionGraph, definition: DefId, kind: DefinitionKind, name: string, span: source.Span | None, alias: bool = false, submodule: int = 0) -> DefinitionIndex | Error:
+    if graph.frozen:
+        throw Error("cannot mutate a frozen semantic graph")
+    key = definition_identity(definition)
+    if key in graph.identities:
+        index = int(definition_index(graph, definition).index)
+        previous = graph.nodes[index]
+        if not alias or previous.kind != kind or previous.submodule != submodule or not same_origin(previous.span, span):
+            throw Error("duplicate semantic definition identity: " + key)
+        if name not in previous.names:
+            previous.names.append(name)
+        return DefinitionIndex(u32(index))
+    index = len(graph.nodes)
+    graph.identities.append(key)
+    graph.nodes.append(DefinitionNode(definition, kind, [name], span, submodule))
+    return DefinitionIndex(u32(index))
+
+
+def add_dependency(graph: DefinitionGraph, dependent: DefinitionIndex, requirement: DefinitionIndex, kind: DependencyKind) -> unit | Error:
+    if graph.frozen:
+        throw Error("cannot mutate a frozen semantic graph")
+    if dependent.index >= len(graph.nodes) or requirement.index >= len(graph.nodes):
+        throw Error("semantic dependency endpoint is out of bounds")
+    for edge in graph.dependencies:
+        if edge.dependent.index == dependent.index and edge.requirement.index == requirement.index and edge.kind == kind:
+            return
+    graph.dependencies.append(DefinitionDependency(dependent, requirement, kind))

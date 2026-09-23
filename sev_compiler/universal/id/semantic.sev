@@ -1,0 +1,71 @@
+import * from "../type/annotation.sev"
+import * from "../declaration/function.sev"
+
+
+# Versioned, deterministic digest. Both accumulators stay below 2**61 before
+# multiplication, so the calculation cannot overflow its u128 intermediates.
+# Full semantic keys remain alongside IDs for collision diagnostics.
+def semantic_digest(key: string) -> u128:
+    first: u128 := 1469598103934665603
+    second: u128 := 1099511628211
+    modulus: u128 = 2305843009213693951
+    for byte in key.bytes():
+        first = (first * 257 + u128(byte) + 1) % modulus
+        second = (second * 263 + u128(byte) + 1) % modulus
+    return first * 2305843009213693952 + second
+
+
+def definition_from_key(key: string) -> DefId:
+    return DefId(2, semantic_digest("definition-owner-2:" + key), DeclarationId(semantic_digest(key)))
+
+
+def same_definition(left: DefId, right: DefId) -> bool:
+    return left.package == right.package and left.module == right.module and left.declaration.value == right.declaration.value
+
+
+def named_definition(owner: string, kind: string, name: string) -> DefId:
+    return definition_from_key(semantic_key([owner, kind, name]))
+
+
+# Keys are explicit strings, not runtime hash() values or source coordinates.
+def semantic_key(parts: list[string]) -> string:
+    encoded: list[string] = []
+    for part in parts:
+        encoded.append(string(len(part)) + ":" + part)
+    return "semantic-2:" + encoded.join("")
+
+
+def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) -> string:
+    match annotation.kind:
+        case Named:
+            index := 0
+            for parameter in parameters:
+                if name == parameter:
+                    return semantic_key(["parameter", string(index)])
+                index += 1
+            parts = ["named", name]
+            for argument in arguments:
+                parts.append(annotation_key(argument, parameters))
+            return semantic_key(parts)
+        case Union:
+            parts = ["union"]
+            for member in members:
+                parts.append(annotation_key(member, parameters))
+            # The source order carries tagged-union ABI meaning.
+            return semantic_key(parts)
+
+
+def callable_key(function: FunctionDeclaration, owner: string) -> string:
+    name = function.name
+    namespace ?= function.lookup
+    if namespace != None:
+        if namespace != "" and name.starts_with(namespace):
+            name = name[len(namespace):]
+    parts = [owner, "callable", name, string(len(function.type_parameters))]
+    for parameter in function.parameters:
+        parts.append(annotation_key(parameter.annotation, function.type_parameters))
+        parts.append("pack" if parameter.variadic else "single")
+        parts.append(parameter.name if parameter.keyword_only else "")
+        for modifier in parameter.modifiers:
+            parts.append(modifier.name)
+    return semantic_key(parts)

@@ -6,6 +6,10 @@ def interface_path(build_id: string) -> string | Error:
     return "package.pkgi/severian/" + metadata.component(build_id) + "/lib.sevi"
 
 def validate(value: Interface) -> unit | Error:
+    if value.version not in [1, 2, 3]:
+        throw Error("unsupported semantic interface version")
+    if value.version == 3 and value.semantic_payload == "":
+        throw Error("semantic interface requires a declaration archive")
     metadata.identifier(value.package.name)
     metadata.identifier(value.package.version)
     metadata.identifier(value.package.content_id)
@@ -21,9 +25,30 @@ def validate(value: Interface) -> unit | Error:
             throw Error("interface declaration provenance must name a source/*.sev file")
         if declaration.contract.strip() == "":
             throw Error("interface declaration requires a compiler contract")
+        if value.version >= 2:
+            if len(declaration.parameter_names) != len(declaration.parameter_types):
+                throw Error("interface parameter names and types disagree")
+            if declaration.result_type not in ["unit", "i32", "i64", "u32", "u64", "f32", "f64"]:
+                throw Error("unsupported semantic interface result representation")
+            parameter_names: list[string] = []
+            for name in declaration.parameter_names:
+                metadata.identifier(name)
+                metadata.unique(parameter_names, name, "interface parameter")
+            for kind in declaration.parameter_types:
+                if kind not in ["i32", "i64", "u32", "u64", "f32", "f64"]:
+                    throw Error("unsupported semantic interface parameter representation")
 
-def encode_declaration(value: Declaration) -> string:
-    return "{\"name\":" + build_flow.document_quote(value.name) + ",\"symbol-id\":" + build_flow.document_quote(value.symbol_id) + ",\"source\":" + build_flow.document_quote(value.source) + ",\"contract\":" + build_flow.document_quote(value.contract) + "}"
+def encode_declaration(value: Declaration, version: int = 1) -> string:
+    fields := ""
+    if version >= 2:
+        names: list[string] = []
+        types: list[string] = []
+        for name in value.parameter_names:
+            names.append(build_flow.document_quote(name))
+        for kind in value.parameter_types:
+            types.append(build_flow.document_quote(kind))
+        fields = ",\"parameter-names\":[" + names.join(",") + "],\"parameter-types\":[" + types.join(",") + "],\"result-type\":" + build_flow.document_quote(value.result_type)
+    return "{\"name\":" + build_flow.document_quote(value.name) + ",\"symbol-id\":" + build_flow.document_quote(value.symbol_id) + ",\"source\":" + build_flow.document_quote(value.source) + ",\"contract\":" + build_flow.document_quote(value.contract) + fields + "}"
 
 # Canonical, versioned UTF-8 JSON. Contracts are preserved verbatim as strings;
 # this layer does not parse or rewrite compiler semantics as source code.
@@ -31,24 +56,41 @@ def encode(value: Interface) -> string | Error:
     validate(value)
     declarations: list[string] = []
     for declaration in value.declarations:
-        declarations.append(encode_declaration(declaration))
+        declarations.append(encode_declaration(declaration, value.version))
+    semantic = ",\"semantic-payload\":" + build_flow.document_quote(value.semantic_payload) if value.version == 3 else ""
     binding = "{\"build-id\":" + build_flow.document_quote(value.build_id) + ",\"path\":" + build_flow.document_quote(metadata.realization_path(value.build_id)) + "}"
-    return "{\"format\":\"severian.interface\",\"version\":1,\"package\":" + metadata.encode_package_identity(value.package) + ",\"semantic-id\":" + build_flow.document_quote(value.semantic_id) + ",\"metadata\":" + binding + ",\"declarations\":[" + declarations.join(",") + "]}\n"
+    return "{\"format\":\"severian.interface\",\"version\":" + string(value.version) + ",\"package\":" + metadata.encode_package_identity(value.package) + ",\"semantic-id\":" + build_flow.document_quote(value.semantic_id) + ",\"metadata\":" + binding + ",\"declarations\":[" + declarations.join(",") + "]" + semantic + "}\n"
 
-def decode_declaration(nodes: list[build_flow.DocumentNode], index: int) -> Declaration | Error:
-    metadata.object_fields(nodes, index, ["name", "symbol-id", "source", "contract"])
+def decode_declaration(nodes: list[build_flow.DocumentNode], index: int, version: int = 1) -> Declaration | Error:
+    fields = ["name", "symbol-id", "source", "contract"]
+    if version >= 2:
+        fields.append("parameter-names")
+        fields.append("parameter-types")
+        fields.append("result-type")
+    metadata.object_fields(nodes, index, fields)
     name = metadata.string_value(nodes, metadata.member(nodes, index, "name"))
     symbol = metadata.string_value(nodes, metadata.member(nodes, index, "symbol-id"))
     source = metadata.string_value(nodes, metadata.member(nodes, index, "source"))
     contract = metadata.string_value(nodes, metadata.member(nodes, index, "contract"))
-    return Declaration(name, symbol, source, contract)
+    value = Declaration(name, symbol, source, contract)
+    if version >= 2:
+        for child in metadata.array_items(nodes, metadata.member(nodes, index, "parameter-names")):
+            value.parameter_names.append(metadata.string_value(nodes, child))
+        for child in metadata.array_items(nodes, metadata.member(nodes, index, "parameter-types")):
+            value.parameter_types.append(metadata.string_value(nodes, child))
+        value.result_type = metadata.string_value(nodes, metadata.member(nodes, index, "result-type"))
+    return value
 
 def decode(text: string) -> Interface | Error:
     nodes = build_flow.document_nodes(text)
-    metadata.object_fields(nodes, 0, ["format", "version", "package", "semantic-id", "metadata", "declarations"])
+    version = metadata.int_value(nodes, metadata.member(nodes, 0, "version"))
+    fields = ["format", "version", "package", "semantic-id", "metadata", "declarations"]
+    if version == 3:
+        fields.append("semantic-payload")
+    metadata.object_fields(nodes, 0, fields)
     if metadata.string_value(nodes, metadata.member(nodes, 0, "format")) != "severian.interface":
         throw Error("invalid .sevi interface format")
-    if metadata.int_value(nodes, metadata.member(nodes, 0, "version")) != 1:
+    if version not in [1, 2, 3]:
         throw Error("unsupported .sevi interface version")
     package = metadata.decode_package_identity(nodes, metadata.member(nodes, 0, "package"))
     semantic_id = metadata.string_value(nodes, metadata.member(nodes, 0, "semantic-id"))
@@ -60,7 +102,9 @@ def decode(text: string) -> Interface | Error:
         throw Error(".sevi metadata path does not match its build identity")
     declarations: list[Declaration] = []
     for child in metadata.array_items(nodes, metadata.member(nodes, 0, "declarations")):
-        declarations.append(decode_declaration(nodes, child))
-    value = Interface(package, build_id, semantic_id, declarations)
+        declarations.append(decode_declaration(nodes, child, version))
+    value = Interface(package, build_id, semantic_id, declarations, version)
+    if version == 3:
+        value.semantic_payload = metadata.string_value(nodes, metadata.member(nodes, 0, "semantic-payload"))
     validate(value)
     return value

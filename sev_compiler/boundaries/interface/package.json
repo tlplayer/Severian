@@ -10,10 +10,22 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "package": {"package": "package", "path": "../../../library/package"},
+    "package": {
+      "package": "package",
+      "path": "../../../library/package"
+    },
     "universal": {
       "package": "sev-compiler-universal",
       "path": "../../universal"
+    },
+    "lexer": {
+      "path": "../../frontend/lexer"
+    },
+    "source": {
+      "path": "../../frontend/source"
+    },
+    "semantic": {
+      "path": "../../frontend/semantic"
     }
   }
 }

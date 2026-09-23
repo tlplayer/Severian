@@ -32,10 +32,10 @@ def run_tool(arguments: list[string]):
         throw Error("native tool failed: " + arguments[0])
 
 
-def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), incremental: bool = true):
+def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbols: bool = false, strip: bool = false, lto: bool = false, native_arguments: list[string] = [], sysroot: string = "", library: bool = false, exports: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), incremental: bool = true, object_units: list[string] = []):
     package.mkdir(path.dirname(output))
     flow = package.CompilerPipeline(package.compiler_cache_root(sysroot), incremental)
-    initial = package.pipeline_text(flow, mlir, ".mlir")
+    initial = package.pipeline_text(flow, object_units[0] if len(object_units) > 0 and not library else mlir, ".mlir")
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
@@ -62,6 +62,16 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
         object_arguments.append(flag)
     object = package.compiler_step(flow, "object", "1", module, object_arguments, ".o")
     objects: list[string] = [object.path]
+    if not library:
+        for part in object_units[1:]:
+            unit = package.pipeline_text(flow, part, ".mlir")
+            owned_unit = package.compiler_step(flow, "ownership", "1", unit, [opt, "{input}", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", "{output}"], ".mlir")
+            materialized_unit = package.pipeline_text(flow, debug_values(package.read_text(owned_unit.path)), ".mlir")
+            lowered_unit = package.compiler_step(flow, "llvm-dialect", "1", materialized_unit, lowering, ".mlir")
+            llvm_unit = package.compiler_step(flow, "llvm-ir", "1", lowered_unit, [translate, "--mlir-to-llvmir", "{input}", "-o", "{output}"], ".ll")
+            compiled_unit = package.compiler_step(flow, "object", "1", llvm_unit, object_arguments, ".o")
+            if compiled_unit.path not in objects:
+                objects.append(compiled_unit.path)
     providers: list[string] = []
     link_options: list[string] = []
     for argument in native_arguments:

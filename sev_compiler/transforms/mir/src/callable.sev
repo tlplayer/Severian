@@ -267,8 +267,10 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
             match callee:
                 case Direct:
                     native := false
+                    target: universal.FunctionId | None := None
                     for declaration in module.functions:
-                        if declaration.id.value == function.declaration.value:
+                        if universal.same_definition(declaration.definition, function):
+                            target = declaration.id
                             native = boundary.scalar_boundary(declaration, "mlir") != ""
                             if not native and (declaration.result_origin >= 0 or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0)):
                                 return callable_inline_receiver(module, context, scope, declaration, arguments, expression.span)
@@ -282,7 +284,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                             evaluated.append(mir_expression(module, context, scope, argument.value))
                     inputs: list[universal.ValueId] = []
                     for declaration in module.functions:
-                        if declaration.id.value == function.declaration.value:
+                        if universal.same_definition(declaration.definition, function):
                             parameter_index := 0
                             for parameter in declaration.parameters:
                                 argument_index := 0
@@ -292,7 +294,11 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                                     argument_index += 1
                                 parameter_index += 1
                     result = mir_value(module, expression.type_id)
-                    cfg.append(context, universal.Operation.Call(universal.FunctionId(function.declaration.value), inputs, result))
+                    selected ?= target
+                    if selected == None:
+                        return error(diagnostics.Diagnostic("E000230", "resolved definition has no executable callable", expression.span))
+                    if selected != None:
+                        cfg.append(context, universal.Operation.Call(selected, inputs, result))
                     return result
                 case _:
                     return error(diagnostics.Diagnostic("E000230", "semantic analysis admitted an unresolved call", expression.span))

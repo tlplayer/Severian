@@ -1,0 +1,68 @@
+import source
+import * from "../id/compiler.sev"
+import * from "../expression/expression.sev"
+
+
+enum ConstraintStage:
+    Static
+    Specialization
+    Runtime
+
+
+enum AttachmentRole:
+    Dispatch
+    Entry
+    Fix
+    Exit
+    Context
+    Setup
+
+
+enum ProofResult:
+    Proven
+    Refuted
+    Unknown
+
+
+class ConstraintId:
+    index: u32
+
+
+class WithAttachment:
+    role: AttachmentRole
+    condition: Expression
+    stage: ConstraintStage = ConstraintStage.Runtime
+    interface: DefId | None = None
+
+
+class ConstraintRequirement:
+    id: ConstraintId
+    condition: Expression
+    prerequisites: list[ConstraintId] = []
+    stage: ConstraintStage = ConstraintStage.Runtime
+    result: ProofResult = ProofResult.Unknown
+    reorderable: bool = false
+    cost: int = 1
+    value_versions: list[int] = []
+
+
+class ConstraintGraph:
+    requirements: list[ConstraintRequirement] = []
+
+
+class DispatchCandidate:
+    definition: DefId
+    requirements: list[ConstraintId]
+
+
+class DispatchFamily:
+    key: string
+    candidates: list[DispatchCandidate]
+
+
+class ConstraintObligation:
+    owner: DefId
+    role: AttachmentRole
+    condition: Expression
+    result: ProofResult = ProofResult.Unknown
+    region: RegionId | None = None

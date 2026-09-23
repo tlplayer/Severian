@@ -1,4 +1,7 @@
  NEVER REMOVE CODE, BEFORE IMPLEMENTING THE REPLACEMENT!
+DONT RUN TESTS, give me the test to run
+DONT add python scripts that just test, add tests and have the rust compiler run them in severian
+
 For an agent friendly representation use to see the call graph/agent friendly IR 
 ```
 sev_rust # Rust compiler

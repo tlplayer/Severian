@@ -1,0 +1,39 @@
+import * from "model.sev"
+
+
+class IntegerInterval:
+    lower: i128 | None = None
+    upper: i128 | None = None
+
+
+def prove_interval(actual: IntegerInterval, required: IntegerInterval) -> ProofResult:
+    low ?= actual.lower
+    high ?= actual.upper
+    minimum ?= required.lower
+    maximum ?= required.upper
+    if low != None and high != None:
+        if low > high:
+            return ProofResult.Unknown
+    if minimum != None and maximum != None:
+        if minimum > maximum:
+            return ProofResult.Refuted
+    if high != None and minimum != None:
+        if high < minimum:
+            return ProofResult.Refuted
+    if low != None and maximum != None:
+        if low > maximum:
+            return ProofResult.Refuted
+    lower_proven := minimum == None
+    upper_proven := maximum == None
+    if low != None and minimum != None:
+        lower_proven = low >= minimum
+    if high != None and maximum != None:
+        upper_proven = high <= maximum
+    return ProofResult.Proven if lower_proven and upper_proven else ProofResult.Unknown
+
+
+def require_static(result: ProofResult) -> unit | Error:
+    if result == ProofResult.Refuted:
+        throw Error("static constraint is false")
+    if result == ProofResult.Unknown:
+        throw Error("static constraint could not be proved")

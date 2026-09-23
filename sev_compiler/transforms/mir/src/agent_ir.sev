@@ -1,6 +1,9 @@
 import universal
+from universal import graph_queries
 import source
+import * from "hierarchy_ir.sev" as hierarchy_ir
 import * from "cfg.sev" as cfg
+import * from "semantic_graph.sev" as semantic_graph
 
 
 def quoted(value: string) -> string:
@@ -8,15 +11,16 @@ def quoted(value: string) -> string:
 
 
 def identity(id: universal.DefId) -> string:
-    return quoted(string(id.package) + ":" + string(id.module) + ":" + string(id.declaration.value))
+    return quoted(universal.definition_identity(id))
 
 
-def span_json(span: source.Span, files: list[source.SourceFile]) -> string:
-    path := ""
+def span_json(span: source.Span, files: list[source.SourceFile]) -> string | Error:
     for file in files:
         if file.id.index == span.source.index:
-            path = file.path
-    return "{\"path\":" + quoted(path) + ",\"start\":" + string(span.start) + ",\"end\":" + string(span.end) + "}"
+            if span.end < span.start:
+                throw Error("reversed source span in Agent IR")
+            return "{\"path\":" + quoted(file.path) + ",\"start\":" + string(source.utf8_offset(file, span.start)) + ",\"end\":" + string(source.utf8_offset(file, span.end)) + "}"
+    throw Error("unknown source identity in Agent IR")
 
 
 def metadata_value(expression: universal.Expression) -> string:
@@ -92,12 +96,12 @@ def operation_kind(operation: universal.Operation) -> string:
             throw Error("noncanonical operation in Agent IR")
 
 
-def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[source.SourceFile]) -> string:
+def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[source.SourceFile], module: universal.Module) -> string | Error:
     blocks: list[string] = []
     for block in body.blocks:
         operations: list[string] = []
         for operation in block.operations:
-            operations.append(operation_json(operation))
+            operations.append(operation_json(operation, module))
         terminal ?= block.terminator
         if terminal != None:
             kind := "Unreachable"
@@ -130,45 +134,69 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
     return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
 
 
-def emit(module: universal.Module, files: list[source.SourceFile]) -> string:
+def emit(module: universal.Module, files: list[source.SourceFile], graph: universal.DefinitionGraph, package_graph: string) -> string | Error:
+    if not graph.frozen:
+        throw Error("Agent IR requires a verified semantic graph")
     definitions: list[string] = []
     functions: list[string] = []
     values: list[string] = []
     for value in module.values:
         values.append("{\"id\":" + quoted(string(value.id.index)) + ",\"type\":" + string(value.type_id.index) + "}")
+    emitted: list[string] = []
     for declaration in module.traits:
+        key = universal.definition_identity(declaration.definition)
+        if key in emitted:
+            continue
+        emitted.append(key)
+        node = graph.nodes[universal.definition_index(graph, declaration.definition).index]
+        aliases: list[string] = []
+        for name in node.names:
+            aliases.append(quoted(name))
         bases: list[string] = []
         for base in declaration.bases:
             name ?= universal.simple_type_name(base)
             if name != None:
-                for parent in module.traits:
-                    if parent.name == name or parent.name == declaration.lookup + name:
-                        bases.append(identity(parent.definition))
-                        break
+                bases.append(identity(semantic_graph.grammar_parent(module, declaration, name)))
         properties: list[string] = []
         for property in declaration.properties:
             value ?= property.default
             if value != None:
                 properties.append(quoted(property.name) + ":" + metadata_value(value))
         kind = "grammar" if declaration.grammar else "trait"
-        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"name\":" + quoted(declaration.name) + ",\"kind\":" + quoted(kind) + ",\"bases\":[" + bases.join(",") + "],\"metadata\":{" + properties.join(",") + "},\"source\":" + span_json(declaration.span, files) + "}")
+        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":" + quoted(declaration.name) + ",\"aliases\":[" + aliases.join(",") + "],\"kind\":" + quoted(kind) + ",\"bases\":[" + bases.join(",") + "],\"metadata\":{" + properties.join(",") + "},\"source\":" + span_json(declaration.span, files) + "}")
     for declaration in module.functions:
-        span := source.Span(source.SourceId(0), 0, 0)
+        key = universal.definition_identity(declaration.definition)
+        if key in emitted:
+            continue
+        emitted.append(key)
+        node = graph.nodes[universal.definition_index(graph, declaration.definition).index]
+        origin := "null"
         declared ?= declaration.span
         if declared != None:
-            span = declared
-        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"name\":" + quoted(declaration.name) + ",\"kind\":\"function\",\"bases\":[],\"source\":" + span_json(span, files) + "}")
+            origin = span_json(declared, files)
+        definitions.append("{\"id\":" + identity(declaration.definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":" + quoted(declaration.name) + ",\"kind\":\"function\",\"bases\":[],\"source\":" + origin + "}")
         if declaration.cfg_index >= 0:
-            functions.append(body_json(declaration.definition, module.cfg_bodies[declaration.cfg_index], files))
+            functions.append(body_json(declaration.definition, module.cfg_bodies[declaration.cfg_index], files, module))
     if len(module.cfg_bodies) != 0:
         definition = universal.DefId(0, 0, universal.DeclarationId(0))
-        definitions.append("{\"id\":" + identity(definition) + ",\"name\":\"$initializer\",\"kind\":\"function\",\"bases\":[]}")
-        functions.append(body_json(definition, module.cfg_bodies[0], files))
-    return "{\"schema_version\":1,\"stage\":\"cfg\",\"definitions\":[" + definitions.join(",") + "],\"functions\":[" + functions.join(",") + "],\"values\":[" + values.join(",") + "]}"
+        node = graph.nodes[universal.definition_index(graph, definition).index]
+        definitions.append("{\"id\":" + identity(definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":\"$initializer\",\"kind\":\"function\",\"bases\":[],\"source\":null}")
+        functions.append(body_json(definition, module.cfg_bodies[0], files, module))
+    dependencies: list[string] = []
+    for edge in graph.dependencies:
+        kind = "call" if edge.kind == universal.DependencyKind.Invocation else "inherits"
+        dependencies.append("{\"from\":" + identity(graph.nodes[edge.dependent.index].definition) + ",\"to\":" + identity(graph.nodes[edge.requirement.index].definition) + ",\"kind\":" + quoted(kind) + "}")
+    components: list[string] = []
+    for component in graph_queries.dependency_components(graph):
+        members: list[string] = []
+        for member in component.members:
+            members.append(identity(graph.nodes[member.index].definition))
+        components.append("[" + members.join(",") + "]")
+    return "{\"semantic_hierarchy\":" + hierarchy_ir.emit(module, graph) + ",\"schema_version\":2,\"stage\":\"cfg\",\"source_coordinates\":\"utf8-bytes\",\"package_graph\":" + package_graph + ",\"definitions\":[" + definitions.join(",") + "],\"functions\":[" + functions.join(",") + "],\"values\":[" + values.join(",") + "],\"dependencies\":[" + dependencies.join(",") + "],\"dependency_components\":[" + components.join(",") + "]}"
 
 
 
-def operation_json(operation: universal.Operation) -> string:
+def operation_json(operation: universal.Operation, module: universal.Module) -> string | Error:
     fields := ""
     operands: list[universal.ValueId] := []
     results: list[universal.ValueId] = []
@@ -209,11 +237,11 @@ def operation_json(operation: universal.Operation) -> string:
             operands = arguments
             for output in outputs:
                 results.append(output)
-            fields = ",\"function\":" + identity(universal.DefId(0, 0, universal.DeclarationId(function.value)))
+            fields = ",\"function\":" + identity(semantic_graph.callable_definition(module, function))
         case Call:
             operands = arguments
             results.append(result)
-            fields = ",\"function\":" + identity(universal.DefId(0, 0, universal.DeclarationId(function.value)))
+            fields = ",\"function\":" + identity(semantic_graph.callable_definition(module, function))
         case Unary:
             operands.append(operand)
             results.append(result)

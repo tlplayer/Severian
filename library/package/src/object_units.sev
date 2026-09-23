@@ -1,0 +1,21 @@
+import * from "semantic_dependencies.sev"
+
+
+class ObjectUnit:
+    key: string
+    submodules: list[int]
+    entry: bool = false
+
+
+# The first realization policy is one object per semantic submodule. The model
+# permits grouping without changing declaration identity or source membership.
+def object_units(plan: SemanticPlan, root: int) -> list[ObjectUnit] | Error:
+    if root < 0 or root >= len(plan.units):
+        throw Error("object plan has no root semantic submodule")
+    result = [ObjectUnit(semantic_unit_key(plan.units[root]), [root], true)]
+    index := 0
+    for unit in plan.units:
+        if index != root:
+            result.append(ObjectUnit(semantic_unit_key(unit), [index]))
+        index += 1
+    return result

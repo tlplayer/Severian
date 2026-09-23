@@ -401,22 +401,35 @@ def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: li
     parser_expect_symbol(parser, "]", "expected closing type parameter bracket")
     return (parameters, constraints)
 
-def parser_declaration_constraints(parser: Parser) -> list[universal.GenericConstraint] | diagnostics.Diagnostic:
+def parser_declaration_constraints(parser: Parser, attachments: list[universal.WithAttachment] = [], callable: bool = false) -> list[universal.GenericConstraint] | diagnostics.Diagnostic:
     constraints: list[universal.GenericConstraint] = []
     if not parser_at_identifier(parser, "with"):
         return constraints
     parser_next(parser)
+    if callable and not parser_at_symbol(parser, "{"):
+        attachments.append(universal.WithAttachment(universal.AttachmentRole.Dispatch, parser_expression(parser, 0)))
+        return constraints
     parser_expect_symbol(parser, "{", "expected { after declaration with")
     multiline = parser_take(parser, Newline) != None
     if multiline:
         parser_expect(parser, Indent, "expected indented declaration constraints")
     parser_separators(parser)
     while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, Dedent):
-        if parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], ":"):
+        if callable and (parser_at_identifier(parser, "entry") or parser_at_identifier(parser, "fix") or parser_at_identifier(parser, "exit")):
+            role := universal.AttachmentRole.Entry
+            if parser_at_identifier(parser, "fix"):
+                role = universal.AttachmentRole.Fix
+            elif parser_at_identifier(parser, "exit"):
+                role = universal.AttachmentRole.Exit
+            parser_next(parser)
+            attachments.append(universal.WithAttachment(role, parser_expression(parser, 0)))
+        elif parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], ":"):
             parameter = parser_identifier(parser, "expected constrained parameter")
             parser_expect_symbol(parser, ":", "expected colon after constrained parameter")
             bound = parser_type_annotation(parser)
             constraints.append(universal.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+        elif callable:
+            attachments.append(universal.WithAttachment(universal.AttachmentRole.Dispatch, parser_expression(parser, 0)))
         else:
             constraints.append(universal.Predicate(parser_expression(parser, 0)))
         parser_take_symbol(parser, ",")
@@ -475,7 +488,8 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
     if parser_take_symbol(parser, "->") != None:
         result_mode = parser_ownership_mode(parser)
         result = parser_type_annotation(parser)
-    for constraint in parser_declaration_constraints(parser):
+    attachments: list[universal.WithAttachment] = []
+    for constraint in parser_declaration_constraints(parser, attachments, true):
         constraints.append(constraint)
     body: universal.Block | None := None
     end := result.span.end
@@ -483,7 +497,7 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
         block = parser_indented_block(parser, "function")
         body = block[0]
         end = block[1]
-    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults)
+    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults, attachments=attachments)
 
 def parser_ownership_mode(parser: Parser) -> string:
     if parser_at_identifier(parser, "view"):

@@ -3,6 +3,7 @@ import * from "host.sev"
 import * from "model.sev"
 import * from "manifest.sev"
 import * from "archive.sev"
+import * from "semantic_dependencies.sev"
 import environment
 import os
 import path
@@ -232,12 +233,7 @@ def resolve(project: Project, request: Resolve) -> Resolution | Error:
     return Resolution(packages, edges, lock)
 
 def dependency_source(resolution: Resolution, importer: string, alias: string) -> string | Error:
-    owner := -1
-    for index in range(int(len(resolution.packages))):
-        root = resolution.packages[index].root
-        if importer.starts_with(root + "/"):
-            if owner < 0 or int(len(root)) > int(len(resolution.packages[owner].root)):
-                owner = index
+    owner = resolved_source_owner(resolution, importer)
     if owner < 0:
         throw Error("module is outside the resolved package graph: " + importer)
     manifest = resolution.packages[owner].manifest

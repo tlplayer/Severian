@@ -5,6 +5,8 @@ class SourceId:
     index: u32
 
 class Span:
+    # Internal coordinates are half-open Unicode scalar indices. Serialized
+    # tooling interfaces use UTF-8 bytes; convert explicitly at that boundary.
     source: SourceId
     start: u32
     end: u32
@@ -14,6 +16,8 @@ class SourceFile:
     path: string
     text: string
     characters: list[string]
+    # Derived lazily, shared by repeated tooling span queries, never archived.
+    byte_offsets: list[int] = []
 
     def SourceFile(id: SourceId, path: string, text: string):
         self.id = id
@@ -29,6 +33,19 @@ def span(source: SourceId, start: u32, end: u32) -> Span:
 
 def virtual_source(path: string, text: string) -> SourceFile:
     return SourceFile(SourceId(0), path, text)
+
+
+def utf8_offset(file: SourceFile, offset: u32) -> u32 | Error:
+    if offset > len(file.characters):
+        throw Error("source offset is out of bounds")
+    if len(file.byte_offsets) == 0:
+        cursor := 0
+        for byte in file.text.bytes():
+            if byte < 128 or byte >= 192:
+                file.byte_offsets.append(cursor)
+            cursor += 1
+        file.byte_offsets.append(cursor)
+    return u32(file.byte_offsets[offset])
 
 def load(path: string) -> SourceFile | Error:
     return virtual_source(path, file.read_checked(path))

@@ -1,0 +1,97 @@
+import source
+import universal
+from universal import graph_verify
+
+
+def callable_definition(module: universal.Module, function: universal.FunctionId) -> universal.DefId | Error:
+    for declaration in borrow module.functions:
+        if declaration.id.value == function.value:
+            return declaration.definition
+    throw Error("call graph refers to an unknown function: " + string(function.value))
+
+
+def grammar_parent(module: universal.Module, declaration: universal.TraitDeclaration, name: string) -> universal.DefId | Error:
+    for parent in borrow module.traits:
+        if parent.name == declaration.lookup + name:
+            return parent.definition
+    for parent in borrow module.traits:
+        if parent.name == name:
+            return parent.definition
+    throw Error("semantic graph refers to an unknown base: " + name)
+
+
+def body_dependencies(graph: universal.DefinitionGraph, module: universal.Module, definition: universal.DefId, body: universal.CfgBody) -> unit | Error:
+    owner = universal.definition_index(graph, definition)
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Call:
+                    target = universal.definition_index(graph, callable_definition(module, function))
+                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation)
+                case CallFields:
+                    target = universal.definition_index(graph, callable_definition(module, function))
+                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation)
+                case _:
+                    continue
+
+
+def source_owner(owners: list[universal.SourceUnit], span: source.Span | None, fallback: int) -> int | Error:
+    origin ?= span
+    if origin != None:
+        for owner in owners:
+            if owner.source.index == origin.source.index:
+                return owner.submodule
+        throw Error("definition source has no package-owned submodule membership")
+    return fallback
+
+
+def build(module: universal.Module, owners: list[universal.SourceUnit], root: int) -> universal.DefinitionGraph | Error:
+    graph = universal.DefinitionGraph()
+    module.hierarchy.regions = []
+    module.hierarchy.sentences = []
+    module.obligations = []
+    for declaration in module.traits:
+        kind = universal.DefinitionKind.GrammarDefinition if declaration.grammar else universal.DefinitionKind.TraitDefinition
+        universal.add_definition(graph, declaration.definition, kind, declaration.name, declaration.span, alias=true, submodule=source_owner(owners, declaration.span, root))
+    executable_ids: list[string] = []
+    for declaration in module.functions:
+        key = string(declaration.id.value)
+        if key in executable_ids:
+            throw Error("duplicate executable function identity: " + key)
+        executable_ids.append(key)
+        unit = source_owner(owners, declaration.span, root)
+        node = universal.add_definition(graph, declaration.definition, universal.DefinitionKind.Callable, declaration.name, declaration.span, alias=true, submodule=unit)
+        owner_key := ""
+        for owner in owners:
+            if owner.submodule == unit:
+                owner_key = owner.key
+                break
+        key = universal.callable_key(declaration, owner_key)
+        if declaration.semantic_key != "":
+            key = declaration.semantic_key
+        graph.nodes[node.index].semantic_key = key
+        body ?= declaration.body
+        if body != None:
+            region = universal.hierarchy_region(module.hierarchy, declaration.definition, body, origin=declaration.span)
+            for attachment in declaration.attachments:
+                module.obligations.append(universal.ConstraintObligation(declaration.definition, attachment.role, attachment.condition, region=region))
+    initializer = universal.DefId(0, 0, universal.DeclarationId(0))
+    if len(module.cfg_bodies) > 0:
+        universal.add_definition(graph, initializer, universal.DefinitionKind.Callable, "$initializer", None, submodule=root)
+    for declaration in module.traits:
+        owner = universal.definition_index(graph, declaration.definition)
+        for base in declaration.bases:
+            name ?= universal.simple_type_name(base)
+            if name != None:
+                target = universal.definition_index(graph, grammar_parent(module, declaration, name))
+                universal.add_dependency(graph, owner, target, universal.DependencyKind.Inheritance)
+    for declaration in module.functions:
+        if declaration.cfg_index >= len(module.cfg_bodies):
+            throw Error("callable CFG index is out of bounds")
+        if declaration.cfg_index >= 0:
+            body_dependencies(graph, module, declaration.definition, module.cfg_bodies[declaration.cfg_index])
+    if len(module.cfg_bodies) > 0:
+        body_dependencies(graph, module, initializer, module.cfg_bodies[0])
+    universal.verify_hierarchy(module.hierarchy)
+    graph_verify.freeze_definitions(graph)
+    return graph

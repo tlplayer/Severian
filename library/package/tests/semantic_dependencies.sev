@@ -1,0 +1,43 @@
+import * from "../src/semantic_dependencies.sev" as semantic
+import * from "../src/model.sev"
+
+
+def fixture(entries: list[Entry]) -> Resolution:
+    manifest = Manifest("compiler-front", "1.0.0", "", [], [], entries)
+    root = ResolvedPackage(PackageIdentity("compiler-front", "1.0.0", "root"), "/virtual/front", manifest, "content-a")
+    nested = ResolvedPackage(PackageIdentity("syntax", "1.0.0", "path:syntax"), "/virtual/front/syntax", Manifest("syntax", "1.0.0", "", [], [], []), "content-b")
+    return Resolution([root, nested], [DependencyEdge(0, 1, "syntax", false)], "")
+
+
+test "semantic ownership uses the resolved longest package root":
+    resolution = fixture([])
+    assert(semantic.resolved_source_owner(resolution, "/virtual/front/src/lib.sev") == 0)
+    assert(semantic.resolved_source_owner(resolution, "/virtual/front/syntax/src/lib.sev") == 1)
+    assert(semantic.resolved_source_owner(resolution, "/virtual/frontend/src/lib.sev") == -1)
+    unit = semantic.semantic_source_unit(resolution, "/virtual/front/syntax/src/lib.sev")
+    assert(unit.package.name == "syntax")
+    assert(unit.submodule == "src/lib.sev")
+
+
+test "explicit membership groups source files and preserves unit identity across moves":
+    entries = [Entry("package.metadata.semantic", "module", "\"frontend\""), Entry("package.metadata.semantic.submodules", "analysis", "[\"src/a.sev\", \"src/b.sev\"]", true)]
+    plan = semantic.semantic_plan(fixture(entries), ["/virtual/front/src/a.sev", "/virtual/front/src/b.sev", "/virtual/front/syntax/src/lib.sev"])
+    assert(len(plan.units) == 2)
+    assert(plan.sources[0].unit == plan.sources[1].unit)
+    assert(plan.sources[0].unit != plan.sources[2].unit)
+    key = semantic.semantic_unit_key(plan.units[0])
+    moved = [Entry("package.metadata.semantic", "module", "\"frontend\""), Entry("package.metadata.semantic.submodules", "analysis", "[\"moved/a.sev\"]", true)]
+    next_unit = semantic.semantic_source_unit(fixture(moved), "/virtual/front/moved/a.sev")
+    assert(semantic.semantic_unit_key(next_unit) == key)
+    graph = semantic.semantic_dependencies(plan, [0, 0, 0], [0, 1, 1])
+    assert(len(graph.edges) == 1)
+    assert(graph.edges[0].parent == 0 and graph.edges[0].child == 1)
+
+
+test "multiple source owners and dangling semantic dependencies reject":
+    entries = [Entry("package.metadata.semantic.submodules", "one", "[\"src/a.sev\"]", true), Entry("package.metadata.semantic.submodules", "two", "[\"src/a.sev\"]", true)]
+    result ?= semantic.semantic_source_unit(fixture(entries), "/virtual/front/src/a.sev")
+    assert(result is Error)
+    plan = semantic.semantic_plan(fixture([]), ["/virtual/front/src/a.sev"])
+    dangling ?= semantic.semantic_dependencies(plan, [0], [1])
+    assert(dangling is Error)

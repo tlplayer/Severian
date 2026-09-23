@@ -73,7 +73,16 @@ pub fn package_order(graph: &ModuleGraph) -> Result<Vec<PackageId>, Diagnostic> 
         Ok(())
     }
     let mut order=Vec::new(); let mut done=BTreeSet::new();
-    for package in edges.keys() {visit(*package,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;}
+    // Disconnected compiler-provided registries are not the requested root.
+    // Visit them before the root so a stable package sort preserves the root
+    // contract instead of selecting whichever registry has the largest ID.
+    let root = graph.modules.last().map(|module| module.package);
+    for package in edges.keys().filter(|package| Some(**package) != root) {
+        visit(*package,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;
+    }
+    if let Some(root) = root {
+        visit(root,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;
+    }
     Ok(order)
 }
 
@@ -528,6 +537,42 @@ mod tests {
         assert!(graph.modules[0].path.ends_with("dependency.sev"));
         assert_ne!(graph.modules[0].source.id, graph.modules[1].source.id);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn disconnected_registry_packages_do_not_replace_the_requested_root() {
+        let directory = temporary();
+        let root = directory.join("app/main.sev");
+        let registry = directory.join("registry/lib.sev");
+        for file in [&root, &registry] {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "def example():\n    pass\n").unwrap();
+        }
+        let packages = PackageGraph {
+            root: PackageId(0),
+            packages: BTreeMap::from([
+                (PackageId(0), ResolvedPackage {
+                    id: PackageId(0), root: root.parent().unwrap().to_owned(),
+                    library: root.clone(), dependencies: BTreeMap::new(),
+                }),
+                (PackageId(9), ResolvedPackage {
+                    id: PackageId(9), root: registry.parent().unwrap().to_owned(),
+                    library: registry.clone(), dependencies: BTreeMap::new(),
+                }),
+            ]),
+        };
+        let mut graph = resolve_with_packages_and_additional_roots(
+            &root, &packages, &[(registry, PackageId(9))], 5,
+        ).unwrap();
+        order_packages(&mut graph).unwrap();
+        assert_eq!(graph.modules.last().unwrap().package, PackageId(0));
+        assert_eq!(graph.modules.last().unwrap().path, std::fs::canonicalize(root).unwrap());
+        assert_eq!(graph.modules[0].package, PackageId(9));
+        // Repeated scheduling must preserve both dependency and root order.
+        let paths: Vec<_> = graph.modules.iter().map(|module| module.path.clone()).collect();
+        order_packages(&mut graph).unwrap();
+        assert_eq!(paths, graph.modules.iter().map(|module| module.path.clone()).collect::<Vec<_>>());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

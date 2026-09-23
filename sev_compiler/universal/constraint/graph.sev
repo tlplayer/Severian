@@ -1,0 +1,42 @@
+import * from "model.sev"
+
+
+# Unsafe checks retain source order. Costs only choose among ready safe checks.
+def constraint_schedule(graph: ConstraintGraph) -> list[ConstraintId] | Error:
+    count = len(graph.requirements)
+    index := 0
+    for requirement in graph.requirements:
+        if requirement.id.index != index or requirement.cost < 0:
+            throw Error("invalid constraint identity or cost")
+        for prerequisite in requirement.prerequisites:
+            if prerequisite.index >= count:
+                throw Error("dangling constraint prerequisite")
+        index += 1
+    result: list[ConstraintId] = []
+    emitted: list[int] = []
+    while len(result) < count:
+        selected := -1
+        index = 0
+        for requirement in graph.requirements:
+            if index not in emitted:
+                ready := true
+                for prerequisite in requirement.prerequisites:
+                    if int(prerequisite.index) not in emitted:
+                        ready = false
+                # Do not move a check across an effect barrier in either direction.
+                previous := 0
+                for earlier in graph.requirements[:index]:
+                    if previous not in emitted and (not requirement.reorderable or not earlier.reorderable):
+                        ready = false
+                    previous += 1
+                if ready:
+                    if selected < 0:
+                        selected = index
+                    elif requirement.reorderable and graph.requirements[selected].reorderable and requirement.cost < graph.requirements[selected].cost:
+                        selected = index
+            index += 1
+        if selected < 0:
+            throw Error("cyclic constraint prerequisites or effect-order conflict")
+        emitted.append(selected)
+        result.append(graph.requirements[selected].id)
+    return result

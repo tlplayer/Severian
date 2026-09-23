@@ -1,0 +1,37 @@
+import universal
+
+
+# Archive readers must reject references before exposing decoded compiler data.
+def validate_semantic_module(module: universal.Module) -> unit | Error:
+    universal.verify_hierarchy(module.hierarchy)
+    definitions: list[string] = []
+    for function in module.functions:
+        key = universal.definition_identity(function.definition)
+        if key in definitions:
+            for previous in module.functions:
+                if previous.id.value != function.id.value and universal.same_definition(previous.definition, function.definition):
+                    if previous.semantic_key != function.semantic_key or not universal.same_origin(previous.span, function.span):
+                        throw Error("conflicting archived callable identity")
+        else:
+            definitions.append(key)
+        if len(function.dispatch_candidates) != len(function.dispatch_predicates):
+            throw Error("archived dispatch candidate and predicate counts disagree")
+        for name in function.dispatch_candidates:
+            found := false
+            for candidate in module.functions:
+                if candidate.name == name:
+                    found = true
+            if not found:
+                throw Error("archived dispatch candidate is missing: " + name)
+    for region in module.hierarchy.regions:
+        if universal.definition_identity(region.definition) not in definitions:
+            throw Error("archived region has an unknown callable owner")
+    for obligation in module.obligations:
+        if universal.definition_identity(obligation.owner) not in definitions:
+            throw Error("archived contract has an unknown callable owner")
+        region ?= obligation.region
+        if region != None:
+            if region.index >= len(module.hierarchy.regions):
+                throw Error("archived contract has an unknown region")
+            if universal.definition_identity(module.hierarchy.regions[region.index].definition) != universal.definition_identity(obligation.owner):
+                throw Error("archived contract region belongs to another callable")

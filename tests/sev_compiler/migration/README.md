@@ -2,6 +2,10 @@
 
 Current implementation results and outstanding work are recorded in
 [RESULTS.md](RESULTS.md) and [INVENTORY.md](INVENTORY.md).
+The semantic graph V2 work and fresh validation are tracked in
+[V2-STATUS.md](V2-STATUS.md). Its behavioral suite is
+`python3 tests/sev_compiler/v2_architecture.py -v`; the checked graph builder has
+native tests in `sev_compiler/tests/graph`.
 
 Run from the repository root after building the source compiler:
 

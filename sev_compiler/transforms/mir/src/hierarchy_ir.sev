@@ -1,0 +1,46 @@
+import universal
+
+
+def quoted(value: string) -> string:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
+
+
+def emit(module: universal.Module, graph: universal.DefinitionGraph) -> string:
+    dispatch: list[string] = []
+    for function in module.functions:
+        if len(function.dispatch_candidates) > 0:
+            candidates: list[string] = []
+            for name in function.dispatch_candidates:
+                candidates.append(quoted(name))
+            dispatch.append("{\"definition\":" + quoted(universal.definition_identity(function.definition)) + ",\"candidates\":[" + candidates.join(",") + "]}")
+    keys: list[string] = []
+    for node in graph.nodes:
+        keys.append("{\"definition\":" + quoted(universal.definition_identity(node.definition)) + ",\"key\":" + quoted(node.semantic_key) + "}")
+    regions: list[string] = []
+    for region in module.hierarchy.regions:
+        parent := "null"
+        owner ?= region.parent
+        if owner != None:
+            parent = string(owner.index)
+        regions.append("{\"id\":" + string(region.id.index) + ",\"definition\":" + quoted(universal.definition_identity(region.definition)) + ",\"parent\":" + parent + "}")
+    sentences: list[string] = []
+    for sentence in module.hierarchy.sentences:
+        sentences.append("{\"id\":" + string(sentence.id.index) + ",\"region\":" + string(sentence.region.index) + ",\"ordinal\":" + string(sentence.ordinal) + "}")
+    obligations: list[string] = []
+    for obligation in module.obligations:
+        role := "context"
+        match obligation.role:
+            case Dispatch:
+                role = "dispatch"
+            case Entry:
+                role = "entry"
+            case Fix:
+                role = "fix"
+            case Exit:
+                role = "exit"
+            case Setup:
+                role = "setup"
+            case Context:
+                role = "context"
+        obligations.append("{\"definition\":" + quoted(universal.definition_identity(obligation.owner)) + ",\"role\":" + quoted(role) + ",\"proof\":\"unknown\"}")
+    return "{\"dispatch\":[" + dispatch.join(",") + "],\"keys\":[" + keys.join(",") + "],\"regions\":[" + regions.join(",") + "],\"sentences\":[" + sentences.join(",") + "],\"obligations\":[" + obligations.join(",") + "]}"

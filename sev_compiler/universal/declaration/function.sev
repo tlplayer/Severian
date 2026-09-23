@@ -7,6 +7,7 @@ import * from "../operator/kind.sev"
 import * from "../statement/statement.sev"
 import * from "../cfg/cfg.sev"
 import * from "language.sev"
+import * from "../constraint/model.sev"
 
 
 class CompilerCapability:
@@ -104,6 +105,10 @@ class FunctionDeclaration:
     prelude: bool = false
     type_defaults: list[TypeAnnotation] = []
     mock_functions: list[MockFunction] = []
+    attachments: list[WithAttachment] = []
+    semantic_key: string = ""
+    dispatch_candidates: list[string] = []
+    dispatch_predicates: list[Expression] = []
 
 
 def resolved_function(

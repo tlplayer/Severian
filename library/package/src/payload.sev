@@ -36,7 +36,9 @@ def artifact_kind(location: string) -> string:
 
 def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string, profile: string) -> list[string] | Error:
     paths: list[string] = []
-    for suffix in [".mlirbc", ".ll", ".bc", ".mir"]:
+    for suffix in [".mlirbc", ".ll", ".bc", ".mir", ".semantic"]:
+        if suffix == ".semantic" and not os.is_file(cache + "/artifact.semantic"):
+            continue
         relative = prefix + "/ir/" + name + suffix
         payload_copy(cache + "/artifact" + suffix, root + "/" + relative)
         paths.append(relative)

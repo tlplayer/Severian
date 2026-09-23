@@ -1,0 +1,36 @@
+import universal
+
+
+# The bounded evaluator never executes user code. Unsupported predicates remain
+# Unknown and must retain their runtime check or fail a static-only requirement.
+def prove_condition(expression: universal.Expression) -> universal.ProofResult:
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case BooleanValue:
+                    return universal.ProofResult.Proven if value else universal.ProofResult.Refuted
+                case _:
+                    return universal.ProofResult.Unknown
+        case Unary:
+            if operator.symbol == "not":
+                result = prove_condition(operand)
+                if result == universal.ProofResult.Proven:
+                    return universal.ProofResult.Refuted
+                if result == universal.ProofResult.Refuted:
+                    return universal.ProofResult.Proven
+        case Binary:
+            first = prove_condition(left)
+            second = prove_condition(right)
+            if operator.symbol == "and":
+                if first == universal.ProofResult.Refuted or second == universal.ProofResult.Refuted:
+                    return universal.ProofResult.Refuted
+                if first == universal.ProofResult.Proven and second == universal.ProofResult.Proven:
+                    return universal.ProofResult.Proven
+            if operator.symbol == "or":
+                if first == universal.ProofResult.Proven or second == universal.ProofResult.Proven:
+                    return universal.ProofResult.Proven
+                if first == universal.ProofResult.Refuted and second == universal.ProofResult.Refuted:
+                    return universal.ProofResult.Refuted
+        case _:
+            return universal.ProofResult.Unknown
+    return universal.ProofResult.Unknown

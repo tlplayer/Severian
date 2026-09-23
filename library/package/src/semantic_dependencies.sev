@@ -1,0 +1,136 @@
+import dependency
+import os
+import path
+import * from "model.sev"
+import * from "document.sev"
+import * from "host.sev"
+import * from "manifest.sev"
+
+
+# The package library owns the semantic compilation hierarchy above a submodule.
+# Compiler clients supply source references, never a competing package resolver.
+class SemanticUnit:
+    package: PackageIdentity
+    module: string
+    submodule: string
+
+
+class SourceMembership:
+    path: string
+    unit: int
+
+
+class SemanticPlan:
+    units: list[SemanticUnit] = []
+    sources: list[SourceMembership] = []
+
+
+def semantic_unit_key(unit: SemanticUnit) -> string:
+    # Length-delimited strings preserve identity without delimiter collisions.
+    fields = [unit.package.name, unit.package.version, unit.package.source, unit.module, unit.submodule]
+    parts: list[string] = []
+    for field in fields:
+        parts.append(string(len(field)) + ":" + field)
+    return "semantic-unit-1:" + parts.join("")
+
+
+def resolved_source_owner(resolution: Resolution, location: string) -> int:
+    owner := -1
+    for index in range(int(len(resolution.packages))):
+        root = resolution.packages[index].root
+        if location.starts_with(root + "/"):
+            if owner < 0 or len(root) > len(resolution.packages[owner].root):
+                owner = index
+    return owner
+
+
+def semantic_source_unit(resolution: Resolution, location: string) -> SemanticUnit | Error:
+    owner = resolved_source_owner(resolution, location)
+    root := ""
+    entries: list[Entry] := []
+    identity := PackageIdentity("$standalone", "0", "source")
+    if owner >= 0:
+        resolved = resolution.packages[owner]
+        root = resolved.root
+        entries = resolved.manifest.entries
+        identity = resolved.identity
+    else:
+        # Standalone compilation follows the same nearest-manifest policy as
+        # package prelude selection, without opening/editing a project.
+        directory := path.dirname(location)
+        while true:
+            if os.is_file(manifest_file(directory)):
+                root = directory
+                entries = parse_document(read_text(manifest_file(directory)))
+                identity = PackageIdentity(text_setting(entries, "package", "name"), text_setting(entries, "package", "version"), "source")
+                break
+            parent = path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
+    relative = location[len(root) + 1:] if root != "" else location
+    module = text_setting(entries, "package.metadata.semantic", "module", identity.name)
+    submodule := relative
+    selected := false
+    for entry in entries:
+        if entry.table == "package.metadata.semantic.submodules":
+            for member in string_array(entry.value):
+                if relative_path(member) == relative:
+                    if selected:
+                        throw Error("source has multiple semantic submodule owners: " + relative)
+                    selected = true
+                    submodule = entry.key
+    if module == "" or submodule == "":
+        throw Error("semantic module and submodule names must be nonempty")
+    return SemanticUnit(identity, module, submodule)
+
+
+def semantic_plan(resolution: Resolution, sources: list[string]) -> SemanticPlan | Error:
+    plan = SemanticPlan()
+    keys: list[string] = []
+    for location in sources:
+        unit = semantic_source_unit(resolution, location)
+        key = semantic_unit_key(unit)
+        index := 0
+        for existing in keys:
+            if existing == key:
+                break
+            index += 1
+        if index == int(len(keys)):
+            keys.append(key)
+            plan.units.append(unit)
+        plan.sources.append(SourceMembership(location, index))
+    return plan
+
+
+def semantic_dependencies(plan: SemanticPlan, dependents: list[int], requirements: list[int]) -> dependency.Graph | Error:
+    if len(dependents) != len(requirements):
+        throw Error("semantic dependency endpoint counts disagree")
+    names: list[string] = []
+    for unit in plan.units:
+        names.append(semantic_unit_key(unit))
+    edges: list[dependency.Edge] = []
+    seen: list[string] = []
+    index := 0
+    while index < len(dependents):
+        left = dependents[index]
+        right = requirements[index]
+        if left < 0 or right < 0 or left >= len(plan.units) or right >= len(plan.units):
+            throw Error("semantic submodule dependency endpoint is out of bounds")
+        key = string(left) + ":" + string(right)
+        if left != right and key not in seen:
+            edges.append(dependency.Edge(left, right))
+            seen.append(key)
+        index += 1
+    return dependency.graph(names, edges)
+
+
+def semantic_plan_json(plan: SemanticPlan, dependents: list[int], requirements: list[int]) -> string | Error:
+    graph = semantic_dependencies(plan, dependents, requirements)
+    units: list[string] = []
+    for unit in plan.units:
+        units.append("{\"key\":" + document_quote(semantic_unit_key(unit)) + ",\"package\":" + document_quote(unit.package.name) + ",\"version\":" + document_quote(unit.package.version) + ",\"module\":" + document_quote(unit.module) + ",\"submodule\":" + document_quote(unit.submodule) + "}")
+    edges: list[string] = []
+    for edge in graph.edges:
+        edges.append("{\"from\":" + string(edge.parent) + ",\"to\":" + string(edge.child) + "}")
+    return "{\"units\":[" + units.join(",") + "],\"dependencies\":[" + edges.join(",") + "]}"

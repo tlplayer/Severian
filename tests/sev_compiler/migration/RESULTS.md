@@ -1,4 +1,7 @@
-# Migration validation — 2026-09-08
+# Historical migration validation — 2026-09-08
+
+These results describe the September 8 checkout, not the current compiler.
+See [V2-STATUS.md](V2-STATUS.md) for the September 22 implementation and validation.
 
 The six-gate migration is **not complete**. The unchanged-binary runner passes
 16 of its 30 cases. Gate 3's five syntax cases all pass, together with the

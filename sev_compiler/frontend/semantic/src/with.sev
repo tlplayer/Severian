@@ -1,0 +1,192 @@
+import diagnostics
+import source
+import universal
+
+
+def has_dispatch(function: universal.FunctionDeclaration) -> bool:
+    for attachment in function.attachments:
+        if attachment.role == universal.AttachmentRole.Dispatch:
+            return true
+    return false
+
+
+def predicate_key(expression: universal.Expression) -> string | diagnostics.Diagnostic:
+    match expression.kind:
+        case Name:
+            return universal.semantic_key(["name", name])
+        case LiteralValue:
+            match value:
+                case BooleanValue:
+                    return "true" if value else "false"
+                case IntegerValue:
+                    return universal.semantic_key(["integer", spelling])
+                case _:
+                    return error(diagnostics.diagnostic_at("E000219", "dispatch predicate requires boolean or integer literals", expression.span))
+        case Binary:
+            if operator.symbol not in ["==", "!=", "<", "<=", ">", ">=", "and", "or"]:
+                return error(diagnostics.diagnostic_at("E000219", "dispatch predicate operation is not proven total and effect-free", expression.span))
+            return universal.semantic_key([operator.symbol, predicate_key(left), predicate_key(right)])
+        case Unary:
+            if operator.symbol != "not":
+                return error(diagnostics.diagnostic_at("E000219", "dispatch unary operation is not proven total", expression.span))
+            return universal.semantic_key(["not", predicate_key(operand)])
+        case ComparisonChain:
+            parts: list[string] = []
+            for operand in operands:
+                parts.append(predicate_key(operand))
+            for operator in operators:
+                if operator.symbol not in ["==", "!=", "<", "<=", ">", ">="]:
+                    return error(diagnostics.diagnostic_at("E000219", "unsupported dispatch comparison", expression.span))
+                parts.append(operator.symbol)
+            return universal.semantic_key(parts)
+        case _:
+            return error(diagnostics.diagnostic_at("E000219", "dispatch predicate needs an effect and termination proof", expression.span))
+
+
+def literal_integer(value: string, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), span)
+
+
+def named(name: string, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.Name(name), span)
+
+
+def binary(symbol: string, left: universal.Expression, right: universal.Expression, span: source.Span) -> universal.Expression:
+    return universal.Expression(universal.Binary(universal.OperatorSyntax(symbol, universal.Fixity.Infix, 30, universal.Associativity.Left), left, right), span)
+
+
+def guard(function: universal.FunctionDeclaration, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
+    condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+    for attachment in function.attachments:
+        if attachment.role == universal.AttachmentRole.Dispatch:
+            predicate_key(attachment.condition)
+            condition = binary("and", condition, attachment.condition, span)
+    return condition
+
+
+# Produce ordinary source-level control flow before callable registration. The
+# selected body is invoked only after every candidate's guard has been checked.
+# Arguments are wrapper parameters, so neither guards nor selection repeat them.
+def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.Diagnostic:
+    guarded_keys: list[string] = []
+    for item in module.items:
+        match item:
+            case Function:
+                if has_dispatch(declaration):
+                    guarded_keys.append(universal.callable_key(declaration, declaration.name))
+            case _:
+                continue
+    if len(guarded_keys) == 0:
+        return module
+    groups: list[string] = []
+    output: list[universal.Item] = []
+    for item in module.items:
+        match item:
+            case Function:
+                key = universal.callable_key(declaration, declaration.name)
+                guarded = key in guarded_keys
+                if not guarded:
+                    output.append(item)
+                    continue
+                if key in groups:
+                    continue
+                groups.append(key)
+                family: list[universal.FunctionDeclaration] = []
+                for candidate_item in module.items:
+                    match candidate_item:
+                        case Function:
+                            if universal.callable_key(declaration, declaration.name) == key:
+                                family.append(declaration)
+                        case _:
+                            continue
+                first = family[0]
+                family_name = first.name
+                family_identity = first.semantic_key
+                origin ?= first.span
+                if origin == None:
+                    return error(diagnostics.diagnostic("E000219", "dispatch family requires source provenance"))
+                if origin != None:
+                    if len(first.type_parameters) != 0 or len(first.constraints) != 0 or first.body == None:
+                        return error(diagnostics.diagnostic_at("E000219", "runtime dispatch requires concrete source signatures", origin))
+                    for parameter in first.parameters:
+                        name ?= universal.simple_type_name(parameter.annotation)
+                        if name == None:
+                            return error(diagnostics.diagnostic_at("E000219", "dispatch parameter needs a proven scalar predicate domain", parameter.span))
+                        if name != None:
+                            if name not in ["bool", "int", "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128"]:
+                                return error(diagnostics.diagnostic_at("E000219", "dispatch parameter needs a proven scalar predicate domain", parameter.span))
+                        if parameter.variadic or len(parameter.modifiers) != 0:
+                            return error(diagnostics.diagnostic_at("E000219", "dispatch requires fixed scalar value parameters", parameter.span))
+                    statements: list[universal.Statement] = []
+                    statements.append(universal.BindingStatement(universal.Binding("$dispatch$count", None, literal_integer("0", origin), false, false, origin, mutable=true)))
+                    calls: list[universal.Expression] = []
+                    guards: list[string] = []
+                    predicate_keys: list[string] = []
+                    candidate_names: list[string] = []
+                    candidate_predicates: list[universal.Expression] = []
+                    index := 0
+                    for candidate in family:
+                        if len(candidate.parameters) != len(first.parameters) or candidate.result_mode != first.result_mode:
+                            return error(diagnostics.diagnostic_at("E000219", "dispatch candidates have incompatible contracts", origin))
+                        result ?= candidate.result
+                        first_result ?= first.result
+                        if result != None and first_result != None:
+                            if universal.annotation_key(result) != universal.annotation_key(first_result):
+                                return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
+                        arguments: list[universal.CallArgument] = []
+                        cursor := 0
+                        for parameter in candidate.parameters:
+                            if parameter.name != first.parameters[cursor].name:
+                                return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must agree on parameter names", parameter.span))
+                            arguments.append(universal.CallArgument(None, named(parameter.name, origin), origin))
+                            cursor += 1
+                        condition = guard(candidate, origin)
+                        candidate_predicates.append(condition)
+                        predicate_identity = predicate_key(condition)
+                        if predicate_identity in predicate_keys:
+                            return error(diagnostics.diagnostic_at("E000219", "duplicate dispatch predicate", origin))
+                        predicate_keys.append(predicate_identity)
+                        flag = "$dispatch$guard$" + string(index)
+                        guards.append(flag)
+                        statements.append(universal.BindingStatement(universal.Binding(flag, None, condition, false, false, origin)))
+                        increment = universal.BindingStatement(universal.Binding("$dispatch$count", None, binary("+", named("$dispatch$count", origin), literal_integer("1", origin), origin), true, false, origin))
+                        statements.append(universal.If(named(flag, origin), universal.Block([increment]), universal.empty_block(), origin))
+                        candidate.name = family_name + "$dispatch$" + string(index)
+                        candidate.semantic_key = universal.semantic_key([candidate.semantic_key, "dispatch", predicate_identity])
+                        candidate.definition = universal.definition_from_key(candidate.semantic_key)
+                        contracts: list[universal.WithAttachment] = []
+                        for attachment in candidate.attachments:
+                            if attachment.role != universal.AttachmentRole.Dispatch:
+                                contracts.append(attachment)
+                        candidate.attachments = contracts
+                        candidate_names.append(candidate.name)
+                        output.append(universal.Function(candidate))
+                        calls.append(universal.Expression(universal.Call(named(candidate.name, origin), arguments), origin))
+                        index += 1
+                    message = universal.Expression(universal.LiteralValue(universal.StringValue("dispatch requires exactly one matching implementation")), origin)
+                    statements.append(universal.Assert(binary("==", named("$dispatch$count", origin), literal_integer("1", origin), origin), message, origin, origin))
+                    tail = universal.empty_block()
+                    index = int(len(calls))
+                    result ?= first.result
+                    is_unit := result == None
+                    if result != None:
+                        is_unit = universal.simple_type_name(result) == "unit"
+                    while index > 0:
+                        index -= 1
+                        branch = universal.Block([universal.ExpressionStatement(calls[index]), universal.Return(None, origin)]) if is_unit else universal.Block([universal.Return(calls[index], origin)])
+                        if index == int(len(calls)) - 1:
+                            tail = branch
+                        else:
+                            tail = universal.Block([universal.If(named(guards[index], origin), branch, tail, origin)])
+                    for statement in tail.statements:
+                        statements.append(statement)
+                    wrapper = universal.FunctionDeclaration(name=family_name, parameters=first.parameters, result=first.result, body=universal.Block(statements), span=first.span, lookup=first.lookup, result_mode=first.result_mode, prelude=first.prelude)
+                    wrapper.semantic_key = universal.semantic_key([family_identity, "dispatch-family"])
+                    wrapper.definition = universal.definition_from_key(wrapper.semantic_key)
+                    wrapper.dispatch_candidates = candidate_names
+                    wrapper.dispatch_predicates = candidate_predicates
+                    output.append(universal.Function(wrapper))
+            case _:
+                output.append(item)
+    module.items = output
+    return module

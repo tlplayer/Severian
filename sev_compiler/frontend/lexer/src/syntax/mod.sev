@@ -20,6 +20,8 @@ class OperatorDescriptor:
     grammar: bool = false
     end: u32 = 0
 
+    semantic_owner: string = ""
+
 
 class SyntaxRegistry:
     operators: list[universal.OperatorSyntax]
@@ -271,7 +273,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         return error(diagnostics.diagnostic_at("E000103", "declaration grammar requires an aggregate representation", descriptor.span))
                     if (declaration_members == "Callables") != (representation == "TaggedAggregate"):
                         return error(diagnostics.diagnostic_at("E000103", "declaration members do not match the representation", descriptor.span))
-                identity = universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
+                identity = universal.named_definition(descriptor.semantic_owner, "trait", descriptor.name) if descriptor.semantic_owner != "" else universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
                 syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation)
                 if descriptor.grammar:
                     syntax.domain = universal.OperatorDomain.GrammarOperator

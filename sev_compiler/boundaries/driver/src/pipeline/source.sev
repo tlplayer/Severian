@@ -1,5 +1,6 @@
 from universal import scalar_declarations as boundary
 import * from "package:mir/src/agent_ir.sev" as agent_ir
+import * from "package:mir/src/semantic_graph.sev" as semantic_graph
 import source
 from source import SourceFile
 import process
@@ -17,6 +18,7 @@ import * from "package:modules/src/source.sev"
 import * from "timing.sev" as timing
 import * from "package_interface.sev" as package_interface
 import * from "mir_archive.sev" as mir_archive
+import * from "package:interface/src/semantic_payload.sev" as semantic_payload
 import * from "package:backend/src/native_mlir.sev" as native
 import * from "quality.sev" as quality
 import * from "editor.sev" as editor
@@ -68,8 +70,8 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = []) -> string | Error:
-    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements, mir_outputs=mir_outputs)
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements, mir_outputs=mir_outputs, object_outputs=object_outputs, semantic_outputs=semantic_outputs)
     if result is string:
         return result
     if result is Diagnostic:
@@ -80,7 +82,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = []) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | diagnostics.Diagnostic:
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()
@@ -244,6 +246,12 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution, root)
         for item in application.items:
             parsed.items.append(item)
+    if emit == "library" and len(resolution.packages) > 0:
+        try:
+            exports = package.string_array(package.setting(resolution.packages[0].manifest.entries, "package", "export", "[]"))
+            semantic_outputs.append(semantic_payload.encode(parsed, registry, files, exports))
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
     # Imported declarations remain available to semantic analysis, but only
     # the subject, explicit exports and their dependencies are codegen roots.
     library_sources: list[int] = []
@@ -310,15 +318,67 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     catch failure: Error:
         return error(diagnostics.diagnostic("E000230", failure.message))
     lowered = mir.build_callables(typed, library_sources, export_names)
+    graph := universal.DefinitionGraph()
+    planned_objects: list[package.ObjectUnit] = []
+    package_graph := ""
+    try:
+        locations: list[string] = []
+        for file in files:
+            locations.append(file.path)
+        membership = package.semantic_plan(resolution, locations)
+        owners: list[universal.SourceUnit] = []
+        index := 0
+        root_unit := 0
+        for file in files:
+            owners.append(universal.SourceUnit(file.id, membership.sources[index].unit, package.semantic_unit_key(membership.units[membership.sources[index].unit])))
+            if file.path == subject_path:
+                root_unit = membership.sources[index].unit
+            index += 1
+        lowered.hierarchy = universal.SemanticHierarchy()
+        for unit in membership.units:
+            library_key = universal.semantic_key([unit.package.name, unit.package.version, unit.package.source])
+            library_index := -1
+            cursor := 0
+            for library in lowered.hierarchy.libraries:
+                if library.key == library_key:
+                    library_index = cursor
+                cursor += 1
+            if library_index < 0:
+                library_index = int(len(lowered.hierarchy.libraries))
+                lowered.hierarchy.libraries.append(universal.SemanticLibrary(library_key))
+            module_key = universal.semantic_key([library_key, unit.module])
+            module_index := -1
+            cursor = 0
+            for semantic_module in lowered.hierarchy.modules:
+                if semantic_module.key == module_key:
+                    module_index = cursor
+                cursor += 1
+            if module_index < 0:
+                module_index = int(len(lowered.hierarchy.modules))
+                lowered.hierarchy.modules.append(universal.SemanticModule(module_key, library_index))
+            lowered.hierarchy.submodules.append(universal.SemanticSubmodule(package.semantic_unit_key(unit), module_index))
+        graph = semantic_graph.build(lowered, owners, root_unit)
+        planned_objects = package.object_units(membership, root_unit)
+        dependents: list[int] = []
+        required_units: list[int] = []
+        for edge in graph.dependencies:
+            dependents.append(graph.nodes[edge.dependent.index].submodule)
+            required_units.append(graph.nodes[edge.requirement.index].submodule)
+        package_graph = package.semantic_plan_json(membership, dependents, required_units)
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000230", failure.message))
     if include_tests and len(typed.quality_files) > 0:
         quality_maps.append(quality.quality_map(lowered))
     if emit == "library":
         mir_outputs.append(mir_archive.encode(lowered))
     timing.finish_stage(timings, "mir")
     if emit == "agent-ir":
-        result = agent_ir.emit(lowered, files)
-        timing.finish_stage(timings, "agent-ir")
-        return result
+        try:
+            result = agent_ir.emit(lowered, files, graph, package_graph)
+            timing.finish_stage(timings, "agent-ir")
+            return result
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000230", failure.message))
     for function in borrow lowered.functions:
         boundary.scalar_requirements(function, requirements)
     requirements.quality = len(lowered.quality_files) > 0
@@ -344,6 +404,18 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))
         program.attributes.append(mlir.MlirNamedAttribute("llvm.target_triple", mlir.string_attribute_value(layout.triple)))
         timing.finish_stage(timings, "target-layout")
+    if emit == "":
+        for object in planned_objects:
+            selected: list[int] = []
+            for function in lowered.functions:
+                for node in graph.nodes:
+                    if universal.same_definition(node.definition, function.definition) and node.submodule in object.submodules:
+                        selected.append(int(function.id.value))
+            if len(selected) == 0 and not object.entry:
+                continue
+            part = mlir.lower_callables(lowered, not object.entry, [], [], selected, true)
+            part.attributes = program.attributes[:]
+            object_outputs.append(text.print_program(part))
     result = text.print_program(program)
     timing.finish_stage(timings, "print")
     return result

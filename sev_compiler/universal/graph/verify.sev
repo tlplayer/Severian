@@ -1,0 +1,42 @@
+import * from "model.sev"
+import * from "queries.sev"
+
+
+def freeze_definitions(graph: DefinitionGraph) -> unit | Error:
+    identities: list[string] = []
+    semantic_keys: list[string] = []
+    index := 0
+    for node in graph.nodes:
+        key = definition_identity(node.definition)
+        if key in identities:
+            throw Error("duplicate semantic definition identity: " + key)
+        identities.append(key)
+        if node.semantic_key != "":
+            if node.semantic_key in semantic_keys:
+                throw Error("duplicate semantic overload key: " + node.semantic_key)
+            semantic_keys.append(node.semantic_key)
+        if index >= len(graph.identities) or graph.identities[index] != key:
+            throw Error("inconsistent semantic identity index")
+        if len(node.names) == 0:
+            throw Error("semantic definition has no name")
+        index += 1
+    if len(graph.identities) != len(graph.nodes):
+        throw Error("dangling semantic identity index")
+    for edge in graph.dependencies:
+        if edge.dependent.index >= len(graph.nodes) or edge.requirement.index >= len(graph.nodes):
+            throw Error("semantic dependency endpoint is out of bounds")
+        left = graph.nodes[edge.dependent.index].kind
+        right = graph.nodes[edge.requirement.index].kind
+        if edge.kind == DependencyKind.Invocation:
+            if left != DefinitionKind.Callable or right != DefinitionKind.Callable:
+                throw Error("invocation dependency requires callable endpoints")
+        elif left == DefinitionKind.Callable or right == DefinitionKind.Callable:
+            throw Error("inheritance dependency requires trait endpoints")
+    for component in dependency_components(graph):
+        for member in component.members:
+            for edge in graph.dependencies:
+                if edge.kind == DependencyKind.Inheritance and edge.dependent.index == member.index:
+                    for other in component.members:
+                        if edge.requirement.index == other.index:
+                            throw Error("cyclic semantic inheritance")
+    graph.frozen = true

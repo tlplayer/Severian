@@ -25,6 +25,8 @@ import * from "package:ownership/src/places.sev" as places
 import * from "package:ownership/src/effects.sev" as parameter_effects
 import * from "closures.sev" as closures
 import * from "callable_index.sev" as callable_index
+import * from "with.sev" as with_clauses
+import * from "constraints.sev" as constraints
 
 
 class TransitionState:
@@ -80,6 +82,7 @@ class CallableAnalysis:
     return_type: universal.TypeId = universal.TypeId(2)
     catching_error: bool = false
     mock_functions: list[universal.MockFunction] = []
+    attachments: list[universal.WithAttachment] = []
 
 
 class PreludeAnalysis:
@@ -580,6 +583,8 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup, owner_type=template.owner_type, constructor=template.constructor, prelude=template.prelude)
     signature = callable_signature(instance, int(len(state.functions)), state.records, state.declarations)
     signature.pack_specialization = true
+    signature.semantic_key = universal.callable_key(instance, template.semantic_key)
+    signature.definition = universal.definition_from_key(signature.semantic_key)
     # Contract checking may call a pack with an enclosing generic's symbolic
     # parameter. Its annotation is meaningful only in that generic environment.
     # Concrete callers reselect the pack after substitution; do not enqueue a
@@ -1860,7 +1865,8 @@ def callable_install_mock(state: CallableAnalysis, calls: list[universal.Express
         ordinal = len(state.functions) + 1
         function.name = "$mock$" + string(ordinal) + "$" + original.name
         function.id = universal.FunctionId(u128(ordinal))
-        function.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal)))
+        function.semantic_key = universal.semantic_key([original.semantic_key, "mock", function.name])
+        function.definition = universal.definition_from_key(function.semantic_key)
         function.result_type = callable_mock_result(state, original, errors, span)
         function.result = universal.named_type(definitions.type_name(function.result_type, state.records), [], span)
         function.lookup = state.namespace
@@ -1922,7 +1928,8 @@ def callable_mock_target(state: CallableAnalysis, function: universal.FunctionDe
     ordinal = len(state.functions) + 1
     specialized.name = name
     specialized.id = universal.FunctionId(u128(ordinal))
-    specialized.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal)))
+    specialized.semantic_key = universal.semantic_key([function.semantic_key, "mock-specialization", name])
+    specialized.definition = universal.definition_from_key(specialized.semantic_key)
     if function.result_type.index != 2 and not definitions.error_conformance(state.declarations, state.records, function.result_type):
         specialized.result_type = callable_mock_result(state, function, errors, span)
         specialized.result = universal.named_type(definitions.type_name(specialized.result_type, state.records), [], span)
@@ -2357,6 +2364,18 @@ def callable_deferred_cleanup(state: CallableAnalysis, output: universal.Block, 
         output.statements.append(callable_expression_statement(state, expression))
 
 
+def callable_contract_checks(state: CallableAnalysis, output: universal.Block, role: universal.AttachmentRole) -> unit | diagnostics.Diagnostic:
+    for attachment in state.attachments:
+        if attachment.role == role:
+            condition = attachment.condition
+            if attachment.stage == universal.ConstraintStage.Static:
+                result = constraints.prove_condition(condition)
+                if result != universal.ProofResult.Proven:
+                    return error(callable_diagnostic("static contract could not be proved", condition.span))
+                continue
+            output.statements.append(callable_assertion(state, condition, None, condition.span, condition.span))
+
+
 def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
     output = universal.empty_block()
     resource_start = int(len(state.resources))
@@ -2544,6 +2563,8 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 saved = callable_binding(state, universal.Binding("$throw$" + string(state.next_id[0]), None, wrapped, false, true, span))
                 output.statements.append(universal.BindingStatement(saved))
                 callable_deferred_cleanup(state, output, 0)
+                callable_contract_checks(state, output, universal.AttachmentRole.Fix)
+                callable_contract_checks(state, output, universal.AttachmentRole.Exit)
                 callable_cleanup(state, output, 0, span)
                 output.statements.append(callable_control(state, "Throw", [universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id)], [], span, true))
                 returned = true
@@ -2578,13 +2599,15 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if actual != None:
                     if callable_has_drop(state, actual.type_id):
                         callable_transfer_result(state, actual, span)
-                    if len(state.deferred) != 0 or len(state.resources) != 0:
+                    if len(state.deferred) != 0 or len(state.resources) != 0 or len(state.attachments) != 0:
                         saved = callable_binding(state, universal.Binding("$defer$return$" + string(state.next_id[0]), None, actual, false, true, span))
                         output.statements.append(universal.BindingStatement(saved))
                         operands.append(universal.Expression(universal.BindingReference(saved.id), span, type_id=saved.type_id))
                     else:
                         operands.append(actual)
                 callable_deferred_cleanup(state, output, 0)
+                callable_contract_checks(state, output, universal.AttachmentRole.Fix)
+                callable_contract_checks(state, output, universal.AttachmentRole.Exit)
                 callable_cleanup(state, output, 0, span)
                 if state.destructor:
                     receiver = universal.Expression(universal.BindingReference(universal.BindingId(0)), span, type_id=state.types[0])
@@ -2712,6 +2735,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("break outside a loop", span))
                 callable_deferred_cleanup(state, output, state.loop_defer_start)
+                callable_contract_checks(state, output, universal.AttachmentRole.Fix)
                 callable_cleanup(state, output, state.loop_resource_start, span)
                 output.statements.append(callable_control(state, "Break", [], [], span, true))
                 returned = true
@@ -2720,15 +2744,21 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 if state.loop_depth == 0:
                     return error(callable_diagnostic("continue outside a loop", span))
                 callable_deferred_cleanup(state, output, state.loop_defer_start)
+                callable_contract_checks(state, output, universal.AttachmentRole.Fix)
                 callable_cleanup(state, output, state.loop_resource_start, span)
                 output.statements.append(callable_control(state, "Continue", [], [], span, true))
                 returned = true
                 loop_exit = true
             case _:
                 return error(callable_diagnostic("statement is outside the scalar bootstrap subset", None))
+        if not returned:
+            callable_contract_checks(state, output, universal.AttachmentRole.Fix)
         index += 1
     if not returned:
         callable_deferred_cleanup(state, output, defer_start)
+        callable_contract_checks(state, output, universal.AttachmentRole.Fix)
+        if complete:
+            callable_contract_checks(state, output, universal.AttachmentRole.Exit)
         callable_cleanup(state, output, 0 if complete else resource_start, source.Span(source.SourceId(0), 0, 0))
     if complete and not returned:
         if state.destructor:
@@ -2856,7 +2886,10 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
             return error(callable_diagnostic("borrowed result requires a matching borrowed parameter", declaration.span))
         declaration.result_origin = origin
     declaration.id = universal.FunctionId(u128(ordinal + 1))
-    declaration.definition = universal.DefId(0, 0, universal.DeclarationId(u128(ordinal + 1)))
+    if declaration.semantic_key == "":
+        declaration.semantic_key = universal.callable_key(declaration, "$generated")
+    if declaration.definition.declaration.value == 0:
+        declaration.definition = universal.definition_from_key(declaration.semantic_key)
     return declaration
 
 
@@ -2883,6 +2916,7 @@ def semantic_stage(previous: float, name: string) -> float:
 
 
 def analyze_registered_callables(module: universal.Module, include_tests: bool, visible: list[universal.FunctionDeclaration], own_ids: list[universal.FunctionId], test_ids: list[universal.FunctionId], environment: definitions.SemanticDefinitions, initializer_namespace: string = "", source_files: list[source.SourceFile] = [], prepared: list[PreludeAnalysis] = [], captured: list[PreludeAnalysis] = []) -> universal.Module | diagnostics.Diagnostic:
+    module = with_clauses.expand_dispatch(module)
     measured := time.monotonic()
     policies = prepared[0].declarations.traits if len(prepared) > 0 else environment.traits
     module = test_modes.expand(module, include_tests, initializer_namespace, policies, source_files)
@@ -3070,14 +3104,15 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         if parameter.name in parameter_names:
                             return error(callable_diagnostic("duplicate parameter " + parameter.name, parameter.span))
                         parameter_names.append(parameter.name)
-                    function_declaration.definition = definitions.definition_id(function_declaration.name, 30000 + int(len(state.templates)))
+                    if function_declaration.definition.declaration.value == 0:
+                        function_declaration.definition = definitions.definition_id(function_declaration.name, 30000 + int(len(state.templates)))
                     state.templates.append(function_declaration)
                     function_names.append(function_declaration.name)
                     continue
                 signature = callable_signature(function_declaration, int(len(state.functions)), state.records, state.declarations)
                 if own_index < len(own_ids):
                     signature.id = own_ids[own_index]
-                    signature.definition = universal.DefId(0, 0, universal.DeclarationId(signature.id.value))
+                    # Executable IDs are revision-local; preserve semantic identity.
                 own_index += 1
                 for previous in borrow state.functions:
                     if previous.prelude and not signature.prelude and signature.name in module.excluded_functions:
@@ -3309,7 +3344,7 @@ def callable_owner_method(state: CallableAnalysis, owner: universal.TypeId, memb
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:])
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:], attachments=state.attachments[:])
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -3434,9 +3469,21 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                 local.declarations.aliases.append(universal.TypeDeclaration([], local.namespace + "Self", [], [], None, record.span, id=function.owner_type))
     local.types = function.parameter_types[:]
     callable_record_environment(local, function.owner_type)
+    for attachment in function.attachments:
+        if attachment.role != universal.AttachmentRole.Dispatch:
+            # Resolve in the parameter scope once. A nested binding with the
+            # same spelling cannot retarget a function contract later.
+            condition = callable_expression(callable_scope(local), attachment.condition, universal.TypeId(1))
+            local.attachments.append(universal.WithAttachment(attachment.role, condition, attachment.stage, attachment.interface))
     body ?= function.body
     if body != None:
-        return callable_block(local, body.statements, function.result_type)
+        entry = universal.empty_block()
+        callable_contract_checks(local, entry, universal.AttachmentRole.Entry)
+        callable_contract_checks(local, entry, universal.AttachmentRole.Fix)
+        resolved = callable_block(local, body.statements, function.result_type)
+        for statement in resolved.statements:
+            entry.statements.append(statement)
+        return entry
     return universal.empty_block()
 
 
@@ -3463,7 +3510,7 @@ def callable_replace_signature(function: universal.FunctionDeclaration, names: l
     annotation ?= function.result
     if annotation != None:
         result = definitions.replace_annotation(annotation, names, replacements)
-    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension, result_mode=function.result_mode, result_origin=function.result_origin)
+    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension, result_mode=function.result_mode, result_origin=function.result_origin, attachments=function.attachments[:], semantic_key=function.semantic_key)
 
 
 def callable_register_aliases(state: CallableAnalysis) -> unit | diagnostics.Diagnostic:
@@ -3492,7 +3539,8 @@ def callable_operator_function(operation: universal.OperatorDeclaration, owner: 
         annotation = definitions.replace_annotation(parameter.annotation, ["Self"], [receiver_type])
         parameters.append(universal.FunctionParameter(parameter.name, annotation, None, parameter.span, modifiers=[universal.BoundaryModifier(parameter.mode)] if parameter.mode != "" else []))
     result = definitions.replace_annotation(operation.result, ["Self"], [receiver_type])
-    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=operation.definition, type_parameters=operation.type_parameters, constraints=operation.constraints, result_mode=operation.result_mode)
+    key = universal.semantic_key([universal.definition_identity(operation.definition), "operator-realization", definitions.type_name(owner, records) if owner.index != 0 else "global"])
+    return universal.FunctionDeclaration(name=namespace + "$operator$" + string(operation.definition.declaration.value) + "$" + string(owner.index), parameters=parameters, result=result, body=operation.body, span=operation.span, lookup=namespace, operator_syntax=operation.syntax, owner_type=owner, definition=universal.definition_from_key(key), type_parameters=operation.type_parameters, constraints=operation.constraints, result_mode=operation.result_mode, semantic_key=key)
 
 
 def callable_same_types(left: list[universal.TypeId], right: list[universal.TypeId]) -> bool | diagnostics.Diagnostic:
@@ -3525,7 +3573,8 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                         case _:
                             throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                 operation = definitions.resolve_operator_constraints(state.declarations, declaration, namespace)
-                operation.definition = definitions.definition_id(operation.syntax.symbol, 10000 + ordinal)
+                if operation.definition.declaration.value == 0:
+                    operation.definition = definitions.definition_id(operation.syntax.symbol, 10000 + ordinal)
                 ordinal += 1
                 function = callable_operator_function(operation, universal.TypeId(0), namespace, state.records)
                 if len(function.type_parameters) != 0:
@@ -3578,7 +3627,8 @@ def callable_register_operators(state: CallableAnalysis, module: universal.Modul
                         operation = definitions.resolve_operator_constraints(state.declarations, operation, declaration.lookup)
                         if len(operation.type_parameters) != 0 or len(operation.constraints) != 0:
                             return error(diagnostics.diagnostic_at("E000212", "generic operator implementations require operator argument inference", operation.span))
-                        operation.definition = definitions.definition_id(declaration.name, 10000 + ordinal)
+                        if operation.definition.declaration.value == 0:
+                            operation.definition = definitions.definition_id(declaration.name, 10000 + ordinal)
                         ordinal += 1
                         function := callable_operator_function(operation, owner, declaration.lookup, state.records)
                         function.operator_syntax = definitions.resolve_grammar_binding(state.declarations, operation.syntax, declaration.lookup, operation.span)
@@ -3930,7 +3980,8 @@ def callable_register_generic(state: CallableAnalysis, function: universal.Funct
     for previous in state.generics:
         if previous.name == function.name and not (previous.prelude and not function.prelude and function.name in state.excluded_functions):
             return error(diagnostics.diagnostic("E000219", "ambiguous generic overload " + function.name))
-    function.definition = definitions.definition_id(function.name, 20000 + int(len(state.generics)))
+    if function.definition.declaration.value == 0:
+        function.definition = definitions.definition_id(function.name, 20000 + int(len(state.generics)))
     state.generics.append(function)
 
 
@@ -4045,6 +4096,11 @@ def callable_specialize_generic(state: CallableAnalysis, template: universal.Fun
     signature = callable_signature(signature, int(len(state.functions)), state.records, local.declarations)
     signature.template = template.definition
     signature.type_arguments = substitution.arguments
+    arguments_key: list[string] = [template.semantic_key, "specialization"]
+    for actual in actuals:
+        arguments_key.append(definitions.type_name(actual, state.records))
+    signature.semantic_key = universal.semantic_key(arguments_key)
+    signature.definition = universal.definition_from_key(signature.semantic_key)
     if symbolic:
         signature.definition = template.definition
     else:
@@ -4429,7 +4485,8 @@ def callable_register_record_methods(state: CallableAnalysis, owner: universal.T
                         found = true
             if found:
                 continue
-            operation.definition = definitions.definition_id(record.name + "." + operation.syntax.symbol, 10000 + int(len(state.functions)))
+            if operation.definition.declaration.value == 0:
+                operation.definition = definitions.definition_id(record.name + "." + operation.syntax.symbol, 10000 + int(len(state.functions)))
             function = callable_operator_function(operation, owner, record.lookup, state.records)
             function.owner_type = owner
             state.functions.append(callable_signature(function, int(len(state.functions)), state.records, local.declarations))

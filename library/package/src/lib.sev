@@ -14,5 +14,7 @@ import * from "lint.sev"
 
 import * from "link.sev"
 import * from "dependency.sev"
+import * from "semantic_dependencies.sev"
+import * from "object_units.sev"
 import * from "stages.sev"
 from profile import ProfileSession, profile_begin, profile_stage

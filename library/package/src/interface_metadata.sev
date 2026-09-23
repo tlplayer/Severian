@@ -1,5 +1,6 @@
 import interface as interfaces
 import metadata
+import os
 import * from "host.sev"
 import * from "model.sev"
 import * from "document.sev"
@@ -27,11 +28,23 @@ def retain_native_interface(owner: ResolvedPackage, unit: BuildUnit, compiler: C
             type_id = "callable:" + symbol
             types.append(metadata.TypeRecord(type_id, "callable"))
             symbols.append(metadata.SymbolRecord(symbol, exported, "function", type_id, true))
-            declarations.append(interfaces.Declaration(exported, symbol, "source/" + unit.target.path, decorator + "\n" + line))
+            declaration = interfaces.Declaration(exported, symbol, "source/" + unit.target.path, decorator + "\n" + line)
+            parameters = line.split("(")[1].split(")")[0]
+            if parameters != "":
+                for parameter in parameters.split(", "):
+                    parts = parameter.split(": ")
+                    declaration.parameter_names.append(parts[0])
+                    declaration.parameter_types.append(parts[1])
+            declaration.result_type = line.split(" -> ")[1]
+            declarations.append(declaration)
             implementations.append(metadata.ImplementationRecord(symbol, "", ["archive"], symbol))
             symbol = ""
-    semantic_id = digest(cache + "/artifact.interface.sev")
-    public = interfaces.Interface(identity, build_id, semantic_id, declarations)
+    semantic_id = digest(cache + "/artifact.semantic") if os.is_file(cache + "/artifact.semantic") else digest(cache + "/artifact.interface.sev")
+    public = interfaces.Interface(identity, build_id, semantic_id, declarations, 1 if contract.contains("libraries=") else 2)
+    if os.is_file(cache + "/artifact.semantic"):
+        public.version = 3
+        public.semantic_payload = read_text(cache + "/artifact.semantic")
+        public.semantic_id = digest(cache + "/artifact.semantic")
     binding = interfaces.write(root, public)
     # The unit build ID includes the complete resolved graph and options.
     compatibility = metadata.Compatibility(digest(compiler.executable), "severian-scalar-c-1", triple, "llvm", unit.profile, build_id, build_id)

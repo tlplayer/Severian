@@ -1,0 +1,143 @@
+import source
+import * from "../id/compiler.sev"
+import * from "../statement/statement.sev"
+import * from "../constraint/model.sev"
+
+
+class SentenceId:
+    index: u32
+
+
+enum RegionKind:
+    Callable
+    Lexical
+    Task
+
+
+class SemanticLibrary:
+    key: string
+
+
+class SemanticModule:
+    key: string
+    library: int
+
+
+class SemanticSubmodule:
+    key: string
+    module: int
+
+
+class SemanticRegion:
+    id: RegionId
+    definition: DefId
+    kind: RegionKind
+    parent: RegionId | None = None
+    introduced_by: SentenceId | None = None
+    span: source.Span | None = None
+
+
+class SemanticSentence:
+    id: SentenceId
+    region: RegionId
+    span: source.Span | None
+    ordinal: int
+
+
+class SemanticHierarchy:
+    libraries: list[SemanticLibrary] = []
+    modules: list[SemanticModule] = []
+    submodules: list[SemanticSubmodule] = []
+    regions: list[SemanticRegion] = []
+    sentences: list[SemanticSentence] = []
+
+
+def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Block, parent: RegionId | None = None, introduced_by: SentenceId | None = None, origin: source.Span | None = None) -> RegionId:
+    region = RegionId(u32(len(hierarchy.regions)))
+    kind = RegionKind.Callable if parent == None else RegionKind.Lexical
+    hierarchy.regions.append(SemanticRegion(region, definition, kind, parent, introduced_by, origin))
+    ordinal := 0
+    for statement in body.statements:
+        sentence = SentenceId(u32(len(hierarchy.sentences)))
+        location: source.Span | None := None
+        children: list[Block] = []
+        match statement:
+            case BindingStatement:
+                location = binding.span
+            case ExpressionStatement:
+                location = expression.span
+            case If:
+                location = span
+                children = [then_block, else_block]
+            case While:
+                location = span
+                children = [body]
+            case ForEach:
+                location = span
+                children = [body]
+            case Unsafe:
+                location = span
+                children = [body]
+            case CompilerCheck:
+                location = span
+                children = [body]
+            case GrammarApply:
+                location = span
+                children = bodies
+            case Match:
+                location = span
+                for arm in arms:
+                    children.append(arm.body)
+            case Return:
+                location = span
+            case Throw:
+                location = span
+            case Assert:
+                location = span
+            case FieldSet:
+                location = span
+            case Defer:
+                location = span
+            case Drop:
+                location = span
+            case Break:
+                location = span
+            case Continue:
+                location = span
+        hierarchy.sentences.append(SemanticSentence(sentence, region, location, ordinal))
+        ordinal += 1
+        for child in children:
+            hierarchy_region(hierarchy, definition, child, region, sentence, location)
+    return region
+
+
+def verify_hierarchy(hierarchy: SemanticHierarchy) -> unit | Error:
+    for module in hierarchy.modules:
+        if module.library < 0 or module.library >= len(hierarchy.libraries):
+            throw Error("semantic module has no owning library")
+    for submodule in hierarchy.submodules:
+        if submodule.module < 0 or submodule.module >= len(hierarchy.modules):
+            throw Error("semantic submodule has no owning module")
+    index := 0
+    for region in hierarchy.regions:
+        if region.id.index != index:
+            throw Error("invalid semantic region identity")
+        parent ?= region.parent
+        sentence ?= region.introduced_by
+        if parent != None:
+            if parent.index >= region.id.index:
+                throw Error("cyclic or dangling semantic region owner")
+            if sentence == None:
+                throw Error("nested region requires an introducing sentence")
+        if sentence != None:
+            if sentence.index >= len(hierarchy.sentences):
+                throw Error("dangling introducing sentence")
+            if parent != None:
+                if hierarchy.sentences[sentence.index].region.index != parent.index:
+                    throw Error("introducing sentence belongs to another region")
+        index += 1
+    index = 0
+    for sentence in hierarchy.sentences:
+        if sentence.id.index != index or sentence.region.index >= len(hierarchy.regions):
+            throw Error("invalid semantic sentence identity or owner")
+        index += 1

@@ -1,0 +1,32 @@
+import * from "model.sev"
+import * from "graph.sev"
+
+
+# Unknown candidates remain live; they never become false because a budget ran out.
+def select_dispatch(family: DispatchFamily, graph: ConstraintGraph) -> DefId | Error:
+    constraint_schedule(graph)
+    selected := -1
+    unknown := false
+    index := 0
+    for candidate in family.candidates:
+        rejected := false
+        unresolved := false
+        for requirement in candidate.requirements:
+            if requirement.index >= len(graph.requirements):
+                throw Error("dispatch references an unknown constraint")
+            result = graph.requirements[requirement.index].result
+            rejected = rejected or result == ProofResult.Refuted
+            unresolved = unresolved or result == ProofResult.Unknown
+        if not rejected:
+            if unresolved:
+                unknown = true
+            elif selected >= 0:
+                throw Error("ambiguous dispatch: multiple implementations match")
+            else:
+                selected = index
+        index += 1
+    if unknown:
+        throw Error("dispatch requires runtime predicate evaluation")
+    if selected < 0:
+        throw Error("no implementation matches dispatch constraints")
+    return family.candidates[selected].definition

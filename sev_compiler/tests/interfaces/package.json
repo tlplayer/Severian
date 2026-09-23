@@ -1,0 +1,11 @@
+{
+  "package": {"name": "compiler-semantic-interface-tests", "version": "0.1.0", "edition": "2026"},
+  "lib": {"name": "interface_tests", "path": "src/lib.sev"},
+  "dependencies": {
+    "interface": {"path": "../../boundaries/interface"},
+    "semantic": {"path": "../../frontend/semantic"},
+    "universal": {"path": "../../universal"},
+    "source": {"path": "../../frontend/source"},
+    "lexer": {"path": "../../frontend/lexer"}
+  }
+}

@@ -1,4 +1,4 @@
-SIP-0000: Interfaces with dispatch methods
+# SIP-0007: Interfaces with dispatch methods
 
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
 Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
@@ -7,6 +7,21 @@ Created: YYYY-MM-DD
 Target:
 Supersedes:
 Superseded by:
+
+## Dispatch correctness policy
+
+Selection requires exactly one admissible implementation. Cost hints may order
+safe ready checks but never establish precedence. A known overlap is a static
+ambiguity diagnostic; unresolved overlap requires exact-one-match runtime checks
+before executing any body. No matches produces a defined no-match failure.
+The SmallAdd/BigAdd example below leaves mixed small/large inputs unmatched.
+
+Reordering and sharing require pure, terminating, non-throwing predicates with
+stable reads and identical substitutions/value versions. Prerequisite guards
+must dominate unsafe accesses. Static-only Unknown is a diagnostic; a proof
+budget cannot turn Unknown into Proven. Candidate-set changes invalidate
+consumers even when existing signatures remain unchanged. Contracts on a selected
+body are obligations, not dispatch retries. See SIP-0008's normative contract.
 
 ## Summary
 

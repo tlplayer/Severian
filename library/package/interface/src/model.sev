@@ -8,6 +8,9 @@ class Declaration:
     symbol_id: string
     source: string
     contract: string
+    parameter_names: list[string] = []
+    parameter_types: list[string] = []
+    result_type: string = ""
 
 # A .sevi file routes declarations by symbol ID into one metadata realization.
 # Its own checksum is held by metadata, avoiding a self-referential file hash.
@@ -16,6 +19,8 @@ class Interface:
     build_id: string
     semantic_id: string
     declarations: list[Declaration]
+    version: int = 1
+    semantic_payload: string = ""
 
 # An opened, identity-checked dependency. Metadata remains the authority for
 # types, layouts, private supporting symbols and implementation selection.

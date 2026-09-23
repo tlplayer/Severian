@@ -27,8 +27,9 @@ class SemanticDefinitions:
 
 
 def definition_id(name: string, ordinal: int) -> universal.DefId:
-    # Keep declaration identities disjoint from executable function ordinals.
-    return universal.DefId(0, 1, universal.DeclarationId(u128(ordinal + 1)))
+    # Compatibility for generated declarations without a source membership.
+    # Registration order never participates in semantic identity.
+    return universal.named_definition("$generated", "declaration", name)
 
 
 def trait_named(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.TraitDeclaration | None:
@@ -472,7 +473,8 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 if result != None:
                     if len(declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
                         function := declaration
-                        function.definition = definition_id(function.name, 40000 + ordinal)
+                        if function.definition.declaration.value == 0:
+                            function.definition = definition_id(function.name, 40000 + ordinal)
                         definitions.expression_functions.append(function)
                         ordinal += 1
             case Trait:
@@ -487,12 +489,14 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                         return error(diagnostics.diagnostic_at("E000212", "reserved compiler contract G cannot be redeclared", trait_declaration.span))
                     return error(diagnostics.diagnostic_at("E000212", "duplicate declaration " + trait_declaration.name, trait_declaration.span))
                 names.append(trait_declaration.name)
-                trait_declaration.definition = definition_id(trait_declaration.name, ordinal)
+                if trait_declaration.definition.declaration.value == 0:
+                    trait_declaration.definition = definition_id(trait_declaration.name, ordinal)
                 for original in definitions.traits:
                     if original.source_name != "" and original.source_name == trait_declaration.source_name and original.span.source.index == trait_declaration.span.source.index and original.span.start == trait_declaration.span.start:
                         trait_declaration.definition = original.definition
                 if trait_declaration.grammar:
-                    trait_declaration.definition = universal.DefId(0, u128(trait_declaration.span.source.index) + 2, universal.DeclarationId(u128(trait_declaration.span.start) + 1))
+                    if trait_declaration.definition.declaration.value == 0:
+                        trait_declaration.definition = universal.DefId(0, u128(trait_declaration.span.source.index) + 2, universal.DeclarationId(u128(trait_declaration.span.start) + 1))
                 ordinal += 1
                 if len(trait_declaration.constraints) != 0:
                     return error(diagnostics.diagnostic_at("E000212", "trait parameter constraints require capability validation", trait_declaration.span))
@@ -500,15 +504,18 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 resolved_operators: list[universal.OperatorDeclaration] = []
                 resolved_properties: list[universal.PropertyDeclaration] = []
                 for property in trait_declaration.properties:
-                    property.definition = definition_id(property.name, ordinal)
+                    if property.definition.declaration.value == 0:
+                        property.definition = definition_id(property.name, ordinal)
                     ordinal += 1
                     resolved_properties.append(property)
                 for method in trait_declaration.methods:
-                    method.definition = definition_id(method.name, ordinal)
+                    if method.definition.declaration.value == 0:
+                        method.definition = definition_id(method.name, ordinal)
                     resolved_methods.append(method)
                     ordinal += 1
                 for operation in trait_declaration.operators:
-                    operation.definition = definition_id(operation.syntax.symbol, ordinal)
+                    if operation.definition.declaration.value == 0:
+                        operation.definition = definition_id(operation.syntax.symbol, ordinal)
                     resolved_operators.append(operation)
                     ordinal += 1
                 trait_declaration.properties = resolved_properties
@@ -524,7 +531,8 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 definitions.aliases.append(declaration)
             case Record:
                 record_declaration := declaration
-                record_declaration.definition = definition_id(declaration.name, 30000 + ordinal)
+                if record_declaration.definition.declaration.value == 0:
+                    record_declaration.definition = definition_id(declaration.name, 30000 + ordinal)
                 for original in definitions.record_templates:
                     if original.source_name != "" and original.source_name == record_declaration.source_name and original.span.source.index == record_declaration.span.source.index and original.span.start == record_declaration.span.start:
                         record_declaration.definition = original.definition

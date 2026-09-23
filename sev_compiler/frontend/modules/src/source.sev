@@ -10,6 +10,9 @@ from io import IOError
 import * from "package:semantic/src/macros.sev" as macros
 import * from "lexical.sev"
 import * from "imports.sev" as import_selection
+import * from "identity.sev" as semantic_identity
+import * from "semantic_interface.sev" as semantic_interface
+import * from "package:interface/src/semantic_payload.sev" as semantic_payload
 
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
@@ -17,6 +20,8 @@ def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     if path.ends_with(".sevi"):
         try:
             public = interfaces.decode(package.read_text(path))
+            if public.version >= 2:
+                return source.SourceFile(source.SourceId(0), path, "")
             declarations: list[string] = []
             for declaration in public.declarations:
                 declarations.append(declaration.contract)
@@ -138,6 +143,17 @@ def read_known_source(path: string, files: list[source.SourceFile]) -> source.So
 
 def discover_source_syntax(input: source.SourceFile, active: list[string], files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "") -> unit | diagnostics.Diagnostic:
     file = registered_source(input, files)
+    if file.path.ends_with(".sevi"):
+        try:
+            public = interfaces.decode(package.read_text(file.path))
+            if public.version == 3:
+                payload = semantic_payload.decode(public.semantic_payload, file.path, files)
+                semantic_payload.register_grammar(payload, registry)
+                return
+            if public.version == 2:
+                return
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
     if file.path in active:
         # The outer visit registers this file's descriptors after visiting its
         # dependencies. A declaration cycle does not require another scan.
@@ -189,11 +205,37 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                     discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
         index += 1
     lexer.discover_operator_descriptors(tokens, registry)
+    try:
+        unit = package.semantic_source_unit(resolution, file.path)
+        owner_key = package.semantic_unit_key(unit)
+        descriptor_index := 0
+        for descriptor in registry.descriptors:
+            if descriptor.span.source.index == file.id.index:
+                descriptor.semantic_owner = owner_key
+                registry.descriptors[descriptor_index] = descriptor
+            descriptor_index += 1
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000124", failure.message))
     registry.discovered.append(file.path)
 
 
 def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = [], required_imports: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
+    if path.ends_with(".sevi"):
+        try:
+            public = interfaces.decode(package.read_text(path))
+            if public.version == 3:
+                registered_source(input, files)
+                payload = semantic_payload.decode(public.semantic_payload, path, files)
+                for requested in required_imports:
+                    if requested != "*" and requested.split(".")[0] not in payload.exports:
+                        return error(diagnostics.diagnostic("E000124", "package does not export " + requested))
+                semantic_payload.register_grammar(payload, registry)
+                return semantic_payload.imported(payload, prefix)
+            if public.version == 2:
+                return semantic_interface.read_module(registered_source(input, files), prefix)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
     if path in active:
         for index in range(int(len(active))):
             if active[index] == path and index < int(len(active_prefixes)) and active_prefixes[index] == prefix:
@@ -212,6 +254,11 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     discover_lexical_rules(files, registry)
     registered = registered_source(input, files)
     parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
+    try:
+        unit = package.semantic_source_unit(resolution, path)
+        parsed = semantic_identity.stamp_module(parsed, package.semantic_unit_key(unit))
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000124", failure.message))
     required = required_imports[:]
     narrow := import_selection.module_names(parsed, required) and "*" not in required
     owner := ""
@@ -281,7 +328,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                             # An alias needs fresh lowering metadata. Sharing
                                             # the values list appends both functions' ABI
                                             # parameters to the same declaration.
-                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:])
+                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:])
                                             result.items.append(universal.Function(imported))
                                             selected = true
                                     case Record:
@@ -386,7 +433,7 @@ def append_selected_import(result: universal.Module, child: universal.Module, na
         match item:
             case Function:
                 if declaration.name == namespace + name:
-                    imported = universal.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:])
+                    imported = universal.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:])
                     append_imported_item(result, universal.Function(imported))
                     selected = true
             case BindingItem:

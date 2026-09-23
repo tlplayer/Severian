@@ -1,0 +1,13 @@
+{
+  "package": {
+    "name": "compiler-semantic-graph-tests",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {"name": "graph_tests", "path": "src/lib.sev"},
+  "dependencies": {
+    "universal": {"path": "../../universal"},
+    "source": {"path": "../../frontend/source"}
+  },
+  "test": {"memory-max": "3GB", "timeout-seconds": 60}
+}

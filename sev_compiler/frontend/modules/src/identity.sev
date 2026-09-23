@@ -1,0 +1,63 @@
+import universal
+
+
+def operator_key(operation: universal.OperatorDeclaration, owner: string) -> string:
+    parts = [owner, "operator", operation.syntax.symbol]
+    for parameter in operation.parameters:
+        parts.append(universal.annotation_key(parameter.annotation, operation.type_parameters))
+        parts.append(parameter.mode)
+    return universal.semantic_key(parts)
+
+
+def stamp_function(function: universal.FunctionDeclaration, owner: string) -> universal.FunctionDeclaration:
+    function.semantic_key = universal.callable_key(function, owner)
+    function.definition = universal.definition_from_key(function.semantic_key)
+    return function
+
+
+# Stamp before import aliases are introduced. Membership is supplied exclusively
+# by library/package; no path, discovery ordinal or source span enters these IDs.
+def stamp_module(module: universal.Module, owner: string) -> universal.Module:
+    items: list[universal.Item] = []
+    for item in module.items:
+        match item:
+            case Function:
+                items.append(universal.Function(stamp_function(declaration, owner)))
+            case Trait:
+                declaration.definition = universal.named_definition(owner, "trait", declaration.name)
+                member_owner = universal.semantic_key([owner, "trait", declaration.name])
+                properties: list[universal.PropertyDeclaration] = []
+                for property in declaration.properties:
+                    property.definition = universal.named_definition(member_owner, "property", property.name)
+                    properties.append(property)
+                methods: list[universal.FunctionDeclaration] = []
+                for method in declaration.methods:
+                    methods.append(stamp_function(method, member_owner))
+                operations: list[universal.OperatorDeclaration] = []
+                for operation in declaration.operators:
+                    operation.definition = universal.definition_from_key(operator_key(operation, member_owner))
+                    operations.append(operation)
+                declaration.properties = properties
+                declaration.methods = methods
+                declaration.operators = operations
+                items.append(universal.Trait(declaration))
+            case OperatorItem:
+                declaration.definition = universal.definition_from_key(operator_key(declaration, owner))
+                items.append(universal.OperatorItem(declaration))
+            case Record:
+                member_owner = universal.semantic_key([owner, "extension" if declaration.extension else "record", declaration.name])
+                declaration.definition = universal.definition_from_key(member_owner)
+                methods: list[universal.FunctionDeclaration] = []
+                for method in declaration.methods:
+                    methods.append(stamp_function(method, member_owner))
+                operations: list[universal.OperatorDeclaration] = []
+                for operation in declaration.operators:
+                    operation.definition = universal.definition_from_key(operator_key(operation, member_owner))
+                    operations.append(operation)
+                declaration.methods = methods
+                declaration.operators = operations
+                items.append(universal.Record(declaration))
+            case _:
+                items.append(item)
+    module.items = items
+    return module

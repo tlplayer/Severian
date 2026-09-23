@@ -8,6 +8,8 @@ import * from "../cfg/cfg.sev"
 import * from "../value/lowered.sev"
 import * from "../grammar/grammar.sev"
 import * from "../source/quality.sev"
+import * from "hierarchy.sev"
+import * from "../constraint/model.sev"
 
 
 enum Item:
@@ -53,6 +55,8 @@ class Module:
     quality_exclusions: list[source.Span] = []
     quality_regions: list[QualityRegion] = []
     debug_files: list[source.SourceFile] = []
+    hierarchy: SemanticHierarchy = SemanticHierarchy()
+    obligations: list[ConstraintObligation] = []
 
 
 class Program:

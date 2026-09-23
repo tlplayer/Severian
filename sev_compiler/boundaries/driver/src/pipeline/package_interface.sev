@@ -37,6 +37,21 @@ def scalar_interface(module: borrow universal.Module, resolution: package.Resolu
     exports = package.string_array(package.setting(owner.manifest.entries, "package", "export", "[]"))
     lines: list[string] = []
     for name in exports:
+        semantic_only := false
+        for function in module.generic_functions:
+            if function.name == name:
+                semantic_only = true
+        for declaration in module.traits:
+            if declaration.name == name:
+                semantic_only = true
+        for declaration in module.records:
+            if declaration.name == name:
+                semantic_only = true
+        for declaration in module.types:
+            if declaration.name == name:
+                semantic_only = true
+        if semantic_only:
+            continue
         found := 0
         for function in borrow module.functions:
             if function.name != name:
@@ -53,7 +68,7 @@ def scalar_interface(module: borrow universal.Module, resolution: package.Resolu
                     return ""
                 parameters.append(parameter.name + ": " + spelling)
                 index += 1
-            symbol = "__sev_pkg_" + owner.checksum.replace("sha256:", "") + "_" + name
+            symbol = "__sev_pkg_" + string(function.definition.package) + "_" + string(function.definition.module) + "_" + string(function.definition.declaration.value)
             names.append(name)
             symbols.append(symbol)
             dependencies = ", libraries=" + package.toml_quote(libraries.join(",")) if len(libraries) > 0 else ""

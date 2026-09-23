@@ -75,8 +75,10 @@ operations. `transforms/mlir/src/emit/callable.sev` uses the typed
 
 The target symbol/operator/grammar separation and exclusive grammar capability
 for CFG construction are specified in [GRAMMAR.md](GRAMMAR.md). The executable
-path still uses structured MIR; source grammar execution and CFG capability
-enforcement remain a separate migration.
+path uses the canonical CFG with source grammar execution and capability checks.
+V2 adds checked declaration references and submodule-local dependency components;
+the package library owns source membership and cross-submodule dependencies.
+See [V2 status](../tests/sev_compiler/migration/V2-STATUS.md) for remaining work.
 
 Supported input consists of integer/boolean bindings, signed `i8`, `i16`,
 `i32`, `i64` types (`int` defaults to `i64`), parentheses, unary `+`/`-`/`not`,

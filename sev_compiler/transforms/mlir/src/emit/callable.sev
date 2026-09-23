@@ -308,7 +308,7 @@ def validate_external_contracts(module: borrow universal.Module):
         declarations.append(function)
 
 
-def lower_callables(module: borrow universal.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = []) -> MlirProgram:
+def lower_callables(module: borrow universal.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = [], selected: list[int] = [], partitioned: bool = false) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
     for function in borrow module.functions:
@@ -322,11 +322,13 @@ def lower_callables(module: borrow universal.Module, library: bool = false, expo
         symbol := boundary.scalar_boundary(function, "c")
         if symbol != "":
             handles.append(callable_external(builder, symbol, parameters, callable_mlir_results(function.result_type, module.records)))
+        elif partitioned and int(function.id.value) not in selected:
+            handles.append(callable_external(builder, callable_function_symbol(function.id), parameters, callable_mlir_results(function.result_type, module.records)))
         else:
-            handles.append(builder_create_function_at(builder, callable_function_symbol(function.id), private_visibility(), parameters, callable_mlir_results(function.result_type, module.records), false, debug.debug_function(module, function)))
+            handles.append(builder_create_function_at(builder, callable_function_symbol(function.id), public_visibility() if partitioned else private_visibility(), parameters, callable_mlir_results(function.result_type, module.records), false, debug.debug_function(module, function)))
     index := 0
     for function in borrow module.functions:
-        if function.cfg_index >= 0:
+        if function.cfg_index >= 0 and (not partitioned or int(function.id.value) in selected):
             ownership.authorize_lowering(module, module.cfg_bodies[function.cfg_index], function.values)
             callable_cfg(builder, module, module.cfg_bodies[function.cfg_index], handles[index].entry, builder.program.functions[handles[index].function].location)
         index += 1

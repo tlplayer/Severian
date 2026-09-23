@@ -32,6 +32,8 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
     records: list[string] = []
     recorded: list[string] = []
     for file in files:
+        if "#semantic-source-" in file.path:
+            continue
         location = package.canonical(file.path)
         package.write_text(destination + ".source", file.text)
         records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location) if location.ends_with("/interface.bin") or location.ends_with(".sevi") else package.digest(destination + ".source")))
@@ -114,9 +116,11 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
     interface: list[string] = []
     quality_maps: list[string] = []
     mir_outputs: list[list[u8]] = []
+    object_outputs: list[string] = []
+    semantic_outputs: list[string] = []
     requirements = boundary.LoweringRequirements()
-    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements, mir_outputs)
-    if emit == "library" and len(resolution.packages) > 0 and package.setting(resolution.packages[0].manifest.entries, "package", "export", "[]") != "[]" and interface[0] == "":
+    text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements, mir_outputs, object_outputs, semantic_outputs)
+    if emit == "library" and len(resolution.packages) > 0 and package.setting(resolution.packages[0].manifest.entries, "package", "export", "[]") != "[]" and interface[0] == "" and len(semantic_outputs) == 0:
         throw Error("unsupported exported ABI: this compiler requires non-generic scalar functions")
     if len(quality_maps) > 0:
         package.write_text(arguments[3] + ".coverage.json", quality_maps[0])
@@ -148,9 +152,10 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
         sources: list[string] = []
         for file in files:
             sources.append(file.path)
-        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements, package.setting(entries, "build", "incremental", "true") != "false")
+        backend.emit_native(text, arguments[3], optimization, debug_symbols, strip, lto, package.native_arguments(resolution, sources), arguments[5], emit == "library", interface[1:] if emit == "library" else [], requirements, package.setting(entries, "build", "incremental", "true") != "false", object_outputs)
         if emit == "library":
             package.write_text(arguments[3] + ".interface.sev", interface[0])
+            package.write_text(arguments[3] + ".semantic", semantic_outputs[0])
             package.write_bytes(arguments[3] + ".interface.bin", metadata.encode_interface(interface[0]))
             package.write_bytes(arguments[3] + ".mir", mir_outputs[0])
             name = resolution.packages[0].identity.name.replace("-", "_")

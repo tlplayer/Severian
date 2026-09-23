@@ -1,0 +1,71 @@
+import * from "model.sev"
+
+
+class DependencyComponent:
+    members: list[DefinitionIndex]
+
+
+class DependencyFrame:
+    node: int
+    next_edge: int = 0
+
+
+# Iterative Kosaraju: legal recursion forms components, never an error or an
+# unbounded compiler recursion. Input adjacency follows checked table order.
+# With dependent -> requirement edges, components are returned requirements first.
+def dependency_components(graph: DefinitionGraph) -> list[DependencyComponent]:
+    outgoing: list[list[int]] = []
+    incoming: list[list[int]] = []
+    visited: list[bool] = []
+    for node in graph.nodes:
+        outgoing.append([])
+        incoming.append([])
+        visited.append(false)
+    for edge in graph.dependencies:
+        # Cross-submodule relationships are planned by library/package.
+        if graph.nodes[edge.dependent.index].submodule != graph.nodes[edge.requirement.index].submodule:
+            continue
+        outgoing[edge.dependent.index].append(int(edge.requirement.index))
+        incoming[edge.requirement.index].append(int(edge.dependent.index))
+    finished: list[int] = []
+    root := 0
+    while root < len(graph.nodes):
+        if not visited[root]:
+            visited[root] = true
+            stack = [DependencyFrame(root)]
+            while len(stack) > 0:
+                frame = stack[-1]
+                if frame.next_edge < len(outgoing[frame.node]):
+                    child = outgoing[frame.node][frame.next_edge]
+                    stack[-1] = DependencyFrame(frame.node, frame.next_edge + 1)
+                    if not visited[child]:
+                        visited[child] = true
+                        stack.append(DependencyFrame(child))
+                else:
+                    finished.append(frame.node)
+                    stack.pop()
+        root += 1
+    index := 0
+    while index < len(visited):
+        visited[index] = false
+        index += 1
+    components: list[DependencyComponent] = []
+    while len(finished) > 0:
+        root = finished.pop()
+        if visited[root]:
+            continue
+        members: list[DefinitionIndex] = []
+        pending = [root]
+        visited[root] = true
+        while len(pending) > 0:
+            node = pending.pop()
+            members.append(DefinitionIndex(u32(node)))
+            for child in incoming[node]:
+                if not visited[child]:
+                    visited[child] = true
+                    pending.append(child)
+        components.append(DependencyComponent(members))
+    ordered: list[DependencyComponent] = []
+    while len(components) > 0:
+        ordered.append(components.pop())
+    return ordered

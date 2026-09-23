@@ -27,6 +27,16 @@ import * from "../grammar/grammar.sev"
 import * from "../cfg/cfg.sev"
 import * from "../module/module.sev"
 import * from "../symbol/symbol.sev"
+import * from "../graph/model.sev"
+import * from "../graph/queries.sev" as graph_queries
+import * from "../graph/verify.sev" as graph_verify
+import * from "../constraint/model.sev"
+import * from "../id/semantic.sev"
+import * from "../module/hierarchy.sev"
+import * from "../constraint/proof.sev"
+import * from "../constraint/graph.sev" as constraint_graph
+import * from "../constraint/dispatch.sev" as constraint_dispatch
+import * from "../constraint/refinement.sev" as refinement
 
 import * from "../cfg/availability.sev"
 import * from "../cfg/dominance.sev"

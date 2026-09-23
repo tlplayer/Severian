@@ -1,0 +1,32 @@
+import universal
+import source
+import interfaces
+import package
+
+
+# Version two imports typed signatures directly. Provenance is attached to the
+# interface file; producer source paths are never opened or reparsed.
+def read_module(file: source.SourceFile, prefix: string) -> universal.Module | Error:
+    public = interfaces.decode(package.read_text(file.path))
+    if public.version != 2:
+        throw Error("typed import requires semantic interface version two")
+    module = universal.empty_module()
+    span = source.Span(file.id, 0, 0)
+    for declaration in public.declarations:
+        parameters: list[universal.FunctionParameter] = []
+        index := 0
+        for kind in declaration.parameter_types:
+            annotation = universal.named_type(kind, [], span)
+            parameters.append(universal.FunctionParameter(declaration.parameter_names[index], annotation, None, span))
+            index += 1
+        decorator = universal.Decorator("c", [universal.DecoratorArgument("symbol", universal.String(declaration.symbol_id), span)], span)
+        function = universal.FunctionDeclaration(decorators=[decorator], name=prefix + declaration.name, parameters=parameters, result=universal.named_type(declaration.result_type, [], span), span=span, lookup=prefix)
+        function.semantic_key = universal.semantic_key([public.package.name, public.package.version, "export", declaration.name])
+        function.definition = universal.definition_from_key(function.semantic_key)
+        if declaration.symbol_id.starts_with("__sev_pkg_"):
+            parts = declaration.symbol_id[len("__sev_pkg_"):].split("_")
+            if len(parts) != 3:
+                throw Error("malformed persistent callable symbol")
+            function.definition = universal.DefId(u128(parts[0]), u128(parts[1]), universal.DeclarationId(u128(parts[2])))
+        module.items.append(universal.Function(function))
+    return module
